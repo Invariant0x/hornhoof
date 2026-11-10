@@ -1,0 +1,38 @@
+== changed files
+apps/server/src/app.ts
+apps/server/src/config.ts
+apps/server/src/errors.ts
+apps/server/src/modules/agents/timers.ts
+apps/server/src/modules/keeper/app-mode.ts
+apps/server/src/modules/keeper/state.ts
+apps/server/test/app-mode.test.ts
+apps/server/test/config.test.ts
+apps/server/test/version.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ [32m✓[39m test/about-version.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 4633[2mms[22m[39m
+   [32m✓[39m the current build for About [2m(2)[22m
+     [33m[2m✓[22m[39m gives a person without company access only the version and short commit[33m 3201[2mms[22m[39m
+     [33m[2m✓[22m[39m requires a person to be signed in[33m 1428[2mms[22m[39m
+ [32m✓[39m test/migrate.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m95 passed[39m[22m[90m (95)[39m
+[2m   Affected [22m 95 of 118 test files [2m(related to 9 files)[22m
+[2m      Tests [22m [1m[32m1639 passed[39m[22m[90m (1639)[39m
+[2m   Start at [22m 23:27:46
+[2m   Duration [22m 1697.18s[2m (tests 96%, import 4%)[22m
+
+== crapper
+OVER 10: apps/server/src/config.ts:122 loadConfig CRAP 13.0
+worst changed CRAP: 13.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at ef6a9186

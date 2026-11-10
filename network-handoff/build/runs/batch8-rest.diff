@@ -1,0 +1,3264 @@
+# Review package: batch 8, slice rest
+
+## 48bc45c6 Show where the link's encryption ends and whose agreement it rests on, warn before its certificate ends, and say that link names are public
+
+Share access says whether the link is encrypted to this machine or to hornhoof.org, with a link to Let's Encrypt's Subscriber Agreement. The Machines tab warns the whole-company people 14 days before the link's certificate ends. Setup starts the link on a long random name instead of the company's name, and after it makes a link it waits up to 90 seconds for the certificate before it shows the link. SECURITY.md, the README and the public link guide say that names are public and how to turn the certificate off.
+
+Two small components are new, LetsEncryptNote and LinkReady, so that Settings and Setup share the agreement line and Setup stays small.
+
+Ruling: new files apps/web/src/ui/LetsEncryptNote.tsx and apps/web/src/ui/LinkReady.tsx, and TlsView in apps/web/src/types.ts - why: the agreement line is used by two screens and the certificate wait is a hook of its own - cost if wrong: two files to fold back into the screens
+Ruling: SECURITY.md and guide/public-link.md lines placed by their text, not by line numbers, since plan 2 task 10 moved them - why: the brief says so - cost if wrong: a line in the wrong paragraph
+Ruling: the Machines warning shows when expiresAt is less than 14 days away, including a certificate already past its date - why: it has not renewed either - cost if wrong: a stale warning after a renewal until the next visit to the tab
+
+---
+ README.md                           |   3 +
+ SECURITY.md                         |   8 ++-
+ apps/web/src/i18n/en.ts             |  11 +++-
+ apps/web/src/i18n/ru.ts             |  11 +++-
+ apps/web/src/screens/Machines.tsx   |  39 ++++++++++++-
+ apps/web/src/screens/Settings.tsx   |  35 +++++++-----
+ apps/web/src/screens/Setup.tsx      |  37 +++++++-----
+ apps/web/src/types.ts               |   4 ++
+ apps/web/src/ui/LetsEncryptNote.tsx |  16 ++++++
+ apps/web/src/ui/LinkName.tsx        |  23 ++++++--
+ apps/web/src/ui/LinkReady.tsx       |  58 +++++++++++++++++++
+ apps/web/test/Machines.test.tsx     |  43 ++++++++++++++
+ apps/web/test/Settings.test.tsx     |  59 +++++++++++++++++---
+ apps/web/test/Setup.test.tsx        | 108 ++++++++++++++++++++++++++++++++----
+ guide/public-link.md                |  10 ++--
+ 15 files changed, 401 insertions(+), 64 deletions(-)
+
+diff --git a/README.md b/README.md
+index 851ecb46..133ea56d 100644
+--- a/README.md
++++ b/README.md
+@@ -182,16 +182,19 @@ Every agent works in a locked box on the machine: a Docker container of its plan
+ If it led the company, an up-to-date copy takes over within about a minute, under the same link. Its employees move to another machine with the same plan, or wait until it comes back. A test run it was doing starts again on another machine.
+ 
+ **How is this different from Claude Code or Codex?**
+ Hornhoof uses them. They are the employees, and Hornhoof is the company around them: departments, tasks, reviews and one view of it all.
+ 
+ **Can I use my phone?**
+ You can open and run your company from the phone's browser. Phones that do work themselves, like an old Android on a charger, are coming next.
+ 
++**What if the hornhoof.org link stops opening after an update?**
++Put `ACME_DIRECTORY=off` in the `.env` file in the `~/hornhoof` folder and run `docker compose up -d app` there. The link opens again within a minute, with its https ending at hornhoof.org as before. Then tell us in an issue.
++
+ ## What Hornhoof is not
+ 
+ - It is not a cloud service. There is no sign-up and no account with us. It is yours, on your machines.
+ - It is not a new AI. It runs the AI programs you already use.
+ - It is not a chat. Work is tasks, each with someone who owns it, a review and a result.
+ - It is not only for code. There are templates for marketing, sales, support, research, finance and the home.
+ 
+ ## Help build Hornhoof
+diff --git a/SECURITY.md b/SECURITY.md
+index 554734d4..9d20ddb7 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -28,34 +28,36 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
+ - Before anything leaves a machine, the node puts `[hidden]` in place of its own key, the plans' tokens, API keys and repository tokens, in terminals and in every output.
+ - API keys, repository tokens and the link's key are stored encrypted with AES-256-GCM, under the secret in your `.env`. Passwords are stored as scrypt hashes. Sessions, invite links, install commands and the keys nodes connect with are kept only as SHA-256 hashes.
+ - The command that connects a machine works once, for 24 hours. When the orchestrator makes one, its code shows only on the CEO's screen and never reaches an agent.
+ - "Disconnect" on a machine's card takes its keys away at once, so a lost or stolen machine can no longer reach the company.
+ 
+ ## People see only what they are given
+ 
+ - Until a company is set up, only the setup link from the server's own log can set it up.
+-- Failed sign-ins are capped: 10 in 15 minutes for one email from one address, and 50 in an hour for one email.
+-- Session cookies cannot be read by scripts on the page, and travel only over https when Hornhoof is on https.
++- Failed sign-ins are capped, and the counts survive a restart: 10 in 15 minutes for one email from one address, 50 in an hour for one email, and 30 in an hour from one address across all emails (an IPv6 address counts with its /64).
++- Session cookies cannot be read by scripts on the page, and travel only over https when Hornhoof is on https. On the hornhoof.org link the cookie's name starts with `__Host-`, so no page under another link can set or replace it. A session from before that change moves to the new name once, on its next visit.
+ - A change, or a terminal connection, that comes from another site's page is refused, even with your cookie.
+ - Each person sees only the departments they are given.
+ - Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
+ - The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
+ - The orchestrator's database role cannot read or write passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
+ - Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
+ 
+ ## The hornhoof.org link
+ 
+ The link, like `https://acme.hornhoof.org`, lets people open your company from anywhere without opening anything on your router.
+ 
+ - It is optional. Untick "Open Hornhoof on the internet" at setup, or remove the link in Settings, and people open Hornhoof only from your own network.
+ - Your server opens the tunnel itself, over an encrypted connection to hornhoof.org whose certificate it checks.
+ - The tunnel ends in the keeper, a container next to the app, which passes its traffic to the Hornhoof app only, never to anything else on your network, whatever hornhoof.org asks for.
+ - hornhoof.org has no accounts and holds none of your company's data. For each link it keeps only the name, a hash of its key, when and from which address the link was made, and when its tunnel was last seen. For a company on several machines it also keeps which machine holds the link, and one flag that says whether the company's copy is up to date.
+-- The browser's https connection ends at hornhoof.org. It opens each request to see which company it is for, passes it on through that company's tunnel, and keeps no copy. If you want no one in between, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
++- The browser's https connection ends at your own machine. hornhoof.org reads only the name being reached from the start of each connection, passes the encrypted bytes on through that company's tunnel, and keeps no copy. Your machine gets the link's certificate from Let's Encrypt itself, accepting Let's Encrypt's Subscriber Agreement for the company, and renews it on its own. If hornhoof.org stops passing connections through unread, or the certificate cannot be renewed in time, the link keeps working with its https ending at hornhoof.org, and Share access says so. A company on an older Hornhoof is served that way until it updates. If you want no one in between at all, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
++- A link's name is public: every certificate goes into public Certificate Transparency logs. Before sign-in, the link tells nothing about the company (not its name, its people or its version), and it asks search engines not to list it.
++- To stop your machine getting its own certificate, put `ACME_DIRECTORY=off` in the `.env` file next to `compose.yaml` and run `docker compose up -d app` there. The link then runs with its https ending at hornhoof.org, as before.
+ - Traffic between your machines that goes through hornhoof.org is encrypted from one machine to the other, so hornhoof.org sees only encrypted bytes.
+ - hornhoof.org decides nothing for your company. A link points to one machine at a time, and that tells two machines which of them leads. A company with no public link keeps a hidden name there for that alone. Three or more machines that are always on choose the leader by vote among themselves.
+ 
+ ## What you decide
+ 
+ - Who sees the whole company. Those people see everything, and so do the orchestrator and anyone with access to Operations, whose head reads the database.
+ - Which plan a department uses. Agents on one plan share its sign-in and can read each other's folders, so work that must stay apart gets a plan of its own.
+ - What a repository token may do. It goes to the machines that run the department's agents and tests, so a fine-grained token for one repository is best.
+diff --git a/apps/web/src/i18n/en.ts b/apps/web/src/i18n/en.ts
+index 3909037c..fa15b8aa 100644
+--- a/apps/web/src/i18n/en.ts
++++ b/apps/web/src/i18n/en.ts
+@@ -61,32 +61,36 @@ export const en = {
+     key: 'Key',
+     subscription: 'Subscription',
+     pasteWholeKey: 'Paste the whole key.',
+     finish: 'Finish setup',
+     connectMachine: 'Connect your machine',
+     runThis: (plan: string) => `Run this in a terminal on your computer. It installs Docker if needed, sets up a node for ${plan} and opens the sign-in link. The orchestrator starts working as soon as you sign in.`,
+     joinOnce: 'The command works once, for 24 hours. The node keeps running in the background after the terminal is closed.',
+     goToMap: 'Go to the map',
++    linkWait: 'Getting the certificate for your link. This takes under a minute.',
++    linkReady: 'People open your company from anywhere at this link:',
++    linkLater: 'The link works now. Its own certificate comes on its own; until then the connection is encrypted to hornhoof.org.',
+   },
+   link: {
+     open: 'Open Hornhoof on the internet',
+     openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later under Share access.',
+     label: 'Link',
+     random: 'Random name',
+     empty: 'Type a name, or take a random one.',
+     invalid: 'Use Latin letters a to z, digits and hyphens, with no hyphen at the start or the end.',
+     current: 'This is the link now.',
+     checking: 'Checking the name.',
+     free: (address: string) => `${address} is free.`,
+     taken: 'This name is taken. Pick another one.',
+     reserved: 'This name is kept for Hornhoof itself. Pick another one.',
+     unknown: 'Could not check the name now. It is checked again when you go on.',
+-    guessable: 'A name like this is easy to guess, so anyone may find the sign-in page. Only the company\'s sign-in protects what is inside.',
+-    hardToGuess: 'A random name is hard to guess. The company\'s sign-in still protects what is inside.',
++    guessable: 'A name you pick shows in public certificate logs and may tell whose company this is. Only the company\'s sign-in protects what is inside.',
++    hardToGuess: 'A random name does not say whose company it is. The company\'s sign-in still protects what is inside.',
++    letsEncrypt: { before: 'The link\'s certificate comes from Let\'s Encrypt. Getting it accepts the ', agreement: 'Let\'s Encrypt Subscriber Agreement', after: ' for your company.' },
+     skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Share access.',
+   },
+   about: {
+     menu: 'About', title: 'About Hornhoof', close: 'Close',
+     description: 'A company where people and agents work together.',
+     version: 'Version', developer: 'Developer', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
+     issues: 'Report a bug or suggest an idea', copyright: 'Copyright (c) 2026 Ivan Korol',
+     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
+@@ -99,16 +103,18 @@ export const en = {
+     closed: 'Hornhoof opens only at its own address, on this computer and your network.',
+     open: 'Open on the internet',
+     change: 'Change name',
+     remove: 'Remove link',
+     removeAsk: (url: string) => `Hornhoof stops opening at ${url}. Machines connected through this link lose the connection.`,
+     yesRemove: 'Remove',
+     keep: 'Keep',
+     moveNote: 'Machines connected through the old link lose the connection. Connect them again under Subscriptions or Machines.',
++    encryptedHere: 'Encrypted to this machine',
++    encryptedRelay: 'Encrypted to hornhoof.org for now. Hornhoof moves the encryption to this machine on its own.',
+   },
+   invite: {
+     heading: 'Invite link',
+     opening: 'Opening your invite',
+     join: (company: string) => `Join ${company}`,
+     hi: (name: string, email: string) => `Hi ${name}. You will sign in as ${email}.`,
+     choosePassword: 'Choose a password',
+     submit: 'Join',
+@@ -334,16 +340,17 @@ export const en = {
+     working: (n: number) => `${n} working`,
+     tests: (n: number) => `${n} ${plural('en', n, { one: 'test run', other: 'test runs' })}`,
+     free: 'free', withYou: 'with you',
+     minutes: (n: number) => n < 60 ? `${n} min` : `${Math.floor(n / 60)} h ${n % 60} min`,
+     startedBy: (name: string) => `Started by ${name}`,
+     moreIn: (n: number, department: string) => `Show ${n} more in ${department}`, showLess: 'Show less',
+   },
+   machines: {
++    certEnds: (date: string) => `The link's certificate ends on ${date} and has not renewed yet. Hornhoof tries again every hour. If it ends, the link keeps working, encrypted to hornhoof.org.`,
+     programs: 'Agent programs',
+     updatePrograms: 'Update programs',
+     programsUpdating: 'Updating programs...',
+     programUpdating: 'Updating...',
+     programUpdateFailed: 'Update failed. Try again.',
+     programVersionUnknown: 'Version unknown',
+     programsOffline: 'Reconnect this machine to see its program versions.',
+     programsUnknown: 'This machine has not reported its program versions yet.',
+diff --git a/apps/web/src/i18n/ru.ts b/apps/web/src/i18n/ru.ts
+index 67ace5f1..455317b0 100644
+--- a/apps/web/src/i18n/ru.ts
++++ b/apps/web/src/i18n/ru.ts
+@@ -50,32 +50,36 @@ export const ru: Messages = {
+     key: 'Ключ',
+     subscription: 'Подписка',
+     pasteWholeKey: 'Вставьте ключ целиком.',
+     finish: 'Завершить настройку',
+     connectMachine: 'Подключите машину',
+     runThis: plan => `Выполните эту команду в терминале на своей машине. Она при необходимости поставит Docker, настроит ноду для ${plan} и откроет ссылку для входа. Оркестратор начнет работать, как только вы войдете.`,
+     joinOnce: 'Команда работает один раз в течение 24 часов. Нода продолжит работать в фоне, даже если закрыть терминал.',
+     goToMap: 'Перейти к карте',
++    linkWait: 'Получаем сертификат для вашей ссылки. Это занимает меньше минуты.',
++    linkReady: 'Компания открывается откуда угодно по этой ссылке:',
++    linkLater: 'Ссылка уже работает. Свой сертификат придет сам, а до тех пор соединение зашифровано до hornhoof.org.',
+   },
+   link: {
+     open: 'Открыть Hornhoof в интернете',
+     openHint: 'Люди открывают его по этой ссылке откуда угодно, каждый под своим входом. Выключите, чтобы Hornhoof работал только на этой машине и в вашей сети. Открыть его можно и позже, в разделе «Общий доступ».',
+     label: 'Ссылка',
+     random: 'Случайное имя',
+     empty: 'Напишите имя или возьмите случайное.',
+     invalid: 'Подходят латинские буквы от a до z, цифры и дефис, но не в начале и не в конце.',
+     current: 'Это нынешняя ссылка.',
+     checking: 'Проверяем имя.',
+     free: address => `Адрес ${address} свободен.`,
+     taken: 'Это имя уже занято. Выберите другое.',
+     reserved: 'Это имя оставлено для самого Hornhoof. Выберите другое.',
+     unknown: 'Сейчас не удалось проверить имя. Его проверят еще раз, когда вы продолжите.',
+-    guessable: 'Такое имя легко угадать, и страницу входа может найти кто угодно. То, что внутри, защищает только вход в вашу компанию.',
+-    hardToGuess: 'Случайное имя трудно угадать. То, что внутри, все равно защищает вход в вашу компанию.',
++    guessable: 'Выбранное имя видно в публичных журналах сертификатов и может подсказать, чья это компания. То, что внутри, защищает только вход в вашу компанию.',
++    hardToGuess: 'Случайное имя не говорит, чья это компания. То, что внутри, все равно защищает вход в вашу компанию.',
++    letsEncrypt: { before: 'Сертификат ссылки выдает Let\'s Encrypt. Получая его, вы принимаете за компанию ', agreement: 'Соглашение подписчика Let\'s Encrypt', after: '.' },
+     skipHint: 'Чтобы продолжить без ссылки, вернитесь назад, выключите «Открыть Hornhoof в интернете» и откройте ссылку позже, в разделе «Общий доступ».',
+   },
+   about: {
+     menu: 'О программе', title: 'О программе Hornhoof', close: 'Закрыть',
+     description: 'Компания, где люди и агенты работают вместе.',
+     version: 'Версия', developer: 'Разработчик', license: 'Лицензия', code: 'Исходный код', contact: 'Связь', website: 'Сайт',
+     issues: 'Сообщить об ошибке или предложить идею', copyright: 'Copyright (c) 2026 Ivan Korol',
+     versionFailed: 'Не удалось загрузить версию сервера. Закройте окно и откройте снова, чтобы повторить.',
+@@ -88,16 +92,18 @@ export const ru: Messages = {
+     closed: 'Hornhoof открывается только по своему адресу, на этой машине и в вашей сети.',
+     open: 'Открыть в интернете',
+     change: 'Сменить имя',
+     remove: 'Убрать ссылку',
+     removeAsk: url => `Hornhoof перестанет открываться по адресу ${url}. Машины, подключенные через эту ссылку, потеряют связь.`,
+     yesRemove: 'Убрать',
+     keep: 'Оставить',
+     moveNote: 'Машины, подключенные через старую ссылку, потеряют связь. Подключите их заново в разделе «Подписки» или «Машины».',
++    encryptedHere: 'Зашифровано до этой машины',
++    encryptedRelay: 'Пока зашифровано до hornhoof.org. Hornhoof сам перенесет шифрование на эту машину.',
+   },
+   invite: {
+     heading: 'Ссылка-приглашение',
+     opening: 'Открываем приглашение',
+     join: company => `Присоединиться к ${company}`,
+     hi: (name, email) => `Здравствуйте, ${name}. Вы будете входить как ${email}.`,
+     choosePassword: 'Придумайте пароль',
+     submit: 'Присоединиться',
+@@ -324,16 +330,17 @@ export const ru: Messages = {
+     working: n => `${n} в работе`,
+     tests: n => `${n} ${plural('ru', n, { one: 'прогон тестов', few: 'прогона тестов', many: 'прогонов тестов', other: 'прогона тестов' })}`,
+     free: 'свободен', withYou: 'с вами',
+     minutes: n => n < 60 ? `${n} мин` : `${Math.floor(n / 60)} ч ${n % 60} мин`,
+     startedBy: name => `Запустил агент ${name}`,
+     moreIn: (n, department) => `Показать еще ${n}: ${department}`, showLess: 'Свернуть',
+   },
+   machines: {
++    certEnds: date => `Сертификат ссылки заканчивается ${date} и еще не обновился. Hornhoof пробует снова каждый час. Если он закончится, ссылка продолжит работать, с шифрованием до hornhoof.org.`,
+     programs: 'Программы агентов',
+     updatePrograms: 'Обновить программы',
+     programsUpdating: 'Обновляем программы...',
+     programUpdating: 'Обновляем...',
+     programUpdateFailed: 'Не удалось обновить. Попробуйте еще раз.',
+     programVersionUnknown: 'Версия неизвестна',
+     programsOffline: 'Подключите эту машину, чтобы увидеть версии программ.',
+     programsUnknown: 'Эта машина пока не сообщила версии программ.',
+diff --git a/apps/web/src/screens/Machines.tsx b/apps/web/src/screens/Machines.tsx
+index 0dc40021..0a58939b 100644
+--- a/apps/web/src/screens/Machines.tsx
++++ b/apps/web/src/screens/Machines.tsx
+@@ -1,14 +1,14 @@
+ import { useCallback, useEffect, useRef, useState } from 'react';
+ import type { NodeLoad } from '@hornhoof/protocol';
+ import { api } from '../api';
+ import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+ import { PROVIDER_NAMES } from '../providers';
+-import type { BuiltinView, MachineView, Me, Running, SubView } from '../types';
++import type { BuiltinView, MachineView, Me, Running, SubView, TlsView } from '../types';
+ import { Ask } from '../ui/Ask';
+ import { Bar } from '../ui/Bar';
+ import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
+ import { Edge } from '../ui/Edge';
+ import { CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
+ import { ProviderMark } from '../ui/icons';
+ import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
+ import { providerFilter, type FilterGroup } from '../ui/TableTools';
+@@ -17,32 +17,67 @@ import { planStateOnMachine, subName } from '../ui/subscription';
+ import { useNow } from '../ui/reset';
+ import { ProgramVersions } from '../ui/ProgramVersions';
+ 
+ const REFRESH_MS = 5000;
+ const GIB = 1024 ** 3;
+ /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
+ const SMALLER = 1.1;
+ 
++/* The link's certificate is warned about this long before it ends. */
++const CERT_WARNING_MS = 14 * 24 * 3600_000;
++
+ const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
+ 
+ const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
+ 
+ const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
+ 
+ function lastSeen(t: Messages, language: Language, iso: string | null): string {
+   if (!iso) return t.machines.notSeen;
+   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+   if (s < 60) return t.machines.lastSeenNow;
+   const rtf = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+   if (s < 3600) return t.machines.lastSeen(rtf.format(-Math.round(s / 60), 'minute'));
+   if (s < 86400) return t.machines.lastSeen(rtf.format(-Math.round(s / 3600), 'hour'));
+   return t.machines.lastSeen(rtf.format(-Math.round(s / 86400), 'day'));
+ }
+ 
++/* The date the link's certificate ends, when that is near and the machine has not renewed it. */
++function endingSoon(tls: TlsView | null, now: number): string | null {
++  if (!tls?.expiresAt) return null;
++  const ends = Date.parse(tls.expiresAt);
++  return ends - now < CERT_WARNING_MS ? tls.expiresAt : null;
++}
++
++/* The link's certificate runs out soon: people who see the whole company are told above the list. */
++function CertificateWarning({ ends }: { ends: string }) {
++  const t = useT();
++  const { language } = useLanguage();
++  return <p className="alert" role="status">{t.machines.certEnds(new Date(ends).toLocaleDateString(language))}</p>;
++}
++
++/* The link's encryption as the server says, only for people who see the whole company; an answer that fails says nothing. */
++function useLinkTls(me: Me): TlsView | null {
++  const [tls, setTls] = useState<TlsView | null>(null);
++  const whole = me.person.scopeKind === 'company';
++  useEffect(() => {
++    if (!whole) return;
++    let live = true;
++    api
++      .get<{ tls?: TlsView | null }>('/api/link')
++      .then(found => live && setTls(found.tls ?? null))
++      .catch(() => undefined);
++    return () => {
++      live = false;
++    };
++  }, [whole]);
++  return tls;
++}
++
+ /* The company's machines as one: how many are online, and the processors and memory of those that are. */
+ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: number }) {
+   const t = useT();
+   const { language } = useLanguage();
+   const sum = (pick: (l: NodeLoad) => number) => loads.reduce((n, l) => n + pick(l), 0);
+   const cores = sum(l => l.cpus);
+   return (
+     <section aria-label={t.machines.pool}>
+@@ -283,16 +318,17 @@ export function Machines({ me }: { me: Me }) {
+   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
+   const [subs, setSubs] = useState<SubView[]>([]);
+   const [command, setCommand] = useState<ActiveCommand | null>(null);
+   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
+   const [confirm, setConfirm] = useState<string | null>(null);
+   const [picking, setPicking] = useState<string | null>(null);
+   const [failure, setFailure] = useState<unknown>(null);
+   const live = useRef(true);
++  const certificateEnds = endingSoon(useLinkTls(me), now);
+ 
+   useEffect(() => {
+     live.current = true;
+     return () => {
+       live.current = false;
+     };
+   }, []);
+ 
+@@ -399,16 +435,17 @@ export function Machines({ me }: { me: Me }) {
+           run={t.machines.runThis}
+           trust={t.machines.trust}
+           shown={activeCommand}
+           onCancel={() => void cancelMachine(activeCommand.id)}
+         />
+       )}
+       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+ 
++      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
+       {machines && <Pool loads={loads} online={online} all={machines.length + (apart ? 1 : 0)} />}
+       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
+       {machines && (machines.length > 0 || builtin) && (
+         <SortTable
+           rows={machineRows(machines, builtin, subs, t.machines.builtin)}
+           columns={machineColumns(t, language)}
+           name={row => row.hostname}
+           openIds={openIds}
+diff --git a/apps/web/src/screens/Settings.tsx b/apps/web/src/screens/Settings.tsx
+index 774ba2eb..13c74adb 100644
+--- a/apps/web/src/screens/Settings.tsx
++++ b/apps/web/src/screens/Settings.tsx
+@@ -1,61 +1,69 @@
+-import { linkNameOf } from '@hornhoof/protocol/link';
+ import { useEffect, useRef, useState } from 'react';
+ import { api } from '../api';
+ import { errorText, useT } from '../i18n';
+-import type { Me } from '../types';
++import type { Me, TlsView } from '../types';
+ import { CopyButton } from '../ui/CopyButton';
++import { LetsEncryptNote } from '../ui/LetsEncryptNote';
+ import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+ import { takeEscape } from '../ui/escape';
+ 
+ type Link = { name: string; url: string };
+-type Loaded = { link: Link | null; domain: string };
++type Loaded = { link: Link | null; domain: string; tls?: TlsView | null };
++
++/* Where the link's https ends, and whose agreement its certificate rests on. */
++function Encryption({ tls }: { tls: TlsView | null }) {
++  const t = useT();
++  if (!tls) return null;
++  return (
++    <>
++      <p className="update-note">{tls.mode === 'https' ? t.settings.encryptedHere : t.settings.encryptedRelay}</p>
++      <LetsEncryptNote />
++    </>
++  );
++}
+ 
+ /* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
+    copy, move to another name or remove. */
+-export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
++export function Settings({ onClose }: { me: Me; onClose: () => void }) {
+   const t = useT();
+   const [loaded, setLoaded] = useState<Loaded | null>(null);
+   const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
+   const [name, setName] = useState('');
+   const [state, setState] = useState<NameState>('empty');
+   const [busy, setBusy] = useState(false);
+   const [failure, setFailure] = useState<unknown>(null);
+   const box = useRef<HTMLDivElement>(null);
+-  const suggested = linkNameOf(me.company.name);
+ 
+   useEffect(() => {
+     box.current?.focus();
+     const onKey = (e: KeyboardEvent) => {
+       if (!takeEscape(e)) return;
+       onClose();
+     };
+     document.addEventListener('keydown', onKey, true);
+     return () => document.removeEventListener('keydown', onKey, true);
+   }, [onClose]);
+ 
+   useEffect(() => {
+     api
+       .get<Loaded>('/api/link')
+-      .then(found => {
+-        setLoaded(found);
+-        if (!found.link) setName(suggested);
+-      })
++      .then(setLoaded)
+       .catch(setFailure);
+-  }, [suggested]);
++  }, []);
+ 
+   async function run(change: () => Promise<Link | null>) {
+     setBusy(true);
+     setFailure(null);
+     try {
+       const link = await change();
+-      setLoaded(was => ({ domain: was?.domain ?? '', link }));
++      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: was?.tls }));
+       setMode('view');
+-      if (!link) setName(suggested);
++      if (!link) setName('');
+     } catch (err) {
+       setFailure(err);
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   const save = () => run(async () => (await api.put<{ link: Link }>('/api/link', { name })).link);
+@@ -75,16 +83,17 @@ export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
+             <h3>{t.settings.link}</h3>
+             {link && mode !== 'edit' ? (
+               <>
+                 <p>{t.settings.opensAt}</p>
+                 <div className="settings-link">
+                   <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
+                   <CopyButton text={link.url} />
+                 </div>
++                <Encryption tls={loaded.tls ?? null} />
+                 {mode === 'remove' ? (
+                   <div className="settings-actions">
+                     <span>{t.settings.removeAsk(link.url)}</span>
+                     <button className="btn small" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
+                     <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
+                   </div>
+                 ) : (
+                   <div className="settings-actions">
+@@ -107,17 +116,17 @@ export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
+               <form
+                 className="settings-form"
+                 onSubmit={e => {
+                   e.preventDefault();
+                   void save();
+                 }}
+               >
+                 {!link && <p>{t.settings.closed}</p>}
+-                <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} />
++                <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} startRandom={!link} />
+                 {link && <p className="update-note">{t.settings.moveNote}</p>}
+                 <div className="settings-actions">
+                   <button className="btn small" type="submit" disabled={busy || blocks(state)}>{link ? t.common.save : t.settings.open}</button>
+                   {link && <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>}
+                 </div>
+               </form>
+             )}
+           </section>
+diff --git a/apps/web/src/screens/Setup.tsx b/apps/web/src/screens/Setup.tsx
+index 5571074d..76b0013e 100644
+--- a/apps/web/src/screens/Setup.tsx
++++ b/apps/web/src/screens/Setup.tsx
+@@ -1,18 +1,18 @@
+-import { linkNameOf } from '@hornhoof/protocol/link';
+ import { useId, useState, type FormEvent } from 'react';
+ import { api, ApiFailure } from '../api';
+ import { errorText, useT } from '../i18n';
+ import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
+ import { Card } from '../ui/Card';
+ import { CommandBox } from '../ui/CommandBox';
+ import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
+ import { Field } from '../ui/Field';
+ import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
++import { LinkReady, type MadeLink } from '../ui/LinkReady';
+ 
+ type Mode = 'api_key' | 'personal' | 'later';
+ type KeyProvider = 'anthropic_api' | 'openai_api';
+ 
+ const MODES: Mode[] = ['api_key', 'personal', 'later'];
+ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+ 
+ /* The setup link the server logs carries the code that lets this browser create the company. */
+@@ -26,80 +26,77 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done:
+   const steps = t.setup.steps;
+   const uid = useId();
+   const [step, setStep] = useState(0);
+   const [code, setCode] = useState(linkCode);
+   const [askCode, setAskCode] = useState(() => !linkCode());
+   const [companyName, setCompanyName] = useState('');
+   /* The ready-made company the CEO starts from, or "empty" to let the orchestrator build it. */
+   const [template, setTemplate] = useState<Pick>('empty');
+-  /* The public link: on unless the person turns it off, named after the company until they write a name themselves. */
++  /* The public link: on unless the person turns it off, starting on a long random name. */
+   const [linkOn, setLinkOn] = useState(true);
+   const [linkName, setLinkName] = useState('');
+-  const [linkOwn, setLinkOwn] = useState(false);
+   const [linkState, setLinkState] = useState<NameState>('empty');
+   const [name, setName] = useState('');
+   const [title, setTitle] = useState('CEO');
+   const [email, setEmail] = useState('');
+   const [password, setPassword] = useState('');
+   const [mode, setMode] = useState<Mode>('api_key');
+   const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic_api');
+   const [apiKey, setApiKey] = useState('');
+   const [plan, setPlan] = useState<PlanProvider>('claude');
+   const [problems, setProblems] = useState<Record<string, string>>({});
+   const [failure, setFailure] = useState('');
+   const [skipLink, setSkipLink] = useState(false);
+   const [busy, setBusy] = useState(false);
+   const [command, setCommand] = useState<string | null>(null);
++  /* The link setup made, shown with its certificate before the person goes on. */
++  const [made, setMade] = useState<MadeLink | null>(null);
+ 
+   function next(e: FormEvent) {
+     e.preventDefault();
+     if (step === 0) setProblems({});
+     if (step === 1) {
+       const found: Record<string, string> = {};
+       if (!EMAIL.test(email.trim())) found.email = t.setup.emailProblem;
+       if (password.length < 10) found.password = t.common.useAtLeast10;
+       setProblems(found);
+       if (Object.keys(found).length) return;
+     }
+     setStep(step + 1);
+   }
+ 
+-  function nameCompany(value: string) {
+-    setCompanyName(value);
+-    if (!linkOwn) setLinkName(linkNameOf(value));
+-  }
+-
+   const checkName = (name: string) => api.get<NameCheck>(`/api/setup/names/${encodeURIComponent(name)}?code=${encodeURIComponent(code.trim())}`);
+ 
+   async function finish(e: FormEvent) {
+     e.preventDefault();
+     if (mode === 'api_key' && apiKey.trim().length < 8) {
+       setProblems({ apiKey: t.setup.pasteWholeKey });
+       return;
+     }
+     const orchestrator =
+       mode === 'api_key' ? { mode, provider: keyProvider, apiKey: apiKey.trim() } : mode === 'personal' ? { mode, provider: plan } : { mode };
+     setBusy(true);
+     setFailure('');
+     setSkipLink(false);
+     try {
+-      const res = await api.post<{ command?: string }>('/api/setup', {
++      const res = await api.post<{ command?: string; link?: MadeLink }>('/api/setup', {
+         code: code.trim(),
+         companyName: companyName.trim(),
+         name: name.trim(),
+         email: email.trim(),
+         password,
+         title: title.trim(),
+         orchestrator,
+         ...(linkOn ? { link: { name: linkName } } : {}),
+         ...(template === 'empty' ? {} : { template }),
+       });
+-      if (res.command) setCommand(res.command);
+-      else onDone({ welcome: true });
++      setCommand(res.command ?? null);
++      if (res.link) setMade(res.link);
++      else if (!res.command) onDone({ welcome: true });
+     } catch (err) {
+       if (err instanceof ApiFailure && err.reason === 'setup_code') {
+         setAskCode(true);
+         setProblems({ code: errorText(t, err) });
+         setStep(0);
+       } else if (err instanceof ApiFailure && err.reason && LINK_REFUSED.has(err.reason)) {
+         setProblems({ link: errorText(t, err) });
+         setStep(0);
+@@ -107,16 +104,30 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done:
+         setFailure(errorText(t, err));
+         setSkipLink(err instanceof ApiFailure && err.reason === 'relay_unreachable');
+       }
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
++  function goOn() {
++    setMade(null);
++    if (!command) onDone({ welcome: true });
++  }
++
++  if (made) {
++    return (
++      <Card>
++        <h1>{t.settings.link}</h1>
++        <LinkReady link={made} onNext={goOn} />
++      </Card>
++    );
++  }
++
+   if (command) {
+     return (
+       <Card>
+         <h1>{t.setup.connectMachine}</h1>
+         <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
+         <CommandBox command={command} />
+         <p className="muted">{t.setup.joinOnce}</p>
+         <div className="actions">
+@@ -139,41 +150,41 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done:
+         </ol>
+         <h1>{steps[step]}</h1>
+       </div>
+ 
+       {step === 0 && (
+         <form onSubmit={next}>
+           <div className="setup-lead">
+             <Field label={t.setup.companyName}>
+-              {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
++              {p => <input {...p} value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
+             </Field>
+           </div>
+           <CompanyTemplates value={template} onPick={setTemplate} />
+           <div className="setup-lead">
+             <label className="check">
+               <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
+               <span>
+                 <b id={`${uid}-link`}>{t.link.open}</b>
+                 <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
+               </span>
+             </label>
+             {linkOn && (
+               <LinkName
+                 name={linkName}
+                 onName={name => {
+                   setLinkName(name);
+-                  setLinkOwn(true);
+                   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit the cleared link problem
+                   setProblems(({ link: _, ...rest }) => rest);
+                 }}
+                 domain={linkDomain}
+                 check={checkName}
+                 onState={setLinkState}
+                 problem={problems.link}
++                startRandom
+               />
+             )}
+             {askCode && (
+               <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
+                 {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+               </Field>
+             )}
+           </div>
+diff --git a/apps/web/src/types.ts b/apps/web/src/types.ts
+index d163a953..5515708e 100644
+--- a/apps/web/src/types.ts
++++ b/apps/web/src/types.ts
+@@ -562,8 +562,12 @@ export type DepartmentTree = {
+   lines: TreeLine[];
+   review: TreeReview | null;
+   reviews?: TreeReview[];
+   activity?: TreeActivity[];
+   waiting?: { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string }[];
+   time: AgentTime[];
+   idle: IdleStretch[];
+ };
++
++/* Where the public link's encryption ends, as GET /api/link says: the tunnel's mode, whether the company's machine holds
++   the link's own certificate, when it ends, and when the last try to get one failed. */
++export type TlsView = { mode: 'http' | 'https'; certificate: boolean; expiresAt: string | null; failedAt: string | null };
+diff --git a/apps/web/src/ui/LetsEncryptNote.tsx b/apps/web/src/ui/LetsEncryptNote.tsx
+new file mode 100644
+index 00000000..38b4eacf
+--- /dev/null
++++ b/apps/web/src/ui/LetsEncryptNote.tsx
+@@ -0,0 +1,16 @@
++import { useT } from '../i18n';
++
++/* Let's Encrypt's page of its current Subscriber Agreement. */
++const AGREEMENT_URL = 'https://letsencrypt.org/repository/';
++
++/* The link's certificate comes from Let's Encrypt, and getting it accepts their agreement for the company. */
++export function LetsEncryptNote() {
++  const { before, agreement, after } = useT().link.letsEncrypt;
++  return (
++    <p className="update-note">
++      {before}
++      <a href={AGREEMENT_URL} target="_blank" rel="noreferrer">{agreement}</a>
++      {after}
++    </p>
++  );
++}
+diff --git a/apps/web/src/ui/LinkName.tsx b/apps/web/src/ui/LinkName.tsx
+index 2c151333..cb1c5670 100644
+--- a/apps/web/src/ui/LinkName.tsx
++++ b/apps/web/src/ui/LinkName.tsx
+@@ -17,32 +17,47 @@ type Props = {
+   /* What the link's address ends in, like hornhoof.org. */
+   domain: string;
+   /* Asks Hornhoof's own server whether the name is free; the browser never asks the relay. */
+   check: (name: string) => Promise<NameCheck>;
+   onState?: (state: NameState) => void;
+   problem?: string;
+   /* The name of the link the company has now, which is not asked about. */
+   current?: string;
++  /* Starts on a long random name when the field is empty as it mounts. */
++  startRandom?: boolean;
+ };
+ 
+ /* Waits this long after the last key before asking, so typing a name asks once. */
+ const PAUSE_MS = 350;
+ 
+ /* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
+    free, asked while it is typed. */
+-export function LinkName({ name, onName, domain, check, onState, problem, current }: Props) {
++export function LinkName({ name, onName, domain, check, onState, problem, current, startRandom }: Props) {
+   const t = useT();
+   const id = useId();
+   const [state, setState] = useState<NameState>('empty');
+   const [random, setRandom] = useState('');
+   const asking = useRef(check);
+   asking.current = check;
+   const told = useRef(onState);
+   told.current = onState;
++  const named = useRef(onName);
++  named.current = onName;
++
++  const takeRandom = () => {
++    const next = randomLinkName();
++    setRandom(next);
++    named.current(next);
++  };
++
++  useEffect(() => {
++    if (startRandom && !name) takeRandom();
++    // Only as the field mounts: later empty names are the person's own.
++  }, []);
+ 
+   useEffect(() => {
+     const now: NameState = !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
+     setState(now);
+     told.current?.(now);
+     if (now !== 'checking') return;
+     let live = true;
+     const timer = setTimeout(() => {
+@@ -91,19 +106,15 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
+         />
+         <span className="link-domain">.{domain}</span>
+       </div>
+       <span id={`${id}-note`} className={bad ? 'bad' : 'hint'} aria-live="polite">{problem || said}</span>
+       <span id={`${id}-safety`} className="hint">{name && name === random ? t.link.hardToGuess : t.link.guessable}</span>
+       <button
+         className="btn small ghost"
+         type="button"
+-        onClick={() => {
+-          const next = randomLinkName();
+-          setRandom(next);
+-          onName(next);
+-        }}
++        onClick={takeRandom}
+       >
+         {t.link.random}
+       </button>
+     </div>
+   );
+ }
+diff --git a/apps/web/src/ui/LinkReady.tsx b/apps/web/src/ui/LinkReady.tsx
+new file mode 100644
+index 00000000..c6a4065c
+--- /dev/null
++++ b/apps/web/src/ui/LinkReady.tsx
+@@ -0,0 +1,58 @@
++import { useEffect, useState } from 'react';
++import { api } from '../api';
++import { useT } from '../i18n';
++import type { TlsView } from '../types';
++import { CopyButton } from './CopyButton';
++import { LetsEncryptNote } from './LetsEncryptNote';
++
++export type MadeLink = { name: string; url: string };
++
++/* The certificate is asked about this often, and shown without it after this long. */
++const POLL_MS = 2000;
++const GIVE_UP_MS = 90_000;
++
++type Stage = 'wait' | 'ready' | 'later';
++
++/* Waits for the new link's own certificate: ready once the server holds it, later when it takes more than 90 seconds. */
++function useCertificateStage(): Stage {
++  const [stage, setStage] = useState<Stage>('wait');
++  useEffect(() => {
++    if (stage !== 'wait') return;
++    let live = true;
++    const ask = () =>
++      api
++        .get<{ tls: TlsView | null }>('/api/link')
++        .then(found => live && found.tls?.certificate && setStage('ready'))
++        .catch(() => undefined);
++    void ask();
++    const poll = setInterval(() => void ask(), POLL_MS);
++    const giveUp = setTimeout(() => setStage('later'), GIVE_UP_MS);
++    return () => {
++      live = false;
++      clearInterval(poll);
++      clearTimeout(giveUp);
++    };
++  }, [stage]);
++  return stage;
++}
++
++/* What setup shows after it made a public link: that the certificate is on its way, then the link to copy. */
++export function LinkReady({ link, onNext }: { link: MadeLink; onNext: () => void }) {
++  const t = useT();
++  const stage = useCertificateStage();
++  return (
++    <>
++      <p className="muted">{stage === 'wait' ? t.setup.linkWait : stage === 'ready' ? t.setup.linkReady : t.setup.linkLater}</p>
++      {stage !== 'wait' && (
++        <div className="settings-link">
++          <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
++          <CopyButton text={link.url} />
++        </div>
++      )}
++      <LetsEncryptNote />
++      <div className="actions">
++        <button className="btn" type="button" onClick={onNext}>{t.common.next}</button>
++      </div>
++    </>
++  );
++}
+diff --git a/apps/web/test/Machines.test.tsx b/apps/web/test/Machines.test.tsx
+index a818d1ac..53f473e1 100644
+--- a/apps/web/test/Machines.test.tsx
++++ b/apps/web/test/Machines.test.tsx
+@@ -30,16 +30,59 @@ const openCard = async (name: string) => {
+ };
+ const meter = (node: HTMLElement, label: string) => within(node).getByText(label, { selector: '.g-l' }).closest('.gauge')!;
+ 
+ /* The value next to a label in a machine's card or in the pool. */
+ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent;
+ 
+ afterEach(() => localStorage.clear());
+ 
++const DAY = 24 * 3600_000;
++const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
++const linkWithCertificate = (expiresAt: string) => ({ link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org', tls: { mode: 'https', certificate: true, expiresAt, failedAt: null } });
++
++describe('the link certificate warning', () => {
++  it('warns 14 days before the link\'s certificate ends', async () => {
++    const soon = endsIn(13);
++    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
++    render(<Machines me={ME} />);
++    const warning = (await screen.findByText(/The link's certificate ends/)).closest('p')!;
++    expect(warning).toHaveClass('alert');
++    expect(warning).toHaveAttribute('role', 'status');
++    expect(warning).toHaveTextContent(`The link's certificate ends on ${new Date(soon).toLocaleDateString('en')} and has not renewed yet. Hornhoof tries again every hour.`);
++    expect(warning).toHaveTextContent('If it ends, the link keeps working, encrypted to hornhoof.org.');
++  });
++
++  it('says nothing while the certificate has 15 days left', async () => {
++    const calls = lists({ 'GET /api/link': [200, linkWithCertificate(endsIn(15))] });
++    render(<Machines me={ME} />);
++    await screen.findByRole('table');
++    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/link')).toBe(true));
++    await act(async () => {
++      await new Promise(resolve => setTimeout(resolve, 0));
++    });
++    expect(screen.queryByText(/The link's certificate ends/)).not.toBeInTheDocument();
++  });
++
++  it('warns in Russian with the date in that language', async () => {
++    localStorage.setItem('hh-lang', 'ru');
++    const soon = endsIn(3);
++    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
++    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
++    expect(await screen.findByText(/Сертификат ссылки заканчивается/)).toHaveTextContent(`Сертификат ссылки заканчивается ${new Date(soon).toLocaleDateString('ru')} и еще не обновился.`);
++  });
++
++  it('asks nothing about the link for people who do not see the whole company', async () => {
++    const calls = lists();
++    render(<Machines me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
++    await screen.findByRole('table');
++    expect(calls.some(c => c.path === '/api/link')).toBe(false);
++  });
++});
++
+ describe('Machines', () => {
+   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
+     localStorage.setItem('hh-lang', language);
+     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });
+     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+     const mac = await openCard('ivan-mbp');
+     expect(within(mac).getByRole('heading', { name: heading })).toBeInTheDocument();
+     expect(fact(mac, 'Claude Code')).toBe('2.1.0');
+diff --git a/apps/web/test/Settings.test.tsx b/apps/web/test/Settings.test.tsx
+index befa6f18..20190cfc 100644
+--- a/apps/web/test/Settings.test.tsx
++++ b/apps/web/test/Settings.test.tsx
+@@ -1,18 +1,23 @@
+ import { render, screen, within } from '@testing-library/react';
+ import userEvent from '@testing-library/user-event';
+-import { afterEach, describe, expect, it } from 'vitest';
++import { afterEach, describe, expect, it, vi } from 'vitest';
+ import { LanguageProvider } from '../src/i18n';
+ import { Settings } from '../src/screens/Settings';
+ import { Shell } from '../src/screens/Shell';
+ import { ME, mockApi, ORG } from './api-mock';
+ import { decl } from './css';
+ 
++vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
++
+ const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
++const RANDOM = 'r4nd0mr4nd0mr4nd0m';
++const AGREEMENT = 'Let\'s Encrypt Subscriber Agreement';
++const tls = (mode: 'http' | 'https') => ({ mode, certificate: mode === 'https', expiresAt: null, failedAt: null });
+ 
+ describe('Share access', () => {
+   it('shows the public link with a copy button', async () => {
+     mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
+     render(<Settings me={ME} onClose={() => {}} />);
+     const dialog = await screen.findByRole('dialog', { name: 'Share access' });
+     expect(within(dialog).getByText('Hornhoof opens from anywhere at this link:')).toBeInTheDocument();
+     expect(await within(dialog).findByRole('link', { name: 'https://acme.hornhoof.org' })).toHaveAttribute('href', 'https://acme.hornhoof.org');
+@@ -50,16 +55,43 @@ describe('Share access', () => {
+     await user.click(await screen.findByRole('button', { name: 'Change name' }));
+     await user.clear(screen.getByLabelText('Link'));
+     await user.type(screen.getByLabelText('Link'), longest);
+     const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
+     expect(note.matches('.link-name > span')).toBe(true);
+     expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
+   });
+ 
++  it('says the link is encrypted to this machine in https mode, and to hornhoof.org otherwise', async () => {
++    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('https') }] });
++    const first = render(<Settings me={ME} onClose={() => {}} />);
++    expect(await screen.findByText('Encrypted to this machine')).toBeInTheDocument();
++    expect(screen.queryByText(/Encrypted to hornhoof.org for now/)).not.toBeInTheDocument();
++    first.unmount();
++    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('http') }] });
++    render(<Settings me={ME} onClose={() => {}} />);
++    expect(await screen.findByText('Encrypted to hornhoof.org for now. Hornhoof moves the encryption to this machine on its own.')).toBeInTheDocument();
++    expect(screen.queryByText('Encrypted to this machine')).not.toBeInTheDocument();
++  });
++
++  it('names the Let\'s Encrypt Subscriber Agreement with a link to it', async () => {
++    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('https') }] });
++    const first = render(<Settings me={ME} onClose={() => {}} />);
++    const agreement = await screen.findByRole('link', { name: AGREEMENT });
++    expect(agreement).toHaveAttribute('href', 'https://letsencrypt.org/repository/');
++    expect(agreement).toHaveAttribute('target', '_blank');
++    expect(agreement).toHaveAttribute('rel', 'noreferrer');
++    expect(agreement.parentElement).toHaveTextContent(`The link's certificate comes from Let's Encrypt. Getting it accepts the ${AGREEMENT} for your company.`);
++    first.unmount();
++    mockApi({ 'GET /api/link': [200, { link: null, domain: 'hornhoof.org', tls: null }] });
++    render(<Settings me={ME} onClose={() => {}} />);
++    await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.');
++    expect(screen.queryByRole('link', { name: AGREEMENT })).not.toBeInTheDocument();
++  });
++
+   it('removes the link after asking', async () => {
+     const calls = mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'DELETE /api/link': [204] });
+     const user = userEvent.setup();
+     render(<Settings me={ME} onClose={() => {}} />);
+     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
+     expect(screen.getByText('Hornhoof stops opening at https://acme.hornhoof.org. Machines connected through this link lose the connection.')).toBeInTheDocument();
+     await user.click(screen.getByRole('button', { name: 'Remove' }));
+     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
+@@ -72,31 +104,40 @@ describe('Share access', () => {
+     const user = userEvent.setup();
+     render(<Settings me={ME} onClose={() => {}} />);
+     await user.click(await screen.findByRole('button', { name: 'Remove link' }));
+     const question = screen.getByText(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
+     expect(question.matches('.settings-actions > span')).toBe(true);
+     expect(decl('.settings-actions > span', 'overflow-wrap')).toBe('anywhere');
+   });
+ 
+-  it('opens Hornhoof on the internet at a name made from the company name', async () => {
++  it('starts a company with no link on a long random name', async () => {
+     const calls = mockApi({
+       'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+-      'GET /api/link/names/acme': [200, { name: 'acme', free: true }],
+-      'PUT /api/link': [200, { link: ACME }],
++      [`GET /api/link/names/${RANDOM}`]: [200, { name: RANDOM, free: true }],
++      'PUT /api/link': [200, { link: { name: RANDOM, url: `https://${RANDOM}.hornhoof.org` } }],
+     });
+     const user = userEvent.setup();
+     render(<Settings me={ME} onClose={() => {}} />);
+     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
+-    expect(screen.getByLabelText('Link')).toHaveValue('acme');
+-    expect(screen.getByText(/A name like this is easy to guess/)).toBeInTheDocument();
+-    await screen.findByText('acme.hornhoof.org is free.');
++    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
++    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
++    await screen.findByText(`${RANDOM}.hornhoof.org is free.`);
+     await user.click(screen.getByRole('button', { name: 'Open on the internet' }));
+-    expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
+-    expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ name: 'acme' });
++    expect(await screen.findByRole('link', { name: `https://${RANDOM}.hornhoof.org` })).toBeInTheDocument();
++    expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ name: RANDOM });
++  });
++
++  it('starts a new random name after the link is removed', async () => {
++    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'DELETE /api/link': [204] });
++    const user = userEvent.setup();
++    render(<Settings me={ME} onClose={() => {}} />);
++    await user.click(await screen.findByRole('button', { name: 'Remove link' }));
++    await user.click(screen.getByRole('button', { name: 'Remove' }));
++    expect(await screen.findByLabelText('Link')).toHaveValue(RANDOM);
+   });
+ 
+   it('says why a name was refused', async () => {
+     mockApi({
+       'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+       'PUT /api/link': [409, { error: { code: 'conflict', message: 'This link is taken already. Pick another name.', reason: 'link_taken' } }],
+     });
+     const user = userEvent.setup();
+diff --git a/apps/web/test/Setup.test.tsx b/apps/web/test/Setup.test.tsx
+index f02f39c2..ca36ad67 100644
+--- a/apps/web/test/Setup.test.tsx
++++ b/apps/web/test/Setup.test.tsx
+@@ -1,22 +1,36 @@
+-import { render, screen } from '@testing-library/react';
++import { act, render, screen } from '@testing-library/react';
+ import userEvent from '@testing-library/user-event';
+-import { beforeEach, describe, expect, it, vi } from 'vitest';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { Setup } from '../src/screens/Setup';
+ import { mockApi, type Call } from './api-mock';
+ import { decl } from './css';
+ 
++/* The same long random name for every start, so the tests know what the Link field holds before anything is typed. */
++vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
++
++const RANDOM = 'r4nd0mr4nd0mr4nd0m';
+ const CREATED = { company: { id: 'c1', name: 'Acme' }, person: { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO' } };
+ const CHECK_ACME = 'GET /api/setup/names/acme?code=LINK-CODE-123';
++const MADE = { name: RANDOM, url: `https://${RANDOM}.hornhoof.org` };
++const linkAnswer = (certificate: boolean) => [200, { link: MADE, domain: 'hornhoof.org', tls: { mode: certificate ? 'https' : 'http', certificate, expiresAt: null, failedAt: null } }] as [number, unknown];
++const AGREEMENT = 'Let\'s Encrypt Subscriber Agreement';
+ /* The setup itself, among the name checks the screen makes while the company name is typed. */
+ const posted = (calls: Call[]) => calls.filter(c => c.method === 'POST');
+ 
++/* The Link field starts on a random name, so a test that wants its own name writes it there. */
++async function typeLinkName(user: ReturnType<typeof userEvent.setup>, name: string) {
++  await user.clear(screen.getByLabelText('Link'));
++  await user.type(screen.getByLabelText('Link'), name);
++}
++
+ async function fillFirstTwoSteps(user: ReturnType<typeof userEvent.setup>, password = 'correct horse battery') {
+   await user.type(screen.getByLabelText('Company name'), 'Acme');
++  await typeLinkName(user, 'acme');
+   await user.click(screen.getByRole('button', { name: 'Next' }));
+   await user.type(screen.getByLabelText('Your name'), 'Ivan');
+   await user.type(screen.getByLabelText('Email'), 'ivan@acme.com');
+   await user.type(screen.getByLabelText('Password'), password);
+   await user.click(screen.getByRole('button', { name: 'Next' }));
+ }
+ 
+ describe('Setup', () => {
+@@ -204,39 +218,41 @@ describe('the public link on the setup screen', () => {
+     expect(decl('.link-input .link-domain', 'white-space')).toBe('nowrap');
+   });
+ 
+   it('breaks the note under the field inside the longest address, so the note does not widen the row', async () => {
+     const longest = 'a'.repeat(63);
+     mockApi({ [`GET /api/setup/names/${longest}?code=LINK-CODE-123`]: [200, { name: longest, free: true }] });
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+-    await user.type(screen.getByLabelText('Link'), longest);
++    await typeLinkName(user, longest);
+     const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
+     /* The address is one word with no place to wrap, wider than a phone; the note may break inside it. */
+     expect(note.matches('.link-name > span')).toBe(true);
+     expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
+   });
+ 
+-  it('opens Hornhoof on the internet at a link made from the company name as it is typed', async () => {
++  it('starts the link with a long random name and keeps it while the company name is typed', async () => {
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toBeChecked();
+     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Share access\.$/);
++    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
+     await user.type(screen.getByLabelText('Company name'), 'Рога и копыта');
+-    expect(screen.getByLabelText('Link')).toHaveValue('roga-i-kopyta');
++    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
+     expect(screen.getByText('.hornhoof.org')).toBeInTheDocument();
+-    expect(screen.getByText(/A name like this is easy to guess/)).toBeInTheDocument();
++    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
+   });
+ 
+   it('asks Hornhoof, with the setup code, whether the name is free', async () => {
+     const calls = mockApi({ [CHECK_ACME]: [200, { name: 'acme', free: true }], 'GET /api/setup/names/globex?code=LINK-CODE-123': [200, { name: 'globex', free: false, reason: 'taken' }] });
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+     await user.type(screen.getByLabelText('Company name'), 'Acme');
++    await typeLinkName(user, 'acme');
+     expect(await screen.findByText('acme.hornhoof.org is free.')).toBeInTheDocument();
+     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+     await user.clear(screen.getByLabelText('Link'));
+     await user.type(screen.getByLabelText('Link'), 'globex');
+     expect(await screen.findByText('This name is taken. Pick another one.')).toBeInTheDocument();
+     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+     expect(calls.every(c => c.path.startsWith('/api/setup/names/'))).toBe(true);
+   });
+@@ -249,23 +265,24 @@ describe('the public link on the setup screen', () => {
+     await user.type(screen.getByLabelText('Link'), 'my-firm-');
+     expect(screen.getByText('Use Latin letters a to z, digits and hyphens, with no hyphen at the start or the end.')).toBeInTheDocument();
+     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+     await user.type(screen.getByLabelText('Link'), '{Backspace}');
+     await user.type(screen.getByLabelText('Company name'), ' Corp');
+     expect(screen.getByLabelText('Link')).toHaveValue('my-firm');
+   });
+ 
+-  it('gives a long random name on a click, which is hard to guess', async () => {
++  it('gives a long random name on a click, which says nothing of the company', async () => {
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} />);
+-    await user.type(screen.getByLabelText('Company name'), 'Acme');
++    await typeLinkName(user, 'my-firm');
++    expect(screen.getByText(/A name you pick shows in public certificate logs/)).toBeInTheDocument();
+     await user.click(screen.getByRole('button', { name: 'Random name' }));
+-    expect((screen.getByLabelText('Link') as HTMLInputElement).value).toMatch(/^[a-z0-9]{24}$/);
+-    expect(screen.getByText(/A random name is hard to guess/)).toBeInTheDocument();
++    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
++    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
+   });
+ 
+   it('sends no link when it is turned off', async () => {
+     const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} />);
+     await user.type(screen.getByLabelText('Company name'), 'Acme');
+     await user.click(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' }));
+@@ -299,16 +316,87 @@ describe('the public link on the setup screen', () => {
+     await fillFirstTwoSteps(user);
+     await user.click(screen.getByRole('radio', { name: 'Later' }));
+     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+     expect(await screen.findByText('hornhoof.org does not answer now. Try again in a few minutes.')).toBeInTheDocument();
+     expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Share access\./)).toBeInTheDocument();
+   });
+ });
+ 
++describe('the new link on the setup screen', () => {
++  beforeEach(() => {
++    window.history.replaceState(null, '', '/setup?code=LINK-CODE-123');
++    /* The clock also runs by itself, so the screen's own waiting (findBy) works beside the timers the test moves. */
++    vi.useFakeTimers({ shouldAdvanceTime: true });
++  });
++  afterEach(() => vi.useRealTimers());
++
++  const setUpWithLink = async (onDone: (done: { welcome: boolean }) => void = () => {}) => {
++    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
++    render(<Setup onDone={onDone} />);
++    await fillFirstTwoSteps(user);
++    await user.click(screen.getByRole('radio', { name: 'Later' }));
++    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
++    return user;
++  };
++
++  it('shows the new link once its certificate is in', async () => {
++    let asked = 0;
++    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(++asked > 1) });
++    await setUpWithLink();
++    expect(await screen.findByText('Getting the certificate for your link. This takes under a minute.')).toBeInTheDocument();
++    expect(screen.queryByRole('link', { name: MADE.url })).not.toBeInTheDocument();
++    expect(screen.getByRole('link', { name: AGREEMENT })).toHaveAttribute('href', 'https://letsencrypt.org/repository/');
++    await act(() => vi.advanceTimersByTimeAsync(2000));
++    expect(screen.getByText('People open your company from anywhere at this link:')).toBeInTheDocument();
++    expect(screen.getByRole('link', { name: MADE.url })).toHaveAttribute('href', MADE.url);
++    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
++    expect(screen.getByRole('link', { name: AGREEMENT })).toBeInTheDocument();
++  });
++
++  it('shows the link after 90 seconds anyway', async () => {
++    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(false) });
++    await setUpWithLink();
++    await screen.findByText('Getting the certificate for your link. This takes under a minute.');
++    await act(() => vi.advanceTimersByTimeAsync(89_000));
++    expect(screen.queryByRole('link', { name: MADE.url })).not.toBeInTheDocument();
++    await act(() => vi.advanceTimersByTimeAsync(1_000));
++    expect(screen.getByText('The link works now. Its own certificate comes on its own; until then the connection is encrypted to hornhoof.org.')).toBeInTheDocument();
++    expect(screen.getByRole('link', { name: MADE.url })).toBeInTheDocument();
++  });
++
++  it('goes on with Next to the command card, or to the map when there is no command', async () => {
++    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join JOIN-CODE-123';
++    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE, command }], 'GET /api/link': () => linkAnswer(true) });
++    const user = await setUpWithLink();
++    await act(() => vi.advanceTimersByTimeAsync(0));
++    await user.click(screen.getByRole('button', { name: 'Next' }));
++    expect(screen.getByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
++    expect(screen.getByText(command)).toBeInTheDocument();
++  });
++
++  it('goes to the map with Next when the setup made no command', async () => {
++    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(true) });
++    const onDone = vi.fn();
++    const user = await setUpWithLink(onDone);
++    await act(() => vi.advanceTimersByTimeAsync(0));
++    expect(onDone).not.toHaveBeenCalled();
++    await user.click(screen.getByRole('button', { name: 'Next' }));
++    expect(onDone).toHaveBeenCalledWith({ welcome: true });
++  });
++
++  it('goes on as today without a link', async () => {
++    mockApi({ 'POST /api/setup': [201, CREATED] });
++    const onDone = vi.fn();
++    await setUpWithLink(onDone);
++    expect(onDone).toHaveBeenCalledWith({ welcome: true });
++    expect(screen.queryByRole('link', { name: AGREEMENT })).not.toBeInTheDocument();
++  });
++});
++
+ describe('Setup without the setup link', () => {
+   it('asks for the setup code before anything else and sends it', async () => {
+     const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+     const user = userEvent.setup();
+     render(<Setup onDone={() => {}} />);
+     expect(screen.getByText(/The code is also in the server log/)).toBeInTheDocument();
+     await user.type(screen.getByLabelText('Company name'), 'Acme');
+     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+diff --git a/guide/public-link.md b/guide/public-link.md
+index f138159e..ca7fd700 100644
+--- a/guide/public-link.md
++++ b/guide/public-link.md
+@@ -1,31 +1,31 @@
+ # The link on the internet
+ 
+-> In short: Hornhoof can give your company a link like `https://acme.hornhoof.org`, so people open it from anywhere. Nothing has to be opened on your router. Anyone who learns the link reaches the sign-in page, so a random name, which is hard to guess, is the safer choice.
++> In short: Hornhoof can give your company a link like `https://acme.hornhoof.org`, so people open it from anywhere. Nothing has to be opened on your router. Link names are public, because each certificate is listed in public logs, so Hornhoof starts with a long random name, which does not say whose company it is. You may change it, and the company's sign-ins protect what is inside.
+ 
+ ## How do I get a link?
+ 
+-Setup offers the company a public link, like `https://acme.hornhoof.org`. As you type the company's name, it shows the link the company will get, written in Latin letters.
++Setup offers the company a public link, like `https://acme.hornhoof.org`. It starts with a long random name.
+ 
+-- You can write another name, or take a long random one with "Random name".
++- You can write another name, or take a new random one with "Random name".
+ - Hornhoof tells you at once whether the name is free.
+ - The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Share access.
+ 
+ ## What changes once there is a link?
+ 
+ Invite links and the commands for new machines use it. Hornhoof still opens at its own address as well.
+ 
+ ## Who can reach it?
+ 
+-Anyone who learns the link reaches the sign-in page. A name like the company's own is easy to guess, so only the company's sign-ins protect what is inside. A random name is hard to guess.
++Link names are public: every link's certificate is listed in public logs, so anyone can find the name. Before sign-in the link tells nothing about the company, and it asks search engines not to list it. A name you pick may tell whose company this is. A random name does not. Either way, only the company's sign-ins protect what is inside.
+ 
+ ## What does hornhoof.org see?
+ 
+-hornhoof.org only passes the traffic on and has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
++The connection is encrypted to your company's own machine, which gets the link's certificate from Let's Encrypt. So hornhoof.org passes it on unread and sees only the name being reached. While that is not possible, the link falls back to https that ends at hornhoof.org, as Share access shows. hornhoof.org has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
+ 
+ ## How do I change or remove the link?
+ 
+ People who see the whole company find the link under Share access in the account menu. There they can:
+ 
+ - copy it;
+ - move it to another name;
+ - remove it.
+
+## 433d7504 Split Setup, Settings, Machines and LinkName into small parts so every function this task changed is under CRAP 10
+
+The gate counts every function that holds a changed line, and these four screens were one large function each (complexity 22 to 46), so adding the certificate texts to them could never pass. Behaviour is the same and the existing tests pin it: Setup is a wizard of three step components with pure helpers for the problems, the request body and the refusal; Settings has a hook for the link and a shown part and an editor; Machines has a data hook, an actions hook, a pool helper and a list; LinkName has a state hook, a random-name hook and pure helpers.
+
+Ruling: after a rename or a removal Settings shows no certificate line until the dialog is opened again - why: the certificate in the last answer was for the old name - cost if wrong: one reopen of the dialog to see the new line
+Ruling: the first author check of this lane failed on test/AgentWindowCurrentTask.test.tsx (findByRole 'Task' timed out at 1 s under coverage on home-api), a file this task does not touch, and the failed run wrote no coverage, so crapper saw 0 - why: the web suite passes 781 of 781 here and that test does not render any screen of this task - cost if wrong: the lead sees this test flake in the batch check and fixes it at its cause
+
+---
+ apps/web/src/screens/Machines.tsx | 203 ++++++++----
+ apps/web/src/screens/Settings.tsx | 248 +++++++++------
+ apps/web/src/screens/Setup.tsx    | 648 ++++++++++++++++++++++++--------------
+ apps/web/src/ui/LinkName.tsx      | 112 ++++---
+ 4 files changed, 769 insertions(+), 442 deletions(-)
+
+diff --git a/apps/web/src/screens/Machines.tsx b/apps/web/src/screens/Machines.tsx
+index 0a58939b..a0095c3a 100644
+--- a/apps/web/src/screens/Machines.tsx
++++ b/apps/web/src/screens/Machines.tsx
+@@ -305,30 +305,26 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
+         <h4>{t.cards.plansOn}</h4>
+         <PlansOnMachine row={row} subs={subs} />
+         {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
+       </section>
+     </CardFrame>
+   );
+ }
+ 
+-export function Machines({ me }: { me: Me }) {
+-  const t = useT();
+-  const { language } = useLanguage();
+-  const now = useNow();
++/* What the screen has loaded, looked at again every few seconds since machines come online, sign in and take work on
++   their own. */
++function useMachineData() {
+   const [machines, setMachines] = useState<MachineView[] | null>(null);
+   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
+   const [subs, setSubs] = useState<SubView[]>([]);
+   const [command, setCommand] = useState<ActiveCommand | null>(null);
+   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
+-  const [confirm, setConfirm] = useState<string | null>(null);
+-  const [picking, setPicking] = useState<string | null>(null);
+   const [failure, setFailure] = useState<unknown>(null);
+   const live = useRef(true);
+-  const certificateEnds = endingSoon(useLinkTls(me), now);
+ 
+   useEffect(() => {
+     live.current = true;
+     return () => {
+       live.current = false;
+     };
+   }, []);
+ 
+@@ -343,23 +339,42 @@ export function Machines({ me }: { me: Me }) {
+       setMachines(hosts.machines);
+       setBuiltin(hosts.builtin ?? null);
+       setSubs(list.subscriptions);
+     } catch (err) {
+       setFailure(err);
+     }
+   }, []);
+ 
+-  /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds. */
+   useEffect(() => {
+     void load();
+     const timer = setInterval(() => void load(), REFRESH_MS);
+     return () => clearInterval(timer);
+   }, [load]);
+ 
++  return { machines, setMachines, builtin, subs, command, setCommand, addCommands, setAddCommands, failure, setFailure, load };
++}
++
++type MachineData = ReturnType<typeof useMachineData>;
++
++const withLends = (list: MachineView[] | null, id: string, lendsTests: boolean) => list?.map(x => (x.id === id ? { ...x, lendsTests } : x)) ?? null;
++
++const withoutKey = <T,>(all: Record<string, T>, key: string): Record<string, T> => {
++  const next = { ...all };
++  delete next[key];
++  return next;
++};
++
++/* What the person can do on the screen: connect a machine, add a plan to one, lend it for tests, disconnect it. A failure
++   of any shows above the list. */
++function useMachineActions(data: MachineData) {
++  const { setCommand, setAddCommands, setMachines, setFailure, load } = data;
++  const [confirm, setConfirm] = useState<string | null>(null);
++  const [picking, setPicking] = useState<string | null>(null);
++
+   async function run(action: () => Promise<void>) {
+     setFailure(null);
+     try {
+       await action();
+     } catch (err) {
+       setFailure(err);
+     }
+   }
+@@ -371,92 +386,140 @@ export function Machines({ me }: { me: Me }) {
+     });
+ 
+   const cancelMachine = (id: string) =>
+     run(async () => {
+       await hideShownCommand(id);
+       setCommand(null);
+     });
+ 
+-  const addPlan = (m: MachineView, sub: SubView) =>
+-    run(async () => {
+-      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
+-      setPicking(null);
+-      setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
+-    });
++  const controls: MachineControls = {
++    picking,
++    addCommands: data.addCommands,
++    confirm,
++    setPicking,
++    setConfirm,
++    refresh: load,
++    addPlan: (m, sub) =>
++      run(async () => {
++        const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
++        setPicking(null);
++        setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
++      }),
++    cancelAdd: (machineId, id) =>
++      run(async () => {
++        await hideShownCommand(id);
++        setAddCommands(all => withoutKey(all, machineId));
++      }),
++    lend: (m, lendsTests) =>
++      run(async () => {
++        await api.patch(`/api/machines/${m.id}`, { lendsTests });
++        setMachines(list => withLends(list, m.id, lendsTests));
++      }),
++    disconnect: m =>
++      run(async () => {
++        setConfirm(null);
++        await api.post(`/api/machines/${m.id}/disconnect`);
++        await load();
++      }),
++  };
++  return { machineCommand, cancelMachine, controls };
++}
+ 
+-  const cancelAdd = (machineId: string, id: string) =>
+-    run(async () => {
+-      await hideShownCommand(id);
+-      setAddCommands(all => {
+-        const next = { ...all };
+-        delete next[machineId];
+-        return next;
+-      });
+-    });
++/* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
++   shows as one card: online while either is, with what either says it has and what runs on either. */
++const hostOf = (machines: MachineView[], builtin: BuiltinView | null): MachineView | null =>
++  builtin?.machine ? (machines.find(m => m.id === builtin.machine!.id) ?? null) : null;
+ 
+-  const lend = (m: MachineView, lendsTests: boolean) =>
+-    run(async () => {
+-      await api.patch(`/api/machines/${m.id}`, { lendsTests });
+-      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, lendsTests } : x)) ?? null);
+-    });
++function loadsOf(machines: MachineView[], host: MachineView | null, builtin: BuiltinView | null, apart: BuiltinView | null): NodeLoad[] {
++  const own = machines.map(m => (m === host ? (m.load ?? builtin!.load) : m.load));
++  return [...own, apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
++}
+ 
+-  const disconnect = (m: MachineView) =>
+-    run(async () => {
+-      setConfirm(null);
+-      await api.post(`/api/machines/${m.id}/disconnect`);
+-      await load();
+-    });
++const onlineCount = (machines: MachineView[], host: MachineView | null, builtin: BuiltinView | null, apart: BuiltinView | null) =>
++  machines.filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
+ 
+-  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
+-     shows as one card: online while either is, with what either says it has and what runs on either. */
+-  const host = builtin?.machine ? ((machines ?? []).find(m => m.id === builtin.machine!.id) ?? null) : null;
++/* The machines as one pool: whose loads it sums, how many are online, and the built-in node that has no machine of its own. */
++function poolOf(machines: MachineView[], builtin: BuiltinView | null) {
++  const host = hostOf(machines, builtin);
+   const apart = host ? null : builtin;
+-  const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
+-  const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
+-  const activeCommand = liveCommand(command, now);
+-  const openIds = openCommandIds(addCommands, now);
++  return { host, apart, loads: loadsOf(machines, host, builtin, apart), online: onlineCount(machines, host, builtin, apart) };
++}
+ 
++function MachinesHead({ shown, onConnect }: { shown: ActiveCommand | null; onConnect: () => void }) {
++  const t = useT();
+   return (
+-    <section className="people machines">
+-      <header className="people-head">
+-        <div>
+-          <h1>{t.machines.heading}</h1>
+-          <p className="muted">{t.machines.intro}</p>
++    <header className="people-head">
++      <div>
++        <h1>{t.machines.heading}</h1>
++        <p className="muted">{t.machines.intro}</p>
++      </div>
++      {!shown && (
++        <div className="head-actions">
++          <button className="btn" type="button" onClick={onConnect}>{t.machines.connect}</button>
+         </div>
+-        {!activeCommand && (
+-          <div className="head-actions">
+-            <button className="btn" type="button" onClick={() => void machineCommand()}>{t.machines.connect}</button>
+-          </div>
+-        )}
+-      </header>
+-
+-      {activeCommand && (
+-        <ActiveCommandPanel
+-          heading={t.machines.connectHeading}
+-          run={t.machines.runThis}
+-          trust={t.machines.trust}
+-          shown={activeCommand}
+-          onCancel={() => void cancelMachine(activeCommand.id)}
+-        />
+       )}
+-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
++    </header>
++  );
++}
+ 
+-      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
+-      {machines && <Pool loads={loads} online={online} all={machines.length + (apart ? 1 : 0)} />}
+-      {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
+-      {machines && (machines.length > 0 || builtin) && (
++interface MachineListProps {
++  data: MachineData;
++  controls: MachineControls;
++  me: Me;
++  now: number;
++}
++
++/* The pool and the table of machines, or a word that there are none. */
++function MachineList({ data, controls, me, now }: MachineListProps) {
++  const t = useT();
++  const { language } = useLanguage();
++  const { machines, builtin, subs, addCommands } = data;
++  if (!machines) return null;
++  const pool = poolOf(machines, builtin);
++  const none = machines.length === 0 && !builtin;
++  return (
++    <>
++      <Pool loads={pool.loads} online={pool.online} all={machines.length + (pool.apart ? 1 : 0)} />
++      {none ? (
++        <p className="muted">{t.machines.noMachines}</p>
++      ) : (
+         <SortTable
+           rows={machineRows(machines, builtin, subs, t.machines.builtin)}
+           columns={machineColumns(t, language)}
+           name={row => row.hostname}
+-          openIds={openIds}
++          openIds={openCommandIds(addCommands, now)}
+           initialSort={{ key: 'status', direction: 1 }}
+           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
+           filters={machineFilters(t)}
+-          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
+-            picking, addCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, lend, disconnect, refresh: load,
+-          }} />}
++          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={controls} />}
++        />
++      )}
++    </>
++  );
++}
++
++export function Machines({ me }: { me: Me }) {
++  const t = useT();
++  const now = useNow();
++  const data = useMachineData();
++  const { machineCommand, cancelMachine, controls } = useMachineActions(data);
++  const certificateEnds = endingSoon(useLinkTls(me), now);
++  const shown = liveCommand(data.command, now);
++
++  return (
++    <section className="people machines">
++      <MachinesHead shown={shown} onConnect={() => void machineCommand()} />
++      {shown && (
++        <ActiveCommandPanel
++          heading={t.machines.connectHeading}
++          run={t.machines.runThis}
++          trust={t.machines.trust}
++          shown={shown}
++          onCancel={() => void cancelMachine(shown.id)}
+         />
+       )}
++      {data.failure !== null && <p className="alert" role="alert">{errorText(t, data.failure)}</p>}
++      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
++      <MachineList data={data} controls={controls} me={me} now={now} />
+     </section>
+   );
+ }
+diff --git a/apps/web/src/screens/Settings.tsx b/apps/web/src/screens/Settings.tsx
+index 13c74adb..aa69844f 100644
+--- a/apps/web/src/screens/Settings.tsx
++++ b/apps/web/src/screens/Settings.tsx
+@@ -4,135 +4,193 @@ import { errorText, useT } from '../i18n';
+ import type { Me, TlsView } from '../types';
+ import { CopyButton } from '../ui/CopyButton';
+ import { LetsEncryptNote } from '../ui/LetsEncryptNote';
+ import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+ import { takeEscape } from '../ui/escape';
+ 
+ type Link = { name: string; url: string };
+ type Loaded = { link: Link | null; domain: string; tls?: TlsView | null };
++type Mode = 'view' | 'edit' | 'remove';
+ 
+-/* Where the link's https ends, and whose agreement its certificate rests on. */
+-function Encryption({ tls }: { tls: TlsView | null }) {
+-  const t = useT();
+-  if (!tls) return null;
+-  return (
+-    <>
+-      <p className="update-note">{tls.mode === 'https' ? t.settings.encryptedHere : t.settings.encryptedRelay}</p>
+-      <LetsEncryptNote />
+-    </>
+-  );
+-}
++const checkName = (name: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(name)}`);
+ 
+-/* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
+-   copy, move to another name or remove. */
+-export function Settings({ onClose }: { me: Me; onClose: () => void }) {
+-  const t = useT();
++/* The link as the server has it, and the changes to it. A change tells whether it worked; a failure stays for the dialog
++   to show. After a change the old certificate is not shown, since it was for the old name. */
++function useLinkSettings() {
+   const [loaded, setLoaded] = useState<Loaded | null>(null);
+-  const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
+-  const [name, setName] = useState('');
+-  const [state, setState] = useState<NameState>('empty');
+   const [busy, setBusy] = useState(false);
+   const [failure, setFailure] = useState<unknown>(null);
+-  const box = useRef<HTMLDivElement>(null);
+-
+-  useEffect(() => {
+-    box.current?.focus();
+-    const onKey = (e: KeyboardEvent) => {
+-      if (!takeEscape(e)) return;
+-      onClose();
+-    };
+-    document.addEventListener('keydown', onKey, true);
+-    return () => document.removeEventListener('keydown', onKey, true);
+-  }, [onClose]);
+ 
+   useEffect(() => {
+-    api
+-      .get<Loaded>('/api/link')
+-      .then(setLoaded)
+-      .catch(setFailure);
++    api.get<Loaded>('/api/link').then(setLoaded).catch(setFailure);
+   }, []);
+ 
+-  async function run(change: () => Promise<Link | null>) {
++  async function run(change: () => Promise<Link | null>): Promise<boolean> {
+     setBusy(true);
+     setFailure(null);
+     try {
+       const link = await change();
+-      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: was?.tls }));
+-      setMode('view');
+-      if (!link) setName('');
++      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
++      return true;
+     } catch (err) {
+       setFailure(err);
++      return false;
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+-  const save = () => run(async () => (await api.put<{ link: Link }>('/api/link', { name })).link);
+-  const remove = () => run(async () => (await api.del('/api/link'), null));
+-  const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
+-  const link = loaded?.link ?? null;
++  return {
++    loaded,
++    busy,
++    failure,
++    clearFailure: () => setFailure(null),
++    save: (name: string) => run(async () => (await api.put<{ link: Link }>('/api/link', { name })).link),
++    remove: () => run(async () => (await api.del('/api/link'), null)),
++  };
++}
++
++type LinkSettings = ReturnType<typeof useLinkSettings>;
++
++function useCloseOnEscape(onClose: () => void) {
++  useEffect(() => {
++    const onKey = (e: KeyboardEvent) => {
++      if (!takeEscape(e)) return;
++      onClose();
++    };
++    document.addEventListener('keydown', onKey, true);
++    return () => document.removeEventListener('keydown', onKey, true);
++  }, [onClose]);
++}
++
++/* Where the link's https ends, and whose agreement its certificate rests on. */
++function Encryption({ tls }: { tls: TlsView | null }) {
++  const t = useT();
++  if (!tls) return null;
++  return (
++    <>
++      <p className="update-note">{tls.mode === 'https' ? t.settings.encryptedHere : t.settings.encryptedRelay}</p>
++      <LetsEncryptNote />
++    </>
++  );
++}
++
++interface ShownProps {
++  link: Link;
++  tls: TlsView | null;
++  mode: Mode;
++  busy: boolean;
++  onMode: (mode: Mode) => void;
++  onRemove: () => void;
++}
++
++/* The link the company has: copy it, change its name or remove it after asking. */
++function LinkShown({ link, tls, mode, busy, onMode, onRemove }: ShownProps) {
++  const t = useT();
++  return (
++    <>
++      <p>{t.settings.opensAt}</p>
++      <div className="settings-link">
++        <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
++        <CopyButton text={link.url} />
++      </div>
++      <Encryption tls={tls} />
++      {mode === 'remove' ? (
++        <div className="settings-actions">
++          <span>{t.settings.removeAsk(link.url)}</span>
++          <button className="btn small" type="button" disabled={busy} onClick={onRemove}>{t.settings.yesRemove}</button>
++          <button className="btn small ghost" type="button" onClick={() => onMode('view')}>{t.settings.keep}</button>
++        </div>
++      ) : (
++        <div className="settings-actions">
++          <button className="btn small ghost" type="button" onClick={() => onMode('edit')}>{t.settings.change}</button>
++          <button className="btn small ghost" type="button" onClick={() => onMode('remove')}>{t.settings.remove}</button>
++        </div>
++      )}
++    </>
++  );
++}
++
++interface EditorProps {
++  link: Link | null;
++  domain: string;
++  busy: boolean;
++  onSave: (name: string) => void;
++  onCancel: () => void;
++}
++
++/* Moving a link can be given up; opening a first one cannot. */
++function CancelButton({ shown, onCancel }: { shown: boolean; onCancel: () => void }) {
++  const t = useT();
++  return shown ? <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button> : null;
++}
++
++/* The name of the link, to move it or to open one: a company with no link starts on a long random name. */
++function LinkEditor({ link, domain, busy, onSave, onCancel }: EditorProps) {
++  const t = useT();
++  const [name, setName] = useState(link?.name ?? '');
++  const [state, setState] = useState<NameState>('empty');
++  return (
++    <form
++      className="settings-form"
++      onSubmit={e => {
++        e.preventDefault();
++        onSave(name);
++      }}
++    >
++      {!link && <p>{t.settings.closed}</p>}
++      <LinkName name={name} onName={setName} domain={domain} check={checkName} onState={setState} current={link?.name} startRandom={!link} />
++      {link && <p className="update-note">{t.settings.moveNote}</p>}
++      <div className="settings-actions">
++        <button className="btn small" type="submit" disabled={busy || blocks(state)}>{link ? t.common.save : t.settings.open}</button>
++        <CancelButton shown={link !== null} onCancel={onCancel} />
++      </div>
++    </form>
++  );
++}
++
++/* The link part of the dialog: the link as it is, or the form that names it. */
++function LinkSection({ loaded, settings }: { loaded: Loaded; settings: LinkSettings }) {
++  const t = useT();
++  const [mode, setMode] = useState<Mode>('view');
++  const { link, domain, tls } = loaded;
++  const finish = async (worked: Promise<boolean>) => {
++    if (await worked) setMode('view');
++  };
++  const choose = (next: Mode) => {
++    settings.clearFailure();
++    setMode(next);
++  };
++  return (
++    <section className="settings-part">
++      <h3>{t.settings.link}</h3>
++      {link && mode !== 'edit' ? (
++        <LinkShown link={link} tls={tls ?? null} mode={mode} busy={settings.busy} onMode={choose} onRemove={() => void finish(settings.remove())} />
++      ) : (
++        <LinkEditor link={link} domain={domain} busy={settings.busy} onSave={name => void finish(settings.save(name))} onCancel={() => choose('view')} />
++      )}
++    </section>
++  );
++}
++
++/* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
++   copy, move to another name or remove. */
++export function Settings({ onClose }: { me: Me; onClose: () => void }) {
++  const t = useT();
++  const box = useRef<HTMLDivElement>(null);
++  const settings = useLinkSettings();
++  useCloseOnEscape(onClose);
++  useEffect(() => box.current?.focus(), []);
+ 
+   return (
+     <div className="dialog-back" onPointerDown={e => e.target === e.currentTarget && onClose()}>
+       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={box}>
+         <header>
+           <h2 id="settings-title">{t.settings.title}</h2>
+           <button className="btn small ghost" type="button" onClick={onClose}>{t.common.done}</button>
+         </header>
+-        {loaded && (
+-          <section className="settings-part">
+-            <h3>{t.settings.link}</h3>
+-            {link && mode !== 'edit' ? (
+-              <>
+-                <p>{t.settings.opensAt}</p>
+-                <div className="settings-link">
+-                  <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
+-                  <CopyButton text={link.url} />
+-                </div>
+-                <Encryption tls={loaded.tls ?? null} />
+-                {mode === 'remove' ? (
+-                  <div className="settings-actions">
+-                    <span>{t.settings.removeAsk(link.url)}</span>
+-                    <button className="btn small" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
+-                    <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
+-                  </div>
+-                ) : (
+-                  <div className="settings-actions">
+-                    <button
+-                      className="btn small ghost"
+-                      type="button"
+-                      onClick={() => {
+-                        setName(link.name);
+-                        setFailure(null);
+-                        setMode('edit');
+-                      }}
+-                    >
+-                      {t.settings.change}
+-                    </button>
+-                    <button className="btn small ghost" type="button" onClick={() => setMode('remove')}>{t.settings.remove}</button>
+-                  </div>
+-                )}
+-              </>
+-            ) : (
+-              <form
+-                className="settings-form"
+-                onSubmit={e => {
+-                  e.preventDefault();
+-                  void save();
+-                }}
+-              >
+-                {!link && <p>{t.settings.closed}</p>}
+-                <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} startRandom={!link} />
+-                {link && <p className="update-note">{t.settings.moveNote}</p>}
+-                <div className="settings-actions">
+-                  <button className="btn small" type="submit" disabled={busy || blocks(state)}>{link ? t.common.save : t.settings.open}</button>
+-                  {link && <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.common.cancel}</button>}
+-                </div>
+-              </form>
+-            )}
+-          </section>
+-        )}
+-        {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
++        {settings.loaded && <LinkSection loaded={settings.loaded} settings={settings} />}
++        {settings.failure !== null && <p className="alert" role="alert">{errorText(t, settings.failure)}</p>}
+       </div>
+     </div>
+   );
+ }
+diff --git a/apps/web/src/screens/Setup.tsx b/apps/web/src/screens/Setup.tsx
+index 76b0013e..d852bce3 100644
+--- a/apps/web/src/screens/Setup.tsx
++++ b/apps/web/src/screens/Setup.tsx
+@@ -1,279 +1,465 @@
+ import { useId, useState, type FormEvent } from 'react';
+ import { api, ApiFailure } from '../api';
+-import { errorText, useT } from '../i18n';
++import { errorText, useT, type Messages } from '../i18n';
+ import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
+ import { Card } from '../ui/Card';
+ import { CommandBox } from '../ui/CommandBox';
+ import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
+ import { Field } from '../ui/Field';
+ import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+ import { LinkReady, type MadeLink } from '../ui/LinkReady';
+ 
+ type Mode = 'api_key' | 'personal' | 'later';
+ type KeyProvider = 'anthropic_api' | 'openai_api';
++type Problems = Record<string, string>;
+ 
+ const MODES: Mode[] = ['api_key', 'personal', 'later'];
+ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+ 
+ /* The setup link the server logs carries the code that lets this browser create the company. */
+ const linkCode = () => new URLSearchParams(window.location.search).get('code')?.trim() ?? '';
+ 
+ const LINK_REFUSED = new Set(['link_taken', 'link_reserved', 'link_invalid']);
+ 
+-/* linkDomain: what public links end in, as the server says. */
+-export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string }) {
+-  const t = useT();
+-  const steps = t.setup.steps;
+-  const uid = useId();
+-  const [step, setStep] = useState(0);
+-  const [code, setCode] = useState(linkCode);
+-  const [askCode, setAskCode] = useState(() => !linkCode());
+-  const [companyName, setCompanyName] = useState('');
++/* Everything the person writes or picks over the three steps. */
++interface Form {
++  code: string;
++  companyName: string;
+   /* The ready-made company the CEO starts from, or "empty" to let the orchestrator build it. */
+-  const [template, setTemplate] = useState<Pick>('empty');
++  template: Pick;
+   /* The public link: on unless the person turns it off, starting on a long random name. */
+-  const [linkOn, setLinkOn] = useState(true);
+-  const [linkName, setLinkName] = useState('');
+-  const [linkState, setLinkState] = useState<NameState>('empty');
+-  const [name, setName] = useState('');
+-  const [title, setTitle] = useState('CEO');
+-  const [email, setEmail] = useState('');
+-  const [password, setPassword] = useState('');
+-  const [mode, setMode] = useState<Mode>('api_key');
+-  const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic_api');
+-  const [apiKey, setApiKey] = useState('');
+-  const [plan, setPlan] = useState<PlanProvider>('claude');
+-  const [problems, setProblems] = useState<Record<string, string>>({});
+-  const [failure, setFailure] = useState('');
+-  const [skipLink, setSkipLink] = useState(false);
+-  const [busy, setBusy] = useState(false);
+-  const [command, setCommand] = useState<string | null>(null);
+-  /* The link setup made, shown with its certificate before the person goes on. */
+-  const [made, setMade] = useState<MadeLink | null>(null);
++  linkOn: boolean;
++  linkName: string;
++  name: string;
++  title: string;
++  email: string;
++  password: string;
++  mode: Mode;
++  keyProvider: KeyProvider;
++  apiKey: string;
++  plan: PlanProvider;
++}
+ 
+-  function next(e: FormEvent) {
+-    e.preventDefault();
+-    if (step === 0) setProblems({});
+-    if (step === 1) {
+-      const found: Record<string, string> = {};
+-      if (!EMAIL.test(email.trim())) found.email = t.setup.emailProblem;
+-      if (password.length < 10) found.password = t.common.useAtLeast10;
+-      setProblems(found);
+-      if (Object.keys(found).length) return;
+-    }
+-    setStep(step + 1);
+-  }
++type Update = (patch: Partial<Form>) => void;
+ 
+-  const checkName = (name: string) => api.get<NameCheck>(`/api/setup/names/${encodeURIComponent(name)}?code=${encodeURIComponent(code.trim())}`);
++const startForm = (): Form => ({
++  code: linkCode(),
++  companyName: '',
++  template: 'empty',
++  linkOn: true,
++  linkName: '',
++  name: '',
++  title: 'CEO',
++  email: '',
++  password: '',
++  mode: 'api_key',
++  keyProvider: 'anthropic_api',
++  apiKey: '',
++  plan: 'claude',
++});
+ 
+-  async function finish(e: FormEvent) {
+-    e.preventDefault();
+-    if (mode === 'api_key' && apiKey.trim().length < 8) {
+-      setProblems({ apiKey: t.setup.pasteWholeKey });
+-      return;
+-    }
+-    const orchestrator =
+-      mode === 'api_key' ? { mode, provider: keyProvider, apiKey: apiKey.trim() } : mode === 'personal' ? { mode, provider: plan } : { mode };
++function useForm(): [Form, Update] {
++  const [form, setForm] = useState(startForm);
++  return [form, patch => setForm(was => ({ ...was, ...patch }))];
++}
++
++/* What is wrong with the account step, by field. */
++function accountProblems(t: Messages, form: Form): Problems {
++  const found: Problems = {};
++  if (!EMAIL.test(form.email.trim())) found.email = t.setup.emailProblem;
++  if (form.password.length < 10) found.password = t.common.useAtLeast10;
++  return found;
++}
++
++/* What is wrong with the step the person leaves; the company step has nothing to check here. */
++const problemsAt = (step: number, t: Messages, form: Form): Problems => (step === 1 ? accountProblems(t, form) : {});
++
++const apiKeyProblem = (t: Messages, form: Form): Problems | null =>
++  form.mode === 'api_key' && form.apiKey.trim().length < 8 ? { apiKey: t.setup.pasteWholeKey } : null;
++
++function orchestratorOf(form: Form) {
++  if (form.mode === 'api_key') return { mode: form.mode, provider: form.keyProvider, apiKey: form.apiKey.trim() };
++  return form.mode === 'personal' ? { mode: form.mode, provider: form.plan } : { mode: form.mode };
++}
++
++function setupBody(form: Form) {
++  return {
++    code: form.code.trim(),
++    companyName: form.companyName.trim(),
++    name: form.name.trim(),
++    email: form.email.trim(),
++    password: form.password,
++    title: form.title.trim(),
++    orchestrator: orchestratorOf(form),
++    ...(form.linkOn ? { link: { name: form.linkName } } : {}),
++    ...(form.template === 'empty' ? {} : { template: form.template }),
++  };
++}
++
++/* Where a refused setup goes back to: the setup code, the link's name, or the last step with the message. */
++type Refusal = { where: 'code' | 'link' | 'form'; text: string; skipLink: boolean };
++
++function refusalOf(t: Messages, err: unknown): Refusal {
++  const reason = err instanceof ApiFailure ? err.reason : undefined;
++  const text = errorText(t, err);
++  if (reason === 'setup_code') return { where: 'code', text, skipLink: false };
++  if (reason && LINK_REFUSED.has(reason)) return { where: 'link', text, skipLink: false };
++  return { where: 'form', text, skipLink: reason === 'relay_unreachable' };
++}
++
++type SetupAnswer = { command?: string; link?: MadeLink };
++
++/* Sends the setup, and keeps what the last try said: busy, or the message of a refusal that stays on the last step. */
++function useSubmit(form: Form, onAnswer: (answer: SetupAnswer) => void, onRefused: (refusal: Refusal) => void) {
++  const t = useT();
++  const [busy, setBusy] = useState(false);
++  const [failure, setFailure] = useState('');
++  const [skipLink, setSkipLink] = useState(false);
++
++  async function submit() {
+     setBusy(true);
+     setFailure('');
+     setSkipLink(false);
+     try {
+-      const res = await api.post<{ command?: string; link?: MadeLink }>('/api/setup', {
+-        code: code.trim(),
+-        companyName: companyName.trim(),
+-        name: name.trim(),
+-        email: email.trim(),
+-        password,
+-        title: title.trim(),
+-        orchestrator,
+-        ...(linkOn ? { link: { name: linkName } } : {}),
+-        ...(template === 'empty' ? {} : { template }),
+-      });
+-      setCommand(res.command ?? null);
+-      if (res.link) setMade(res.link);
+-      else if (!res.command) onDone({ welcome: true });
++      onAnswer(await api.post<SetupAnswer>('/api/setup', setupBody(form)));
+     } catch (err) {
+-      if (err instanceof ApiFailure && err.reason === 'setup_code') {
+-        setAskCode(true);
+-        setProblems({ code: errorText(t, err) });
+-        setStep(0);
+-      } else if (err instanceof ApiFailure && err.reason && LINK_REFUSED.has(err.reason)) {
+-        setProblems({ link: errorText(t, err) });
+-        setStep(0);
+-      } else {
+-        setFailure(errorText(t, err));
+-        setSkipLink(err instanceof ApiFailure && err.reason === 'relay_unreachable');
++      const refusal = refusalOf(t, err);
++      if (refusal.where !== 'form') onRefused(refusal);
++      else {
++        setFailure(refusal.text);
++        setSkipLink(refusal.skipLink);
+       }
+     } finally {
+       setBusy(false);
+     }
+   }
++  return { busy, failure, skipLink, submit };
++}
+ 
+-  function goOn() {
+-    setMade(null);
+-    if (!command) onDone({ welcome: true });
+-  }
++/* What follows a setup that went through: a link made waits for its certificate, a node command waits to be run, else the
++   person is done. The plan is kept for the command's words. */
++function useAfterSetup(onDone: (done: { welcome: boolean }) => void) {
++  const [command, setCommand] = useState<string | null>(null);
++  const [plan, setPlan] = useState<PlanProvider>('claude');
++  const [made, setMade] = useState<MadeLink | null>(null);
++  const done = () => onDone({ welcome: true });
++  return {
++    command,
++    plan,
++    made,
++    answer(answer: SetupAnswer, chosen: PlanProvider) {
++      setCommand(answer.command ?? null);
++      setPlan(chosen);
++      if (answer.link) setMade(answer.link);
++      else if (!answer.command) done();
++    },
++    goOn() {
++      setMade(null);
++      if (!command) done();
++    },
++    done,
++  };
++}
+ 
+-  if (made) {
+-    return (
+-      <Card>
+-        <h1>{t.settings.link}</h1>
+-        <LinkReady link={made} onNext={goOn} />
+-      </Card>
+-    );
+-  }
++interface StepProps {
++  form: Form;
++  update: Update;
++  problems: Problems;
++}
+ 
+-  if (command) {
+-    return (
+-      <Card>
+-        <h1>{t.setup.connectMachine}</h1>
+-        <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
+-        <CommandBox command={command} />
+-        <p className="muted">{t.setup.joinOnce}</p>
+-        <div className="actions">
+-          <button className="btn" type="button" onClick={() => onDone({ welcome: true })}>{t.setup.goToMap}</button>
+-        </div>
+-      </Card>
+-    );
+-  }
++interface PublicLinkProps extends StepProps {
++  domain: string;
++  onState: (state: NameState) => void;
++  onNameTyped: () => void;
++}
+ 
++/* The choice to open Hornhoof on the internet, and the name of the link. */
++function PublicLinkChoice({ form, update, problems, domain, onState, onNameTyped }: PublicLinkProps) {
++  const t = useT();
++  const uid = useId();
++  const checkName = (name: string) => api.get<NameCheck>(`/api/setup/names/${encodeURIComponent(name)}?code=${encodeURIComponent(form.code.trim())}`);
+   return (
+-    <Card wide={step === 0}>
+-      <div className="wizard-head">
+-        <p className="muted">{t.setup.heading}</p>
+-        <ol className="steps" aria-label={t.setup.stepOf(step + 1, steps.length)}>
+-          {steps.map((title, i) => (
+-            <li key={title} className={i <= step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}>
+-              <span className="sr">{title}</span>
+-            </li>
+-          ))}
+-        </ol>
+-        <h1>{steps[step]}</h1>
+-      </div>
+-
+-      {step === 0 && (
+-        <form onSubmit={next}>
+-          <div className="setup-lead">
+-            <Field label={t.setup.companyName}>
+-              {p => <input {...p} value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
+-            </Field>
+-          </div>
+-          <CompanyTemplates value={template} onPick={setTemplate} />
+-          <div className="setup-lead">
+-            <label className="check">
+-              <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
+-              <span>
+-                <b id={`${uid}-link`}>{t.link.open}</b>
+-                <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
+-              </span>
+-            </label>
+-            {linkOn && (
+-              <LinkName
+-                name={linkName}
+-                onName={name => {
+-                  setLinkName(name);
+-                  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit the cleared link problem
+-                  setProblems(({ link: _, ...rest }) => rest);
+-                }}
+-                domain={linkDomain}
+-                check={checkName}
+-                onState={setLinkState}
+-                problem={problems.link}
+-                startRandom
+-              />
+-            )}
+-            {askCode && (
+-              <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
+-                {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+-              </Field>
+-            )}
+-          </div>
+-          <div className="actions">
+-            <button className="btn" type="submit" disabled={!companyName.trim() || (askCode && !code.trim()) || (linkOn && (blocks(linkState) || !!problems.link))}>{t.common.next}</button>
+-          </div>
+-        </form>
++    <>
++      <label className="check">
++        <input type="checkbox" checked={form.linkOn} onChange={e => update({ linkOn: e.target.checked })} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
++        <span>
++          <b id={`${uid}-link`}>{t.link.open}</b>
++          <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
++        </span>
++      </label>
++      {form.linkOn && (
++        <LinkName
++          name={form.linkName}
++          onName={linkName => {
++            update({ linkName });
++            onNameTyped();
++          }}
++          domain={domain}
++          check={checkName}
++          onState={onState}
++          problem={problems.link}
++          startRandom
++        />
+       )}
++    </>
++  );
++}
+ 
+-      {step === 1 && (
+-        <form onSubmit={next} noValidate>
+-          <p className="muted">{t.setup.becomeCeo(companyName.trim())}</p>
+-          <Field label={t.setup.yourName}>
+-            {p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus autoComplete="name" />}
+-          </Field>
+-          <Field label={t.setup.yourTitle}>
+-            {p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoComplete="organization-title" />}
+-          </Field>
+-          <Field label={t.common.email} problem={problems.email}>
+-            {p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />}
+-          </Field>
+-          <Field label={t.common.password} problem={problems.password} hint={t.common.atLeast10}>
+-            {p => <input {...p} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />}
++/* The company step cannot go on without a name, a setup code if one is asked, and a link name that works. */
++const companyStepBlocked = (form: Form, askCode: boolean, linkState: NameState, problems: Problems): boolean =>
++  !form.companyName.trim() || (askCode && !form.code.trim()) || (form.linkOn && (blocks(linkState) || !!problems.link));
++
++interface CompanyStepProps extends StepProps {
++  askCode: boolean;
++  linkDomain: string;
++  onNameTyped: () => void;
++  onNext: (e: FormEvent) => void;
++}
++
++function CompanyStep({ form, update, problems, askCode, linkDomain, onNameTyped, onNext }: CompanyStepProps) {
++  const t = useT();
++  const [linkState, setLinkState] = useState<NameState>('empty');
++  return (
++    <form onSubmit={onNext}>
++      <div className="setup-lead">
++        <Field label={t.setup.companyName}>
++          {p => <input {...p} value={form.companyName} onChange={e => update({ companyName: e.target.value })} maxLength={80} autoFocus autoComplete="organization" />}
++        </Field>
++      </div>
++      <CompanyTemplates value={form.template} onPick={template => update({ template })} />
++      <div className="setup-lead">
++        <PublicLinkChoice form={form} update={update} problems={problems} domain={linkDomain} onState={setLinkState} onNameTyped={onNameTyped} />
++        {askCode && (
++          <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
++            {p => <input {...p} value={form.code} onChange={e => update({ code: e.target.value })} maxLength={200} autoComplete="off" spellCheck={false} />}
+           </Field>
+-          <div className="actions">
+-            <button className="btn ghost" type="button" onClick={() => setStep(0)}>{t.common.back}</button>
+-            <button className="btn" type="submit" disabled={!name.trim() || !email.trim() || !password}>{t.common.next}</button>
+-          </div>
+-        </form>
+-      )}
++        )}
++      </div>
++      <div className="actions">
++        <button className="btn" type="submit" disabled={companyStepBlocked(form, askCode, linkState, problems)}>{t.common.next}</button>
++      </div>
++    </form>
++  );
++}
+ 
+-      {step === 2 && (
+-        <form onSubmit={e => void finish(e)} noValidate>
+-          <p className="muted">{t.setup.orchestratorIntro}</p>
+-          <fieldset className="choice">
+-            <legend className="sr">{t.setup.howOrchestratorRuns}</legend>
+-            {MODES.map(id => (
+-              <label key={id} className={mode === id ? 'on' : ''}>
+-                <input
+-                  type="radio"
+-                  name="mode"
+-                  value={id}
+-                  checked={mode === id}
+-                  onChange={() => setMode(id)}
+-                  aria-labelledby={`${uid}-${id}`}
+-                  aria-describedby={`${uid}-${id}-hint`}
+-                />
+-                <b id={`${uid}-${id}`}>{t.setup.modes[id].label}</b>
+-                <span id={`${uid}-${id}-hint`}>{t.setup.modes[id].hint}</span>
+-              </label>
+-            ))}
+-          </fieldset>
+-
+-          {mode === 'api_key' && (
+-            <>
+-              <Field label={t.setup.provider}>
+-                {p => (
+-                  <select {...p} value={keyProvider} onChange={e => setKeyProvider(e.target.value as KeyProvider)}>
+-                    <option value="anthropic_api">Anthropic</option>
+-                    <option value="openai_api">OpenAI</option>
+-                  </select>
+-                )}
+-              </Field>
+-              <Field label={t.setup.key} problem={problems.apiKey}>
+-                {p => <input {...p} type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} autoComplete="off" spellCheck={false} />}
+-              </Field>
+-            </>
+-          )}
+-
+-          {mode === 'personal' && (
+-            <fieldset className="segments">
+-              <legend className="sr">{t.setup.subscription}</legend>
+-              {PLAN_PROVIDERS.map(id => (
+-                <label key={id} className={plan === id ? 'on' : ''}>
+-                  <input type="radio" name="plan" value={id} checked={plan === id} onChange={() => setPlan(id)} />
+-                  {PROVIDER_NAMES[id]}
+-                </label>
+-              ))}
+-            </fieldset>
+-          )}
+-
+-          {failure && <p className="alert" role="alert">{failure}</p>}
+-          {failure && skipLink && <p className="muted">{t.link.skipHint}</p>}
+-          <div className="actions">
+-            <button className="btn ghost" type="button" onClick={() => setStep(1)}>{t.common.back}</button>
+-            <button className="btn" type="submit" disabled={busy}>{t.setup.finish}</button>
+-          </div>
+-        </form>
+-      )}
++interface AccountStepProps extends StepProps {
++  onBack: () => void;
++  onNext: (e: FormEvent) => void;
++}
++
++function AccountStep({ form, update, problems, onBack, onNext }: AccountStepProps) {
++  const t = useT();
++  return (
++    <form onSubmit={onNext} noValidate>
++      <p className="muted">{t.setup.becomeCeo(form.companyName.trim())}</p>
++      <Field label={t.setup.yourName}>
++        {p => <input {...p} value={form.name} onChange={e => update({ name: e.target.value })} maxLength={80} autoFocus autoComplete="name" />}
++      </Field>
++      <Field label={t.setup.yourTitle}>
++        {p => <input {...p} value={form.title} onChange={e => update({ title: e.target.value })} maxLength={80} autoComplete="organization-title" />}
++      </Field>
++      <Field label={t.common.email} problem={problems.email}>
++        {p => <input {...p} type="email" value={form.email} onChange={e => update({ email: e.target.value })} autoComplete="email" />}
++      </Field>
++      <Field label={t.common.password} problem={problems.password} hint={t.common.atLeast10}>
++        {p => <input {...p} type="password" value={form.password} onChange={e => update({ password: e.target.value })} autoComplete="new-password" />}
++      </Field>
++      <div className="actions">
++        <button className="btn ghost" type="button" onClick={onBack}>{t.common.back}</button>
++        <button className="btn" type="submit" disabled={!form.name.trim() || !form.email.trim() || !form.password}>{t.common.next}</button>
++      </div>
++    </form>
++  );
++}
++
++/* How the orchestrator runs: with an API key, with the person's own plan, or later. */
++function ModeChoice({ mode, onMode }: { mode: Mode; onMode: (mode: Mode) => void }) {
++  const t = useT();
++  const uid = useId();
++  return (
++    <fieldset className="choice">
++      <legend className="sr">{t.setup.howOrchestratorRuns}</legend>
++      {MODES.map(id => (
++        <label key={id} className={mode === id ? 'on' : ''}>
++          <input type="radio" name="mode" value={id} checked={mode === id} onChange={() => onMode(id)} aria-labelledby={`${uid}-${id}`} aria-describedby={`${uid}-${id}-hint`} />
++          <b id={`${uid}-${id}`}>{t.setup.modes[id].label}</b>
++          <span id={`${uid}-${id}-hint`}>{t.setup.modes[id].hint}</span>
++        </label>
++      ))}
++    </fieldset>
++  );
++}
++
++function KeyFields({ form, update, problems }: StepProps) {
++  const t = useT();
++  return (
++    <>
++      <Field label={t.setup.provider}>
++        {p => (
++          <select {...p} value={form.keyProvider} onChange={e => update({ keyProvider: e.target.value as KeyProvider })}>
++            <option value="anthropic_api">Anthropic</option>
++            <option value="openai_api">OpenAI</option>
++          </select>
++        )}
++      </Field>
++      <Field label={t.setup.key} problem={problems.apiKey}>
++        {p => <input {...p} type="password" value={form.apiKey} onChange={e => update({ apiKey: e.target.value })} autoComplete="off" spellCheck={false} />}
++      </Field>
++    </>
++  );
++}
++
++function PlanChoice({ plan, onPlan }: { plan: PlanProvider; onPlan: (plan: PlanProvider) => void }) {
++  const t = useT();
++  return (
++    <fieldset className="segments">
++      <legend className="sr">{t.setup.subscription}</legend>
++      {PLAN_PROVIDERS.map(id => (
++        <label key={id} className={plan === id ? 'on' : ''}>
++          <input type="radio" name="plan" value={id} checked={plan === id} onChange={() => onPlan(id)} />
++          {PROVIDER_NAMES[id]}
++        </label>
++      ))}
++    </fieldset>
++  );
++}
++
++interface OrchestratorStepProps extends StepProps {
++  busy: boolean;
++  failure: string;
++  skipLink: boolean;
++  onBack: () => void;
++  onFinish: (e: FormEvent) => void;
++}
++
++function OrchestratorStep({ form, update, problems, busy, failure, skipLink, onBack, onFinish }: OrchestratorStepProps) {
++  const t = useT();
++  return (
++    <form onSubmit={onFinish} noValidate>
++      <p className="muted">{t.setup.orchestratorIntro}</p>
++      <ModeChoice mode={form.mode} onMode={mode => update({ mode })} />
++      {form.mode === 'api_key' && <KeyFields form={form} update={update} problems={problems} />}
++      {form.mode === 'personal' && <PlanChoice plan={form.plan} onPlan={plan => update({ plan })} />}
++      {failure && <p className="alert" role="alert">{failure}</p>}
++      {failure && skipLink && <p className="muted">{t.link.skipHint}</p>}
++      <div className="actions">
++        <button className="btn ghost" type="button" onClick={onBack}>{t.common.back}</button>
++        <button className="btn" type="submit" disabled={busy}>{t.setup.finish}</button>
++      </div>
++    </form>
++  );
++}
++
++/* The three steps, one at a time. */
++function StepBody({ step, ...props }: { step: number } & CompanyStepProps & OrchestratorStepProps) {
++  if (step === 0) return <CompanyStep {...props} />;
++  if (step === 1) return <AccountStep {...props} />;
++  return <OrchestratorStep {...props} />;
++}
++
++function StepsHead({ step }: { step: number }) {
++  const t = useT();
++  const steps = t.setup.steps;
++  return (
++    <div className="wizard-head">
++      <p className="muted">{t.setup.heading}</p>
++      <ol className="steps" aria-label={t.setup.stepOf(step + 1, steps.length)}>
++        {steps.map((title, i) => (
++          <li key={title} className={i <= step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}>
++            <span className="sr">{title}</span>
++          </li>
++        ))}
++      </ol>
++      <h1>{steps[step]}</h1>
++    </div>
++  );
++}
++
++interface WizardProps {
++  linkDomain: string;
++  onAnswer: (answer: SetupAnswer, plan: PlanProvider) => void;
++}
++
++/* The three steps of setup, with what the person has written kept while they go back and forth. */
++function Wizard({ linkDomain, onAnswer }: WizardProps) {
++  const t = useT();
++  const [form, update] = useForm();
++  const [step, setStep] = useState(0);
++  const [askCode, setAskCode] = useState(() => !linkCode());
++  const [problems, setProblems] = useState<Problems>({});
++  const sent = useSubmit(
++    form,
++    answer => onAnswer(answer, form.plan),
++    refusal => {
++      setProblems({ [refusal.where]: refusal.text });
++      setAskCode(was => was || refusal.where === 'code');
++      setStep(0);
++    },
++  );
++
++  function next(e: FormEvent) {
++    e.preventDefault();
++    const found = problemsAt(step, t, form);
++    setProblems(found);
++    if (!Object.keys(found).length) setStep(step + 1);
++  }
++
++  function finish(e: FormEvent) {
++    e.preventDefault();
++    const missing = apiKeyProblem(t, form);
++    if (missing) setProblems(missing);
++    else void sent.submit();
++  }
++
++  return (
++    <Card wide={step === 0}>
++      <StepsHead step={step} />
++      <StepBody
++        step={step}
++        form={form}
++        update={update}
++        problems={problems}
++        askCode={askCode}
++        linkDomain={linkDomain}
++        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit the cleared link problem
++        onNameTyped={() => setProblems(({ link: _, ...rest }) => rest)}
++        onNext={next}
++        {...sent}
++        onBack={() => setStep(step - 1)}
++        onFinish={finish}
++      />
++    </Card>
++  );
++}
++
++/* The command that connects the person's own machine, shown when the orchestrator runs on their plan. */
++function ConnectMachine({ command, plan, onDone }: { command: string; plan: PlanProvider; onDone: () => void }) {
++  const t = useT();
++  return (
++    <Card>
++      <h1>{t.setup.connectMachine}</h1>
++      <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
++      <CommandBox command={command} />
++      <p className="muted">{t.setup.joinOnce}</p>
++      <div className="actions">
++        <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>
++      </div>
+     </Card>
+   );
+ }
++
++/* linkDomain: what public links end in, as the server says. */
++export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string }) {
++  const t = useT();
++  const after = useAfterSetup(onDone);
++  if (after.made) {
++    return (
++      <Card>
++        <h1>{t.settings.link}</h1>
++        <LinkReady link={after.made} onNext={after.goOn} />
++      </Card>
++    );
++  }
++  if (after.command) return <ConnectMachine command={after.command} plan={after.plan} onDone={after.done} />;
++  return <Wizard linkDomain={linkDomain} onAnswer={after.answer} />;
++}
+diff --git a/apps/web/src/ui/LinkName.tsx b/apps/web/src/ui/LinkName.tsx
+index cb1c5670..001b972f 100644
+--- a/apps/web/src/ui/LinkName.tsx
++++ b/apps/web/src/ui/LinkName.tsx
+@@ -1,11 +1,11 @@
+ import { isLinkName, randomLinkName } from '@hornhoof/protocol/link';
+ import { useEffect, useId, useRef, useState } from 'react';
+-import { useT } from '../i18n';
++import { useT, type Messages } from '../i18n';
+ 
+ export type NameCheck = { name: string; free: boolean; reason?: 'taken' | 'reserved' | 'invalid' };
+ 
+ /* What is known about the name typed: nothing yet, not a name a link can have, the link the company has now, being
+    checked, free, taken or kept for Hornhoof, or not known because the check failed. */
+ export type NameState = 'empty' | 'invalid' | 'current' | 'checking' | 'free' | 'taken' | 'reserved' | 'unknown';
+ 
+ /* A name the person may not go on with. */
+@@ -24,75 +24,101 @@ type Props = {
+   current?: string;
+   /* Starts on a long random name when the field is empty as it mounts. */
+   startRandom?: boolean;
+ };
+ 
+ /* Waits this long after the last key before asking, so typing a name asks once. */
+ const PAUSE_MS = 350;
+ 
+-/* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
+-   free, asked while it is typed. */
+-export function LinkName({ name, onName, domain, check, onState, problem, current, startRandom }: Props) {
+-  const t = useT();
+-  const id = useId();
++/* What is known about a name before anyone is asked: nothing, the link now, a name a link can have, or one it cannot. */
++export const nameStateOf = (name: string, current?: string): NameState =>
++  !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
++
++const answerState = (found: NameCheck): NameState => (found.free ? 'free' : (found.reason ?? 'taken'));
++
++/* Asks about the name after the pause and tells the answer, 'unknown' when the check fails; the returned function drops a
++   pending ask, so a name typed over is never answered. */
++function askAfterPause(ask: (name: string) => Promise<NameCheck>, name: string, told: (state: NameState) => void): () => void {
++  let live = true;
++  const timer = setTimeout(() => {
++    void ask(name)
++      .then(answerState)
++      .catch((): NameState => 'unknown')
++      .then(next => live && told(next));
++  }, PAUSE_MS);
++  return () => {
++    live = false;
++    clearTimeout(timer);
++  };
++}
++
++/* The state of the name as it is typed, which the parent hears too. */
++function useNameState(name: string, current: string | undefined, check: Props['check'], onState: Props['onState']): NameState {
+   const [state, setState] = useState<NameState>('empty');
+-  const [random, setRandom] = useState('');
+   const asking = useRef(check);
+   asking.current = check;
+   const told = useRef(onState);
+   told.current = onState;
++
++  useEffect(() => {
++    const say = (next: NameState) => {
++      setState(next);
++      told.current?.(next);
++    };
++    const now = nameStateOf(name, current);
++    say(now);
++    if (now === 'checking') return askAfterPause(n => asking.current(n), name, say);
++  }, [name, current]);
++  return state;
++}
++
++/* The random name the field gave, to know whether the name in it is still that one, and the click that gives a new one;
++   with startRandom an empty field starts with one as it mounts. */
++function useRandomName(name: string, onName: (name: string) => void, startRandom: boolean | undefined): [string, () => void] {
++  const [random, setRandom] = useState('');
+   const named = useRef(onName);
+   named.current = onName;
+-
+-  const takeRandom = () => {
++  const take = () => {
+     const next = randomLinkName();
+     setRandom(next);
+     named.current(next);
+   };
+-
+   useEffect(() => {
+-    if (startRandom && !name) takeRandom();
+-    // Only as the field mounts: later empty names are the person's own.
++    // Only as the field mounts: a name emptied later is the person's own.
++    if (startRandom && !name) take();
+   }, []);
++  return [random, take];
++}
+ 
+-  useEffect(() => {
+-    const now: NameState = !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
+-    setState(now);
+-    told.current?.(now);
+-    if (now !== 'checking') return;
+-    let live = true;
+-    const timer = setTimeout(() => {
+-      void asking
+-        .current(name)
+-        .then(found => (found.free ? 'free' : (found.reason ?? 'taken')) as NameState)
+-        .catch((): NameState => 'unknown')
+-        .then(next => {
+-          if (!live) return;
+-          setState(next === 'invalid' ? 'invalid' : next);
+-          told.current?.(next);
+-        });
+-    }, PAUSE_MS);
+-    return () => {
+-      live = false;
+-      clearTimeout(timer);
+-    };
+-  }, [name, current]);
+-
+-  const said = {
++const sayName = (t: Messages, state: NameState, address: string): string =>
++  ({
+     empty: t.link.empty,
+     invalid: t.link.invalid,
+     current: t.link.current,
+     checking: t.link.checking,
+-    free: t.link.free(`${name}.${domain}`),
++    free: t.link.free(address),
+     taken: t.link.taken,
+     reserved: t.link.reserved,
+     unknown: t.link.unknown,
+-  }[state];
+-  const bad = problem || (blocks(state) && state !== 'empty' && state !== 'current' ? said : '');
++  })[state];
++
++/* What is wrong with the name, if anything: the parent's problem, or what a state that stops the person says. */
++const trouble = (problem: string | undefined, state: NameState, said: string): string =>
++  problem || (blocks(state) && state !== 'empty' && state !== 'current' ? said : '');
++
++/* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
++   free, asked while it is typed. */
++export function LinkName({ name, onName, domain, check, onState, problem, current, startRandom }: Props) {
++  const t = useT();
++  const id = useId();
++  const state = useNameState(name, current, check, onState);
++  const [random, takeRandom] = useRandomName(name, onName, startRandom);
++  const said = sayName(t, state, `${name}.${domain}`);
++  const bad = trouble(problem, state, said);
+ 
+   return (
+     <div className="field link-name">
+       <label htmlFor={id}>{t.link.label}</label>
+       <div className="link-input">
+         <input
+           id={id}
+           value={name}
+@@ -103,18 +129,12 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
+           spellCheck={false}
+           aria-describedby={`${id}-note ${id}-safety`}
+           aria-invalid={bad ? true : undefined}
+         />
+         <span className="link-domain">.{domain}</span>
+       </div>
+       <span id={`${id}-note`} className={bad ? 'bad' : 'hint'} aria-live="polite">{problem || said}</span>
+       <span id={`${id}-safety`} className="hint">{name && name === random ? t.link.hardToGuess : t.link.guessable}</span>
+-      <button
+-        className="btn small ghost"
+-        type="button"
+-        onClick={takeRandom}
+-      >
+-        {t.link.random}
+-      </button>
++      <button className="btn small ghost" type="button" onClick={takeRandom}>{t.link.random}</button>
+     </div>
+   );
+ }
+
+## 9e06cd05 Take a turn's late stop for no part of the next turn
+
+terminal-host-stop.test.ts "tells Hornhoof how full each agent's context is"
+failed once on a loaded machine, and the defect is in the product. The host
+answers a turn as soon as it reads the end in the program's log, so Hornhoof's
+next turn can begin before the program's stop hook of that same end arrives.
+stoppedHook applied that hook to whatever ran at its arrival.
+
+When the next turn starts a new program, the late stop made the host follow
+the old session back and read its log from the start. That log's own end then
+ended the new turn: host.run answered the next prompt with the last turn's
+answer and session, before the program had taken the prompt, and a context
+reading was lost. In the same session the late stop held the next turn for
+SETTLE_MS and could end it as done.
+
+Reproduced on home-api under a CPU load, on the old code: 4 of 127 rounds lost
+the reading, each with a stop that arrived after the first turn was answered,
+and each answered "echo: hello" to the second prompt.
+
+A stop from before the running turn took its prompt, or from a session the
+agent left, now only shows whether the two channels disagree. stopIsLate is a
+pure function with direct tests; two integration tests deliver the stop at a
+chosen point of the next turn, with no load and no sleeps.
+
+Ruling: a stop before the running turn's prompt went in is never that turn's, read after draining the log - why: a program takes one prompt at a time, and the log's turn.prompt counts for a lost prompt hook - cost if wrong: a real stop that beats both its prompt hook and its log line is ignored, and the turn ends from the log instead.
+Ruling: a stop from the session the agent is in, after the next prompt went in, still counts for the running turn - why: Kimi's Stop names no turn, and both fakes wait for the stop's answer before they take the next prompt, so a program in one session cannot do this - cost if wrong: if real Kimi takes a prompt while its last stop is still unanswered, that turn ends early as done after SETTLE_MS.
+
+---
+ apps/node/src/terminal/host.ts            | 24 ++++++++++++++++++----
+ apps/node/src/terminal/turn-signals.ts    |  9 +++++++++
+ apps/node/test/terminal-host-stop.test.ts | 33 +++++++++++++++++++++++++++++--
+ apps/node/test/turn-signals.test.ts       | 17 +++++++++++++++-
+ 4 files changed, 76 insertions(+), 7 deletions(-)
+
+diff --git a/apps/node/src/terminal/host.ts b/apps/node/src/terminal/host.ts
+index 6a57f8b0..11b75def 100644
+--- a/apps/node/src/terminal/host.ts
++++ b/apps/node/src/terminal/host.ts
+@@ -17,17 +17,17 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
+ import { redact } from '../redact.js';
+ import { Bridge, type AgentUrls } from './bridge.js';
+ import { inputOf } from './input.js';
+ import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
+ import { StreamMask } from './mask.js';
+ import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
+ import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
+ import { FAILURE, failure } from './failures.js';
+-import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
++import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
+ import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
+ import { CALLS } from './tool-calls.js';
+ import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+ import type { RecordingCursor } from './recordings.js';
+ import { envFile, type Tmux } from './tmux.js';
+ 
+ /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
+ export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null> };
+@@ -86,16 +86,18 @@ type Agent = {
+   signedOut: RegExp | null;
+   home: string;
+   workDir: string;
+   /* What the running program was started with; a turn that needs anything else starts it again. */
+   hash: string | null;
+   sessionId: string | null;
+   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
+   cleared: Set<string>;
++  /* Sessions the agent was in and left, in any program: what they still say is not about the turn that runs now. */
++  left: Set<string>;
+   tail: LineTail | null;
+   draining: boolean;
+   /* The Codex session logs there were when the program started a new session: its own log is none of them. */
+   oldLogs: Set<string> | null;
+   startedAt: number;
+   started: Deferred<void> | null;
+   ended: Deferred<string> | null;
+   turn: Turn | null;
+@@ -366,17 +368,17 @@ export class TerminalHost {
+ 
+   screen(key: string): Promise<string> {
+     return this.opts.tmux.screen(this.agent(key).name);
+   }
+ 
+   private agent(key: string): Agent {
+     let a = this.agents.get(key);
+     if (!a) {
+-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
++      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+       this.agents.set(key, a);
+     }
+     return a;
+   }
+ 
+   /* Hornhoof's turns for one agent run one after another. */
+   run(job: TermJob): Promise<RunResult> {
+     const a = this.agent(job.key);
+@@ -493,16 +495,17 @@ export class TerminalHost {
+     return sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+   }
+ 
+   /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */
+   private async startProgram(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
+     const { input } = job;
+     this.programIs(a, false);
+     await this.prepare(job, urls);
++    if (a.sessionId) a.left.add(a.sessionId);
+     Object.assign(a, { ...startedState(job, spec), hash });
+     if (job.program.kind === 'claude' && !input.sessionId) await this.keepNew(input, spec.sessionId);
+     a.tail = this.tailFor(a);
+     const env = { ...lasting(input.env), ...spec.env };
+     const scratch = this.opts.tmux.scratch();
+     await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
+     this.watch(a);
+     if (await this.ready(a, job)) {
+@@ -738,16 +741,17 @@ export class TerminalHost {
+     this.followSessionLog(a, sessionId);
+   }
+ 
+   private leaveSession(a: Agent): void {
+     if (!a.sessionId) return;
+     this.drain(a);
+     this.reportUnheard(a, true);
+     a.cleared.add(a.sessionId);
++    a.left.add(a.sessionId);
+   }
+ 
+   private followSessionLog(a: Agent, sessionId: string): void {
+     switch (a.program?.kind) {
+       case 'claude':
+         a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
+         return;
+       case 'kimi':
+@@ -806,17 +810,17 @@ export class TerminalHost {
+ 
+   private turnFailed(a: Agent, reason: string, detail?: Failure, id?: string): void {
+     this.endTurn(a, { status: 'failed', message: '', failure: detail ?? failure('unknown', reason) }, id);
+   }
+ 
+   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
+     if (a.restarting) return;
+     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
+-    if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
++    if (decision.conflict) this.logDisagreement(a);
+     if (!decision.accept) return;
+     if (a.turn) this.endWords(a, a.turn);
+     a.busy = false;
+     a.retry = null;
+     a.calls.clear();
+     a.question = null;
+     a.stopped = end.status === 'stopped';
+     a.failure = end.failure ?? null;
+@@ -827,16 +831,20 @@ export class TerminalHost {
+     const settling = this.settle(a, end.message);
+     a.settling = settling;
+     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
+     void settling.then(() => {
+       this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
+     });
+   }
+ 
++  private logDisagreement(a: Agent): void {
++    this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
++  }
++
+   private tookTurn(a: Agent, id?: string): void {
+     const first = !a.took;
+     a.busy = a.took = true;
+     a.ends.started(id);
+     if (id !== undefined) a.programTurnId = id;
+     if (first) a.turn?.words?.clear();
+   }
+ 
+@@ -1200,24 +1208,32 @@ export class TerminalHost {
+         return;
+       case 'stop':
+         return this.stoppedHook(a, data);
+     }
+   }
+ 
+   private async stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+     this.drain(a);
+-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
++    if (stopIsLate({ promptIn: this.stoppable(a), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
++    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+     if (data.stopped === true) return this.interrupted(a, id);
+     const detail = this.stopFailure(a, data);
+     if (detail) return this.turnFailed(a, detail.text, detail, id);
+     await this.successfulStop(a, data, id);
+   }
+ 
++  /* The turn this stop tells of is over, so the session and the turn that run now are not its to change. All it can still
++     show is that the two channels disagree on how that turn ended. */
++  private lateStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
++    const status = data.stopped === true ? 'stopped' : this.stopFailure(a, data) ? 'failed' : 'done';
++    if (a.ends.end(status, false, id).conflict) this.logDisagreement(a);
++  }
++
+   private stopFailure(a: Agent, data: Record<string, unknown>): Failure | null {
+     const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
+     if (!failed) return null;
+     const raw = this.stopFailureData(a, data);
+     return a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
+   }
+ 
+   private stopFailureData(a: Agent, data: Record<string, unknown>): Record<string, unknown> {
+diff --git a/apps/node/src/terminal/turn-signals.ts b/apps/node/src/terminal/turn-signals.ts
+index 92f6834a..a9427184 100644
+--- a/apps/node/src/terminal/turn-signals.ts
++++ b/apps/node/src/terminal/turn-signals.ts
+@@ -32,16 +32,25 @@ export class TurnEnds {
+     if (!stoppable || different) return { accept: false, conflict: false };
+     record.id ??= id;
+     record.status = status;
+     if (record.id !== undefined) this.identified.set(record.id, record);
+     return { accept: true, conflict: false };
+   }
+ }
+ 
++/* Whether a stop hook arriving now tells of a turn that is over. The host answers a turn once the program's log says it
++   ended, so the stop of that same end can still be on its way, or be sent again, when the next turn begins. A stop from
++   before the running turn took its prompt cannot be that turn's, nor can one from a session the agent has left. A session
++   the agent came back to counts as its own, and one the host never heard of is where a cleared conversation went on. */
++export function stopIsLate({ promptIn, from, session, left }: { promptIn: boolean; from: unknown; session: string | null; left: ReadonlySet<string> }): boolean {
++  if (!promptIn) return true;
++  return typeof from === 'string' && from !== session && left.has(from);
++}
++
+ export function hookCalls(event: string, data: Record<string, unknown>): Calls {
+   const rawId = data.tool_use_id ?? data.tool_call_id;
+   const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId) : '';
+   if (!id) return { began: [], ended: [] };
+   return event === 'tool' || event === 'ask'
+     ? { began: [{ id, name: toolName(String(data.tool_name ?? 'tool')) }], ended: [] }
+     : { began: [], ended: [id] };
+ }
+diff --git a/apps/node/test/terminal-host-stop.test.ts b/apps/node/test/terminal-host-stop.test.ts
+index 27f2b304..cee90ddb 100644
+--- a/apps/node/test/terminal-host-stop.test.ts
++++ b/apps/node/test/terminal-host-stop.test.ts
+@@ -1,12 +1,12 @@
+ import { mkdirSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+-import { afterEach, describe, expect, it } from 'vitest';
+-import { hasTmux, until, host, sent, home, setUp, job, codexJob, kimiJob, done, ack, typeTurn } from './terminal-host-helpers.js';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { hasTmux, until, host, tmux, sent, home, setUp, job, codexJob, kimiJob, done, ack, typeTurn } from './terminal-host-helpers.js';
+ 
+ describe.skipIf(!hasTmux)('agents in live terminals', () => {
+   afterEach(async () => host?.stop());
+ 
+   it('ends a turn as stopped when a person stops it with Escape in the terminal', async () => {
+     await setUp();
+     const first = await host.run(job('b1', 'warm up'));
+     const started = Date.now();
+@@ -105,9 +105,38 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
+     await host.run(kimiJob('x3', 'SWITCH'));
+     expect(sent.filter(m => m.type === 'agent.context')).toEqual([
+       { type: 'agent.context', agentKey: 'x1', used: 0.25 },
+       { type: 'agent.context', agentKey: 'x2', used: 0.5 },
+       { type: 'agent.context', agentKey: 'x3', used: 0.25 },
+       { type: 'agent.context', agentKey: 'x3', used: 0.5 },
+     ]);
+   });
++
++  /* The host answers a turn as soon as it reads the end in the program's log, and Hornhoof's next turn can begin before
++     the program's stop hook of that same end arrives. These two deliver that hook at a chosen point of the next turn. */
++  it("gives the next turn its own answer when the last turn's stop arrives while the next program starts", async () => {
++    await setUp();
++    const first = await host.run(kimiJob('late1', 'hello'));
++    const launch = tmux.launch.bind(tmux);
++    vi.spyOn(tmux, 'launch').mockImplementation((...args) => {
++      void host['hook']('late1', 'stop', { session_id: first.sessionId });
++      return launch(...args);
++    });
++    const next = await host.run(kimiJob('late1', 'next'));
++    expect(next).toMatchObject({ ok: true, result: 'echo: next' });
++    expect(next.sessionId).not.toBe(first.sessionId);
++  });
++
++  it("stays in the next turn's session when the last turn's stop arrives after the next prompt went in", async () => {
++    await setUp();
++    const first = await host.run(kimiJob('late2', 'hello'));
++    const stopping = new AbortController();
++    const running = host.run(kimiJob('late2', 'HANG', { signal: stopping.signal }));
++    await until(async () => (await host.screen('late2')).includes('waiting: HANG'));
++    await host['hook']('late2', 'stop', { session_id: first.sessionId });
++    const agent = host['agents'].get('late2')!;
++    expect(agent.sessionId).not.toBe(first.sessionId);
++    expect(agent.turn?.ending).toBeUndefined();
++    stopping.abort();
++    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
++  });
+ });
+diff --git a/apps/node/test/turn-signals.test.ts b/apps/node/test/turn-signals.test.ts
+index 33d04ae5..4a4d5154 100644
+--- a/apps/node/test/turn-signals.test.ts
++++ b/apps/node/test/turn-signals.test.ts
+@@ -1,10 +1,10 @@
+ import { describe, expect, it } from 'vitest';
+-import { TurnEnds, hookCalls, claudeEnd } from '../src/terminal/turn-signals.js';
++import { TurnEnds, hookCalls, claudeEnd, stopIsLate } from '../src/terminal/turn-signals.js';
+ import { kimiWire } from '../src/terminal/transcripts.js';
+ import { ProgramWatch, programState } from '../src/terminal/program-state.js';
+ import hooks from './fixtures/turn-hooks.json' with { type: 'json' };
+ import retry from './fixtures/kimi-retry.json' with { type: 'json' };
+ 
+ describe('one end from two channels', () => {
+   it.each([['done', 'failed'], ['failed', 'done']] as const)('keeps the first %s end and diagnoses a later %s once', (first, later) => {
+     const ends = new TurnEnds();
+@@ -26,16 +26,31 @@ describe('one end from two channels', () => {
+   it('closes Claude from turn_duration, using its API error or answer', () => {
+     expect(claudeEnd({ type: 'system', subtype: 'turn_duration' }, 'Answer', null)).toEqual({ status: 'done', message: 'Answer' });
+     const error = { kind: 'auth' as const, text: 'Invalid API key', retryable: false };
+     expect(claudeEnd({ type: 'system', subtype: 'turn_duration' }, 'Invalid API key', error)).toEqual({ status: 'failed', message: '', failure: error });
+     expect(claudeEnd({ type: 'user' }, '', null)).toBeNull();
+   });
+ });
+ 
++describe('whose a stop hook is', () => {
++  const left = new Set(['old']);
++  it.each([
++    ['before the running turn took its prompt, from any session', { promptIn: false, from: 'new', session: 'new', left }, true],
++    ['before the running turn took its prompt, from no session', { promptIn: false, from: undefined, session: null, left }, true],
++    ['from a session the agent left', { promptIn: true, from: 'old', session: 'new', left }, true],
++    ['from the session the agent is in', { promptIn: true, from: 'new', session: 'new', left }, false],
++    ['from a session the agent left and went back to', { promptIn: true, from: 'old', session: 'old', left }, false],
++    ['from a session the host has not heard of, as a cleared conversation goes on in', { promptIn: true, from: 'unknown', session: 'new', left }, false],
++    ['from a program that names no session', { promptIn: true, from: undefined, session: 'new', left }, false],
++  ])('%s', (_, stop, late) => {
++    expect(stopIsLate(stop)).toBe(late);
++  });
++});
++
+ describe('tool and retry evidence', () => {
+   it.each(hooks.filter(h => ['PreToolUse', 'PostToolUse', 'PostToolUseFailure'].includes(h.event)))('$program $event uses the log call id', ({ event, input }) => {
+     const calls = hookCalls(event === 'PreToolUse' ? 'tool' : event === 'PostToolUseFailure' ? 'toolfail' : 'tooldone', input);
+     const id = 'tool_call_id' in input ? input.tool_call_id : input.tool_use_id;
+     expect(calls).toEqual(event === 'PreToolUse' ? { began: [{ id, name: input.tool_name }], ended: [] } : { began: [], ended: [id] });
+   });
+   it('reads the measured Kimi retry fields without rounding nextAt below the delay', () => {
+     expect(kimiWire(retry).retry).toEqual({ attempt: retry.failedAttempt, max: retry.maxAttempts, delayMs: retry.delayMs });
+
+## 2504f426 Split endTurn, whose changed line the CRAP gate reads
+
+The late stop's fix changed one line of endTurn, which was at complexity 20 and
+CRAP 20.9 from before. It now decides whether an end counts, acceptEnd takes
+it, endTyped sends a typed turn's end out, and typedEndError names how that
+turn ended. Nothing changes in what they do.
+
+The last commit's second ruling says both fakes wait for the stop's answer. It
+is the three fakes for Claude Code, Codex and Kimi Code, read in their source
+and seen with Kimi's, and real Kimi Code was not checked.
+
+---
+ apps/node/src/terminal/host.ts | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/apps/node/src/terminal/host.ts b/apps/node/src/terminal/host.ts
+index 11b75def..ed346a39 100644
+--- a/apps/node/src/terminal/host.ts
++++ b/apps/node/src/terminal/host.ts
+@@ -811,28 +811,36 @@ export class TerminalHost {
+   private turnFailed(a: Agent, reason: string, detail?: Failure, id?: string): void {
+     this.endTurn(a, { status: 'failed', message: '', failure: detail ?? failure('unknown', reason) }, id);
+   }
+ 
+   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
+     if (a.restarting) return;
+     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
+     if (decision.conflict) this.logDisagreement(a);
+-    if (!decision.accept) return;
++    if (decision.accept) this.acceptEnd(a, end);
++  }
++
++  private acceptEnd(a: Agent, end: TurnEnd): void {
+     if (a.turn) this.endWords(a, a.turn);
+     a.busy = false;
+     a.retry = null;
+     a.calls.clear();
+     a.question = null;
+     a.stopped = end.status === 'stopped';
+     a.failure = end.failure ?? null;
+     const turn = a.turn;
+     if (turn) turn.ending = end;
+     if (!turn?.typed) return a.ended?.resolve(end.message);
+-    const error = a.stopped ? 'cancelled' : end.failure ? (end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed') : null;
++    this.endTyped(a, turn, end);
++  }
++
++  /* A typed turn's end goes out once the rest of its log is read. */
++  private endTyped(a: Agent, turn: Turn, end: TurnEnd): void {
++    const error = typedEndError(a, end);
+     const settling = this.settle(a, end.message);
+     a.settling = settling;
+     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
+     void settling.then(() => {
+       this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
+     });
+   }
+ 
+@@ -1753,16 +1761,23 @@ export async function parentOf(pid: number): Promise<number | null> {
+   }
+ }
+ 
+ function ownership(options: Options, panes: Panes): Ownership {
+   if (options.owner) return options.owner(panes);
+   return options.proc ? procOwner(options.proc)(panes) : { owns: null };
+ }
+ 
++/* How a typed turn's job ended, as Hornhoof hears it. */
++function typedEndError(a: Agent, end: TurnEnd): JobError {
++  if (a.stopped) return 'cancelled';
++  if (!end.failure) return null;
++  return end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed';
++}
++
+ /* A cancelled turn can still wait for Escape and its final session, but takes no more input or events. */
+ function activeTurn(a: Agent): Turn | null {
+   return a.turn?.signal?.aborted ? null : a.turn;
+ }
+ 
+ /* How many tokens the model Kimi starts with takes in its context, from its settings. */
+ function kimiWindow(home: string, model: string | null): number | null {
+   try {
+
+## 216cd541 Fix flaky web waits: raise the Testing Library wait limit to 10 s
+
+Testing Library findBy and waitFor give up after asyncUtilTimeout, one second by
+default, while testTimeout is 20 s. On a loaded machine the first render of a
+test can take longer than one second with no fault in the code; this showed in
+AgentWindowCurrentTask.test.tsx (Unable to find role button name Task). A wait
+ends as soon as its element appears, so the longer limit costs a healthy test
+nothing. New direct test: an element that appears after 1.1 s is found.
+
+Web suite before: 53.84 s, 769 tests. After: 54.69 s, 770 tests. No test in
+apps/web expects a findBy or waitFor to fail (no rejects, no catch around them).
+
+Ruling: limit is 10 s, half of testTimeout - why: a missing element still fails with a clear message before the 20 s test timeout - cost if wrong: a test that truly hangs fails 9 s later
+
+---
+ apps/web/test/async-wait-timeout.test.tsx | 20 ++++++++++++++++++++
+ apps/web/test/setup.ts                    |  6 +++++-
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/apps/web/test/async-wait-timeout.test.tsx b/apps/web/test/async-wait-timeout.test.tsx
+new file mode 100644
+index 00000000..17e5bb39
+--- /dev/null
++++ b/apps/web/test/async-wait-timeout.test.tsx
+@@ -0,0 +1,20 @@
++import { render, screen } from '@testing-library/react';
++import { useEffect, useState } from 'react';
++import { expect, it } from 'vitest';
++
++/* A loaded machine can make a render take longer than Testing Library's default one second wait. */
++const LATE_MS = 1100;
++
++function LateButton() {
++  const [shown, setShown] = useState(false);
++  useEffect(() => {
++    const timer = setTimeout(() => setShown(true), LATE_MS);
++    return () => clearTimeout(timer);
++  }, []);
++  return shown ? <button>Task</button> : null;
++}
++
++it('finds an element that appears a little after one second', async () => {
++  render(<LateButton />);
++  expect(await screen.findByRole('button', { name: 'Task' })).toBeInTheDocument();
++});
+diff --git a/apps/web/test/setup.ts b/apps/web/test/setup.ts
+index 438c0c47..aeebf7a1 100644
+--- a/apps/web/test/setup.ts
++++ b/apps/web/test/setup.ts
+@@ -1,9 +1,13 @@
+ import '@testing-library/jest-dom/vitest';
+-import { cleanup } from '@testing-library/react';
++import { cleanup, configure } from '@testing-library/react';
+ import { afterEach, vi } from 'vitest';
+ 
++/* A wait ends as soon as its element appears, so a long limit costs a healthy test nothing. The default one second is
++   missed on a loaded machine with no fault in the code. It stays well under testTimeout. */
++configure({ asyncUtilTimeout: 10000 });
++
+ afterEach(() => {
+   cleanup();
+   vi.unstubAllGlobals();
+   window.history.replaceState(null, '', '/');
+ });
+

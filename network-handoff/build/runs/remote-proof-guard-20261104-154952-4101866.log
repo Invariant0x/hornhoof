@@ -1,0 +1,39 @@
+uid=1000 gid=1000 home=/home/altera
+/home/altera/hornhoof-network/network-build/nodocker/docker
+docker is not available in this build
+docker-exit=127
+failed to connect to the docker API at unix:///home/altera/hornhoof-network/network-build/tmp/no-docker.sock; check if the path is correct and if the daemon is running: dial unix /home/altera/hornhoof-network/network-build/tmp/no-docker.sock: connect: no such file or directory
+real-docker-exit=0
+ls: cannot access '/var/run/docker.sock': No such file or directory
+through-light DOCKER_HOST=unix:///home/altera/hornhoof-network/network-build/tmp/no-docker.sock
+through-heavy DOCKER_HOST=unix:///home/altera/hornhoof-network/network-build/tmp/no-docker.sock
+hornhoof
+hornhoof-edge
+network-build
+quality
+agy-run.sh
+changed-lines.sh
+gates-hornhoof.sh
+gates-relay.sh
+heavy.sh
+lane.sh
+light.sh
+mkbrief.sh
+mutate-helper.sh
+mutate.sh
+mutator-helper.py
+nodocker
+remote.sh
+review-package.sh
+setup-quality.sh
+tmp
+Python 3.12.14
+Python 3.14.7
+coverage 7.17.1
+v22.23.4
+version: 0.11.0
+ok-crapper
+ok-dryer
+ok-mutator
+8
+home-writable

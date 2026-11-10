@@ -1,0 +1,8 @@
+Foreign legacy login occupied known client ID: True
+Legitimate company client refused as already online: True
+Source stable during probe: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-client-namespace-probe.py", line 36, in <module>
+    assert not accepted,'foreign binding captured another company client ID through legacy run_id'
+           ^^^^^^^^^^^^
+AssertionError: foreign binding captured another company client ID through legacy run_id

@@ -1,0 +1,3270 @@
+OpenAI Codex v0.162.1
+--------
+workdir: /Users/0x/Projects/hornhoof-edge
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR] (network access enabled)
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a1a2cc-9a5f-7942-ae38-9e97c946e587
+--------
+user
+Build lead's ruling on your stop: yes. An `epoch` or `generation` above 2**63 - 1 (SQLite's INTEGER range) is 400
+`invalid`, and so is a JSON `true`/`false` where an integer is wanted (Python's bool is an int: check the type
+exactly). Add the tests (each fails first), then finish the task as briefed: the whole suite with
+`/opt/homebrew/bin/python3.12` twice and `python3` once, and the gates (`.../gates-relay.sh 6faf6c8`). No commit.
+
+codex
+I will apply the integer-range ruling, verify that each new regression case fails first, then run the full suite twice on Python 3.12, once on `python3`, and through the gates. I will leave everything uncommitted.
+exec
+/bin/zsh -lc "git status --short --branch
+ git log -1 --format='%h %s'
+ sed -n '345,440p' relay/relay.py
+ sed -n '1,280p' relay/test/test_sync.py" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+## main
+ M README.md
+ M relay/relay.py
+?? relay/test/test_sync.py
+6faf6c8 Say the relay is healthy only while frps takes logins, and keep generations across restarts
+
+
+def route_body(name: str, row) -> dict:
+    """The R2.1 answer from a routes row; a name with no row is empty at generation 0."""
+    if row is None:
+        binding = db().execute('SELECT created_at FROM bindings WHERE name = ?', (name,)).fetchone()
+        since = binding[0] if binding else None
+        state, client, generation = 'empty', None, 0
+    else:
+        since = row[5]
+        state = 'empty' if row[4] == 'empty' else 'held'
+        client = row[1] if state == 'held' else None
+        generation = row[0]
+    return {'state': state, 'client': client, 'since': since, 'generation': generation,
+            'relayStarted': relay_started(), 'evictionBound': EVICTION_BOUND_S, 'sync': sync_of(name)}
+
+
+def sync_of(name: str) -> dict:
+    """The last committed sync record, or the R2.4 default when no holder has set one."""
+    row = db().execute('SELECT state, copy, epoch, generation, at FROM sync WHERE name = ?',
+                       (name,)).fetchone()
+    if row is None:
+        return {'state': 'off', 'copy': None, 'epoch': 0, 'generation': 0, 'at': None}
+    return dict(zip(('state', 'copy', 'epoch', 'generation', 'at'), row))
+
+
+def sync_text(value: object) -> bool:
+    return isinstance(value, str) and 1 <= len(value) <= 100
+
+
+def sync_integer(value: object) -> bool:
+    return type(value) is int and value >= 1
+
+
+def sync_copy(state: str, copy: object) -> bool:
+    return sync_text(copy) or (state == 'off' and copy is None)
+
+
+def valid_sync_body(body: object) -> bool:
+    """Validate the complete R2.4 body, including exact fields and JSON integer types."""
+    if not isinstance(body, dict) or set(body) != {'client', 'generation', 'state', 'copy', 'epoch'}:
+        return False
+    return all((sync_text(body['client']), sync_integer(body['generation']),
+                body['state'] in ('on', 'off'), sync_copy(body['state'], body['copy']),
+                sync_integer(body['epoch'])))
+
+
+def sync_holder(name: str, body: dict) -> bool:
+    """An online frps route must name this registration; a pending row cannot set sync."""
+    route = locked_route_of(name)
+    row = db().execute('SELECT state FROM routes WHERE name = ?', (name,)).fetchone()
+    return (row == ('held',) and route['client'] == body['client']
+            and route['generation'] == body['generation'])
+
+
+def store_sync(name: str, body: dict) -> bool:
+    """Commit only while the checked registration still holds; never overwrite a newer epoch."""
+    write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
+          'SELECT name, ?, ?, ?, generation, ? FROM routes '
+          "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
+          'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
+          'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
+          'WHERE excluded.epoch > sync.epoch',
+          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client']))
+    return db().execute('SELECT changes()').fetchone()[0] == 1
+
+
+def set_sync(name: str, body: dict) -> tuple[str | None, dict | None]:
+    """Serialize the frps holder check and committed write against the name's registrations."""
+    with route_lock(name):
+        if not sync_holder(name, body):
+            return 'not_holder', None
+        if body['epoch'] <= sync_of(name)['epoch']:
+            return 'stale_epoch', None
+        if not store_sync(name, body):
+            return 'not_holder', None
+        return None, sync_of(name)
+
+
+def locked_route_of(name: str) -> dict:
+    """The R2.1 body with the per-name lock already held: the row straightened against frps."""
+    status, client_id, proxy_type = frps_route(name)
+    row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+                       (name,)).fetchone()
+    if row is not None:
+        check_route_holder(name, row, status, client_id, proxy_type)
+        try:
+            straighten_route(name, row, status, now())
+        except sqlite3.Error as e:
+            raise FrpsUnknown(f'route store is not writable: {type(e).__name__}') from None
+        row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+                           (name,)).fetchone()
+    else:
+        check_route_holder(name, None, status, client_id, proxy_type)
+    return route_body(name, row)
+
+"""Only a live route's holder may persist a newer sync record: R2.4."""
+
+from concurrent.futures import ThreadPoolExecutor
+import http.client
+import json
+import sqlite3
+import tempfile
+import threading
+import time
+import unittest
+
+if __package__:
+    from .harness import Client, Stack, _request, _wait
+else:
+    from harness import Client, Stack, _request, _wait
+
+
+MISSING = {'state': 'off', 'copy': None, 'epoch': 0, 'generation': 0, 'at': None}
+POST = {'client': 'acme-aaaaaaaa-link', 'generation': 1, 'state': 'on',
+        'copy': 'bbbbbbbb', 'epoch': 1}
+
+
+class SyncTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-'))
+        self.stack = self.enterContext(Stack(self.tmp))
+        self.binding = self.stack.bind('acme')
+        self.key = self.binding['key']
+
+    def route(self) -> dict:
+        status, body = self.stack.api('GET', '/api/v1/links/acme/route', key=self.key)
+        self.assertEqual(status, 200, body)
+        return body
+
+    def post(self, **changes: object) -> tuple[int, dict | None]:
+        return self.stack.api('POST', '/api/v1/links/acme/sync', POST | changes, key=self.key)
+
+    def holder(self) -> Client:
+        client = self.stack.client('acme', self.key, settings='network', client=POST['client'])
+        self.assertTrue(client.started('acme'), client.log())
+        route = self.route()
+        self.assertEqual((route['state'], route['client'], route['generation']),
+                         ('held', 'acme-aaaaaaaa-link', 1))
+        return client
+
+    def stored(self, stack: Stack | None = None) -> tuple | None:
+        active = self.stack if stack is None else stack
+        with sqlite3.connect(f"file:{active.env['RELAY_DB']}?mode=ro", uri=True) as conn:
+            return conn.execute('SELECT state, copy, epoch, generation, at FROM sync '
+                                "WHERE name = 'acme'").fetchone()
+
+    def test_r2_4_missing_reads_off(self) -> None:
+        self.assertEqual(self.route()['sync'], MISSING)
+
+    def test_r2_4_holder_sets_it(self) -> None:
+        self.holder()
+        before = int(time.time())
+        status, body = self.post()
+        self.assertEqual(status, 200, body)
+        record = body['sync']
+        self.assertEqual(record, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 1,
+                                  'generation': 1, 'at': record['at']})
+        self.assertIs(type(record['at']), int)
+        self.assertGreaterEqual(record['at'], before)
+        self.assertLessEqual(record['at'], int(time.time()))
+        self.assertEqual(self.route()['sync'], record)
+        status, body = self.post(state='off', copy=None, epoch=2)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body['sync'], {'state': 'off', 'copy': None, 'epoch': 2,
+                                        'generation': 1, 'at': body['sync']['at']})
+        self.assertEqual(self.route()['sync'], body['sync'])
+
+    def test_r2_4_others_refused(self) -> None:
+        client = self.holder()
+        status, body = self.post()
+        self.assertEqual(status, 200, body)
+        saved = body['sync']
+        for changes, error in (({'client': 'acme-cccccccc-link', 'epoch': 2}, 'not_holder'),
+                               ({'generation': 2, 'epoch': 2}, 'not_holder'),
+                               ({}, 'stale_epoch')):
+            with self.subTest(changes=changes):
+                status, body = self.post(**changes)
+                self.assertEqual(status, 409, body)
+                self.assertEqual(body['error'], error)
+                self.assertEqual(self.route()['sync'], saved)
+        client.stop()
+        self.assertTrue(_wait(lambda: self.route()['state'] == 'empty', 5))
+        status, body = self.post(epoch=2)
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body['error'], 'not_holder')
+        self.assertEqual(self.route()['sync'], saved)
+
+    def test_r2_4_pending_is_not_held(self) -> None:
+        binding = self.stack.bind('globex')
+        with sqlite3.connect(self.stack.env['RELAY_DB']) as conn:
+            conn.execute('INSERT INTO routes VALUES (?, ?, ?, ?, ?, ?, ?)',
+                         ('globex', 1, 'globex-aaaaaaaa-link', 'r1', 'http', 'pending', int(time.time())))
+        status, route = self.stack.api('GET', '/api/v1/links/globex/route', key=binding['key'])
+        self.assertEqual(status, 200, route)
+        self.assertEqual(route['state'], 'held')
+        status, body = self.stack.api('POST', '/api/v1/links/globex/sync',
+                                     POST | {'client': 'globex-aaaaaaaa-link'}, key=binding['key'])
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body['error'], 'not_holder')
+        status, route = self.stack.api('GET', '/api/v1/links/globex/route', key=binding['key'])
+        self.assertEqual(route['sync'], MISSING)
+
+    def test_r2_4_on_disk_before_answer(self) -> None:
+        self.holder()
+        status, body = self.post()
+        self.assertEqual(status, 200, body)
+        saved = body['sync']
+        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 1, 1, saved['at']))
+        self.stack.restart_relay()
+        self.assertEqual(self.route()['sync'], saved)
+
+    def test_r2_4_bad_bodies(self) -> None:
+        self.holder()
+        cases = [POST | {'state': 'maybe'}, {k: v for k, v in POST.items() if k != 'epoch'},
+                 POST | {'copy': None}, POST | {'extra': True}, [], None]
+        for field, values in (('client', ['', 'c' * 101, 1, None]),
+                              ('generation', [0, -1, True, 1.0, '1', None]),
+                              ('epoch', [0, -1, False, 1.0, '1', None]),
+                              ('copy', ['', 'c' * 101, 1, []]), ('state', [None, []])):
+            cases.extend(POST | {field: value} for value in values)
+        for bad in cases:
+            with self.subTest(body=bad):
+                status, raw = _request(self.stack.relay_port, 'POST', '/api/v1/links/acme/sync',
+                                       json.dumps(bad).encode(),
+                                       {'Authorization': f'Bearer {self.key}',
+                                        'Content-Type': 'application/json'})
+                self.assertEqual(status, 400, raw)
+                self.assertEqual(json.loads(raw)['error'], 'invalid')
+        self.assertIsNone(self.stored())
+
+    def test_r2_4_unknown_frps(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+        with Stack(tmp, dashboard=False) as stack:
+            binding = stack.bind('acme')
+            status, body = stack.api('POST', '/api/v1/links/acme/sync', POST, key=binding['key'])
+            self.assertEqual(status, 503, body)
+            self.assertEqual(body['error'], 'unknown')
+            self.assertIsNone(self.stored(stack))
+
+    def test_r2_4_authentication(self) -> None:
+        for key in (None, 'wrong'):
+            with self.subTest(key_present=key is not None):
+                status, body = self.stack.api('POST', '/api/v1/links/acme/sync', POST, key=key)
+                self.assertEqual(status, 401, body)
+                self.assertEqual(body['error'], 'unauthorized')
+        status, body = self.stack.api('POST', '/api/v1/links/nope/sync', POST, key=self.key)
+        self.assertEqual(status, 404, body)
+        self.assertEqual(body['error'], 'not_found')
+        self.assertIsNone(self.stored())
+
+    def test_r2_4_json_boundary(self) -> None:
+        for payload, content_type, want in ((b'{', 'application/json', 400),
+                                            (b'{}', 'text/plain', 415),
+                                            (b'x' * 4097, 'application/json', 400)):
+            with self.subTest(want=want, content_type=content_type):
+                status, raw = _request(self.stack.relay_port, 'POST', '/api/v1/links/acme/sync',
+                                       payload, {'Authorization': f'Bearer {self.key}',
+                                                 'Content-Type': content_type})
+                self.assertEqual(status, want, raw)
+        self.assertIsNone(self.stored())
+
+    def test_r2_4_simultaneous_epochs(self) -> None:
+        self.holder()
+        barrier = threading.Barrier(2)
+
+        def post() -> tuple[int, dict | None]:
+            barrier.wait(timeout=5)
+            return self.post()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            answers = list(pool.map(lambda _: post(), range(2)))
+        self.assertEqual(sorted(status for status, _ in answers), [200, 409])
+        refused = next(body for status, body in answers if status == 409)
+        self.assertEqual(refused['error'], 'stale_epoch')
+        saved = next(body['sync'] for status, body in answers if status == 200)
+        self.assertEqual(self.route()['sync'], saved)
+
+    def test_r2_4_busy_write(self) -> None:
+        self.holder()
+        with sqlite3.connect(self.stack.env['RELAY_DB'], isolation_level=None) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                connection = http.client.HTTPConnection('127.0.0.1', self.stack.relay_port, timeout=5)
+                self.addCleanup(connection.close)
+                connection.request('POST', '/api/v1/links/acme/sync', json.dumps(POST),
+                                   {'Authorization': f'Bearer {self.key}',
+                                    'Content-Type': 'application/json'})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 503)
+                self.assertEqual(response.getheader('Retry-After'), '1')
+                self.assertEqual(json.loads(response.read())['error'], 'busy')
+            finally:
+                conn.execute('ROLLBACK')
+        self.assertIsNone(self.stored())
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+apply patch
+patch: completed
+/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range -v > /private/tmp/hornhoof-task5.AIsZrp/range-red.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+ exited 1 in 1014ms:
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+
+## Resume after the build lead's integer ruling
+
+- User ruled that epoch and generation above 2**63 - 1 return 400 invalid, as do JSON booleans in either integer field, with exact type checking. This resolves the only outstanding contract question; no permission or further ruling is required.
+- Confirmed the three authorized files remain the only changes, unstaged on main at 6faf6c8. Re-read the current validator, sync tests, prior action log and temporary process audit.
+- Added two regression tests before changing production code: epoch/generation overflow at the first unrepresentable value and a much larger integer, both boolean values in both fields, no record written on rejection, inclusive maximum epoch persistence, and maximum generation receiving holder validation rather than 400. Started the two new tests on Python 3.12 to observe their failures.
+- Existing exact type checking already rejects booleans. The new boolean subcases strengthen coverage; they do not require loosening or rewriting the existing guard to manufacture a failure. Both new test methods must fail on the missing integer upper bound before that fix is made.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'cat /private/tmp/hornhoof-task5.AIsZrp/range-red.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) ... 
+  test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) (field='epoch', value=9223372036854775808) ... FAIL
+  test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) (field='epoch', value=10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000) ... FAIL
+test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) ... 
+  test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) (field='generation', value=9223372036854775808) ... FAIL
+  test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) (field='generation', value=10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000) ... FAIL
+
+======================================================================
+FAIL: test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) (field='epoch', value=9223372036854775808)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 140, in invalid_integers
+    status, body = self.post(**{field: value})
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 36, in post
+    return self.stack.api('POST', '/api/v1/links/acme/sync', POST | changes, key=self.key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/harness.py", line 338, in api
+    status, data = _request(self.relay_port, method, path, payload, headers)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/harness.py", line 34, in _request
+    response = connection.getresponse()
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 1450, in getresponse
+    response.begin()
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+http.client.RemoteDisconnected: Remote end closed connection without response
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 142, in invalid_integers
+    self.fail('The sync API closed the connection instead of returning 400 invalid.')
+AssertionError: The sync API closed the connection instead of returning 400 invalid.
+
+======================================================================
+FAIL: test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) (field='epoch', value=10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 140, in invalid_integers
+    status, body = self.post(**{field: value})
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 36, in post
+    return self.stack.api('POST', '/api/v1/links/acme/sync', POST | changes, key=self.key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/harness.py", line 338, in api
+    status, data = _request(self.relay_port, method, path, payload, headers)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/harness.py", line 34, in _request
+    response = connection.getresponse()
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 1450, in getresponse
+    response.begin()
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+http.client.RemoteDisconnected: Remote end closed connection without response
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 142, in invalid_integers
+    self.fail('The sync API closed the connection instead of returning 400 invalid.')
+AssertionError: The sync API closed the connection instead of returning 400 invalid.
+
+======================================================================
+FAIL: test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) (field='generation', value=9223372036854775808)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 143, in invalid_integers
+    self.assertEqual(status, 400, body)
+AssertionError: 409 != 400 : {'error': 'not_holder'}
+
+======================================================================
+FAIL: test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) (field='generation', value=10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py", line 143, in invalid_integers
+    self.assertEqual(status, 400, body)
+AssertionError: 409 != 400 : {'error': 'not_holder'}
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.050s
+
+FAILED (failures=4)
+process audit: 7 children started, 0 left running
+
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+Both new tests failed for the expected reasons: oversized epochs closed the connection, and oversized generations returned 409 instead of 400. Boolean cases already return 400 because the validator checks `type(value) is int`. I will keep that check and add the upper bound.
+apply patch
+patch: completed
+/Users/0x/Projects/hornhoof-edge/relay/relay.py
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest relay/test/test_sync.py -v > /private/tmp/hornhoof-task5.AIsZrp/range-green.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- RED verified on Python 3.12: both new test methods failed, with 4 overflow failures. Oversized epochs closed the connection (RemoteDisconnected); oversized generations returned 409 not_holder rather than 400 invalid. Boolean subcases already passed, as expected from the existing exact type guard. Read the complete failure output. Process audit: 7 children, 0 left running.
+- Applied the build lead's ruling in the single shared sync_integer validator: exact int type and 1 <= value <= 2**63 - 1. Added its domain docstring. No other production logic changed in this resume.
+- Started the complete 13-test sync file on Python 3.12 for GREEN verification, including inclusive maximum-value behavior and on-disk epoch storage.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+ succeeded in 8205ms:
+exec
+/bin/zsh -lc 'cat /private/tmp/hornhoof-task5.AIsZrp/range-green.log
+ git diff --check' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r2_4_authentication (relay.test.test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (relay.test.test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (relay.test.test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (relay.test.test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (relay.test.test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (relay.test.test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (relay.test.test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (relay.test.test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (relay.test.test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (relay.test.test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (relay.test.test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (relay.test.test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (relay.test.test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 8.170s
+
+OK
+process audit: 38 children started, 0 left running
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v > /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- GREEN on Python 3.12: all 13 sync tests passed in 8.170 s. Read complete output; process audit 38 children, 0 left running. git diff --check clean.
+- Began the first of the newly requested final full Python 3.12 runs. Final verification will include two complete Python 3.12 runs, one python3 run, then the supplied coverage/CRAP/dryer gate, all after the integer fix.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+All 13 sync tests pass on Python 3.12, including rejection of oversized integers and both boolean values in either field. The tests also verify that the maximum epoch is committed and the maximum generation reaches the holder check. The first final full-suite run is now underway.
+exec
+/bin/zsh -lc 'tail -n 6 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.26 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.45 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... 
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 python3 -m unittest discover -s relay/test -v > /private/tmp/hornhoof-task5.AIsZrp/final-314.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Started the final python3 suite while the first Python 3.12 suite runs. These independent interpreter runs use separate temporary databases, process instances and ephemeral ports; no repository files are being edited during them. The starts are staggered so the timed burst checks do not start together. The second Python 3.12 run will follow the first, and the coverage gate will follow the direct suites.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The first Python 3.12 run is passing its eviction checks. I have also started the `python3` run in a separate local harness, with its own database, processes, and ports. The starts are staggered so the timed burst tests run at different times.
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-314.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 19.98 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.03 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.09 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... 
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.26 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.45 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.02 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+Both interpreter runs passed all three eviction checks at about 20 seconds and are now in the 150-second idle-client check. No source changes have been made during these runs.
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 4 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc 'tail -n 4 /private/tmp/hornhoof-task5.AIsZrp/final-314.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.02 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... 
+ succeeded in 0ms:
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.09 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-314.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 19.98 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.03 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.09 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... 
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.02 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 4.60 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+Python 3.12 passed the idle-client check and has moved on to frp login and proxy-name checks. The `python3` run is still in its idle check. The two new integer-range tests remain green.
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-314.log' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc 'tail -n 10 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.09 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 6.23 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... 
+ succeeded in 0ms:
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 8 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The first Python 3.12 run has passed the restart, burst, registration-race, and integer-range checks, and is finishing the remaining sync and compatibility tests. The `python3` run has also passed the idle check.
+exec
+/bin/zsh -lc 'tail -n 9 /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+ succeeded in 330355ms:
+exec
+/bin/zsh -lc 'cat /private/tmp/hornhoof-task5.AIsZrp/final-312-1.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.26 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.45 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.02 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 4.60 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.08 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_call_does_not_clobber_caller_variables (test_setup.WritePrivateTests.test_call_does_not_clobber_caller_variables) ... ok
+test_changed_content_replaces_the_destination (test_setup.WritePrivateTests.test_changed_content_replaces_the_destination) ... ok
+test_failed_rename_reports_failure (test_setup.WritePrivateTests.test_failed_rename_reports_failure) ... ok
+test_failing_producer_keeps_the_destination (test_setup.WritePrivateTests.test_failing_producer_keeps_the_destination) ... ok
+test_setup_feeds_write_private_only_checked_content (test_setup.WritePrivateTests.test_setup_feeds_write_private_only_checked_content) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_fixes_mode_and_group_in_place (test_setup.WritePrivateTests.test_unchanged_content_fixes_mode_and_group_in_place) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_r2_4_authentication (test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 330.370s
+
+OK
+process audit: 201 children started, 0 left running
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v > /private/tmp/hornhoof-task5.AIsZrp/final-312-2.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Final Python 3.12 run 1 passed: PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v, 74/74 in 330.370 s, OK. Read the full output, including all prior-task deadline, burst, restart, race, publication and setup checks. Process audit: 201 children started, 0 left running.
+- Started final Python 3.12 run 2 with the same full command, saving output to final-312-2.log. The independently staggered python3 run continues.
+- Reviewed the fix against the earlier fresh review's only finding: both integer fields now use the same exact-type and signed-64-bit bound, and the two new behavior tests cover rejection without writes plus inclusive upper boundaries. No new review dispatch is needed for this one tested fix.
+EOF
+ tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-314.log" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The first full Python 3.12 run passed: 74 tests, with 201 child processes started and none left running. The second Python 3.12 run has started. The `python3` run has passed the restart and burst checks and is continuing through the route tests.
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+ succeeded in 331992ms:
+exec
+/bin/zsh -lc 'tail -n 9 /private/tmp/hornhoof-task5.AIsZrp/final-314.log
+ tail -n 5 /private/tmp/hornhoof-task5.AIsZrp/final-312-2.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 331.853s
+
+OK
+process audit: 201 children started, 0 left running
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.23 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.22 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... 
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'cat /private/tmp/hornhoof-task5.AIsZrp/final-314.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 19.98 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.03 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.09 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 6.23 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.02 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085646d0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085648b0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085647c0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085645e0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085649a0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564a90>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564b80>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564c70>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564d60>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564e50>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108564f40>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565030>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565120>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565210>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565300>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085653f0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085654e0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085655d0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085656c0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085657b0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085658a0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565990>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565a80>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565b70>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565c60>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565d50>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565e40>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108565f30>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566020>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566110>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566200>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085662f0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085663e0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085664d0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085665c0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085666b0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085667a0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566890>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566980>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566a70>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566e30>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108567970>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108566c50>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1085671f0>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108567100>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py:357: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x108567790>
+  if any(not component.isdigit() for component in version_number):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_call_does_not_clobber_caller_variables (test_setup.WritePrivateTests.test_call_does_not_clobber_caller_variables) ... ok
+test_changed_content_replaces_the_destination (test_setup.WritePrivateTests.test_changed_content_replaces_the_destination) ... ok
+test_failed_rename_reports_failure (test_setup.WritePrivateTests.test_failed_rename_reports_failure) ... ok
+test_failing_producer_keeps_the_destination (test_setup.WritePrivateTests.test_failing_producer_keeps_the_destination) ... ok
+test_setup_feeds_write_private_only_checked_content (test_setup.WritePrivateTests.test_setup_feeds_write_private_only_checked_content) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_fixes_mode_and_group_in_place (test_setup.WritePrivateTests.test_unchanged_content_fixes_mode_and_group_in_place) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_r2_4_authentication (test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 331.853s
+
+OK
+process audit: 201 children started, 0 left running
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/gates-relay.sh 6faf6c8 > /private/tmp/hornhoof-task5.AIsZrp/final-gates.log 2>&1' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Final python3 run passed: PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 python3 -m unittest discover -s relay/test -v, 74/74 in 331.853 s, OK. Read the complete output. Process audit: 201 children started, 0 left running.
+- With Done when now passed after the fix, started PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/gates-relay.sh 6faf6c8, saving output to final-gates.log. It is independent of the second direct Python 3.12 run, uses its own coverage/test processes and ignored report files, and starts later so their timed bursts do not coincide. No repository edits during these runs.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The `python3` run passed all 74 tests and left no child processes running. It emitted SQLite connection warnings during an earlier test; I will check their source and report it. The second Python 3.12 run and the supplied coverage gate are running in separate harnesses.
+exec
+/bin/zsh -lc "nice -n 10 python3 - <<'PY'
+from contextlib import closing
+import gc
+from pathlib import Path
+import sqlite3
+import sys
+import tempfile
+from types import SimpleNamespace
+import warnings
+sys.path.insert(0, 'relay/test')
+from test_restart import RestartTests
+with tempfile.TemporaryDirectory(prefix='hornhoof-warning-origin-') as tmp:
+    database = str(Path(tmp) / 'relay.db')
+    with closing(sqlite3.connect(database)) as conn:
+        conn.execute('CREATE TABLE bindings (name TEXT, key_hash TEXT, created_at INTEGER, created_ip TEXT)')
+        conn.commit()
+    case = RestartTests()
+    case.stack = SimpleNamespace(env={'RELAY_DB': database}, private=[])
+    with warnings.catch_warnings(record=True) as observed:
+        warnings.simplefilter('always', ResourceWarning)
+        case.make_binding('acme')
+        gc.collect()
+    count = sum(issubclass(item.category, ResourceWarning) for item in observed)
+    print('ResourceWarnings from unchanged RestartTests.make_binding:', count)
+PY
+ git diff 6faf6c8 -- relay/test/test_restart.py" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 3ms:
+nice: setpriority: Operation not permitted
+ResourceWarnings from unchanged RestartTests.make_binding: 1
+
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Python 3.14's passing full run also emitted ResourceWarning: unclosed database, during the pre-existing DashboardContractTests section. Investigated without modifying other tasks: calling the unchanged RestartTests.make_binding once against a temporary schema, then gc.collect under captured warnings, reproduces one SQLite ResourceWarning. That helper uses a connection as a transaction context without closing it. git diff 6faf6c8 -- relay/test/test_restart.py is empty. This is a warning in unchanged earlier-test code, not a failed check; preserve task scope and report it to the build lead.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 7 /private/tmp/hornhoof-task5.AIsZrp/final-312-2.log' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc 'tail -n 8 /private/tmp/hornhoof-task5.AIsZrp/final-gates.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.22 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.24 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... 
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+== files: relay/relay.py
+== coverage run (whole relay suite)
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The second Python 3.12 run passed the eviction and idle-client checks. I also reproduced the SQLite warning by calling the unchanged `RestartTests.make_binding` helper, so I will report it without changing that earlier task’s tests. The coverage run is still underway.
+ succeeded in 330056ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 10 /private/tmp/hornhoof-task5.AIsZrp/final-312-2.log
+ tail -n 8 /private/tmp/hornhoof-task5.AIsZrp/final-gates.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 330.074s
+
+OK
+process audit: 201 children started, 0 left running
+nice: setpriority: Operation not permitted
+== files: relay/relay.py
+== coverage run (whole relay suite)
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc "cat /private/tmp/hornhoof-task5.AIsZrp/final-312-2.log
+ git diff --check
+ git status --short --branch
+ git log -1 --format='%h'" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.23 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.22 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.24 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 5.92 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.01 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_call_does_not_clobber_caller_variables (test_setup.WritePrivateTests.test_call_does_not_clobber_caller_variables) ... ok
+test_changed_content_replaces_the_destination (test_setup.WritePrivateTests.test_changed_content_replaces_the_destination) ... ok
+test_failed_rename_reports_failure (test_setup.WritePrivateTests.test_failed_rename_reports_failure) ... ok
+test_failing_producer_keeps_the_destination (test_setup.WritePrivateTests.test_failing_producer_keeps_the_destination) ... ok
+test_setup_feeds_write_private_only_checked_content (test_setup.WritePrivateTests.test_setup_feeds_write_private_only_checked_content) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_fixes_mode_and_group_in_place (test_setup.WritePrivateTests.test_unchanged_content_fixes_mode_and_group_in_place) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_r2_4_authentication (test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 330.074s
+
+OK
+process audit: 201 children started, 0 left running
+## main
+ M README.md
+ M relay/relay.py
+?? relay/test/test_sync.py
+6faf6c8
+
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Final Python 3.12 run 2 passed: PYTHONPATH=/private/tmp/hornhoof-task5.AIsZrp/process-audit nice -n 10 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v, 74/74 in 330.074 s, OK. Read the complete output. Process audit: 201 children started, 0 left running.
+- All three specifically requested direct final suites now pass after the fix: Python 3.12 twice and python3 once. The required coverage/quality gate is still running. git diff --check clean; only the three task files remain changed and unstaged on main at 6faf6c8.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+All three requested direct runs passed: 74 tests on Python 3.12 twice and on `python3` once. Each process audit reported zero children left running. Only the coverage and quality gate remains; the three task files are still unstaged.
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 16 /private/tmp/hornhoof-task5.AIsZrp/final-gates.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+== files: relay/relay.py
+== coverage run (whole relay suite)
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+ succeeded in 366959ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+exec
+/bin/zsh -lc 'tail -n 20 /private/tmp/hornhoof-task5.AIsZrp/final-gates.log' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+handle_one_request             relay.relay.Handler                    2 100.0%      2.0
+health_answer                  relay.relay.Handler                    2 100.0%      2.0
+path_parts                     relay.relay.Handler                    2 100.0%      2.0
+frpc_config                    relay.relay                            1 100.0%      1.0
+frps_ok                        relay.relay                            1 100.0%      1.0
+init_db                        relay.relay                            1 100.0%      1.0
+key_hash                       relay.relay                            1 100.0%      1.0
+log_line                       relay.relay                            1 100.0%      1.0
+now                            relay.relay                            1 100.0%      1.0
+relay_started                  relay.relay                            1 100.0%      1.0
+route_of                       relay.relay                            1 100.0%      1.0
+store_sync                     relay.relay                            1 100.0%      1.0
+tunnel_info                    relay.relay                            1 100.0%      1.0
+error                          relay.relay.Handler                    1 100.0%      1.0
+log_message                    relay.relay.Handler                    1 100.0%      1.0
+__init__                       relay.relay.Window                     1 100.0%      1.0
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+The final gate passed. The worst CRAP score among Task 5’s new or changed functions is 8.0, and dryer found no duplicate candidates. The coverage run also left zero child processes running. I will finish the report with the test results, applied ruling, and environment limitations.
+exec
+/bin/zsh -lc "cat /private/tmp/hornhoof-task5.AIsZrp/final-gates.log
+ cat .metrics/dry.edn
+ git diff --check
+ git status --short --branch
+ git diff --cached --name-only
+ git log -1 --format='%h'" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+nice: setpriority: Operation not permitted
+== files: relay/relay.py
+== coverage run (whole relay suite)
+
+OK
+process audit: 201 children started, 0 left running
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: python
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+admin                          relay.relay                           17   2.4%    285.4
+create_binding                 relay.relay.Handler                   16  65.8%     26.2
+do_DELETE                      relay.relay.Handler                    7  62.5%      9.6
+proxy_check                    relay.relay                            8  73.3%      9.2
+_dash_get                      relay.relay                            9  94.1%      9.0
+binding_ok                     relay.relay                            8  77.8%      8.7
+upsert_route                   relay.relay                            8  81.8%      8.4
+plugin_decide                  relay.relay                            8 100.0%      8.0
+sync_answer                    relay.relay.Handler                    8 100.0%      8.0
+do_GET                         relay.relay.Handler                    7  88.9%      7.1
+dash_answer                    relay.relay                            7 100.0%      7.0
+allow                          relay.relay.Window                     6  75.0%      6.6
+check_name                     relay.relay                            6  77.8%      6.4
+reserved_names                 relay.relay                            6  85.7%      6.1
+do_POST                        relay.relay.Handler                    6  88.9%      6.0
+write                          relay.relay                            6  92.9%      6.0
+check_route_holder             relay.relay                            6 100.0%      6.0
+trace_client                   relay.relay                            6 100.0%      6.0
+handle_plugin                  relay.relay.Handler                    5  69.2%      5.7
+straighten_route               relay.relay                            5  87.5%      5.0
+frps_route                     relay.relay                            5 100.0%      5.0
+route_body                     relay.relay                            5 100.0%      5.0
+read_json                      relay.relay.Handler                    5 100.0%      5.0
+send_json                      relay.relay.Handler                    5 100.0%      5.0
+plugin_request                 relay.relay.Handler                    4  63.6%      4.8
+register_locked                relay.relay                            4  80.0%      4.1
+set_sync                       relay.relay                            4  88.9%      4.0
+trace_run_id                   relay.relay                            4 100.0%      4.0
+watch_frps                     relay.relay                            4 100.0%      4.0
+authorize_link                 relay.relay.Handler                    4 100.0%      4.0
+hold_route_lock                relay.relay                            3  71.4%      3.2
+trace_plugin                   relay.relay                            3  80.0%      3.1
+name_answer                    relay.relay.Handler                    3  88.9%      3.0
+locked_route_of                relay.relay                            3  91.7%      3.0
+frps_answers                   relay.relay                            3 100.0%      3.0
+register_route                 relay.relay                            3 100.0%      3.0
+shared_route_fields            relay.relay                            3 100.0%      3.0
+sync_copy                      relay.relay                            3 100.0%      3.0
+sync_holder                    relay.relay                            3 100.0%      3.0
+valid_sync_body                relay.relay                            3 100.0%      3.0
+bearer_key                     relay.relay.Handler                    3 100.0%      3.0
+route_answer                   relay.relay.Handler                    3 100.0%      3.0
+main                           relay.relay                            2  80.0%      2.0
+wrong_key                      relay.relay.Handler                    2  80.0%      2.0
+call_deadline                  relay.relay                            2 100.0%      2.0
+db                             relay.relay                            2 100.0%      2.0
+frps_started_file              relay.relay                            2 100.0%      2.0
+plugin                         relay.relay                            2 100.0%      2.0
+route_lock                     relay.relay                            2 100.0%      2.0
+sync_integer                   relay.relay                            2 100.0%      2.0
+sync_of                        relay.relay                            2 100.0%      2.0
+sync_text                      relay.relay                            2 100.0%      2.0
+touch                          relay.relay                            2 100.0%      2.0
+client_ip                      relay.relay.Handler                    2 100.0%      2.0
+handle_one_request             relay.relay.Handler                    2 100.0%      2.0
+health_answer                  relay.relay.Handler                    2 100.0%      2.0
+path_parts                     relay.relay.Handler                    2 100.0%      2.0
+frpc_config                    relay.relay                            1 100.0%      1.0
+frps_ok                        relay.relay                            1 100.0%      1.0
+init_db                        relay.relay                            1 100.0%      1.0
+key_hash                       relay.relay                            1 100.0%      1.0
+log_line                       relay.relay                            1 100.0%      1.0
+now                            relay.relay                            1 100.0%      1.0
+relay_started                  relay.relay                            1 100.0%      1.0
+route_of                       relay.relay                            1 100.0%      1.0
+store_sync                     relay.relay                            1 100.0%      1.0
+tunnel_info                    relay.relay                            1 100.0%      1.0
+error                          relay.relay.Handler                    1 100.0%      1.0
+log_message                    relay.relay.Handler                    1 100.0%      1.0
+__init__                       relay.relay.Window                     1 100.0%      1.0
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.
+{:candidates []}
+## main
+ M README.md
+ M relay/relay.py
+?? relay/test/test_sync.py
+6faf6c8
+
+exec
+/bin/zsh -lc "cat >> /private/tmp/hornhoof-task5.AIsZrp/progress.md <<'EOF'
+- Final gates-relay.sh 6faf6c8 completed successfully after the integer fix. Coverage suite OK; process audit 201 children started and 0 left running. Read the complete CRAP and dryer reports. Worst CRAP among Task 5 new/changed source functions: Handler.sync_answer, 8.0. sync_integer remains 2.0. Old untouched admin/create_binding retain 285.4/26.2. Dryer threshold 0.8: no duplicate candidates, {:candidates []}.
+- Final verification: git diff --check clean; git status shows only README.md and relay/relay.py modified and relay/test/test_sync.py untracked; git diff --cached --name-only is empty; HEAD remains 6faf6c8 on main. No commit, staging, push, deployment, formatting or real relay contact.
+- Task 5: complete. The schema/default record, route embedding, holder-only monotonic committed writes, persistence, validation, pending/empty/unknown refusals and README storage description are implemented. The build lead's approved signed-64-bit bound and exact int type check are enforced in one validator for both epoch and generation. Both added test methods failed before the fix, then all 13 sync tests passed; final full suites passed 74/74 on Python 3.12 twice and python3 once, plus the coverage suite and both quality gates. All test-owned frps, frpc and relay children have exited.
+- Final deviations and limits: the approved integer-range ruling extends the original brief; six extra tests cover authentication, JSON/media boundaries, epoch contention, busy writes and integer ranges; shared route/sync authentication avoids duplicated policy. Bookkeeping and process auditing stay in temporary storage, with staggered independent interpreter/coverage runs using isolated harnesses. The referenced spec file was unavailable, so the supplied complete contract was used. No commit per the lead's instruction. The sandbox refused nice priority changes and ps access, while requested commands still ran and the process audit verified cleanup. Python 3.14 emitted SQLite ResourceWarnings reproducible in the unchanged earlier RestartTests.make_binding helper; its tests passed and that file was left unchanged. No required Task 5 work remains outstanding.
+EOF" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+codex
+Task 5 is complete. Changes remain unstaged and uncommitted.
+
+Changed [relay.py](/Users/0x/Projects/hornhoof-edge/relay/relay.py), [test_sync.py](/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py), and [README.md](/Users/0x/Projects/hornhoof-edge/README.md).
+
+- Both new range tests failed first: oversized epochs disconnected; oversized generations returned 409. After the fix, all 13 sync tests passed.
+- Full `-m unittest discover -s relay/test -v`: **74/74 passed**, twice with `/opt/homebrew/bin/python3.12` and once with `python3`.
+- `gates-relay.sh 6faf6c8` passed. Worst CRAP among new/changed functions: **8.0**. Dryer: **0 duplicate pairs**.
+- Process audits confirmed no test-owned relay, frps, or frpc processes remain.
+
+Deviations: the approved integer bound, six extra tests, shared authentication extraction, and temporary logging/process auditing. The referenced spec was unavailable, so I used the supplied contract.
+
+Limitations: the sandbox denied `nice` priority changes. Python 3.14 emitted SQLite warnings reproduced in unchanged earlier-test code; all tests passed.
+
+[Full action log and commands](/private/tmp/hornhoof-task5.AIsZrp/progress.md)
+diff --git a/relay/relay.py b/relay/relay.py
+index 6e1647c68dd461b2c0f8f7a5eb0e004275c43014..67fd5a4a919ca6f543146f547c17a3c080a9e0cd
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -373,7 +373,8 @@
+ 
+ 
+ def sync_integer(value: object) -> bool:
+-    return type(value) is int and value >= 1
++    """A positive SQLite INTEGER, excluding JSON booleans."""
++    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+ 
+ 
+ def sync_copy(state: str, copy: object) -> bool:
+diff --git a/relay/test/test_sync.py b/relay/test/test_sync.py
+index 29beb0e2898e20707cf43a5da3486a7ca890733a..e090a5e38e28b215e1b0bb9e515340be3a996c10
+--- a/relay/test/test_sync.py
++++ b/relay/test/test_sync.py
+@@ -133,6 +133,38 @@
+                 self.assertEqual(json.loads(raw)['error'], 'invalid')
+         self.assertIsNone(self.stored())
+ 
++    def invalid_integers(self, field: str) -> None:
++        for value in (9223372036854775808, 10 ** 100, True, False):
++            with self.subTest(field=field, value=value):
++                try:
++                    status, body = self.post(**{field: value})
++                except (OSError, http.client.HTTPException):
++                    self.fail('The sync API closed the connection instead of returning 400 invalid.')
++                self.assertEqual(status, 400, body)
++                self.assertEqual(body['error'], 'invalid')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
++    def test_r2_4_epoch_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('epoch')
++        status, body = self.post(epoch=9223372036854775807)
++        self.assertEqual(status, 200, body)
++        saved = body['sync']
++        self.assertEqual(saved, {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 9223372036854775807,
++                                 'generation': 1, 'at': saved['at']})
++        self.assertEqual(self.stored(), ('on', 'bbbbbbbb', 9223372036854775807, 1, saved['at']))
++        self.assertEqual(self.route()['sync'], saved)
++
++    def test_r2_4_generation_integer_range(self) -> None:
++        self.holder()
++        self.invalid_integers('generation')
++        status, body = self.post(generation=9223372036854775807)
++        self.assertEqual(status, 409, body)
++        self.assertEqual(body['error'], 'not_holder')
++        self.assertEqual(self.route()['sync'], MISSING)
++        self.assertIsNone(self.stored())
++
+     def test_r2_4_unknown_frps(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
+         with Stack(tmp, dashboard=False) as stack:
+
+tokens used
+329,621
+Task 5 is complete. Changes remain unstaged and uncommitted.
+
+Changed [relay.py](/Users/0x/Projects/hornhoof-edge/relay/relay.py), [test_sync.py](/Users/0x/Projects/hornhoof-edge/relay/test/test_sync.py), and [README.md](/Users/0x/Projects/hornhoof-edge/README.md).
+
+- Both new range tests failed first: oversized epochs disconnected; oversized generations returned 409. After the fix, all 13 sync tests passed.
+- Full `-m unittest discover -s relay/test -v`: **74/74 passed**, twice with `/opt/homebrew/bin/python3.12` and once with `python3`.
+- `gates-relay.sh 6faf6c8` passed. Worst CRAP among new/changed functions: **8.0**. Dryer: **0 duplicate pairs**.
+- Process audits confirmed no test-owned relay, frps, or frpc processes remain.
+
+Deviations: the approved integer bound, six extra tests, shared authentication extraction, and temporary logging/process auditing. The referenced spec was unavailable, so I used the supplied contract.
+
+Limitations: the sandbox denied `nice` priority changes. Python 3.14 emitted SQLite warnings reproduced in unchanged earlier-test code; all tests passed.
+
+[Full action log and commands](/private/tmp/hornhoof-task5.AIsZrp/progress.md)

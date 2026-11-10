@@ -1,0 +1,31 @@
+== changed files
+apps/server/src/modules/merge/plan.ts
+apps/server/src/modules/merge/read.ts
+apps/server/test/merge-plan.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m test/merge-plan.test.ts [2m([22m[2m43 tests[22m[2m)[22m[32m 64[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Affected [22m 1 of 127 test files [2m(related to 3 files)[22m
+[2m      Tests [22m [1m[32m43 passed[39m[22m[90m (43)[39m
+[2m   Start at [22m 11:18:17
+[2m   Duration [22m 7.78s[2m (tests 40%, import 39%, worker 18%, transform 2%)[22m
+
+== crapper
+worst changed CRAP: 9.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 877a35c0

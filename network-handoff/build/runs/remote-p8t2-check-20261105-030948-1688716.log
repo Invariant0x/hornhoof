@@ -1,0 +1,32 @@
+== changed files
+apps/server/src/modules/merge/facts.ts
+apps/server/src/modules/merge/rules.ts
+apps/server/src/modules/merge/words.ts
+apps/server/test/merge-rules.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+     [33m[2m✓[22m[39m has a rule for every table[33m 1972[2mms[22m[39m
+   [32m✓[39m the catalog [2m(4)[22m
+     [33m[2m✓[22m[39m reads tables, keys and foreign keys both ways[33m 1295[2mms[22m[39m
+     [33m[2m✓[22m[39m orders parents first and each table after what its rule names[33m 1213[2mms[22m[39m
+     [33m[2m✓[22m[39m compares the shape of two databases by tables, columns and types[33m 1241[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Affected [22m 1 of 126 test files [2m(related to 4 files)[22m
+[2m      Tests [22m [1m[32m15 passed[39m[22m[90m (15)[39m
+[2m   Start at [22m 03:22:20
+[2m   Duration [22m 16.27s[2m (tests 70%, import 29%, transform 1%)[22m
+
+== crapper
+worst changed CRAP: 6.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 70f04acf

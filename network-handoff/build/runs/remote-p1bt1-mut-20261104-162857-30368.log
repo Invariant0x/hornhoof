@@ -1,0 +1,43 @@
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.session.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.tunnel.edn
+KILLED    apps/server/src/auth/session.ts:47 true -> false
+KILLED    apps/server/src/auth/session.ts:52 true -> false
+KILLED    apps/server/src/auth/session.ts:55 || -> &&
+KILLED    apps/server/src/auth/session.ts:60 + -> -
+KILLED    apps/server/src/auth/session.ts:60 * -> /
+KILLED    apps/server/src/auth/session.ts:60 * -> /
+KILLED    apps/server/src/auth/session.ts:60 * -> /
+KILLED    apps/server/src/auth/session.ts:60 * -> /
+KILLED    apps/server/src/auth/session.ts:78 false -> true
+KILLED    apps/server/src/auth/session.ts:102 true -> false
+KILLED    apps/server/src/auth/session.ts:104 delete !
+KILLED    apps/server/src/auth/session.ts:111 false -> true
+KILLED    apps/server/src/auth/session.ts:117 && -> ||
+KILLED    apps/server/src/auth/session.ts:117 delete !
+KILLED    apps/server/src/auth/session.ts:117 delete !
+KILLED    apps/server/src/auth/session.ts:117 && -> ||
+KILLED    apps/server/src/auth/session.ts:117 delete !
+KILLED    apps/server/src/auth/session.ts:117 && -> ||
+KILLED    apps/server/src/auth/session.ts:117 delete !
+KILLED    apps/server/src/auth/session.ts:122 delete !
+KILLED    apps/server/src/auth/session.ts:124 true -> false
+KILLED    apps/server/src/auth/session.ts:125 delete !
+Function            Namespace     Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------------------
+actorOf             auth.session       0         0          0      0    n/a
+changedBy           auth.session       0         0          0      2    n/a
+endSession          auth.session       0         0          0      0    n/a
+notSignedIn         auth.session       0         0          0      0    n/a
+personOf            auth.session       0         0          0      0    n/a
+requireCompanyScope auth.session       0         0          0      1    n/a
+requirePerson       auth.session       0         0          0      7    n/a
+sessionCookieOf     auth.session       0         0          0      0    n/a
+clearingOptions     auth.session       1         0          0      1 100.0%
+handOverSession     auth.session       3         0          0      3 100.0%
+moveOlderSession    auth.session       3         0          0      3 100.0%
+needsHandOver       auth.session       7         0          0      7 100.0%
+newSessionExpiry    auth.session       5         0          0      5 100.0%
+setSessionCookie    auth.session       2         0          0      2 100.0%
+startSession        auth.session       1         0          0      7 100.0%
+----------------------------------------------------------------------------
+Total                                 22         0          0     38  100.0%

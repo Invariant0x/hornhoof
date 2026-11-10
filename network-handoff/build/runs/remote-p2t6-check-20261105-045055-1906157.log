@@ -1,0 +1,44 @@
+== changed files
+apps/server/src/auth/tunnel.ts
+apps/server/src/main.ts
+apps/server/src/modules/keeper/keeper.ts
+apps/server/src/modules/keeper/served.ts
+apps/server/src/modules/link/client.ts
+apps/server/src/modules/link/link.ts
+apps/server/src/modules/link/tunnel.ts
+apps/server/src/modules/tls/listener.ts
+apps/server/src/modules/tls/store.ts
+apps/server/test/client.test.ts
+apps/server/test/config.test.ts
+apps/server/test/keeper-link.test.ts
+apps/server/test/keeper.test.ts
+apps/server/test/link-listener.test.ts
+apps/server/test/tunnel.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+   [32m✓[39m the current build for About [2m(2)[22m
+     [33m[2m✓[22m[39m gives a person without company access only the version and short commit[33m 1997[2mms[22m[39m
+     [33m[2m✓[22m[39m requires a person to be signed in[33m 1080[2mms[22m[39m
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 8598[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 8596[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m93 passed[39m[22m[90m (93)[39m
+[2m   Affected [22m 93 of 129 test files [2m(related to 15 files)[22m
+[2m      Tests [22m [1m[32m1670 passed[39m[22m[90m (1670)[39m
+[2m   Start at [22m 04:53:28
+[2m   Duration [22m 1471.80s[2m (tests 95%, import 5%)[22m
+
+== crapper
+OVER 10: apps/server/src/modules/keeper/keeper.ts:164 start CRAP 13.7037
+worst changed CRAP: 13.7037
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at f318e74f

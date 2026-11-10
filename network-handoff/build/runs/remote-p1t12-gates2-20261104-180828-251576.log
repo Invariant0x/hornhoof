@@ -1,0 +1,94 @@
+== files: apps/server/src/modules/link/relay.ts
+     [33m[2m✓[22m[39m follow the database when Hornhoof starts[33m 1177[2mms[22m[39m
+     [33m[2m✓[22m[39m go when there is no link[33m 1129[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m36 passed[39m[22m[90m (36)[39m
+[2m   Start at [22m 18:08:48
+[2m   Duration [22m 39.83s[2m (tests 85%, import 8%, transform 7%)[22m
+
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+reasonOf                       modules.link.relay                     7  50.0%     13.1
+bind                           modules.link.relay.Relay              12  85.0%     12.5
+check                          modules.link.relay.Relay               6  87.5%      6.1
+attempt                        modules.link.relay.Relay               6 100.0%      6.0
+setSync                        modules.link.relay.Relay               6 100.0%      6.0
+secretFrom                     modules.link.relay.Relay               5  83.3%      5.1
+unbind                         modules.link.relay.Relay               4  83.3%      4.1
+conflictOf                     modules.link.relay                     4 100.0%      4.0
+echoes                         modules.link.relay                     4 100.0%      4.0
+health                         modules.link.relay.Relay               4 100.0%      4.0
+route                          modules.link.relay.Relay               4 100.0%      4.0
+call                           modules.link.relay.Relay               2 100.0%      2.0
+busy                           modules.link.relay                     1 100.0%      1.0
+invalid                        modules.link.relay                     1 100.0%      1.0
+unreachable                    modules.link.relay                     1 100.0%      1.0
+changeKey                      modules.link.relay.Relay               1 100.0%      1.0
+constructor                    modules.link.relay.Relay               1 100.0%      1.0
+visitorKey                     modules.link.relay.Relay               1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/modules.link.relay.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/modules.link.relay.Relay.edn
+KILLED    apps/server/src/modules/link/relay.ts:69 ?. -> .
+KILLED    apps/server/src/modules/link/relay.ts:70 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:70 || -> &&
+KILLED    apps/server/src/modules/link/relay.ts:70 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:75 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:75 && -> ||
+KILLED    apps/server/src/modules/link/relay.ts:75 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:75 && -> ||
+KILLED    apps/server/src/modules/link/relay.ts:75 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:75 && -> ||
+KILLED    apps/server/src/modules/link/relay.ts:75 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:88 && -> ||
+KILLED    apps/server/src/modules/link/relay.ts:91 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:104 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:105 !== -> ===
+KILLED    apps/server/src/modules/link/relay.ts:105 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:107 true -> false
+KILLED    apps/server/src/modules/link/relay.ts:107 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:113 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:114 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:114 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:115 !== -> ===
+KILLED    apps/server/src/modules/link/relay.ts:115 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:117 && -> ||
+KILLED    apps/server/src/modules/link/relay.ts:117 true -> false
+KILLED    apps/server/src/modules/link/relay.ts:117 false -> true
+KILLED    apps/server/src/modules/link/relay.ts:123 || -> &&
+KILLED    apps/server/src/modules/link/relay.ts:123 !== -> ===
+KILLED    apps/server/src/modules/link/relay.ts:125 true -> false
+KILLED    apps/server/src/modules/link/relay.ts:140 === -> !==
+KILLED    apps/server/src/modules/link/relay.ts:142 delete !
+KILLED    apps/server/src/modules/link/relay.ts:142 ?. -> .
+Function    Namespace                 Killed  Survived  Uncovered  Sites   Score
+--------------------------------------------------------------------------------
+bind        modules.link.relay.Relay       0         0          0     13    n/a
+busy        modules.link.relay             0         0          0      0    n/a
+call        modules.link.relay.Relay       0         0          0      0    n/a
+changeKey   modules.link.relay.Relay       0         0          0      0    n/a
+check       modules.link.relay.Relay       0         0          0      5    n/a
+constructor modules.link.relay.Relay       0         0          0      0    n/a
+invalid     modules.link.relay             0         0          0      0    n/a
+reasonOf    modules.link.relay             0         0          0      6    n/a
+unbind      modules.link.relay.Relay       0         0          0      2    n/a
+unreachable modules.link.relay             0         0          0      0    n/a
+visitorKey  modules.link.relay.Relay       0         0          0      0    n/a
+attempt     modules.link.relay.Relay       2         0          0      2 100.0%
+conflictOf  modules.link.relay             4         0          0      4 100.0%
+echoes      modules.link.relay             7         0          0      7 100.0%
+health      modules.link.relay.Relay       3         0          0      3 100.0%
+route       modules.link.relay.Relay       5         0          0      5 100.0%
+secretFrom  modules.link.relay.Relay       3         0          0      3 100.0%
+setSync     modules.link.relay.Relay       8         0          0      8 100.0%
+--------------------------------------------------------------------------------
+Total                                     32         0          0     58  100.0%

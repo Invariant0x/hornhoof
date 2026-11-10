@@ -1,0 +1,29 @@
+== bash -n
+exit 0
+== shellcheck
+version: 0.11.0
+exit 0
+== tsc
+exit 0
+== typecheck:tests
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+exit 0
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+exit 0
+== gates
+== files: 
+== no source files of apps/server in this task
+exit 0
+== updater tests
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m70 passed[39m[22m[90m (70)[39m
+[2m   Start at [22m 21:57:43
+[2m   Duration [22m 199.15s[2m (tests 100%)[22m
+
+exit 0

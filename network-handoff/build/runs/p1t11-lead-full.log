@@ -1,0 +1,387 @@
+
+> hornhoof@0.6.0 test
+> node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present --testTimeout=90000
+
+Release checks passed for 0.6.0 (local).
+
+> hornhoof@0.6.0 test:release
+> node --test scripts/test/*.test.mjs
+
+TAP version 13
+# Subtest: the first release may equal origin/main when its tag does not exist
+ok 1 - the first release may equal origin/main when its tag does not exist
+  ---
+  duration_ms: 64.761652
+  type: 'test'
+  ...
+# Subtest: rejects a workspace version that differs from the root
+ok 2 - rejects a workspace version that differs from the root
+  ---
+  duration_ms: 44.198593
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\# Changelog\\n"
+ok 3 - rejects missing, mismatched or empty release notes: "\# Changelog\\n"
+  ---
+  duration_ms: 39.564977
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\#\# [0.4.0] - 2026-11-04\\nOlder notes.\\n"
+ok 4 - rejects missing, mismatched or empty release notes: "\#\# [0.4.0] - 2026-11-04\\nOlder notes.\\n"
+  ---
+  duration_ms: 38.425822
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\#\# [0.5.0] - 2026-11-04\\n\#\#\# Fixed\\n"
+ok 5 - rejects missing, mismatched or empty release notes: "\#\# [0.5.0] - 2026-11-04\\n\#\#\# Fixed\\n"
+  ---
+  duration_ms: 49.284034
+  type: 'test'
+  ...
+# Subtest: rejects an existing tag even when origin/main still has the same version
+ok 6 - rejects an existing tag even when origin/main still has the same version
+  ---
+  duration_ms: 52.158227
+  type: 'test'
+  ...
+# Subtest: compares numeric components rather than strings
+ok 7 - compares numeric components rather than strings
+  ---
+  duration_ms: 76.359707
+  type: 'test'
+  ...
+# Subtest: a numerically newer turn release passes
+ok 8 - a numerically newer turn release passes
+  ---
+  duration_ms: 85.939348
+  type: 'test'
+  ...
+# Subtest: a lower first digit is older even when its turn is higher
+ok 9 - a lower first digit is older even when its turn is higher
+  ---
+  duration_ms: 73.206339
+  type: 'test'
+  ...
+# Subtest: a turn release must match its branch or explicit turn number
+ok 10 - a turn release must match its branch or explicit turn number
+  ---
+  duration_ms: 74.241753
+  type: 'test'
+  ...
+# Subtest: an explicit turn supports feature branches; fixes do not need a turn
+ok 11 - an explicit turn supports feature branches; fixes do not need a turn
+  ---
+  duration_ms: 137.654103
+  type: 'test'
+  ...
+# Subtest: local checks permit Unreleased and skip release-only git checks
+ok 12 - local checks permit Unreleased and skip release-only git checks
+  ---
+  duration_ms: 72.295442
+  type: 'test'
+  ...
+# Subtest: local checks explain a missing changelog section
+ok 13 - local checks explain a missing changelog section
+  ---
+  duration_ms: 41.963803
+  type: 'test'
+  ...
+# Subtest: a missing origin/main is an actionable failure in full mode
+ok 14 - a missing origin/main is an actionable failure in full mode
+  ---
+  duration_ms: 61.588444
+  type: 'test'
+  ...
+# Subtest: a malformed newer heading cannot hide the actual top release
+ok 15 - a malformed newer heading cannot hide the actual top release
+  ---
+  duration_ms: 43.209947
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--other"]
+ok 16 - rejects check-release arguments ["--other"]
+  ---
+  duration_ms: 40.198682
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--other","5"]
+ok 17 - rejects check-release arguments ["--other","5"]
+  ---
+  duration_ms: 39.301301
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn"]
+ok 18 - rejects check-release arguments ["--turn"]
+  ---
+  duration_ms: 38.795356
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn","05"]
+ok 19 - rejects check-release arguments ["--turn","05"]
+  ---
+  duration_ms: 38.266313
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn","5","extra"]
+ok 20 - rejects check-release arguments ["--turn","5","extra"]
+  ---
+  duration_ms: 37.052771
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--local","--turn","5"]
+ok 21 - rejects check-release arguments ["--local","--turn","5"]
+  ---
+  duration_ms: 39.298977
+  type: 'test'
+  ...
+# Subtest: ESLint rejects an unused variable in a server test instead of ignoring the file
+ok 22 - ESLint rejects an unused variable in a server test instead of ignoring the file
+  ---
+  duration_ms: 3370.274013
+  type: 'test'
+  ...
+# Subtest: tests and TypeScript configs keep every rule in server, node and protocol
+ok 23 - tests and TypeScript configs keep every rule in server, node and protocol
+  ---
+  duration_ms: 3197.726786
+  type: 'test'
+  ...
+# Subtest: extracts exactly the requested release, including its summary and subsections
+ok 24 - extracts exactly the requested release, including its summary and subsections
+  ---
+  duration_ms: 47.274019
+  type: 'test'
+  ...
+# Subtest: defaults to the root version
+ok 25 - defaults to the root version
+  ---
+  duration_ms: 35.993384
+  type: 'test'
+  ...
+# Subtest: a malformed older heading cannot fill empty notes with another release
+ok 26 - a malformed older heading cannot fill empty notes with another release
+  ---
+  duration_ms: 35.372174
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\# Changelog\\n"
+ok 27 - rejects absent or empty dated notes: "\# Changelog\\n"
+  ---
+  duration_ms: 49.561804
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\#\# [0.5.0] - 2026-11-04\\n\\n\#\#\# Fixed\\n"
+ok 28 - rejects absent or empty dated notes: "\#\# [0.5.0] - 2026-11-04\\n\\n\#\#\# Fixed\\n"
+  ---
+  duration_ms: 38.436099
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\#\# [0.5.0]\\nMissing date.\\n"
+ok 29 - rejects absent or empty dated notes: "\#\# [0.5.0]\\nMissing date.\\n"
+  ---
+  duration_ms: 41.971656
+  type: 'test'
+  ...
+# Subtest: turn writes 0.5.0 to every manifest and workspace lock entry
+ok 30 - turn writes 0.5.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 51.44716
+  type: 'test'
+  ...
+# Subtest: turn 7 writes 0.7.0 to every manifest and workspace lock entry
+ok 31 - turn 7 writes 0.7.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 32.893161
+  type: 'test'
+  ...
+# Subtest: fix writes 0.5.1 to every manifest and workspace lock entry
+ok 32 - fix writes 0.5.1 to every manifest and workspace lock entry
+  ---
+  duration_ms: 38.747112
+  type: 'test'
+  ...
+# Subtest: major writes 1.150.0 to every manifest and workspace lock entry
+ok 33 - major writes 1.150.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 34.33718
+  type: 'test'
+  ...
+# Subtest: turn normalizes a workspace still at the old independent web version
+ok 34 - turn normalizes a workspace still at the old independent web version
+  ---
+  duration_ms: 37.495386
+  type: 'test'
+  ...
+# Subtest: rejects [] before changing any version
+ok 35 - rejects [] before changing any version
+  ---
+  duration_ms: 36.835522
+  type: 'test'
+  ...
+# Subtest: rejects ["other"] before changing any version
+ok 36 - rejects ["other"] before changing any version
+  ---
+  duration_ms: 35.278035
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","-1"] before changing any version
+ok 37 - rejects ["turn","-1"] before changing any version
+  ---
+  duration_ms: 37.976112
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","7.5"] before changing any version
+ok 38 - rejects ["turn","7.5"] before changing any version
+  ---
+  duration_ms: 32.510141
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","07"] before changing any version
+ok 39 - rejects ["turn","07"] before changing any version
+  ---
+  duration_ms: 36.430237
+  type: 'test'
+  ...
+# Subtest: rejects ["fix","7"] before changing any version
+ok 40 - rejects ["fix","7"] before changing any version
+  ---
+  duration_ms: 32.581695
+  type: 'test'
+  ...
+# Subtest: turn needs an explicit number outside a turn branch
+ok 41 - turn needs an explicit number outside a turn branch
+  ---
+  duration_ms: 49.994735
+  type: 'test'
+  ...
+# Subtest: a malformed lock fails before any manifest is rewritten
+ok 42 - a malformed lock fails before any manifest is rewritten
+  ---
+  duration_ms: 39.496629
+  type: 'test'
+  ...
+# Subtest: a missing lock entry . fails before any manifest is rewritten
+ok 43 - a missing lock entry . fails before any manifest is rewritten
+  ---
+  duration_ms: 38.433547
+  type: 'test'
+  ...
+# Subtest: a missing lock entry apps/web fails before any manifest is rewritten
+ok 44 - a missing lock entry apps/web fails before any manifest is rewritten
+  ---
+  duration_ms: 35.420695
+  type: 'test'
+  ...
+1..44
+# tests 44
+# suites 0
+# pass 44
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6605.418568
+
+> hornhoof@0.6.0 typecheck:tests
+> npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/protocol@0.6.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /home/altera/hornhoof-network/hornhoof/packages/protocol
+
+
+ Test Files  5 passed (5)
+      Tests  127 passed (127)
+   Start at  09:33:18
+   Duration  416ms (import 38%, transform 38%, tests 21%, worker 3%)
+
+
+> @hornhoof/node@0.6.0 pretest
+> npm run build -w @hornhoof/protocol
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/node@0.6.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /home/altera/hornhoof-network/hornhoof/apps/node
+
+Hook stop delivery not confirmed: HTTP 403.
+Hook stop delivery not confirmed: connection lost.
+Hook stop delivery not confirmed: timeout.
+Hook status delivery not confirmed: HTTP 503.
+Hook tool delivery not confirmed: HTTP 503.
+Hook tooldone delivery not confirmed: HTTP 503.
+Hook toolfail delivery not confirmed: HTTP 503.
+
+ Test Files  87 passed (87)
+      Tests  1205 passed | 1 skipped (1206)
+   Start at  09:33:20
+   Duration  327.51s (tests 99%, import 1%)
+
+
+> @hornhoof/server@0.6.0 pretest
+> npm run build -w @hornhoof/protocol
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/server@0.6.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /home/altera/hornhoof-network/hornhoof/apps/server
+
+
+ Test Files  110 passed (110)
+      Tests  1823 passed (1823)
+   Start at  09:38:49
+   Duration  650.07s (tests 93%, import 7%)
+
+
+> @hornhoof/web@0.6.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /home/altera/hornhoof-network/hornhoof/apps/web
+
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+
+ Test Files  49 passed (49)
+      Tests  767 passed (767)
+   Start at  09:49:39
+   Duration  78.01s (tests 66%, environment 23%, setup 4%, import 4%, transform 2%)
+
+    Isolate  49 workers spawned · ~841ms startup each (spawn + environment, per file)
+             at least ~19.77s faster with isolate: false — reuses workers across files instead of one per file
+
+exit 0

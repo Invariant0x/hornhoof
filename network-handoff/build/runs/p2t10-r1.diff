@@ -1,0 +1,525 @@
+# Review package: lane p2t10
+
+ SECURITY.md                        |    2 +-
+ apps/web/src/i18n/en.ts            |    4 ++++
+ apps/web/src/i18n/ru.ts            |    4 ++++
+ apps/web/src/screens/Versions.tsx  |    4 ++--
+ apps/web/src/ui/UpdateBanner.tsx   |    2 +-
+ apps/web/src/ui/UpdateProgress.tsx |   29 ++++++++++++++++++-----------
+ apps/web/src/updates.ts            |   23 +++++++++++++++++------
+ apps/web/test/Updates.test.tsx     |   23 ++++++++++++++++++++++-
+ apps/web/test/i18n.test.tsx        |   10 ++++++++++
+ guide/install.md                   |    2 +-
+ guide/public-link.md               |    2 +-
+ 11 files changed, 81 insertions(+), 24 deletions(-)
+
+## Diff
+diff --git a/SECURITY.md b/SECURITY.md
+index 2f545ac5..554734d4 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -41,21 +41,21 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
+ - The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
+ - The orchestrator's database role cannot read or write passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
+ - Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
+ 
+ ## The hornhoof.org link
+ 
+ The link, like `https://acme.hornhoof.org`, lets people open your company from anywhere without opening anything on your router.
+ 
+ - It is optional. Untick "Open Hornhoof on the internet" at setup, or remove the link in Settings, and people open Hornhoof only from your own network.
+ - Your server opens the tunnel itself, over an encrypted connection to hornhoof.org whose certificate it checks.
+-- The tunnel carries traffic only to the Hornhoof app, never to anything else on your network, whatever hornhoof.org asks for.
++- The tunnel ends in the keeper, a container next to the app, which passes its traffic to the Hornhoof app only, never to anything else on your network, whatever hornhoof.org asks for.
+ - hornhoof.org has no accounts and holds none of your company's data. For each link it keeps only the name, a hash of its key, when and from which address the link was made, and when its tunnel was last seen. For a company on several machines it also keeps which machine holds the link, and one flag that says whether the company's copy is up to date.
+ - The browser's https connection ends at hornhoof.org. It opens each request to see which company it is for, passes it on through that company's tunnel, and keeps no copy. If you want no one in between, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
+ - Traffic between your machines that goes through hornhoof.org is encrypted from one machine to the other, so hornhoof.org sees only encrypted bytes.
+ - hornhoof.org decides nothing for your company. A link points to one machine at a time, and that tells two machines which of them leads. A company with no public link keeps a hidden name there for that alone. Three or more machines that are always on choose the leader by vote among themselves.
+ 
+ ## What you decide
+ 
+ - Who sees the whole company. Those people see everything, and so do the orchestrator and anyone with access to Operations, whose head reads the database.
+ - Which plan a department uses. Agents on one plan share its sign-in and can read each other's folders, so work that must stay apart gets a plan of its own.
+ - What a repository token may do. It goes to the machines that run the department's agents and tests, so a fine-grained token for one repository is best.
+diff --git a/apps/web/src/i18n/en.ts b/apps/web/src/i18n/en.ts
+index b2eab9c7..3909037c 100644
+--- a/apps/web/src/i18n/en.ts
++++ b/apps/web/src/i18n/en.ts
+@@ -944,20 +944,21 @@ export const en = {
+     update: 'Update',
+     whenIdle: 'Update when agents finish',
+     later: 'Later',
+     waiting: (version: string) => `Hornhoof will update to ${version} when the agents finish.`,
+     callOff: 'Call off',
+     running: (version: string) => (version ? `Updating Hornhoof to ${version}` : 'Updating Hornhoof'),
+     progress: 'Update progress',
+     stepOf: (n: number, total: number, step: string) => `Step ${n} of ${total}: ${step}`,
+     starting: 'Getting the update ready',
+     restarting: 'Hornhoof is restarting. The page reloads by itself.',
++    maintenance: 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.',
+     steps: { backup: 'saving the database', pull: 'downloading', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
+     result: (s: { state: string; version: string }, current: string) =>
+       s.state === 'done'
+         ? `Updated to ${s.version}.`
+         : s.state === 'rolled_back'
+           ? `The update to ${s.version} did not start. Hornhoof went back to ${current}.`
+           : `The update to ${s.version} failed. What the updater wrote is in Versions.`,
+     details: 'Details',
+     ok: 'OK',
+     menu: 'Versions',
+@@ -967,20 +968,23 @@ export const en = {
+     newest: 'Newest build',
+     checkNow: 'Check now',
+     checkedAt: (time: string) => `Checked at ${time}`,
+     checkFailed: 'Could not check for updates.',
+     install: 'Install',
+     goBack: (version: string) => `Go back to ${version}`,
+     pastMigration: 'Going back past a database change may not start. If it does not, update to the newest version again.',
+     missing: 'The updater is not running. Run the install command for this server again to add it.',
+   },
+   errors: {
++    maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',
++    read_only: 'Hornhoof only reads on this machine now, so nothing was changed.',
++    starting: 'Hornhoof is starting. Try again in a few seconds.',
+     command_active: 'There is an active command for this place. Use it or wait until it expires.',
+     codes: {
+       validation: 'Check the fields and try again.',
+       unauthorized: 'Sign in to continue.',
+       forbidden: 'You do not have access to this.',
+       not_found: 'Not found.',
+       conflict: 'This clashes with something that already exists.',
+       gone: 'This is no longer available.',
+       too_many: 'Too many attempts. Wait a little and try again.',
+       unavailable: 'This is not available right now.',
+diff --git a/apps/web/src/i18n/ru.ts b/apps/web/src/i18n/ru.ts
+index 6cbea657..67ace5f1 100644
+--- a/apps/web/src/i18n/ru.ts
++++ b/apps/web/src/i18n/ru.ts
+@@ -930,20 +930,21 @@ export const ru: Messages = {
+     update: 'Обновить',
+     whenIdle: 'Обновить, когда агенты закончат',
+     later: 'Позже',
+     waiting: version => `Hornhoof обновится до ${version}, когда агенты закончат.`,
+     callOff: 'Отменить',
+     running: version => (version ? `Hornhoof обновляется до ${version}` : 'Hornhoof обновляется'),
+     progress: 'Ход обновления',
+     stepOf: (n, total, step) => `Шаг ${n} из ${total}: ${step}`,
+     starting: 'Готовлю обновление',
+     restarting: 'Hornhoof перезапускается. Страница обновится сама.',
++    maintenance: 'Обслуживание: Hornhoof ставит обновление и не принимает изменений, пока оно не закончится.',
+     steps: { backup: 'сохраняю базу', pull: 'скачиваю', install: 'устанавливаю', health: 'жду ответа нового сервера', rollback: 'возвращаю прежнюю версию', finished: 'готово' },
+     result: (s, current) =>
+       s.state === 'done'
+         ? `Обновлено до ${s.version}.`
+         : s.state === 'rolled_back'
+           ? `Версия ${s.version} не запустилась. Hornhoof вернулся к ${current}.`
+           : `Обновление до ${s.version} не удалось. Что написала служба обновления, видно в окне «Версии».`,
+     details: 'Подробнее',
+     ok: 'Понятно',
+     menu: 'Версии',
+@@ -953,20 +954,23 @@ export const ru: Messages = {
+     newest: 'Самая новая сборка',
+     checkNow: 'Проверить сейчас',
+     checkedAt: time => `Проверено в ${time}`,
+     checkFailed: 'Не удалось проверить обновления.',
+     install: 'Установить',
+     goBack: version => `Вернуться к ${version}`,
+     pastMigration: 'Возврат через изменение базы данных может не запуститься. Если так случится, снова обновитесь до самой новой версии.',
+     missing: 'Служба обновления не запущена. Запустите команду установки этого сервера еще раз, она ее добавит.',
+   },
+   errors: {
++    maintenance: 'Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.',
++    read_only: 'Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.',
++    starting: 'Hornhoof запускается. Попробуйте еще раз через несколько секунд.',
+     command_active: 'Для этого места уже есть действующая команда. Используйте ее или дождитесь окончания срока.',
+     codes: {
+       validation: 'Проверьте поля и попробуйте снова.',
+       unauthorized: 'Войдите, чтобы продолжить.',
+       forbidden: 'У вас нет доступа к этому.',
+       not_found: 'Не найдено.',
+       conflict: 'Это противоречит тому, что уже есть.',
+       gone: 'Это больше недоступно.',
+       too_many: 'Слишком много попыток. Подождите немного и попробуйте снова.',
+       unavailable: 'Сейчас это недоступно.',
+diff --git a/apps/web/src/screens/Versions.tsx b/apps/web/src/screens/Versions.tsx
+index 8277bfd5..41370b8f 100644
+--- a/apps/web/src/screens/Versions.tsx
++++ b/apps/web/src/screens/Versions.tsx
+@@ -62,25 +62,25 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
+             onClick={() => {
+               setChecking(true);
+               void act(updates.check).finally(() => setChecking(false));
+             }}
+           >
+             {t.updates.checkNow}
+           </button>
+           <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt)))}</span>
+         </div>
+         {!updater.present && <p className="update-note">{t.updates.missing}</p>}
+-        {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} />}
++        {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} maintenance={updates.maintenance} />}
+         {status && (
+           <div className="update-progress">
+             {updates.starting || status.state === 'running' ? (
+-              <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} />
++              <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
+             ) : (
+               <p>{t.updates.result(versionedStatus(status), versionText(current))}</p>
+             )}
+             {status.log && <pre>{status.log}</pre>}
+           </div>
+         )}
+         {failure !== null && <p className="update-error" role="alert">{errorText(t, failure)}</p>}
+         <ul className="versions">
+           {rows.map(b => (
+             <li key={b.tag}>
+diff --git a/apps/web/src/ui/UpdateBanner.tsx b/apps/web/src/ui/UpdateBanner.tsx
+index b375799a..9277191c 100644
+--- a/apps/web/src/ui/UpdateBanner.tsx
++++ b/apps/web/src/ui/UpdateBanner.tsx
+@@ -44,21 +44,21 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
+ 
+   const hide = (key: string, value: string) => {
+     store(key, value);
+     rerender(n => n + 1);
+   };
+ 
+   let body: React.ReactNode = null;
+   if (updates.starting || status?.state === 'running') {
+     body = (
+       <>
+-        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} />
++        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
+         <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
+       </>
+     );
+   } else if (waiting) {
+     body = (
+       <>
+         <span>{t.updates.waiting(versionText(waiting))}</span>
+         <button className="btn small ghost" type="button" onClick={() => void act(updates.callOff)}>{t.updates.callOff}</button>
+       </>
+     );
+diff --git a/apps/web/src/ui/UpdateProgress.tsx b/apps/web/src/ui/UpdateProgress.tsx
+index dfffd24c..c9381421 100644
+--- a/apps/web/src/ui/UpdateProgress.tsx
++++ b/apps/web/src/ui/UpdateProgress.tsx
+@@ -1,32 +1,39 @@
+ import { useT } from '../i18n';
++import type { Messages } from '../i18n/en';
+ import type { UpdateStep } from '../types';
+ 
+ /* The four steps of an update, in the order the updater takes them. */
+ const STEPS: UpdateStep[] = ['pull', 'backup', 'install', 'health'];
+ 
+-type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean };
++type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean; maintenance?: boolean };
++
++/* What the bar says: a failed poll first, then the step. */
++function barLabel(t: Messages, p: { step: UpdateStep | null; starting: boolean; offline: boolean; maintenance: boolean }, at: number): string {
++  if (p.maintenance) return t.updates.maintenance;
++  if (p.offline) return t.updates.restarting;
++  return stepLabel(t, p.step, p.starting, at);
++}
++
++/* What the bar says about the step: the first words while the update has not begun, then the step in order. */
++function stepLabel(t: Messages, step: UpdateStep | null, starting: boolean, at: number): string {
++  if (starting || !step) return t.updates.starting;
++  if (step === 'finished' || step === 'rollback') return t.updates.steps[step];
++  return t.updates.stepOf(at + 1, STEPS.length, t.updates.steps[step]);
++}
+ 
+ /* A turning ring and a bar of the four steps: the ones behind are filled, the one under way moves. */
+-export function UpdateProgress({ version, step, starting = false, offline = false }: Props) {
++export function UpdateProgress({ version, step, starting = false, offline = false, maintenance = false }: Props) {
+   const t = useT();
+   const back = step === 'rollback';
+   const at = starting || !step ? 0 : step === 'finished' ? STEPS.length : back ? STEPS.length - 1 : STEPS.indexOf(step);
+-  const label = offline
+-    ? t.updates.restarting
+-    : starting || !step
+-      ? t.updates.starting
+-      : step === 'finished'
+-        ? t.updates.steps.finished
+-        : back
+-          ? t.updates.steps.rollback
+-          : t.updates.stepOf(at + 1, STEPS.length, t.updates.steps[step]);
++  const label = barLabel(t, { step, starting, offline, maintenance }, at);
+   return (
+     <div className={`uprog${back ? ' back' : ''}`}>
+       <span className="spinner" aria-hidden="true" />
+       <b>{t.updates.running(version)}</b>
+       <span
+         className="uprog-bar"
+         role="progressbar"
+         aria-label={t.updates.progress}
+         aria-valuemin={0}
+         aria-valuemax={STEPS.length}
+diff --git a/apps/web/src/updates.ts b/apps/web/src/updates.ts
+index 415c4723..f115021a 100644
+--- a/apps/web/src/updates.ts
++++ b/apps/web/src/updates.ts
+@@ -1,66 +1,76 @@
+ import { useCallback, useEffect, useRef, useState } from 'react';
+-import { api } from './api';
++import { api, ApiFailure } from './api';
+ import type { UpdatesView } from './types';
+ import type { Version } from './ui/VersionMark';
+ 
+ /* A seam for tests: the page reloads once the server runs another build. */
+ export const page = { reload: () => window.location.reload() };
+ 
+ const POLL_MS = 5 * 60_000;
+ /* While an update waits or runs, and while the server restarts. */
+ const BUSY_POLL_MS = 2_000;
+ 
+ export type Updates = {
+   view: UpdatesView | null;
+   busy: boolean;
+   /* An update was asked for and the updater has not reported on it yet. */
+   starting: boolean;
+   target: Version | null;
+   /* The server stopped answering while an update runs: it is restarting. */
+   offline: boolean;
++  /* The server answered that it is installing the update and takes no changes. */
++  maintenance: boolean;
+   /* An update is being asked for and the server has not answered yet. */
+   asking: boolean;
+   check(): Promise<void>;
+   update(version: string, whenIdle: boolean): Promise<void>;
+   callOff(): Promise<void>;
+ };
+ 
+ function requestedBuild(view: UpdatesView | null, tag: string): Version {
+   const build = tag === 'latest' ? view?.latest : view?.versions.find(b => b.tag === tag);
+   if (!build) return { version: tag };
+   return { version: build.version || build.tag, commit: build.commit };
+ }
+ 
++type Outage = 'none' | 'maintenance' | 'offline';
++
++/* Why a poll failed: the server said it is in maintenance, or it is silent while an update runs, which is a restart. */
++function outageOf(err: unknown, updating: boolean): Outage {
++  if (err instanceof ApiFailure && err.reason === 'maintenance') return 'maintenance';
++  return updating ? 'offline' : 'none';
++}
++
+ /* What Hornhoof knows about newer builds and the updater, for people who see the whole company. */
+ export function useUpdates(enabled: boolean): Updates {
+   const [view, setView] = useState<UpdatesView | null>(null);
+   const [sent, setSent] = useState<(Version & { id: string }) | null>(null);
+-  const [offline, setOffline] = useState(false);
++  const [outage, setOutage] = useState<Outage>('none');
+   const [asking, setAsking] = useState(false);
+   const boot = useRef<string | null>(null);
+   const busyNow = useRef(false);
+   const askingNow = useRef(false);
+ 
+   const take = useCallback((next: UpdatesView) => {
+     boot.current ??= next.current.commit;
+     if (next.current.commit !== boot.current) return page.reload();
+     setView(next);
+   }, []);
+ 
+   const load = useCallback(async () => {
+     try {
+       take(await api.get<UpdatesView>('/api/updates'));
+-      setOffline(false);
+-    } catch {
++      setOutage('none');
++    } catch (err) {
+       /* The server restarts during an update; the next poll asks again. */
+-      if (busyNow.current) setOffline(true);
++      setOutage(outageOf(err, busyNow.current));
+     }
+   }, [take]);
+ 
+   const status = view?.updater.status;
+   /* A sent request counts until the updater reports on it. */
+   const answered = sent !== null && status?.id === sent.id && status.state !== 'running';
+   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
+   const starting = sent !== null && status?.id !== sent.id;
+   busyNow.current = busy;
+ 
+@@ -73,21 +83,22 @@ export function useUpdates(enabled: boolean): Updates {
+     void load();
+     const timer = setInterval(() => void load(), busy ? BUSY_POLL_MS : POLL_MS);
+     return () => clearInterval(timer);
+   }, [enabled, busy, load]);
+ 
+   return {
+     view,
+     busy,
+     starting,
+     target: sent,
+-    offline,
++    offline: outage === 'offline',
++    maintenance: outage === 'maintenance',
+     asking,
+     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
+     update: async (version, whenIdle) => {
+       /* A second click before the answer would ask the updater twice. */
+       if (askingNow.current) return;
+       askingNow.current = true;
+       setAsking(true);
+       try {
+         const target = requestedBuild(view, version);
+         const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });
+diff --git a/apps/web/test/Updates.test.tsx b/apps/web/test/Updates.test.tsx
+index 5c269a9e..2a022854 100644
+--- a/apps/web/test/Updates.test.tsx
++++ b/apps/web/test/Updates.test.tsx
+@@ -128,20 +128,41 @@ describe('updates', () => {
+     /* The updater has not picked it up yet, and the banner already moves. */
+     expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
+     expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Getting the update ready');
+     view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
+     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
+     expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuenow', '2');
+     down = true;
+     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.'), { timeout: 4000 });
+   });
+ 
++  it('shows maintenance while the server answers with it', async () => {
++    let view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
++    let maintenance = false;
++    mockApi({
++      'GET /api/org': [200, ORG],
++      'GET /api/updates': () =>
++        maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
++    });
++    render(<Shell me={ME} onSignOut={() => {}} />);
++    const bar = () => screen.getByRole('progressbar', { name: 'Update progress' });
++    await waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
++    maintenance = true;
++    await waitFor(
++      () => expect(bar()).toHaveAttribute('aria-valuetext', 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.'),
++      { timeout: 4000 },
++    );
++    maintenance = false;
++    view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
++    await waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 4 of 4: waiting for the new server'), { timeout: 4000 });
++  });
++
+   it('lists versions and marks the running one', async () => {
+     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
+     const user = userEvent.setup();
+     render(<Shell me={ME} onSignOut={() => {}} />);
+     const dialog = await openVersions(user);
+     const rows = within(dialog).getAllByRole('listitem');
+     expect(rows.map(r => r.querySelector('b')!.textContent)).toEqual(['0.4.1 (bbbbbbb)', '0.4.0 (aaaaaaa)', '0.3.0 (ccccccc)']);
+     expect(rows[1]).toHaveTextContent('Running now');
+     expect(within(rows[1]!).queryByRole('button')).not.toBeInTheDocument();
+     expect(within(rows[0]!).getByRole('button', { name: 'Install' })).toBeInTheDocument();
+@@ -228,21 +249,21 @@ describe('updates', () => {
+     const user = userEvent.setup();
+     render(<Shell me={ME} onSignOut={() => {}} />);
+     const dialog = await openVersions(user);
+     expect(within(dialog).getByText('The updater is not running. Run the install command for this server again to add it.')).toBeInTheDocument();
+     expect(within(dialog).queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+   });
+ 
+   it('gives the time of the last check as the chosen language writes it', () => {
+     localStorage.setItem('hh-lang', 'ru');
+     const view = updates();
+-    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
++    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
+     render(
+       <LanguageProvider>
+         <Versions updates={idle} onClose={() => {}} />
+       </LanguageProvider>,
+     );
+     const time = new Intl.DateTimeFormat('ru', { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt!));
+     expect(screen.getByText(`Проверено в ${time}`)).toBeInTheDocument();
+   });
+ 
+   it('checks for updates when asked and says when it could not', async () => {
+diff --git a/apps/web/test/i18n.test.tsx b/apps/web/test/i18n.test.tsx
+index c7b0972b..abd20fa7 100644
+--- a/apps/web/test/i18n.test.tsx
++++ b/apps/web/test/i18n.test.tsx
+@@ -57,20 +57,30 @@ describe('The agent in the center', () => {
+     expect(textsOf(en).filter(t => /chief/i.test(t))).toEqual([]);
+     expect(textsOf(ru).filter(t => /шеф/i.test(t))).toEqual([]);
+   });
+ });
+ 
+ describe('errorText', () => {
+   it('shows a known reason in the chosen language', () => {
+     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);
+   });
+ 
++  it('words the reasons of maintenance, read-only and starting in both languages', () => {
++    const answer = (reason: string) => new ApiFailure(503, 'unavailable', 'x', reason);
++    expect(errorText(en, answer('maintenance'))).toBe('Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.');
++    expect(errorText(ru, answer('maintenance'))).toBe('Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.');
++    expect(errorText(en, answer('read_only'))).toBe('Hornhoof only reads on this machine now, so nothing was changed.');
++    expect(errorText(ru, answer('read_only'))).toBe('Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.');
++    expect(errorText(en, answer('starting'))).toBe('Hornhoof is starting. Try again in a few seconds.');
++    expect(errorText(ru, answer('starting'))).toBe('Hornhoof запускается. Попробуйте еще раз через несколько секунд.');
++  });
++
+   it('tells a person who tried too often to wait, in both languages', () => {
+     const err = new ApiFailure(429, 'too_many', 'Too many attempts. Wait up to 15 minutes, then try again.', 'too_many_attempts');
+     /* A sign-in past the softer cap per email waits up to an hour. */
+     expect(errorText(en, err)).toBe('Too many attempts. Wait up to an hour, then try again.');
+     expect(errorText(ru, err)).toBe('Слишком много попыток. Подождите до часа и попробуйте снова.');
+     expect(errorText(ru, new ApiFailure(429, 'too_many', 'x'))).toBe('Слишком много попыток. Подождите немного и попробуйте снова.');
+   });
+ 
+   it('words a failure the server did not word from the dictionary, in English too', async () => {
+     mockApi({ 'GET /api/x': [503, { error: { code: 'unavailable' } }] });
+diff --git a/guide/install.md b/guide/install.md
+index e84d3233..d294df72 100644
+--- a/guide/install.md
++++ b/guide/install.md
+@@ -33,21 +33,21 @@ Every node also gets 2 GB of shared memory for the browsers agents run.
+ 
+ ## Run several companies on one computer
+ 
+ Each company is its own Hornhoof. To run a second one next to the first, give it a name:
+ 
+ ```sh
+ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server --name acme
+ ```
+ 
+ - It goes into `~/hornhoof-acme`, as its own compose project.
+-- It takes the first free port from 8080 and keeps it in `.env` as `HORNHOOF_PORT`.
++- It takes the first free web port from 8080 and peer port from 8180, and keeps them in `.env` as `HORNHOOF_PORT` and `HORNHOOF_PEER_PORT`. A list in the Docker volume `hornhoof-ports` keeps every company's ports on this computer, so no two companies get the same one, even while one is stopped.
+ - Run the same command again to update that company.
+ 
+ Machines can carry nodes for several companies too. Each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's nodes.
+ 
+ ## Run it from source with Docker
+ 
+ You need Docker with Compose.
+ 
+ ```sh
+ git clone https://github.com/Invariant0x/hornhoof.git
+diff --git a/guide/public-link.md b/guide/public-link.md
+index cfb6559e..f138159e 100644
+--- a/guide/public-link.md
++++ b/guide/public-link.md
+@@ -13,21 +13,21 @@ Setup offers the company a public link, like `https://acme.hornhoof.org`. As you
+ ## What changes once there is a link?
+ 
+ Invite links and the commands for new machines use it. Hornhoof still opens at its own address as well.
+ 
+ ## Who can reach it?
+ 
+ Anyone who learns the link reaches the sign-in page. A name like the company's own is easy to guess, so only the company's sign-ins protect what is inside. A random name is hard to guess.
+ 
+ ## What does hornhoof.org see?
+ 
+-hornhoof.org only passes the traffic on and has no accounts of its own. A small tunnel container next to the server keeps the connection to it, so nothing has to be opened on your router. The tunnel waits while the company has no link.
++hornhoof.org only passes the traffic on and has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
+ 
+ ## How do I change or remove the link?
+ 
+ People who see the whole company find the link under Share access in the account menu. There they can:
+ 
+ - copy it;
+ - move it to another name;
+ - remove it.
+ 
+ The orchestrator does the same when the CEO asks him.

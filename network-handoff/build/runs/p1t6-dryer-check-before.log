@@ -1,0 +1,9 @@
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/dry.edn
+DUPLICATE score=0.82
+  relay/relay.py:371-391
+  relay/relay.py:794-822
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-dryer-check.py", line 14, in <module>
+    assert 'DUPLICATE score=' not in result.stdout, 'dryer found a pair at or above 0.8'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: dryer found a pair at or above 0.8

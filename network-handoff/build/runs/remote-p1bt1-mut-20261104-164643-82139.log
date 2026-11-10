@@ -1,0 +1,11 @@
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/app.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.session.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.tunnel.edn
+SURVIVED  apps/server/src/app.ts:82 false -> true
+Function         Namespace  Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------------
+GET /api/health  app             0         0          0      1    n/a
+GET /api/version app             0         0          0      0    n/a
+buildApp         app             0         1          0      5   0.0%
+----------------------------------------------------------------------
+Total                            0         1          0      6    0.0%

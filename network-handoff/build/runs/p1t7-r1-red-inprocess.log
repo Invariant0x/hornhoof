@@ -1,0 +1,513 @@
+FFFFbound 4kim70cth4vuyi8pg1r243nz for 198.51.100.99
+bound 6wzybj693otiz3m1p3xvc8wy for 127.0.0.1
+Fbound m40xrg4adzudzqxxe48j7zwo for 198.51.100.99
+bound g36f364s960vw5xsb7yvwlq9 for 127.0.0.1
+Fbound gtesa6zv0z172gom6m4ixjs8 for 198.51.100.99
+bound r3louuqx47v4ln01qkyelq17 for 127.0.0.1
+Fbound t3mi344m0lre83ypuk6mx919 for 198.51.100.99
+bound in0jr75th9031eqn4tsldurr for 127.0.0.1
+Fnew link key for acme
+FFnew link key for acme
+bound r8k1y1oiswn8a88gimd56rek for 127.0.0.1
+.Fbound 99y8bpi6lrt2ftlp1igbx003 for 127.0.0.1
+Fbound yvri930vvsr5g9wbim0txlbi for 127.0.0.1
+Fbound 6hpu4zl66z2tevk5tr5z7pin for 127.0.0.1
+Fbound s8qfpfikcsknyob0fudnq3f4 for 127.0.0.1
+Fbound 869bdgnmri6plyunl37rymbm for 127.0.0.1
+Fbound 2k9qsr70ymdsxz9e2n84ldnk for 127.0.0.1
+Fbound 8zu24jdv0vzhkjdv2ixljuth for 127.0.0.1
+Fbound 57p4lsnjq4g4c6px7s5ptrov for 127.0.0.1
+Fbound neoxr9fopn8mum4j3wnl5rtn for 127.0.0.1
+FFFFFFFFFF
+======================================================================
+FAIL: test_a_big_unread_body_still_gets_its_answer (relay.test.test_keys.ConnectionTests.test_a_big_unread_body_still_gets_its_answer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 728, in test_a_big_unread_body_still_gets_its_answer
+    self.assert_answered_once_and_closed(self.exchange(request), 401)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 666, in assert_answered_once_and_closed
+    self.assertTrue(exchange.closed, 'the connection must close once a request leaves bytes unread')
+AssertionError: False is not true : the connection must close once a request leaves bytes unread
+
+======================================================================
+FAIL: test_a_body_over_the_limit_closes_the_connection (relay.test.test_keys.ConnectionTests.test_a_body_over_the_limit_closes_the_connection)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 724, in test_a_body_over_the_limit_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 666, in assert_answered_once_and_closed
+    self.assertTrue(exchange.closed, 'the connection must close once a request leaves bytes unread')
+AssertionError: False is not true : the connection must close once a request leaves bytes unread
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('abc',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [400, 501] != [400]
+
+First list contains 1 additional elements.
+First extra element 1:
+501
+
+- [400, 501]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('-5',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [400, 501] != [400]
+
+First list contains 1 additional elements.
+First extra element 1:
+501
+
+- [400, 501]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('+2',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201, 201] != [400]
+
+First differing element 0:
+201
+400
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [201, 201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('0_2',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201, 201] != [400]
+
+First differing element 0:
+201
+400
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [201, 201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('2', '102'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201, 201] != [400]
+
+First differing element 0:
+201
+400
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [201, 201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_length_that_cannot_be_trusted_reads_nothing (relay.test.test_keys.ConnectionTests.test_a_length_that_cannot_be_trusted_reads_nothing) (lengths=('2', '2'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 719, in test_a_length_that_cannot_be_trusted_reads_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201, 201] != [400]
+
+First differing element 0:
+201
+400
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [201, 201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_new_key_survives_a_body_and_a_good_request_behind_it (relay.test.test_keys.ConnectionTests.test_a_new_key_survives_a_body_and_a_good_request_behind_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 734, in test_a_new_key_survives_a_body_and_a_good_request_behind_it
+    self.assert_answered_once_and_closed(exchange, 200)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200, 501] != [200]
+
+First list contains 1 additional elements.
+First extra element 1:
+501
+
+- [200, 501]
++ [200] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_plugin_call_in_a_body_never_reaches_the_plugin (relay.test.test_keys.ConnectionTests.test_a_plugin_call_in_a_body_never_reaches_the_plugin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 692, in test_a_plugin_call_in_a_body_never_reaches_the_plugin
+    self.assert_answered_once_and_closed(self.exchange(request), 401)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 200] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+200
+
+- [401, 200]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_transfer_encoding_closes_the_connection (relay.test.test_keys.ConnectionTests.test_transfer_encoding_closes_the_connection) (label='real chunks')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 710, in test_transfer_encoding_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 667, in assert_answered_once_and_closed
+    self.assertTrue(exchange.says_close, 'the answer must say Connection: close, so that Caddy does not reuse it')
+AssertionError: False is not true : the answer must say Connection: close, so that Caddy does not reuse it
+
+======================================================================
+FAIL: test_transfer_encoding_closes_the_connection (relay.test.test_keys.ConnectionTests.test_transfer_encoding_closes_the_connection) (label='request right after the headers')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 710, in test_transfer_encoding_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 201] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [401, 201]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_transfer_encoding_closes_the_connection (relay.test.test_keys.ConnectionTests.test_transfer_encoding_closes_the_connection) (label='any coding')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 710, in test_transfer_encoding_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 201] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [401, 201]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_transfer_encoding_closes_the_connection (relay.test.test_keys.ConnectionTests.test_transfer_encoding_closes_the_connection) (label='a route that reads its body')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 710, in test_transfer_encoding_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [400, 201] != [400]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [400, 201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_transfer_encoding_closes_the_connection (relay.test.test_keys.ConnectionTests.test_transfer_encoding_closes_the_connection) (label='the plugin, whose calls keep their connection')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 710, in test_transfer_encoding_closes_the_connection
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200, 201] != [200]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [200, 201]
++ [200] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/links/acme/key')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 201] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [401, 201]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/links/nobody/key')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [404, 201] != [404]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [404, 201]
++ [404] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/links/acme/visitor-key')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 201] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [401, 201]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/links/acme/sync')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 201] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [401, 201]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/links/acme/sync')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [415, 201] != [415]
+
+First list contains 1 additional elements.
+First extra element 1:
+201
+
+- [415, 201]
++ [415] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='DELETE', path='/api/v1/bindings/acme')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 429] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [401, 429]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='DELETE', path='/api/v1/bindings/nobody')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [404, 429] != [404]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [404, 429]
++ [404] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/bindings')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [415, 429] != [415]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [415, 429]
++ [415] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/frp/handler')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [403, 429] != [403]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [403, 429]
++ [403] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='POST', path='/api/v1/nothing')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [404, 429] != [404]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [404, 429]
++ [404] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='DELETE', path='/api/v1/nothing')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [404, 429] != [404]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [404, 429]
++ [404] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='GET', path='/api/v1/links/acme/route')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [401, 429] != [401]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [401, 429]
++ [401] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='GET', path='/api/v1/names/acme')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200, 429] != [200]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [200, 429]
++ [200] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_unread_body_never_runs_as_a_request (relay.test.test_keys.ConnectionTests.test_unread_body_never_runs_as_a_request) (method='GET', path='/api/v1/nothing')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 687, in test_unread_body_never_runs_as_a_request
+    self.assert_answered_once_and_closed(self.exchange(request), status)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 665, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [404, 429] != [404]
+
+First list contains 1 additional elements.
+First extra element 1:
+429
+
+- [404, 429]
++ [404] : exactly one answer: the unread bytes must not run
+
+----------------------------------------------------------------------
+Ran 8 tests in 81.489s
+
+FAILED (failures=29)

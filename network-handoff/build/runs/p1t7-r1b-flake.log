@@ -1,0 +1,32 @@
+== slow watcher, the test as it was, three runs
+Ran 1 test in 1.379s
+OK
+Ran 1 test in 1.269s
+OK
+Ran 1 test in 1.259s
+OK
+== slow watcher, the test as fixed, three runs
+Ran 1 test in 4.084s
+OK
+Ran 1 test in 4.076s
+OK
+Ran 1 test in 4.076s
+OK
+== watcher's first answer forced between the two reads, the comparison as fixed, two runs
+Ran 1 test in 5.304s
+OK
+Ran 1 test in 5.303s
+OK
+== the same, the comparison as it was, two runs
+  File "/home/altera/hornhoof-network/network-build/tmp/p1t7-flake.IPuEsD/relay/test/test_keys.py", line 84, i
+AssertionError: (route bodies differ)
+-  'relayStarted': 1793824495,
++  'relayStarted': 1793824492,
+Ran 1 test in 4.521s
+FAILED (failures=1)
+  File "/home/altera/hornhoof-network/network-build/tmp/p1t7-flake.IPuEsD/relay/test/test_keys.py", line 84, i
+AssertionError: (route bodies differ)
+-  'relayStarted': 1793824500,
++  'relayStarted': 1793824497,
+Ran 1 test in 4.525s
+FAILED (failures=1)

@@ -1,0 +1,30 @@
+== files: apps/web/src/i18n/en.ts apps/web/src/i18n/ru.ts apps/web/src/screens/Versions.tsx apps/web/src/ui/UpdateBanner.tsx apps/web/src/ui/UpdateProgress.tsx apps/web/src/updates.ts
+[2m   Start at [22m 21:52:10
+[2m   Duration [22m 17.25s[2m (tests 76%, environment 11%, transform 7%, import 3%, setup 2%, worker 1%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+Versions                       screens.Versions                      29  83.0%     33.1
+useUpdates                     updates                               20  91.3%     20.3
+UpdateBanner                   ui.UpdateBanner                       16  96.0%     16.0
+UpdateProgress                 ui.UpdateProgress                     10  85.7%     10.3
+requestedBuild                 updates                                6  66.7%      7.3
+stepLabel                      ui.UpdateProgress                      5  87.5%      5.0
+summary                        i18n.en                                2  50.0%      2.5
+stored                         ui.UpdateBanner                        2  66.7%      2.1
+store                          ui.UpdateBanner                        2 100.0%      2.0
+isMaintenance                  updates                                2 100.0%      2.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.

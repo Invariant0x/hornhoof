@@ -1,0 +1,34 @@
+== changed files
+apps/server/src/modules/keeper/switch-step.ts
+apps/server/src/modules/keeper/sync-step.ts
+apps/server/src/modules/keeper/update-steps.ts
+apps/server/test/switch-step.test.ts
+apps/server/test/sync-step.test.ts
+apps/server/test/update-steps.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m test/update-steps.test.ts [2m([22m[2m50 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m test/sync-step.test.ts [2m([22m[2m57 tests[22m[2m)[22m[32m 51[2mms[22m[39m
+ [32m✓[39m test/switch-step.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Affected [22m 3 of 131 test files [2m(related to 6 files)[22m
+[2m      Tests [22m [1m[32m180 passed[39m[22m[90m (180)[39m
+[2m   Start at [22m 11:26:07
+[2m   Duration [22m 5.42s[2m (tests 48%, import 27%, worker 23%, transform 1%)[22m
+
+== crapper
+worst changed CRAP: 9.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 125f7d96

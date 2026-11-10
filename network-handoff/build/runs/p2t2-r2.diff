@@ -1,0 +1,318 @@
+# Review package: lane p2t2
+
+ apps/server/package.json                 |    4 +--
+ apps/server/src/cli.ts                   |    4 +--
+ apps/server/src/db/client.ts             |   41 +++++++++++++++++++++++-------
+ apps/server/src/main.ts                  |    4 +--
+ apps/server/src/migrate.ts               |   35 ++++++++++++++++++++++++++
+ apps/server/test/db-pool.test.ts         |   22 +++++++++++++++-
+ apps/server/test/migrate-masking.test.ts |   19 ++++++++++++++
+ apps/server/test/migrate.test.ts         |   25 ++++++++++++++++++
+ 8 files changed, 137 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/apps/server/package.json b/apps/server/package.json
+index 7c481a69..6055c805 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -1,18 +1,18 @@
+ {
+   "name": "@hornhoof/server",
+   "private": true,
+   "type": "module",
+   "scripts": {
+-    "dev": "tsx watch src/main.ts",
++    "dev": "tsx src/migrate.ts && tsx watch src/main.ts",
+     "build": "tsc -p tsconfig.json",
+-    "start": "node dist/main.js",
++    "start": "node dist/migrate.js && node dist/main.js",
+     "pretest": "npm run build -w @hornhoof/protocol",
+     "test": "vitest run"
+   },
+   "dependencies": {
+     "@fastify/cookie": "^11.1.5",
+     "@fastify/static": "^10.1.8",
+     "@fastify/websocket": "^11.3.4",
+     "@hornhoof/protocol": "*",
+     "@modelcontextprotocol/sdk": "^1.32.2",
+     "drizzle-orm": "^0.45.4",
+diff --git a/apps/server/src/cli.ts b/apps/server/src/cli.ts
+index 87bcc369..69687fe1 100644
+--- a/apps/server/src/cli.ts
++++ b/apps/server/src/cli.ts
+@@ -1,16 +1,16 @@
+ import { realpathSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { isLinkName } from '@hornhoof/protocol/link';
+ import { eq } from 'drizzle-orm';
+ import { loadConfig, type Config } from './config.js';
+-import { createDb, type Db } from './db/client.js';
++import { APP_NAME, openDb, type Db } from './db/client.js';
+ import { companies, people } from './db/schema.js';
+ import { ApiError } from './errors.js';
+ import { linkOf, publicUrl, saveLink, writeTunnelSettings } from './modules/link/link.js';
+ import { Relay } from './modules/link/relay.js';
+ import { reinvite } from './modules/people/routes.js';
+ import { setupLink } from './modules/setup/code.js';
+ 
+ const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link | link <name> < key-file';
+ 
+ type Deps = { db: Db; config: Config; print: (line: string) => void; read?: () => Promise<string> };
+@@ -83,18 +83,18 @@ export async function runCli(args: string[], deps: Deps): Promise<number> {
+   if (args[0] === 'setup-link') return printSetupLink(deps);
+   if (args[0] === 'link') return takeLink(args[1], deps);
+   deps.print(USAGE);
+   return 1;
+ }
+ 
+ const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
+ if (entry === fileURLToPath(import.meta.url)) {
+   const config = loadConfig(process.env);
+   if (!config.databaseUrl) throw new Error('DATABASE_URL is not set.');
+-  const db = await createDb(config.databaseUrl);
++  const db = openDb(config.databaseUrl, APP_NAME);
+   const read = async () => {
+     let text = '';
+     for await (const chunk of process.stdin) text += String(chunk);
+     return text;
+   };
+   process.exit(await runCli(process.argv.slice(2), { db, config, print: line => console.log(line), read }));
+ }
+diff --git a/apps/server/src/db/client.ts b/apps/server/src/db/client.ts
+index e727f604..132bcdd3 100644
+--- a/apps/server/src/db/client.ts
++++ b/apps/server/src/db/client.ts
+@@ -5,34 +5,57 @@ import { readMigrationFiles, type MigrationConfig } from 'drizzle-orm/migrator';
+ import { drizzle } from 'drizzle-orm/node-postgres';
+ import { migrate } from 'drizzle-orm/node-postgres/migrator';
+ import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+ import pg from 'pg';
+ import * as schema from './schema.js';
+ 
+ export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
+ 
+ export const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url));
+ 
++export const APP_NAME = 'hornhoof-app';
++export const MIGRATE_NAME = 'hornhoof-migrate';
++export const KEEPER_NAME = 'hornhoof-keeper';
++
+ /* pg reports an idle connection the database dropped, as when Postgres restarts, as an error on the pool. Without a
+-   listener Node ends the whole server; with one the pool opens a fresh connection for the next query. */
+-export function openPool(url: string, onDropped: (err: Error) => void): pg.Pool {
+-  const pool = new pg.Pool({ connectionString: url });
++   listener Node ends the whole server; with one the pool opens a fresh connection for the next query. The name shows
++   in pg_stat_activity, so each process can be told apart there. */
++export function openPool(url: string, onDropped: (err: Error) => void, name: string, opts: { statementTimeoutMs?: number } = {}): pg.Pool {
++  const pool = new pg.Pool({
++    connectionString: url,
++    application_name: name,
++    ...(opts.statementTimeoutMs === undefined ? {} : { statement_timeout: opts.statementTimeoutMs }),
++  });
+   pool.on('error', onDropped);
+   return pool;
+ }
+ 
+-export async function createDb(url: string): Promise<Db> {
+-  const pool = openPool(url, err => console.warn(`Lost a database connection, will open another: ${err.message}`));
+-  const db = drizzle(pool, { schema });
+-  await migrate(db, { migrationsFolder: MIGRATIONS });
+-  await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+-  return db;
++const warnDropped = (err: Error) => console.warn(`Lost a database connection, will open another: ${err.message}`);
++
++/* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. */
++export function openDb(url: string, name: string, opts: { statementTimeoutMs?: number } = {}): Db {
++  return drizzle(openPool(url, warnDropped, name, opts), { schema });
++}
++
++/* Runs on a pool with no timeouts, since a migration may take as long as it needs. Answers how many migrations the
++   database has recorded. */
++export async function migrateDb(url: string): Promise<number> {
++  const pool = openPool(url, warnDropped, MIGRATE_NAME);
++  try {
++    const db = drizzle(pool, { schema });
++    await migrate(db, { migrationsFolder: MIGRATIONS });
++    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
++    const { rows } = await pool.query<{ count: string }>('SELECT count(*) FROM drizzle.__drizzle_migrations');
++    return Number(rows[0]!.count);
++  } finally {
++    await pool.end();
++  }
+ }
+ 
+ /* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
+ export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<void> {
+   const recorded = await db.select({ when: sql<string>`created_at` }).from(sql`drizzle.__drizzle_migrations`);
+   const applied = new Set(recorded.map(row => Number(row.when)));
+   const migrations = readMigrationFiles(config);
+   const journal = JSON.parse(readFileSync(`${config.migrationsFolder}/meta/_journal.json`, 'utf8')) as { entries: { tag: string }[] };
+   for (const [i, migration] of migrations.entries()) {
+     if (applied.has(migration.folderMillis)) continue;
+diff --git a/apps/server/src/main.ts b/apps/server/src/main.ts
+index 3dcf3f26..48dd4524 100644
+--- a/apps/server/src/main.ts
++++ b/apps/server/src/main.ts
+@@ -1,25 +1,25 @@
+ import { buildApp } from './app.js';
+ import { loadConfig } from './config.js';
+ import { openAgentSql } from './db/agent-sql.js';
+-import { createDb } from './db/client.js';
++import { APP_NAME, openDb } from './db/client.js';
+ import { publicUrl } from './modules/link/link.js';
+ import { setupLink } from './modules/setup/code.js';
+ 
+ function requireDbUrl(url: string | undefined): string {
+   if (!url) throw new Error('DATABASE_URL is not set.');
+   return url;
+ }
+ 
+ const config = loadConfig(process.env);
+ const url = requireDbUrl(config.databaseUrl);
+-const db = await createDb(url);
++const db = openDb(url, APP_NAME);
+ const app = await buildApp({
+   db,
+   agentSql: await openAgentSql(url),
+   config,
+   logger: { level: process.env.LOG_LEVEL || 'info' },
+ });
+ await app.listen({ port: config.port, host: '0.0.0.0' });
+ console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
+ /* Until a company exists, only the link with the setup code sets it up. */
+ const link = await setupLink(db, config);
+diff --git a/apps/server/src/migrate.ts b/apps/server/src/migrate.ts
+new file mode 100644
+index 00000000..1bb0e0aa
+--- /dev/null
++++ b/apps/server/src/migrate.ts
+@@ -0,0 +1,35 @@
++import { realpathSync } from 'node:fs';
++import { fileURLToPath } from 'node:url';
++import { migrateDb } from './db/client.js';
++import { loggable } from './errors.js';
++
++/* A drizzle error only says which query failed; the reason is in the innermost cause. Both pass through loggable, which
++   masks any password written into an address. */
++function reasonOf(err: unknown): string {
++  const messages: string[] = [];
++  for (let step: Record<string, unknown> | undefined = loggable(err); step; step = step.cause as Record<string, unknown> | undefined) {
++    if (step.message) messages.push(String(step.message));
++  }
++  return [messages[0], messages.length > 1 ? messages[messages.length - 1] : undefined].filter(Boolean).join(': ');
++}
++
++/* Brings the database up to this build and says so in one line. Nothing else starts the migrations, so the app and the
++   keeper open the database knowing the schema is already there. */
++export async function runMigrate(env: NodeJS.ProcessEnv, print: (line: string) => void): Promise<number> {
++  if (!env.DATABASE_URL) {
++    print('DATABASE_URL is not set.');
++    return 1;
++  }
++  try {
++    print(`The database is up to this build: ${await migrateDb(env.DATABASE_URL)} migrations.`);
++    return 0;
++  } catch (err) {
++    print(`Could not bring the database up to this build: ${reasonOf(err)}`);
++    return 1;
++  }
++}
++
++const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
++if (entry === fileURLToPath(import.meta.url)) {
++  process.exit(await runMigrate(process.env, line => console.log(line)));
++}
+diff --git a/apps/server/test/db-pool.test.ts b/apps/server/test/db-pool.test.ts
+index d5d305da..94ddca65 100644
+--- a/apps/server/test/db-pool.test.ts
++++ b/apps/server/test/db-pool.test.ts
+@@ -1,13 +1,31 @@
+ import { describe, expect, it } from 'vitest';
+-import { openPool } from '../src/db/client.js';
++import type pg from 'pg';
++import { openDb, openPool } from '../src/db/client.js';
+ 
+ describe('the database pool', () => {
+   it('outlives a connection the database drops, as when Postgres restarts', async () => {
+     const dropped: Error[] = [];
+-    const pool = openPool('postgres://hornhoof@127.0.0.1:1/hornhoof', err => dropped.push(err));
++    const pool = openPool('postgres://hornhoof@127.0.0.1:1/hornhoof', err => dropped.push(err), 'hornhoof-app');
+     /* pg reports a dropped idle connection as an error on the pool; without a listener Node ends the process. */
+     expect(() => pool.emit('error', new Error('Connection terminated unexpectedly'))).not.toThrow();
+     expect(dropped.map(e => e.message)).toEqual(['Connection terminated unexpectedly']);
+     await pool.end();
+   });
++
++  it('names each pool to Postgres', async () => {
++    const url = 'postgres://hornhoof@127.0.0.1:1/hornhoof';
++    const keeper = openPool(url, () => {}, 'hornhoof-keeper', { statementTimeoutMs: 2000 });
++    const app = openPool(url, () => {}, 'hornhoof-app');
++    expect(keeper.options).toMatchObject({ application_name: 'hornhoof-keeper', statement_timeout: 2000 });
++    expect(app.options).toMatchObject({ application_name: 'hornhoof-app' });
++    expect(app.options).not.toHaveProperty('statement_timeout');
++    await Promise.all([keeper.end(), app.end()]);
++  });
++
++  it('hands the name and the statement timeout of openDb to its pool', async () => {
++    const db = openDb('postgres://hornhoof@127.0.0.1:1/hornhoof', 'hornhoof-keeper', { statementTimeoutMs: 2000 });
++    const pool = (db as unknown as { $client: pg.Pool }).$client;
++    expect(pool.options).toMatchObject({ application_name: 'hornhoof-keeper', statement_timeout: 2000 });
++    await pool.end();
++  });
+ });
+diff --git a/apps/server/test/migrate-masking.test.ts b/apps/server/test/migrate-masking.test.ts
+new file mode 100644
+index 00000000..6d3e4fb4
+--- /dev/null
++++ b/apps/server/test/migrate-masking.test.ts
+@@ -0,0 +1,19 @@
++import { describe, expect, it, vi } from 'vitest';
++
++vi.mock('../src/db/client.js', () => ({
++  migrateDb: async () => {
++    throw new Error('Failed query', { cause: new Error('could not connect to postgres://hornhoof:s3cret@db:5432/hornhoof') });
++  },
++}));
++
++describe('the migrate entry point when the driver repeats the database address', () => {
++  it('says the reason and keeps the password out of the line', async () => {
++    const { runMigrate } = await import('../src/migrate.js');
++    const lines: string[] = [];
++    const code = await runMigrate({ DATABASE_URL: 'postgres://hornhoof:s3cret@db:5432/hornhoof' }, line => lines.push(line));
++    expect(code).toBe(1);
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain('could not connect to postgres://hornhoof:***@db');
++    expect(lines[0]).not.toContain('s3cret');
++  });
++});
+diff --git a/apps/server/test/migrate.test.ts b/apps/server/test/migrate.test.ts
+new file mode 100644
+index 00000000..0cee3310
+--- /dev/null
++++ b/apps/server/test/migrate.test.ts
+@@ -0,0 +1,25 @@
++import { describe, expect, it } from 'vitest';
++import { runMigrate } from '../src/migrate.js';
++
++async function migrateWith(env: NodeJS.ProcessEnv) {
++  const lines: string[] = [];
++  const code = await runMigrate(env, line => lines.push(line));
++  return { code, lines };
++}
++
++describe('the migrate entry point', () => {
++  it('says what is missing without a database address', async () => {
++    const { code, lines } = await migrateWith({});
++    expect(code).toBe(1);
++    expect(lines).toEqual(['DATABASE_URL is not set.']);
++  });
++
++  it('fails plainly when the database does not answer, and hides the password', async () => {
++    const { code, lines } = await migrateWith({ DATABASE_URL: 'postgres://hornhoof:s3cret@127.0.0.1:1/hornhoof' });
++    expect(code).toBe(1);
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toMatch(/^Could not bring the database up to this build:/);
++    expect(lines[0]).not.toContain('s3cret');
++    expect(lines[0]).toContain('ECONNREFUSED');
++  });
++});

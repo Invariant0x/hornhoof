@@ -1,0 +1,61 @@
+== changed files
+apps/server/src/cli.ts
+apps/server/src/db/agent-sql.ts
+apps/server/src/db/client.ts
+apps/server/src/db/confirm.ts
+apps/server/src/errors.ts
+apps/server/src/main.ts
+apps/server/src/modules/tools/database.ts
+apps/server/test/agent-sql.test.ts
+apps/server/test/confirm.test.ts
+apps/server/test/db-pool.test.ts
+apps/server/test/errors.test.ts
+apps/server/test/fake-pg-client.ts
+apps/server/test/fence-lint.test.ts
+apps/server/test/helpers.ts
+apps/server/test/journal.test.ts
+apps/server/test/orchestrator-control.test.ts
+apps/server/test/real/agent-sql.test.ts
+apps/web/src/i18n/en.ts
+apps/web/src/i18n/ru.ts
+apps/web/test/i18n.test.tsx
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 18096[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 18094[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m131 passed[39m[22m[90m (131)[39m
+[2m      Tests [22m [1m[32m2525 passed[39m[22m[90m (2525)[39m
+[2m   Start at [22m 11:55:04
+[2m   Duration [22m 1683.31s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m131 workers spawned[39m[2m · ~263ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~11.23s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== apps/web tests
+ [32m✓[39m test/CommandLifetime.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 152[2mms[22m[39m
+ [32m✓[39m test/restarts.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m test/dev-server.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 22[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m49 passed[39m[22m[90m (49)[39m
+[2m      Tests [22m [1m[32m769 passed[39m[22m[90m (769)[39m
+[2m   Start at [22m 12:23:08
+[2m   Duration [22m 116.17s[2m (tests 73%, environment 18%, setup 4%, import 3%, transform 1%, worker 1%)[22m
+
+[2m    Isolate [22m [33m49 workers spawned[39m[2m · ~1.39s startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~21.27s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+worst changed CRAP: 6.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 228fd988

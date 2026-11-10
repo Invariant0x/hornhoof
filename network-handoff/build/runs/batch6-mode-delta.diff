@@ -1,0 +1,1644 @@
+# Review package: batch 6, slice mode-delta
+
+## 5e20285c Stop what a leader does as soon as the app leaves lead, and let no read write
+
+Batch 6's review of the app's modes (runs/batch6-mode-r2-agy.md) found work that crosses a step-down. Every claim held, and
+each fix below came from a test seen red for that reason.
+
+A read no longer writes: subViews and machineNodes stop expiring stale nodes, so the five screens cannot answer 500 under
+plan 3's fence. The minute round's reconcile stays the one writer. A waiting update stops on leaving lead: its 30 s timer,
+bus subscription, held turns and hand-over timeout go, nothing is pumped, and a POST whose registry read crossed a step-down
+is refused before it reaches the updater. A socket that crossed a step-down is refused on all three socket routes, and open
+sockets close in the very call that leaves lead. A stay in lead that ended stops its remaining hooks and leaves only those it
+entered. The entry sweeps and minute rounds run one at a time, and leaving waits for what runs. A hook registered late waits
+for what is pending. freshState refuses a word from the future. A second start and a late check after stop do nothing, and
+the hook log line goes through loggable.
+
+The 2 s promise is now shown on a fake clock with fromKeeper true, and that test was seen to fail with the poll at 3000 ms.
+The socket test keeps the real path from the keeper's word to the socket, with no timer of its own.
+
+Ruling: refused a crossing socket with a second modeGate in preHandler, not on the connection event - why: connection fires after the upgrade and the route's handler still runs right after it and reaches the hub and the terminals; at preHandler the client gets the same 503 and nothing waits between it and the upgrade - cost if wrong: a route that later adds its own waiting preHandler reopens the window, and its socket would stay open until the next step-down.
+Ruling: expireStaleNodes left the read paths in every mode, not only outside lead - why: only the leader writes and a read must not, and a 24 hour limit does not need the last minute; socket.test.ts sweeps before its two reads, as the read did before - cost if wrong: a screen shows a stale node as ready up to a minute longer.
+Ruling: AppMode gains whenLeaving; whenLead, current, settled, start, stop and whileLeading keep their names and shapes - why: closing sockets and standing down the update cannot wait behind an enter hook, and must run even when their hook never entered - cost if wrong: one more method to know.
+Ruling: a hook registered while leading is entered after what is pending, not synchronously, against plan 2's "entered at once" - why: the review's item 6, hooks keep their registered order - cost if wrong: a caller that reads the hook's effect right after whenLead must await settled().
+Ruling: freshState allows no skew - why: keeper and app share one host's clock, so a word ahead of now means the clock stepped back and says nothing about a live keeper; null keeps the mode and a live keeper's next word is obeyed - cost if wrong: a word written between reading now and reading the file waits one more check, a second.
+Ruling: a tick that finds a sweep running is dropped, not chained - why: the next tick does the same work with a fresh now, as sendWaiting and reconcile already skip themselves - cost if wrong: a round is late by up to one tick after an overrun.
+Ruling: a newer hand-over replaces the company's older release timeout, instead of both running - why: leaving lead has to clear them, so they are kept by company - cost if wrong: turns stay held up to ten minutes from the newest hand-over, not the oldest.
+Ruling: updateRoutes' onClose hook is gone - why: stop() leaves lead, which runs standDown, and an app not in lead has nothing waiting - cost if wrong: none seen; a waiting update on a closing app that never led cannot exist.
+Ruling: a links.sync in flight when the app leaves lead may still write tunnel.json, left as it is - why: the review's fix names it but this round's item 4 does not, and by plan 2 the keeper reads the link from the database while tunnel.json is the updater's and installer's copy of the same row - cost if wrong: the copy is written once after a step-down, with what the database holds.
+
+---
+ apps/server/src/app.ts                         |   5 +-
+ apps/server/src/modules/agents/timers.ts       |  52 ++++--
+ apps/server/src/modules/keeper/app-mode.ts     |  64 +++++--
+ apps/server/src/modules/keeper/state.ts        |   6 +-
+ apps/server/src/modules/nodes/nodes.ts         |   3 +-
+ apps/server/src/modules/subscriptions/views.ts |   3 +-
+ apps/server/src/modules/testruns/load.ts       |   3 +-
+ apps/server/src/modules/updates/routes.ts      |  29 ++-
+ apps/server/test/app-mode.test.ts              | 241 ++++++++++++++++++++++++-
+ apps/server/test/socket.test.ts                |   2 +
+ apps/server/test/timers.test.ts                |  71 +++++++-
+ apps/server/test/updates.test.ts               |  96 +++++++++-
+ 12 files changed, 525 insertions(+), 50 deletions(-)
+
+diff --git a/apps/server/src/app.ts b/apps/server/src/app.ts
+index 85df787f..812a834c 100644
+--- a/apps/server/src/app.ts
++++ b/apps/server/src/app.ts
+@@ -139,30 +139,33 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+   });
+   ctx.updater = new UpdaterControl(config.controlDir);
+   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
+   ctx.templates = loadTemplates(config.templatesDir);
+   ctx.links = new PublicLinks(ctx);
+   ctx.challenges = new Challenges();
+   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+-  ctx.mode.whenLead(() => undefined, () => closeOpenSockets(app));
++  ctx.mode.whenLeaving(() => closeOpenSockets(app));
+   app.addHook('onReady', async () => {
+     ctx.mode.start();
+     await ctx.mode.settled();
+   });
+   app.addHook('onClose', async () => ctx.mode.stop());
+   await app.register(cookie);
+   await app.register(websocket, SOCKET_OPTIONS);
+   /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+   app.addHook('onRequest', async (req, reply) => {
+     if (ctx.mode.current() === 'lead') await handOverSession(req, reply, deps.db, deps.config);
+   });
+   /* After the socket plugin, so a refused socket is closed by it. */
+   app.addHook('onRequest', modeGate(ctx.mode));
++  /* Again after the routes' own checks, which wait for the database: a socket that passed the gate above and crossed a
++     step-down there is refused here, and from here to its upgrade nothing waits, so none opens outside lead. */
++  app.addHook('preHandler', modeGate(ctx.mode));
+   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
+   if (web) await serveWebApp(app, deps.config.webDist);
+   publicRoutes(app, ctx);
+   setupRoutes(app, ctx);
+   authRoutes(app, deps);
+   peopleRoutes(app, ctx);
+   orgRoutes(app, ctx);
+   subscriptionRoutes(app, ctx);
+diff --git a/apps/server/src/modules/agents/timers.ts b/apps/server/src/modules/agents/timers.ts
+index 2ad790b3..c928975e 100644
+--- a/apps/server/src/modules/agents/timers.ts
++++ b/apps/server/src/modules/agents/timers.ts
+@@ -119,30 +119,48 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
+     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
+     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
+     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+     checkTestTimes(ctx).catch(failed('checking test run times failed')),
+     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+   ]);
+ }
+ 
+-/* Does the minute round while the app leads; left-behind turns and old files are looked at as it starts leading, and the
+-   timer stops with it, after waiting for a round that runs. */
+-export function startTimers(app: FastifyInstance, ctx: Ctx): void {
+-  const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
++/* What is looked at as the app starts leading, without waiting for the first minute round. */
++async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) => void): Promise<void> {
++  await Promise.all([
++    checkExternalWaits(ctx).catch(failed('ending external task waits failed')),
++    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
++    dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed')),
++  ]);
++}
++
++/* A leading app's sweeps, one at a time: those of the way in, then a round on each tick. A tick that finds a sweep still
++   running is dropped, since the next one does what it would have. Entering waits for no sweep; leaving stops the ticks
++   and waits for what runs, so nothing of this writes once the app has left lead. */
++export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS): { enter: () => void; leave: () => Promise<void> } {
+   let timer: NodeJS.Timeout | null = null;
+-  let round: Promise<void> = Promise.resolve();
+-  const enter = () => {
+-    void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
+-    void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
+-    void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
+-    timer = setInterval(() => {
+-      round = minuteRound(ctx, new Date(), failed);
+-    }, TICK_MS);
+-    timer.unref();
++  let running: Promise<void> | null = null;
++  const alone = (sweep: () => Promise<void>) => {
++    if (running) return;
++    running = sweep().finally(() => {
++      running = null;
++    });
+   };
+-  const leave = async () => {
+-    if (timer) clearInterval(timer);
+-    timer = null;
+-    await round;
++  return {
++    enter() {
++      alone(entry);
++      timer = setInterval(() => alone(round), everyMs);
++      timer.unref();
++    },
++    async leave() {
++      if (timer) clearInterval(timer);
++      timer = null;
++      await running;
++    },
+   };
++}
++
++export function startTimers(app: FastifyInstance, ctx: Ctx): void {
++  const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
++  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed));
+   ctx.mode.whenLead(enter, leave);
+ }
+diff --git a/apps/server/src/modules/keeper/app-mode.ts b/apps/server/src/modules/keeper/app-mode.ts
+index 65d545e4..4388a911 100644
+--- a/apps/server/src/modules/keeper/app-mode.ts
++++ b/apps/server/src/modules/keeper/app-mode.ts
+@@ -1,96 +1,136 @@
+ import type { FastifyRequest } from 'fastify';
+-import { ApiError } from '../../errors.js';
++import { ApiError, loggable } from '../../errors.js';
+ import { freshState, type Mode } from './state.js';
+ 
+ const CHECK_EVERY_MS = 1000;
+ 
+ export const READ_ONLY_MESSAGE = 'Hornhoof only reads on this machine now, so nothing was changed.';
+ const MESSAGES = {
+   read_only: READ_ONLY_MESSAGE,
+   maintenance: 'Hornhoof is installing an update and takes no changes until it ends.',
+   starting: 'Hornhoof is starting.',
+ } as const;
+ type Refusal = keyof typeof MESSAGES;
+ 
+ type Hook = { enter: () => unknown; leave: () => unknown };
++/* One stay in lead: the hooks it entered, which are the only ones it leaves, and whether it has ended. */
++type LeadStay = { entered: Hook[]; over: boolean };
+ export type AppModeOptions = {
+   dir: string;
+   fromKeeper: boolean;
+   everyMs?: number;
+   staleMs?: number;
+   now?: () => number;
+   log: (line: string) => void;
+ };
+ 
+ /* The mode the app runs in: lead, read, maintenance or off. The keeper says it in keeper.json; an app with no keeper
+    (tests, a compose file of an older build) leads. Work only a leader does registers with whenLead. */
+ export class AppMode {
+   private mode: Mode = 'off';
+   private readonly hooks: Hook[] = [];
++  private readonly atLeaving: (() => unknown)[] = [];
++  private stay: LeadStay = { entered: [], over: true };
+   private timer: NodeJS.Timeout | null = null;
++  private stopped = false;
+   /* Hook runs, one after another, so a quick lead, read, lead never overlaps its own work. */
+   private pending: Promise<void> = Promise.resolve();
+ 
+   constructor(private readonly opts: AppModeOptions) {}
+ 
+   current(): Mode {
+     return this.mode;
+   }
+ 
+   start(): void {
++    if (this.timer || this.stopped) return;
+     if (!this.opts.fromKeeper) return this.change('lead');
+     void this.check();
+     this.timer = setInterval(() => void this.check(), this.opts.everyMs ?? CHECK_EVERY_MS);
+     this.timer.unref();
+   }
+ 
+   /* Resolves when the work of the start or of any change so far has ended. */
+   settled(): Promise<void> {
+     return this.pending;
+   }
+ 
+   async stop(): Promise<void> {
++    this.stopped = true;
+     if (this.timer) clearInterval(this.timer);
+     this.timer = null;
+     this.change('off');
+     await this.pending;
+   }
+ 
+   async check(): Promise<void> {
++    if (this.stopped) return;
+     const word = this.opts.fromKeeper ? freshState(this.opts.dir, (this.opts.now ?? Date.now)(), this.opts.staleMs) : null;
+     if (word) this.change(word.mode);
+     await this.pending;
+   }
+ 
++  /* Entered after whatever is pending, so a hook never starts ahead of or beside the ones registered before it. */
+   whenLead(enter: () => unknown, leave: () => unknown): void {
+     const hook = { enter, leave };
+     this.hooks.push(hook);
+-    if (this.mode === 'lead') this.pending = Promise.all([this.pending, this.run('enter', [hook])]).then(() => undefined);
++    if (this.mode === 'lead') this.enterAfterPending(this.stay, [hook]);
++  }
++
++  /* For what must not wait behind a slow hook: it runs in the very call that leaves lead, however that stay in lead went. */
++  whenLeaving(now: () => unknown): void {
++    this.atLeaving.push(now);
+   }
+ 
+   private change(next: Mode): void {
+     const was = this.mode;
+     if (was === next) return;
+     this.mode = next;
+     this.opts.log(`Hornhoof now runs in ${next} mode.`);
+-    const hooks = [...this.hooks];
+-    if (next === 'lead') this.pending = this.pending.then(() => this.run('enter', hooks));
+-    else if (was === 'lead') this.pending = this.pending.then(() => this.run('leave', hooks));
++    if (next === 'lead') this.beginStay();
++    else if (was === 'lead') this.endStay();
+   }
+ 
+-  /* A hook that throws costs one log line and stops neither the others nor the change. */
+-  private async run(which: 'enter' | 'leave', hooks: Hook[]): Promise<void> {
++  private beginStay(): void {
++    this.stay = { entered: [], over: false };
++    this.enterAfterPending(this.stay, [...this.hooks]);
++  }
++
++  private endStay(): void {
++    const stay = this.stay;
++    stay.over = true;
++    for (const now of this.atLeaving) void this.attempt('leaving', now);
++    this.pending = this.pending.then(() => this.leave(stay));
++  }
++
++  private enterAfterPending(stay: LeadStay, hooks: Hook[]): void {
++    this.pending = this.pending.then(() => this.enter(stay, hooks));
++  }
++
++  /* A hook counts as entered from the moment it starts, since what it began needs its leave even if it then throws. */
++  private async enter(stay: LeadStay, hooks: Hook[]): Promise<void> {
+     for (const hook of hooks) {
+-      try {
+-        await hook[which]();
+-      } catch (err) {
+-        this.opts.log(`A ${which} hook of lead mode failed: ${err instanceof Error ? err.message : String(err)}`);
+-      }
++      if (stay.over) return;
++      stay.entered.push(hook);
++      await this.attempt('enter', hook.enter);
++    }
++  }
++
++  private async leave(stay: LeadStay): Promise<void> {
++    for (const hook of stay.entered) await this.attempt('leave', hook.leave);
++  }
++
++  /* A hook that throws costs one log line and stops neither the others nor the change. */
++  private async attempt(which: 'enter' | 'leave' | 'leaving', work: () => unknown): Promise<void> {
++    try {
++      await work();
++    } catch (err) {
++      this.opts.log(`A hook of lead mode failed on ${which}: ${String(loggable(err).message)}`);
+     }
+   }
+ }
+ 
+ type Asked = Pick<FastifyRequest, 'method' | 'url' | 'headers'>;
+ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
+ const pathOf = (url: string): string => url.split('?')[0]!;
+ const wantsSocket = (req: Asked): boolean => String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
+diff --git a/apps/server/src/modules/keeper/state.ts b/apps/server/src/modules/keeper/state.ts
+index 3410db55..65890c8e 100644
+--- a/apps/server/src/modules/keeper/state.ts
++++ b/apps/server/src/modules/keeper/state.ts
+@@ -30,14 +30,16 @@ export function readKeeperState(dir: string): KeeperState | null {
+ export function writeKeeperState(dir: string, state: KeeperState): void {
+   const path = join(dir, KEEPER_FILE);
+   const partial = `${path}.${process.pid}.tmp`;
+   writeFileSync(partial, JSON.stringify(state));
+   chmodSync(partial, 0o644);
+   renameSync(partial, path);
+ }
+ 
+-/* The word, only while it is recent: a keeper that stopped writing is not obeyed. */
++/* The word, only while it is recent: a keeper that stopped writing is not obeyed. A word from the future means the clock
++   stepped back, so it says nothing about whether the keeper still lives; a live keeper's next word is obeyed anyway. */
+ export function freshState(dir: string, now: number, staleMs = FRESH_MS): KeeperState | null {
+   const state = readKeeperState(dir);
+   if (!state) return null;
+-  return now - Date.parse(state.at) <= staleMs ? state : null;
++  const age = now - Date.parse(state.at);
++  return age >= 0 && age <= staleMs ? state : null;
+ }
+diff --git a/apps/server/src/modules/nodes/nodes.ts b/apps/server/src/modules/nodes/nodes.ts
+index 295c4539..f3d5aaed 100644
+--- a/apps/server/src/modules/nodes/nodes.ts
++++ b/apps/server/src/modules/nodes/nodes.ts
+@@ -13,17 +13,18 @@ export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdent
+   const [row] = await ctx.db.select({ keyHash: nodes.keyHash }).from(nodes).where(eq(nodes.id, id.nodeId));
+   if (row?.keyHash === id.keyHash) return true;
+   ctx.hub.close(id.nodeId, 4001, id.keyHash);
+   return false;
+ }
+ 
+ export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
+ 
+-/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. */
++/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. A write, so only
++   the leader's minute round calls it: the screens show what it last found, a minute late at worst. */
+ export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> {
+   const cutoff = new Date(now.getTime() - NODE_STALE_MS);
+   const stale = await db
+     .update(nodes)
+     .set({ status: 'needs_login' })
+     .where(and(eq(nodes.status, 'ready'), lte(nodes.lastSeenAt, cutoff)))
+     .returning({ subscriptionId: nodes.subscriptionId });
+   await settlePlans(db, stale.map(n => n.subscriptionId));
+diff --git a/apps/server/src/modules/subscriptions/views.ts b/apps/server/src/modules/subscriptions/views.ts
+index ea5a95c6..aabd1c58 100644
+--- a/apps/server/src/modules/subscriptions/views.ts
++++ b/apps/server/src/modules/subscriptions/views.ts
+@@ -1,16 +1,16 @@
+ import type { Account, Limits } from '@hornhoof/protocol';
+ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+ import type { Db } from '../../db/client.js';
+ import { agents, departments, nodes, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+ import { WHOLE_COMPANY } from '../people/views.js';
+ import { deptName } from '../departments/templates.js';
+ import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+-import { expireStaleNodes, planNodes } from '../nodes/nodes.js';
++import { planNodes } from '../nodes/nodes.js';
+ 
+ /* listed: a personal plan whose owner has several departments; the name lists them. */
+ export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
+ 
+ export type SubView = {
+   id: string;
+   provider: Provider;
+   kind: 'personal' | 'api_key';
+@@ -80,17 +80,16 @@ function placeOf(kind: string | null, id: string | null, depts: Map<string, stri
+ 
+ /* A personal plan serves wherever its owner works: the whole company, or each listed department, teams counting as theirs. */
+ function ownerPlace(deptIds: string[], depts: Map<string, string>): Place {
+   if (deptIds.length === 1) return { kind: 'department', id: deptIds[0]!, name: depts.get(deptIds[0]!) ?? '' };
+   return { kind: 'listed', id: null, name: deptIds.map(d => depts.get(d) ?? '').join(', ') };
+ }
+ 
+ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
+-  await expireStaleNodes(db);
+   const live = isNull(subscriptions.removedAt);
+   const rows = await db
+     .select(columns)
+     .from(subscriptions)
+     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
+     .where(id ? and(live, eq(subscriptions.id, id)) : live)
+     .orderBy(asc(subscriptions.createdAt));
+   const deptRows = await db
+diff --git a/apps/server/src/modules/testruns/load.ts b/apps/server/src/modules/testruns/load.ts
+index 78801a7b..ac1bd122 100644
+--- a/apps/server/src/modules/testruns/load.ts
++++ b/apps/server/src/modules/testruns/load.ts
+@@ -1,14 +1,14 @@
+ import type { NodeLoad } from '@hornhoof/protocol';
+ import { and, asc, eq, isNull } from 'drizzle-orm';
+ import type { Db } from '../../db/client.js';
+ import { nodes, subscriptions } from '../../db/schema.js';
+ import { nodeIdentity, type NodeHub, type SaidLoad } from '../nodes/hub.js';
+-import { expireStaleNodes, liveNode } from '../nodes/nodes.js';
++import { liveNode } from '../nodes/nodes.js';
+ 
+ // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
+ const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
+ 
+ /* A machine's load from what its nodes said: they share its processors and memory, of which the newest word counts, and
+    each runs jobs of its own. */
+ export function together(loads: (SaidLoad | null)[]): NodeLoad | null {
+   const said = loads.filter((l): l is SaidLoad => l !== null);
+@@ -22,17 +22,16 @@ export function forRun(own: SaidLoad | null, loads: (SaidLoad | null)[]): NodeLo
+   const combined = together(loads);
+   return own && combined ? { ...combined, cpus: own.cpus, load: own.load, memFree: own.memFree, memTotal: own.memTotal } : null;
+ }
+ 
+ /* The nodes that stand for the company's machines: each machine's own and its plans'. A removed plan's node is gone from
+    its machine, though it keeps its key until it hears so. Plans that joined with one command came at the same moment, so
+    they go by name. */
+ export async function machineNodes(db: Db, companyId: string) {
+-  await expireStaleNodes(db);
+   return db
+     .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
+     .from(nodes)
+     .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
+     .where(and(eq(nodes.companyId, companyId), liveNode, isNull(subscriptions.removedAt)))
+     .orderBy(asc(nodes.createdAt), asc(subscriptions.provider), asc(nodes.id));
+ }
+ 
+diff --git a/apps/server/src/modules/updates/routes.ts b/apps/server/src/modules/updates/routes.ts
+index fd6f720a..84b19d0a 100644
+--- a/apps/server/src/modules/updates/routes.ts
++++ b/apps/server/src/modules/updates/routes.ts
+@@ -1,16 +1,17 @@
+ import { randomUUID } from 'node:crypto';
+ import type { FastifyInstance, FastifyRequest } from 'fastify';
+ import { z } from 'zod';
+ import type { Ctx } from '../../app.js';
+ import { requireCompanyScope, requirePerson } from '../../auth/session.js';
+ import { ApiError, loggable } from '../../errors.js';
+ import { pumpWaiting } from '../conversation/queue.js';
+ import { workingCount } from '../events/store.js';
++import { modeGate } from '../keeper/app-mode.js';
+ import { holdTurns } from './drain.js';
+ import type { UpdateRequest, UpdaterView } from './control.js';
+ import type { Build } from './registry.js';
+ 
+ export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true) });
+ const FULL_SHA = /^[0-9a-f]{40}$/;
+ /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
+ const IDLE_CHECK_MS = 30_000;
+@@ -19,16 +20,18 @@ const HELD_AFTER_MS = 10 * 60_000;
+ 
+ type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
+ 
+ /* The running build summary is for every signed-in person. Published builds and update controls
+    are for people who see the whole company. */
+ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
+   const { version, commit, migrations } = ctx.config;
+   let waiting: Waiting | null = null;
++  /* What ends the hold on a company's turns once its update went to the updater. */
++  const heldAfterHandOver = new Map<string, NodeJS.Timeout>();
+ 
+   async function companyPerson(req: FastifyRequest) {
+     const me = await requirePerson(req, ctx.db);
+     requireCompanyScope(me);
+     return me;
+   }
+ 
+   function view() {
+@@ -48,16 +51,36 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
+     waiting = null;
+   }
+ 
+   function letTurnsGo(companyId: string) {
+     holdTurns(ctx, companyId, false);
+     void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
+   }
+ 
++  function holdAfterHandOver(companyId: string) {
++    clearTimeout(heldAfterHandOver.get(companyId));
++    const timeout = setTimeout(() => {
++      heldAfterHandOver.delete(companyId);
++      if (waiting?.companyId !== companyId) letTurnsGo(companyId);
++    }, HELD_AFTER_MS);
++    timeout.unref();
++    heldAfterHandOver.set(companyId, timeout);
++  }
++
++  /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader
++     starts turns: its minute round picks up what waits. */
++  function standDown() {
++    const companies = waiting ? [waiting.companyId, ...heldAfterHandOver.keys()] : [...heldAfterHandOver.keys()];
++    callOff(false);
++    heldAfterHandOver.forEach(timeout => clearTimeout(timeout));
++    heldAfterHandOver.clear();
++    for (const companyId of companies) holdTurns(ctx, companyId, false);
++  }
++
+   /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
+      digests pin it: the updater installs only the app image the app read, and the node and updater images of the
+      same tag, read now. */
+   async function requestFor(build: Build, id: string): Promise<UpdateRequest> {
+     const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
+     const siblings = await ctx.updates.siblings(tag).catch(err => {
+       app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
+       throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
+@@ -76,29 +99,29 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
+   async function sendWhenIdle(companyId: string, request: UpdateRequest) {
+     let done = false;
+     const wanted = () => !done && waiting?.request.id === request.id;
+     const check = async () => {
+       if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
+       send(request);
+       done = true;
+       callOff(false);
+-      setTimeout(() => waiting?.companyId === companyId || letTurnsGo(companyId), HELD_AFTER_MS).unref();
++      holdAfterHandOver(companyId);
+     };
+     const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
+     const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
+     const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
+     timer.unref();
+     waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
+     /* No new turn starts meanwhile, so the running ones can end. */
+     holdTurns(ctx, companyId, true);
+     await tryCheck();
+   }
+ 
+-  app.addHook('onClose', async () => callOff(false));
++  ctx.mode.whenLeaving(standDown);
+ 
+   app.get('/api/updates/current', async req => {
+     await requirePerson(req, ctx.db);
+     return { version, commit: commit.slice(0, 7) };
+   });
+ 
+   app.get('/api/updates', async req => {
+     await companyPerson(req);
+@@ -118,16 +141,18 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
+       throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
+     }
+     if (ctx.updater.status()?.state === 'running') throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
+     if (!ctx.updates.state().checkedAt) await ctx.updates.now();
+     const { latest, versions } = ctx.updates.state();
+     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
+     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
+     const request = await requestFor(build, randomUUID());
++    /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
++    await modeGate(ctx.mode)(req);
+     callOff();
+     if (body.whenIdle) await sendWhenIdle(me.companyId, request);
+     else send(request);
+     return reply.code(202).send({ id: request.id });
+   });
+ 
+   app.delete('/api/updates', async (req, reply) => {
+     await companyPerson(req);
+diff --git a/apps/server/test/app-mode.test.ts b/apps/server/test/app-mode.test.ts
+index e82c253a..974daab5 100644
+--- a/apps/server/test/app-mode.test.ts
++++ b/apps/server/test/app-mode.test.ts
+@@ -1,16 +1,19 @@
+ import { eq } from 'drizzle-orm';
++import type { FastifyInstance } from 'fastify';
+ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+-import { describe, expect, it, onTestFinished } from 'vitest';
+-import { sessions } from '../src/db/schema.js';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
++import WebSocket from 'ws';
++import { agents, nodes, sessions, subscriptions } from '../src/db/schema.js';
+ import { hashToken } from '../src/crypto/tokens.js';
+ import { AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
++import { NODE_STALE_MS } from '../src/modules/nodes/nodes.js';
+ import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
+ import { as, connectNode, listen, setUpCompany, testApp, TUNNEL, until, viaLink } from './helpers.js';
+ 
+ const NOW = 1_700_000_000_000;
+ const NODE_KEY = 'k'.repeat(40);
+ 
+ function folder(): string {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-mode-'));
+@@ -21,16 +24,23 @@ function folder(): string {
+ const stateOf = (mode: Mode, at: number = NOW): KeeperState => ({ mode, at: new Date(at).toISOString(), link: null });
+ 
+ function modeIn(dir: string, extra: Partial<ConstructorParameters<typeof AppMode>[0]> = {}) {
+   const lines: string[] = [];
+   const mode = new AppMode({ dir, fromKeeper: true, now: () => NOW, log: line => lines.push(line), ...extra });
+   return { mode, lines };
+ }
+ 
++/* A promise the test opens by hand, so a hook stays in the middle of its work for as long as the test needs. */
++function gate() {
++  let open!: () => void;
++  const opened = new Promise<void>(done => (open = done));
++  return { opened, open };
++}
++
+ describe('the keeper file', () => {
+   it('is written whole and read back', () => {
+     const dir = folder();
+     const state: KeeperState = { mode: 'lead', at: new Date(NOW).toISOString(), link: { host: 'acme.hornhoof.test', fingerprint256: null } };
+     writeKeeperState(dir, state);
+     expect(readKeeperState(dir)).toEqual(state);
+   });
+ 
+@@ -46,16 +56,24 @@ describe('the keeper file', () => {
+   it('counts a word fresh for ten seconds', () => {
+     const dir = folder();
+     writeKeeperState(dir, stateOf('lead', NOW - 10_000));
+     expect(freshState(dir, NOW)?.mode).toBe('lead');
+     writeKeeperState(dir, stateOf('lead', NOW - 10_001));
+     expect(freshState(dir, NOW)).toBeNull();
+     expect(freshState(dir, NOW, 20_000)?.mode).toBe('lead');
+   });
++
++  it('counts a word from the future as no word, however little ahead', () => {
++    const dir = folder();
++    writeKeeperState(dir, stateOf('lead', NOW + 1));
++    expect(freshState(dir, NOW)).toBeNull();
++    writeKeeperState(dir, stateOf('lead', NOW));
++    expect(freshState(dir, NOW)?.mode).toBe('lead');
++  });
+ });
+ 
+ describe('AppMode', () => {
+   it('leads at once without a keeper', () => {
+     const { mode, lines } = modeIn(folder(), { fromKeeper: false });
+     expect(mode.current()).toBe('off');
+     mode.start();
+     expect(mode.current()).toBe('lead');
+@@ -96,56 +114,185 @@ describe('AppMode', () => {
+     for (const next of ['lead', 'maintenance', 'lead'] as const) {
+       writeKeeperState(dir, stateOf(next));
+       await mode.check();
+     }
+     await mode.stop();
+     expect(counts).toEqual({ enter: 2, leave: 2 });
+   });
+ 
+-  it('enters a hook registered while leading at once, and in the order hooks were registered', async () => {
++  it('enters a hook registered while leading, and in the order hooks were registered', async () => {
+     const dir = folder();
+     const { mode } = modeIn(dir);
+     const order: string[] = [];
+     mode.whenLead(() => void order.push('first in'), () => void order.push('first out'));
+     writeKeeperState(dir, stateOf('lead'));
+     await mode.check();
+     mode.whenLead(() => void order.push('late in'), () => void order.push('late out'));
++    await mode.settled();
+     expect(order).toEqual(['first in', 'late in']);
+     writeKeeperState(dir, stateOf('read'));
+     await mode.check();
+     expect(order.slice(2)).toEqual(['first out', 'late out']);
+   });
+ 
++  it('enters a hook registered after start only once the hooks before it have ended', async () => {
++    const { mode } = modeIn(folder(), { fromKeeper: false });
++    const order: string[] = [];
++    const first = gate();
++    mode.whenLead(async () => {
++      order.push('first in');
++      await first.opened;
++      order.push('first done');
++    }, () => undefined);
++    mode.start();
++    mode.whenLead(() => void order.push('second in'), () => undefined);
++    await Promise.resolve();
++    first.open();
++    await mode.settled();
++    expect(order).toEqual(['first in', 'first done', 'second in']);
++  });
++
++  /* The app is in lead with a first hook still entering, the second waiting behind it. */
++  async function midwayIntoLead(dir: string, order: string[]) {
++    const { mode } = modeIn(dir);
++    const reached = gate();
++    const slow = gate();
++    mode.whenLead(async () => {
++      order.push('slow in');
++      reached.open();
++      await slow.opened;
++    }, () => void order.push('slow out'));
++    mode.whenLead(() => void order.push('next in'), () => void order.push('next out'));
++    writeKeeperState(dir, stateOf('lead'));
++    void mode.check();
++    await reached.opened;
++    return { mode, slow };
++  }
++
++  it('stops the remaining hooks of a stay in lead that ended, and leaves only those it entered', async () => {
++    const dir = folder();
++    const order: string[] = [];
++    const { mode, slow } = await midwayIntoLead(dir, order);
++    mode.whenLead(() => void order.push('late in'), () => void order.push('late out'));
++    writeKeeperState(dir, stateOf('read'));
++    void mode.check();
++    slow.open();
++    await mode.settled();
++    expect(order).toEqual(['slow in', 'slow out']);
++  });
++
++  it('finishes leaving before it enters again, on a quick lead, read, lead', async () => {
++    const dir = folder();
++    const order: string[] = [];
++    const { mode, slow } = await midwayIntoLead(dir, order);
++    writeKeeperState(dir, stateOf('read'));
++    void mode.check();
++    writeKeeperState(dir, stateOf('lead'));
++    void mode.check();
++    slow.open();
++    await mode.settled();
++    expect(order).toEqual(['slow in', 'slow out', 'slow in', 'next in']);
++  });
++
++  it('runs whenLeaving in the very call that leaves lead, ahead of a hook still at work', async () => {
++    const dir = folder();
++    const { mode, slow } = await midwayIntoLead(dir, []);
++    const left: string[] = [];
++    mode.whenLeaving(() => {
++      left.push('first');
++      throw new Error('boom');
++    });
++    mode.whenLeaving(() => void left.push('second'));
++    writeKeeperState(dir, stateOf('read'));
++    void mode.check();
++    expect(left).toEqual(['first', 'second']);
++    writeKeeperState(dir, stateOf('maintenance'));
++    void mode.check();
++    expect(left).toEqual(['first', 'second']);
++    slow.open();
++    await mode.settled();
++  });
++
+   it('lets the next hook run when one throws, and says so in one log line', async () => {
+     const dir = folder();
+     const { mode, lines } = modeIn(dir);
+     let second = 0;
+     mode.whenLead(() => { throw new Error('boom'); }, () => undefined);
+     mode.whenLead(() => void second++, () => undefined);
+     writeKeeperState(dir, stateOf('lead'));
+     await mode.check();
+     expect(second).toBe(1);
+     expect(mode.current()).toBe('lead');
+     expect(lines.filter(line => line.includes('boom'))).toHaveLength(1);
+   });
+ 
++  it('hides a password in what a failed hook logs', async () => {
++    const dir = folder();
++    const { mode, lines } = modeIn(dir);
++    mode.whenLead(() => { throw new Error('no database at postgres://hornhoof:hunter2@db/x'); }, () => undefined);
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    expect(lines.filter(line => line.includes('hunter2'))).toEqual([]);
++    expect(lines.filter(line => line.includes('no database at'))).toHaveLength(1);
++  });
++
+   it('waits for a slow leave hook in the check that leaves', async () => {
+     const dir = folder();
+     const { mode } = modeIn(dir);
+     let finished = false;
+     mode.whenLead(() => undefined, () => new Promise<void>(done => setTimeout(() => { finished = true; done(); }, 200)));
+     writeKeeperState(dir, stateOf('lead'));
+     await mode.check();
+     writeKeeperState(dir, stateOf('maintenance'));
+     await mode.check();
+     expect(finished).toBe(true);
+   });
+ });
+ 
++describe('AppMode on the clock, behind a keeper', () => {
++  function clocked() {
++    vi.useFakeTimers();
++    onTestFinished(() => void vi.useRealTimers());
++    const dir = folder();
++    return { dir, ...modeIn(dir) };
++  }
++
++  it('takes the keeper\'s word in the start itself, and acts on a new word within 2 s, ahead of any hook', async () => {
++    const { dir, mode } = clocked();
++    const told: Mode[] = [];
++    writeKeeperState(dir, stateOf('lead'));
++    mode.whenLead(() => new Promise(() => undefined), () => undefined);
++    mode.whenLeaving(() => void told.push(mode.current()));
++    mode.start();
++    expect(mode.current()).toBe('lead');
++    writeKeeperState(dir, stateOf('maintenance'));
++    vi.advanceTimersByTime(2000);
++    expect(told).toEqual(['maintenance']);
++  });
++
++  it('reads no more once stopped, though it was started twice', async () => {
++    const { dir, mode } = clocked();
++    mode.start();
++    mode.start();
++    await mode.stop();
++    writeKeeperState(dir, stateOf('lead'));
++    vi.advanceTimersByTime(2000);
++    expect(mode.current()).toBe('off');
++  });
++
++  it('takes no word in a late check after stop', async () => {
++    const { dir, mode } = clocked();
++    await mode.stop();
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    expect(mode.current()).toBe('off');
++  });
++});
++
+ describe('whileLeading', () => {
+   it('does its work in lead, and in maintenance and off resolves without doing it', async () => {
+     const dir = folder();
+     const { mode } = modeIn(dir);
+     const calls: number[] = [];
+     const work = whileLeading(mode, async (n: number) => void calls.push(n));
+     await work(0);
+     writeKeeperState(dir, stateOf('lead'));
+@@ -207,24 +354,37 @@ describe('what each mode allows', () => {
+       reason: 'starting',
+       message: 'Hornhoof is starting.',
+     });
+   });
+ });
+ 
+ async function appWithKeeper(first?: Mode) {
+   const dir = folder();
+-  if (first) writeKeeperState(dir, stateOf(first, Date.now()));
+   const made = await testApp({ HORNHOOF_KEEPER: 'on', HORNHOOF_CONTROL_DIR: dir, NODE_KEY, TUNNEL_HOST: TUNNEL });
+   const say = (mode: Mode) => writeKeeperState(dir, stateOf(mode, Date.now()));
++  /* Said once the app is built and not yet started, so a slow build cannot make the word stale. */
++  if (first) say(first);
+   const modeNow = async () => (await made.app.inject({ url: '/api/health' })).json().mode;
+-  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 4000);
++  /* How soon the poll comes is shown on the clock above, so this bound only has to outlast a loaded machine. */
++  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 15_000);
+   return { ...made, dir, say, reaches };
+ }
+ 
++/* A company with a plan and a node for it, whose key the test can connect with. */
++async function companyWithNode(app: FastifyInstance) {
++  const ceo = await setUpCompany(app);
++  const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
++  const code = connected.json().command.split('--join ')[1];
++  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
++  const [node] = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload })).json().nodes;
++  return { ceo, nodeId: node.nodeId as string, subId: node.subscriptionId as string, key: node.key as string };
++}
++type CompanyWithNode = Awaited<ReturnType<typeof companyWithNode>>;
++
+ describe('the app behind a keeper', () => {
+   it('answers only health while off', async () => {
+     const { app, config } = await appWithKeeper();
+     const health = await app.inject({ url: '/api/health' });
+     expect(health.statusCode).toBe(503);
+     expect(health.json()).toEqual({ ok: false, version: config.version, commit: config.commit, mode: 'off' });
+     const me = await app.inject({ url: '/api/me' });
+     expect(me.statusCode).toBe(503);
+@@ -263,18 +423,85 @@ describe('the app behind a keeper', () => {
+     const before = await db.select().from(sessions);
+     say('maintenance');
+     await reaches('maintenance');
+     const res = await app.inject({ url: '/api/me', ...viaLink(), cookies: { hh_session: token } });
+     expect(res.cookies.some(cookie => cookie.name === '__Host-hh_session')).toBe(false);
+     expect(await db.select().from(sessions)).toEqual(before);
+   });
+ 
++  it('writes nothing on the screens that show nodes, with a node silent for over a day', async () => {
++    const { app, db, say, reaches } = await appWithKeeper('lead');
++    const { ceo, nodeId, subId } = await companyWithNode(app);
++    await db.update(nodes).set({ status: 'ready', lastSeenAt: new Date(Date.now() - NODE_STALE_MS - 60_000) }).where(eq(nodes.id, nodeId));
++    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
++    const [orchestrator] = await db.select({ id: agents.id }).from(agents);
++    say('read');
++    await reaches('read');
++    for (const url of ['/api/org', '/api/subscriptions', `/api/agents/${orchestrator!.id}`, '/api/machines', '/api/pool']) {
++      expect((await app.inject({ url, ...as(ceo) })).statusCode).toBe(200);
++      expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status, url).toBe('ready');
++      expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.status, url).toBe('ready');
++    }
++  });
++
++  /* That the poll comes within 2 s is shown on the clock above; this is the way from the keeper's word to the socket. */
+   it('closes open sockets when it leaves lead, and refuses new ones while it is away', async () => {
+     const { app, say } = await appWithKeeper('lead');
+     const url = await listen(app);
+     const node = await connectNode(url, NODE_KEY);
+     say('maintenance');
+-    const code = await Promise.race([node.closed, new Promise<number>(done => setTimeout(() => done(-1), 4000))]);
+-    expect(code).toBe(1012);
++    expect(await node.closed).toBe(1012);
+     await expect(connectNode(url, NODE_KEY)).rejects.toThrow(/503/);
+   });
++
++  it('closes open sockets at once on leaving lead, though the way in is still at work', async () => {
++    const { app, say, reaches } = await appWithKeeper('read');
++    const url = await listen(app);
++    const stuck = gate();
++    onTestFinished(stuck.open);
++    app.ctx.links.sync = () => stuck.opened;
++    say('lead');
++    await reaches('lead');
++    const node = await connectNode(url, NODE_KEY);
++    say('maintenance');
++    expect(await node.closed).toBe(1012);
++  });
++});
++
++describe('a socket whose connect crosses a step-down', () => {
++  /* The app steps down once the first gate has let the connect through, as it may while a route's own checks wait for
++     the database. */
++  async function steppingDown(path: (at: CompanyWithNode) => string, headers: (at: CompanyWithNode) => Record<string, string>) {
++    const { app, say } = await appWithKeeper('lead');
++    let armed = false;
++    app.addHook('preValidation', async req => {
++      if (!armed || !req.ws) return;
++      say('read');
++      await app.ctx.mode.check();
++    });
++    const nodeSocket = await listen(app);
++    const at = await companyWithNode(app);
++    armed = true;
++    return new Promise<number>((resolve, reject) => {
++      const ws = new WebSocket(nodeSocket.replace('/api/nodes/socket', path(at)), { headers: headers(at) });
++      ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
++      ws.on('open', () => {
++        ws.close();
++        resolve(101);
++      });
++      ws.on('error', reject);
++    });
++  }
++
++  it("is refused on a node's socket", async () => {
++    expect(await steppingDown(() => '/api/nodes/socket', at => ({ authorization: `Bearer ${at.key}` }))).toBe(503);
++  });
++
++  it("is refused on an agent's terminal", async () => {
++    expect(await steppingDown(() => '/api/agents/orchestrator/terminal?cols=100&rows=30', at => ({ cookie: `hh_session=${at.ceo}` }))).toBe(503);
++  });
++
++  it("is refused on a plan's sign-in terminal", async () => {
++    const path = (at: CompanyWithNode) => `/api/subscriptions/${at.subId}/signin/terminal?nodeId=${at.nodeId}&cols=100&rows=30`;
++    expect(await steppingDown(path, at => ({ cookie: `hh_session=${at.ceo}` }))).toBe(503);
++  });
+ });
+diff --git a/apps/server/test/socket.test.ts b/apps/server/test/socket.test.ts
+index 8d8d1c38..5e2c6812 100644
+--- a/apps/server/test/socket.test.ts
++++ b/apps/server/test/socket.test.ts
+@@ -267,21 +267,23 @@ describe('node socket', () => {
+ 
+     const silentSince = new Date(now.getTime() - NODE_STALE_MS);
+     await db.update(nodes).set({ lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+     await reconcile(app.ctx, now);
+     expect(agentProgramState(app.ctx, turn).alarm).toBeNull();
+ 
+     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
++    await expireStaleNodes(db, now);
+     const machinesRes = (await app.inject({ url: '/api/machines', ...as(ceo) })).json();
+     expect(machinesRes.machines[0].plans[0].status).toBe('needs_login');
+ 
+     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
++    await expireStaleNodes(db, now);
+     const staleSub = await subOf(app, ceo, subId);
+     expect(staleSub.status).toBe('needs_login');
+     expect(staleSub.machines[0].status).toBe('needs_login');
+     expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status).toBe('needs_login');
+     expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.status).toBe('needs_login');
+ 
+     const back = await connectNode(url, key);
+     back.send(hello([]));
+diff --git a/apps/server/test/timers.test.ts b/apps/server/test/timers.test.ts
+index 514ddb88..3ad89b90 100644
+--- a/apps/server/test/timers.test.ts
++++ b/apps/server/test/timers.test.ts
+@@ -1,13 +1,13 @@
+ import { and, asc, eq, isNull } from 'drizzle-orm';
+ import type { FastifyInstance } from 'fastify';
+-import { describe, expect, it, onTestFinished } from 'vitest';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
+-import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
++import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
+ import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
+ import { BUILTIN } from '../src/modules/nodes/hub.js';
+ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+ import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
+ 
+ const NODE_KEY = 'k'.repeat(40);
+ 
+ /* Operations with Wanda on the company key, which the built-in node runs. */
+@@ -524,8 +524,75 @@ describe('timers', () => {
+     const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
+     expect(waltTurns).toHaveLength(1);
+     expect(waltTurns[0]!.prompt).toContain(turn!.id);
+ 
+     await minuteRound(app.ctx, at(32), () => () => {});
+     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
+   });
+ });
++
++describe('the sweeps of a leading app', () => {
++  const EVERY_MS = 1000;
++  /* Sweeps that stay running until the test ends them, and how many of each kind started. */
++  function sweeps() {
++    vi.useFakeTimers();
++    onTestFinished(() => void vi.useRealTimers());
++    const started = { entry: 0, tick: 0 };
++    let end: () => void = () => undefined;
++    const running = (kind: keyof typeof started) => () => {
++      started[kind]++;
++      return new Promise<void>(done => (end = done));
++    };
++    return { started, endSweep: () => end(), ...leadSweeps(running('entry'), running('tick'), EVERY_MS) };
++  }
++  /* Tells whether a promise has ended by now, after everything already due has run. */
++  async function ended(promise: Promise<unknown>): Promise<boolean> {
++    let done = false;
++    void promise.then(() => (done = true));
++    await vi.advanceTimersByTimeAsync(0);
++    return done;
++  }
++
++  it('does not leave while the sweeps of the way in still run', async () => {
++    const { started, endSweep, enter, leave } = sweeps();
++    enter();
++    expect(started.entry).toBe(1);
++    const leaving = leave();
++    expect(await ended(leaving)).toBe(false);
++    endSweep();
++    expect(await ended(leaving)).toBe(true);
++  });
++
++  it('starts no round over the sweeps of the way in', async () => {
++    const { started, endSweep, enter, leave } = sweeps();
++    enter();
++    vi.advanceTimersByTime(EVERY_MS);
++    expect(started.tick).toBe(0);
++    endSweep();
++    await vi.advanceTimersByTimeAsync(EVERY_MS);
++    expect(started.tick).toBe(1);
++    endSweep();
++    await leave();
++  });
++
++  it('starts no round over a round that overran, and leaving waits for the one that runs', async () => {
++    const { started, endSweep, enter, leave } = sweeps();
++    enter();
++    endSweep();
++    await vi.advanceTimersByTimeAsync(EVERY_MS);
++    await vi.advanceTimersByTimeAsync(3 * EVERY_MS);
++    expect(started.tick).toBe(1);
++    const leaving = leave();
++    expect(await ended(leaving)).toBe(false);
++    endSweep();
++    expect(await ended(leaving)).toBe(true);
++  });
++
++  it('starts no round once it has left', async () => {
++    const { started, endSweep, enter, leave } = sweeps();
++    enter();
++    endSweep();
++    await leave();
++    await vi.advanceTimersByTimeAsync(3 * EVERY_MS);
++    expect(started.tick).toBe(0);
++  });
++});
+diff --git a/apps/server/test/updates.test.ts b/apps/server/test/updates.test.ts
+index 7feea3e1..1dabb283 100644
+--- a/apps/server/test/updates.test.ts
++++ b/apps/server/test/updates.test.ts
+@@ -4,16 +4,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync
+ import type { AddressInfo } from 'node:net';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { eq } from 'drizzle-orm';
+ import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+ import { publishWorking } from '../src/modules/events/store.js';
+ import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
++import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
+ import { turnsHeld } from '../src/modules/updates/drain.js';
+ 
+ /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
+ const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
+ vi.mock('../src/modules/events/store.js', async importOriginal => {
+   const real = await importOriginal<typeof import('../src/modules/events/store.js')>();
+   return {
+     ...real,
+@@ -112,27 +113,50 @@ async function fakeRegistry(
+     base: `http://127.0.0.1:${(reg.server.address() as AddressInfo).port}`,
+     set: (tag, build) => (tags[tag] = build),
+     fail: status => (failing = status),
+     calls,
+     digests,
+   };
+ }
+ 
+-async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-'))) {
+-  const { app, db } = await testApp({
++const updatableApp = (registry: { base: string }, commit: string, control: string, env: NodeJS.ProcessEnv = {}) =>
++  testApp({
+     HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
+     REGISTRY_URL: registry.base,
+     HORNHOOF_VERSION: '0.4.0',
+     HORNHOOF_COMMIT: commit,
+     HORNHOOF_CONTROL_DIR: control,
++    ...env,
+   });
++
++async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-'))) {
++  const { app, db } = await updatableApp(registry, commit, control);
+   return { app, db, control, ceo: await setUpCompany(app) };
+ }
+ 
++/* A company whose app leads on a keeper's word, with an agent at work, and the step down the keeper can order. */
++async function leadingCompany(registry: { base: string }) {
++  const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
++  const say = (mode: Mode) => writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
++  const { app, db } = await updatableApp(registry, 'aaa', control, { HORNHOOF_KEEPER: 'on' });
++  /* Said once the app is built and not yet started, so a slow build cannot make the word stale. */
++  say('lead');
++  const ceo = await setUpCompany(app);
++  updaterAlive(control);
++  const [acme] = await db.select().from(companies);
++  const [sub] = await db.select().from(subscriptions);
++  const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
++  const stepDown = async () => {
++    say('read');
++    await app.ctx.mode.check();
++  };
++  return { app, db, ceo, control, acme: acme!, job: job!, say, stepDown };
++}
++
+ /* The updater is alive when it touched alive in the last 30 seconds. */
+ const updaterAlive = (control: string, ageSeconds = 0) => {
+   writeFileSync(join(control, 'alive'), '');
+   const when = Date.now() / 1000 - ageSeconds;
+   utimesSync(join(control, 'alive'), when, when);
+ };
+ const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
+ const SHA = 'b'.repeat(40);
+@@ -372,16 +396,84 @@ describe('updates', () => {
+     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
+ 
+     rmdirSync(join(control, 'request.json.new'));
+     await publishWorking(app.ctx, acme!.id);
+     await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+   });
+ 
++  it('stops waiting when the app leaves lead, and starts no updater on a machine that no longer leads', async () => {
++    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
++    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
++    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
++    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
++    await stepDown();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
++    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
++    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
++    await publishWorking(app.ctx, acme.id);
++    await settled();
++    expect(request(control)).toBeNull();
++  });
++
++  it('hands over nothing when the app leaves lead while the agents are counted', async () => {
++    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
++    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
++    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
++    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
++    const hold = holdNextCount();
++    await publishWorking(app.ctx, acme.id);
++    await hold.counted;
++    await stepDown();
++    hold.resume();
++    await settled();
++    expect(request(control)).toBeNull();
++  });
++
++  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
++    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
++    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
++    const timeouts = vi.spyOn(globalThis, 'setTimeout');
++    const cleared = vi.spyOn(globalThis, 'clearTimeout');
++    onTestFinished(() => {
++      timeouts.mockRestore();
++      cleared.mockRestore();
++    });
++    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
++    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
++    await publishWorking(app.ctx, acme.id);
++    await expect.poll(() => request(control)).not.toBeNull();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
++    const heldFor = timeouts.mock.results[timeouts.mock.calls.findIndex(([, ms]) => ms === 10 * 60_000)]!.value;
++    await stepDown();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
++    expect(cleared).toHaveBeenCalledWith(heldFor);
++  });
++
++  it('refuses an update whose reading of the registry crossed a step-down', async () => {
++    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
++    const { app, ceo, control, acme, say, stepDown } = await leadingCompany(registry);
++    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
++    const read = app.ctx.updates.siblings.bind(app.ctx.updates);
++    app.ctx.updates.siblings = async tag => {
++      await stepDown();
++      return read(tag);
++    };
++    for (const whenIdle of [true, false]) {
++      const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle }, ...as(ceo) });
++      expect(res.json().error?.reason).toBe('read_only');
++      /* The next attempt crosses the same step-down, from lead again. */
++      say('lead');
++      await app.ctx.mode.check();
++    }
++    expect(request(control)).toBeNull();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
++  });
++
+   it('says when no updater runs', async () => {
+     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+     const { app, ceo, control } = await company(registry);
+     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater).toEqual({ present: false, status: null, waiting: null });
+     const missing = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+     expect(missing.statusCode).toBe(503);
+     expect(missing.json().error.reason).toBe('updater_missing');
+     updaterAlive(control, 31);
+
+## 4a24503a Move the waiting update out of updateRoutes, which the stand-down pushed over the gate
+
+The author check on 972ea31c was red on one gate only: crapper counted updateRoutes at CC 20, since it counts the closures
+inside a function, and the stand-down had touched it. All 1642 related tests were green there. UpdateWait now holds the update
+that waits, its timers and the held turns; the routes keep only what they answer. updateRoutes is CC 1. Nothing changes in
+what the routes do, and test/updates.test.ts proves it unchanged.
+
+The flag done in sendWhenIdle goes, since callOff clears waiting in the same step, so the request is no longer the wanted one.
+
+Ruling: split updateRoutes into routes.ts and a new updates/wait.ts, against the brief's "do not reorganise" - why: the gate says every changed function stays under CRAP 10, split first, and the closures are what it counts - cost if wrong: one more file to read; a lane that changes updates/routes.ts must merge with the move.
+
+---
+ apps/server/src/modules/updates/routes.ts | 132 +++++++-----------------------
+ apps/server/src/modules/updates/wait.ts   |  89 ++++++++++++++++++++
+ 2 files changed, 118 insertions(+), 103 deletions(-)
+
+diff --git a/apps/server/src/modules/updates/routes.ts b/apps/server/src/modules/updates/routes.ts
+index 84b19d0a..4ab030e8 100644
+--- a/apps/server/src/modules/updates/routes.ts
++++ b/apps/server/src/modules/updates/routes.ts
+@@ -1,162 +1,88 @@
+ import { randomUUID } from 'node:crypto';
+ import type { FastifyInstance, FastifyRequest } from 'fastify';
+ import { z } from 'zod';
+ import type { Ctx } from '../../app.js';
+ import { requireCompanyScope, requirePerson } from '../../auth/session.js';
+ import { ApiError, loggable } from '../../errors.js';
+-import { pumpWaiting } from '../conversation/queue.js';
+-import { workingCount } from '../events/store.js';
+ import { modeGate } from '../keeper/app-mode.js';
+-import { holdTurns } from './drain.js';
+ import type { UpdateRequest, UpdaterView } from './control.js';
+ import type { Build } from './registry.js';
++import { sendToUpdater, UpdateWait } from './wait.js';
+ 
+ export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true) });
+ const FULL_SHA = /^[0-9a-f]{40}$/;
+-/* While an update waits for the agents, the working count is checked when it changes and this often besides. */
+-const IDLE_CHECK_MS = 30_000;
+-/* An update handed over restarts Hornhoof within minutes; one that did not keeps no turns waiting longer. */
+-const HELD_AFTER_MS = 10 * 60_000;
+ 
+-type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
++function updatesView(ctx: Ctx, wait: UpdateWait) {
++  const { version, commit, migrations } = ctx.config;
++  const state = ctx.updates.state();
++  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: wait.shown() };
++  return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
++}
++
++/* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
++   digests pin it: the updater installs only the app image the app read, and the node and updater images of the
++   same tag, read now. */
++async function requestFor(ctx: Ctx, build: Build, id: string): Promise<UpdateRequest> {
++  const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
++  const siblings = await ctx.updates.siblings(tag).catch(err => {
++    ctx.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
++    throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
++  });
++  return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
++}
+ 
+ /* The running build summary is for every signed-in person. Published builds and update controls
+    are for people who see the whole company. */
+ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
+-  const { version, commit, migrations } = ctx.config;
+-  let waiting: Waiting | null = null;
+-  /* What ends the hold on a company's turns once its update went to the updater. */
+-  const heldAfterHandOver = new Map<string, NodeJS.Timeout>();
++  const { version, commit } = ctx.config;
++  const wait = new UpdateWait(ctx);
++  ctx.mode.whenLeaving(() => wait.standDown());
+ 
+   async function companyPerson(req: FastifyRequest) {
+     const me = await requirePerson(req, ctx.db);
+     requireCompanyScope(me);
+     return me;
+   }
+ 
+-  function view() {
+-    const state = ctx.updates.state();
+-    const updater: UpdaterView = {
+-      present: ctx.updater.present(),
+-      status: ctx.updater.status(),
+-      waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
+-    };
+-    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
+-  }
+-
+-  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
+-  function callOff(release = true) {
+-    waiting?.stop();
+-    if (waiting && release) letTurnsGo(waiting.companyId);
+-    waiting = null;
+-  }
+-
+-  function letTurnsGo(companyId: string) {
+-    holdTurns(ctx, companyId, false);
+-    void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
+-  }
+-
+-  function holdAfterHandOver(companyId: string) {
+-    clearTimeout(heldAfterHandOver.get(companyId));
+-    const timeout = setTimeout(() => {
+-      heldAfterHandOver.delete(companyId);
+-      if (waiting?.companyId !== companyId) letTurnsGo(companyId);
+-    }, HELD_AFTER_MS);
+-    timeout.unref();
+-    heldAfterHandOver.set(companyId, timeout);
+-  }
+-
+-  /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader
+-     starts turns: its minute round picks up what waits. */
+-  function standDown() {
+-    const companies = waiting ? [waiting.companyId, ...heldAfterHandOver.keys()] : [...heldAfterHandOver.keys()];
+-    callOff(false);
+-    heldAfterHandOver.forEach(timeout => clearTimeout(timeout));
+-    heldAfterHandOver.clear();
+-    for (const companyId of companies) holdTurns(ctx, companyId, false);
+-  }
+-
+-  /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
+-     digests pin it: the updater installs only the app image the app read, and the node and updater images of the
+-     same tag, read now. */
+-  async function requestFor(build: Build, id: string): Promise<UpdateRequest> {
+-    const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
+-    const siblings = await ctx.updates.siblings(tag).catch(err => {
+-      app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
+-      throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
+-    });
+-    return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
+-  }
+-
+-  function send(request: UpdateRequest) {
+-    const { id, ...rest } = request;
+-    ctx.updater.request(rest, id);
+-  }
+-
+-  /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile.
+-     It stops waiting only once the updater has it: a request that could not be written is tried again on the next
+-     check, and the failure goes to the log instead of taking the server down. */
+-  async function sendWhenIdle(companyId: string, request: UpdateRequest) {
+-    let done = false;
+-    const wanted = () => !done && waiting?.request.id === request.id;
+-    const check = async () => {
+-      if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
+-      send(request);
+-      done = true;
+-      callOff(false);
+-      holdAfterHandOver(companyId);
+-    };
+-    const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
+-    const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
+-    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
+-    timer.unref();
+-    waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
+-    /* No new turn starts meanwhile, so the running ones can end. */
+-    holdTurns(ctx, companyId, true);
+-    await tryCheck();
+-  }
+-
+-  ctx.mode.whenLeaving(standDown);
+-
+   app.get('/api/updates/current', async req => {
+     await requirePerson(req, ctx.db);
+     return { version, commit: commit.slice(0, 7) };
+   });
+ 
+   app.get('/api/updates', async req => {
+     await companyPerson(req);
+-    return view();
++    return updatesView(ctx, wait);
+   });
+ 
+   app.post('/api/updates/check', async req => {
+     await companyPerson(req);
+     await ctx.updates.now();
+-    return view();
++    return updatesView(ctx, wait);
+   });
+ 
+   app.post('/api/updates', async (req, reply) => {
+     const me = await companyPerson(req);
+     const body = UpdateBody.parse(req.body);
+     if (!ctx.updater.present()) {
+       throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
+     }
+     if (ctx.updater.status()?.state === 'running') throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
+     if (!ctx.updates.state().checkedAt) await ctx.updates.now();
+     const { latest, versions } = ctx.updates.state();
+     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
+     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
+-    const request = await requestFor(build, randomUUID());
++    const request = await requestFor(ctx, build, randomUUID());
+     /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
+     await modeGate(ctx.mode)(req);
+-    callOff();
+-    if (body.whenIdle) await sendWhenIdle(me.companyId, request);
+-    else send(request);
++    wait.callOff();
++    if (body.whenIdle) await wait.sendWhenIdle(me.companyId, request);
++    else sendToUpdater(ctx, request);
+     return reply.code(202).send({ id: request.id });
+   });
+ 
+   app.delete('/api/updates', async (req, reply) => {
+     await companyPerson(req);
+-    callOff();
++    wait.callOff();
+     return reply.code(204).send();
+   });
+ }
+diff --git a/apps/server/src/modules/updates/wait.ts b/apps/server/src/modules/updates/wait.ts
+new file mode 100644
+index 00000000..3604c684
+--- /dev/null
++++ b/apps/server/src/modules/updates/wait.ts
+@@ -0,0 +1,89 @@
++import type { Ctx } from '../../app.js';
++import { loggable } from '../../errors.js';
++import { pumpWaiting } from '../conversation/queue.js';
++import { workingCount } from '../events/store.js';
++import type { UpdateRequest, UpdaterView } from './control.js';
++import { holdTurns } from './drain.js';
++
++/* While an update waits for the agents, the working count is checked when it changes and this often besides. */
++const IDLE_CHECK_MS = 30_000;
++/* An update handed over restarts Hornhoof within minutes; one that did not keeps no turns waiting longer. */
++const HELD_AFTER_MS = 10 * 60_000;
++
++type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
++
++export function sendToUpdater(ctx: Ctx, request: UpdateRequest): void {
++  const { id, ...rest } = request;
++  ctx.updater.request(rest, id);
++}
++
++/* The update that waits for a company's agents to finish, and the company's turns held meanwhile and for a while after. */
++export class UpdateWait {
++  private waiting: Waiting | null = null;
++  /* What ends the hold on a company's turns once its update went to the updater. */
++  private readonly heldAfterHandOver = new Map<string, NodeJS.Timeout>();
++
++  constructor(private readonly ctx: Ctx) {}
++
++  shown(): UpdaterView['waiting'] {
++    return this.waiting && { version: this.waiting.request.version, commit: this.waiting.request.commit };
++  }
++
++  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
++  callOff(release = true): void {
++    this.waiting?.stop();
++    if (this.waiting && release) this.letTurnsGo(this.waiting.companyId);
++    this.waiting = null;
++  }
++
++  /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader
++     starts turns: its minute round picks up what waits. */
++  standDown(): void {
++    const companies = this.waiting ? [this.waiting.companyId, ...this.heldAfterHandOver.keys()] : [...this.heldAfterHandOver.keys()];
++    this.callOff(false);
++    this.heldAfterHandOver.forEach(timeout => clearTimeout(timeout));
++    this.heldAfterHandOver.clear();
++    for (const companyId of companies) holdTurns(this.ctx, companyId, false);
++  }
++
++  /* A request that could not be written is tried again on the next check, and the failure goes to the log instead of
++     taking the server down. */
++  async sendWhenIdle(companyId: string, request: UpdateRequest): Promise<void> {
++    const tryCheck = () => this.handOverIfIdle(companyId, request).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
++    const unsubscribe = this.ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
++    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
++    timer.unref();
++    this.waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
++    /* No new turn starts meanwhile, so the running ones can end. */
++    holdTurns(this.ctx, companyId, true);
++    await tryCheck();
++  }
++
++  private wanted(request: UpdateRequest): boolean {
++    return this.waiting?.request.id === request.id;
++  }
++
++  /* The request is still the one waiting after the count, since a person may call it off, ask for another or the app may
++     stop leading meanwhile. It stops waiting only once the updater has it. */
++  private async handOverIfIdle(companyId: string, request: UpdateRequest): Promise<void> {
++    if (!this.wanted(request) || (await workingCount(this.ctx.db, companyId)) > 0 || !this.wanted(request)) return;
++    sendToUpdater(this.ctx, request);
++    this.callOff(false);
++    this.holdAfterHandOver(companyId);
++  }
++
++  private holdAfterHandOver(companyId: string): void {
++    clearTimeout(this.heldAfterHandOver.get(companyId));
++    const timeout = setTimeout(() => {
++      this.heldAfterHandOver.delete(companyId);
++      if (this.waiting?.companyId !== companyId) this.letTurnsGo(companyId);
++    }, HELD_AFTER_MS);
++    timeout.unref();
++    this.heldAfterHandOver.set(companyId, timeout);
++  }
++
++  private letTurnsGo(companyId: string): void {
++    holdTurns(this.ctx, companyId, false);
++    void pumpWaiting(this.ctx).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
++  }
++}
+
+## 8ede7cd9 Test the end of the hold on turns after an update is handed over
+
+The author check on 14442431 was red on one gate only: crapper scored holdAfterHandOver at CC 3 and 0 percent. It reads branch
+coverage where a function has branches, and this function's one branch sits in the callback of the ten minute timeout, which no
+test ever ran. All 1642 related tests were green there.
+
+The gap was real and older than this lane: nothing showed that the hold ends, or that it stays while another update waits. Two
+tests now run that callback by hand, taken from a spy on setTimeout, so none waits ten minutes. They passed at once as the
+behaviour already stood, so each was proved by a mutant of the callback, seen failing in that test alone. wait.ts does not change.
+
+---
+ apps/server/test/updates.test.ts | 39 ++++++++++++++++++++++++++++++---------
+ 1 file changed, 30 insertions(+), 9 deletions(-)
+
+diff --git a/apps/server/test/updates.test.ts b/apps/server/test/updates.test.ts
+index 1dabb283..43660e1b 100644
+--- a/apps/server/test/updates.test.ts
++++ b/apps/server/test/updates.test.ts
+@@ -155,16 +155,17 @@ async function leadingCompany(registry: { base: string }) {
+ /* The updater is alive when it touched alive in the last 30 seconds. */
+ const updaterAlive = (control: string, ageSeconds = 0) => {
+   writeFileSync(join(control, 'alive'), '');
+   const when = Date.now() / 1000 - ageSeconds;
+   utimesSync(join(control, 'alive'), when, when);
+ };
+ const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
+ const SHA = 'b'.repeat(40);
++const HELD_AFTER_MS = 10 * 60_000;
+ /* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
+ const asked = (registry: { digests: Record<string, string> }, id: string) => ({
+   id,
+   version: '0.4.1',
+   commit: SHA,
+   tag: SHA,
+   digest: registry.digests.latest,
+   nodeDigest: registry.digests[`hornhoof-node:${SHA}`],
+@@ -424,34 +425,54 @@ describe('updates', () => {
+     await publishWorking(app.ctx, acme.id);
+     await hold.counted;
+     await stepDown();
+     hold.resume();
+     await settled();
+     expect(request(control)).toBeNull();
+   });
+ 
+-  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
++  /* An update just handed over, with the turns still held, and the timeout that ends the hold, which the test may run
++     without waiting its ten minutes. */
++  async function handedOver() {
+     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+-    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
++    const made = await leadingCompany(registry);
++    const { app, db, ceo, control, acme, job } = made;
+     const timeouts = vi.spyOn(globalThis, 'setTimeout');
+-    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+-    onTestFinished(() => {
+-      timeouts.mockRestore();
+-      cleared.mockRestore();
+-    });
++    onTestFinished(() => timeouts.mockRestore());
+     await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+     await publishWorking(app.ctx, acme.id);
+     await expect.poll(() => request(control)).not.toBeNull();
+     expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+-    const heldFor = timeouts.mock.results[timeouts.mock.calls.findIndex(([, ms]) => ms === 10 * 60_000)]!.value;
++    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === HELD_AFTER_MS);
++    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout };
++  }
++
++  it('lets the turns held after a hand-over go when its timeout ends', async () => {
++    const { app, acme, holdEnds } = await handedOver();
++    holdEnds();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
++  });
++
++  it('keeps the turns held when the timeout of a hand-over ends and another update waits', async () => {
++    const { app, db, ceo, acme, job, holdEnds } = await handedOver();
++    await db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, job.id));
++    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
++    holdEnds();
++    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
++  });
++
++  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
++    const cleared = vi.spyOn(globalThis, 'clearTimeout');
++    onTestFinished(() => cleared.mockRestore());
++    const { app, acme, stepDown, holdTimeout } = await handedOver();
+     await stepDown();
+     expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+-    expect(cleared).toHaveBeenCalledWith(heldFor);
++    expect(cleared).toHaveBeenCalledWith(holdTimeout);
+   });
+ 
+   it('refuses an update whose reading of the registry crossed a step-down', async () => {
+     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+     const { app, ceo, control, acme, say, stepDown } = await leadingCompany(registry);
+     await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+     const read = app.ctx.updates.siblings.bind(app.ctx.updates);
+     app.ctx.updates.siblings = async tag => {
+

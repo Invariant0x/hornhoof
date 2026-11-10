@@ -1,0 +1,995 @@
+# Review package: batch 6, slice mode
+
+## 3cbef0dc Run the app in the mode the keeper gives it: lead, read, maintenance or off
+
+The app reads keeper.json from the control folder every second (AppMode), and
+an onRequest gate refuses what the mode does not allow: reads pass in read and
+maintenance, everything but GET /api/health is refused while off, and a
+websocket upgrade is refused outside lead. Work only a leader does (update
+check, link sync, the minute timers and their start-up sweeps, which now
+include checkExternalWaits) registers with whenLead; node messages go through
+whileLeading, so a message queued when the app leaves lead writes nothing.
+Leaving lead closes open sockets with 1012, and the session hand-over to the
+link's cookie runs only in lead. Health answers 503 while off and carries the
+mode outside the link. Without HORNHOOF_KEEPER the app leads from onReady as
+before. Proved by test/app-mode.test.ts, version, health, config and socket
+tests.
+
+Ruling: NodeHub's onMessage wrapped is receiveNodeMessage, not handleNodeMessage - why: the plan was written before lifecycle.ts took the node.stopping message - cost if wrong: none, the wrapper sits on the same seam
+Ruling: AppMode.settled() added and awaited by onReady - why: the old onReady awaited links.sync, and tests rely on the app being ready after it - cost if wrong: one small public method to remove
+Ruling: stop() moves the mode to off - why: the leave hooks must run before the database closes, and a closed app should refuse work - cost if wrong: requests during close get 503 starting
+Ruling: the full server suite was not run - why: the brief forbids a writer from running it, the author check runs the related tests - cost if wrong: a lead-work regression shows at the batch check
+
+---
+ apps/server/src/app.ts                     |  41 +++--
+ apps/server/src/config.ts                  |   4 +
+ apps/server/src/errors.ts                  |   5 +-
+ apps/server/src/modules/agents/timers.ts   |  20 ++-
+ apps/server/src/modules/keeper/app-mode.ts | 118 ++++++++++++
+ apps/server/src/modules/keeper/state.ts    |  43 +++++
+ apps/server/test/app-mode.test.ts          | 280 +++++++++++++++++++++++++++++
+ apps/server/test/config.test.ts            |   7 +
+ apps/server/test/version.test.ts           |   2 +-
+ 9 files changed, 502 insertions(+), 18 deletions(-)
+
+diff --git a/apps/server/src/app.ts b/apps/server/src/app.ts
+index 44d69384..85df787f 100644
+--- a/apps/server/src/app.ts
++++ b/apps/server/src/app.ts
+@@ -1,13 +1,14 @@
+ import cookie from '@fastify/cookie';
+ import websocket from '@fastify/websocket';
+ import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
+ import type { Config } from './config.js';
+ import { loggable, registerErrorHandling } from './errors.js';
++import { AppMode, modeGate, whileLeading } from './modules/keeper/app-mode.js';
+ import { authRoutes } from './modules/auth/routes.js';
+ import { agentRoutes } from './modules/agents/routes.js';
+ import { conversationRoutes } from './modules/conversation/routes.js';
+ import { notebookRoutes } from './modules/notebook/routes.js';
+ import { startTimers } from './modules/agents/timers.js';
+ import { departmentRoutes } from './modules/departments/routes.js';
+ import { EventBus } from './modules/events/bus.js';
+ import { streamRoutes } from './modules/events/stream.js';
+@@ -67,84 +68,104 @@ export type Ctx = Deps & {
+   bus: EventBus;
+   terminals: TerminalRelay;
+   updates: UpdateCheck;
+   updater: UpdaterControl;
+   computer: ComputerAccess;
+   templates: Templates;
+   links: PublicLinks;
+   challenges: Challenges;
++  mode: AppMode;
+ };
+ 
+ declare module 'fastify' {
+   interface FastifyInstance {
+     /* For tests and the few places outside a route that need the same context. */
+     ctx: Ctx;
+   }
+   interface FastifyRequest {
+     /* The request came over the public link: its session cookie is the __Host- one. Set by the first onRequest hook. */
+     overLink: boolean;
+   }
+ }
+ 
+ /* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
+-   company or which build is behind the name. */
+-function publicRoutes(app: FastifyInstance, { config, db }: Deps): void {
++   company or which build is behind the name. The health answer is 503 while the app is off, so a check can tell it has
++   not started. */
++function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
+   const { version, commit, migrations } = config;
+-  app.get('/api/health', async req => (req.overLink ? { ok: true } : { ok: true, version, commit }));
++  app.get('/api/health', async (req, reply) => {
++    const ok = mode.current() !== 'off';
++    if (!ok) reply.code(503);
++    return req.overLink ? { ok } : { ok, version, commit, mode: mode.current() };
++  });
+   app.get('/api/version', async req => {
+     if (req.overLink) await requirePerson(req, db);
+     return { version, commit, migrations };
+   });
+   app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
+ }
+ 
++/* A node or a terminal connected while leading sends nothing more once the app stops leading; 1012 tells it to come back. */
++function closeOpenSockets(app: FastifyInstance): void {
++  for (const client of app.websocketServer.clients) client.close(1012, 'Hornhoof takes no changes now.');
++}
++
+ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
+   const web = hasWebApp(deps.config.webDist);
+   if (deps.onRoute) app.addHook('onRoute', deps.onRoute);
+   app.decorateRequest('overLink', false);
+   app.addHook('onRequest', async req => {
+     req.overLink = await overLink(req, deps.config);
+   });
+   addSecurityHeaders(app);
+   registerErrorHandling(app, web ? webAppRoutes : undefined);
+   const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+   app.decorate('ctx', ctx);
++  ctx.mode = new AppMode({ dir: deps.config.controlDir, fromKeeper: deps.config.keeper, log: line => app.log.info(line) });
+   ctx.hub = new NodeHub({
+     pingMs: deps.config.nodePingMs,
+-    onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
++    onMessage: whileLeading(ctx.mode, (id, msg) => receiveNodeMessage(ctx, id, msg)),
+     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
+-    onClose: id => handleNodeClose(ctx, id),
++    onClose: whileLeading(ctx.mode, id => handleNodeClose(ctx, id)),
+     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
+   });
+   app.addHook('onClose', async () => ctx.hub.stop());
+   app.addHook('onClose', async () => ctx.agentSql?.close());
+   const { config } = deps;
+   ctx.updates = new UpdateCheck({
+     registry: registry({ image: config.image, arch: archOf(), base: config.registryUrl }),
+     everyMs: config.updateCheckMs,
+     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
+   });
+   ctx.updater = new UpdaterControl(config.controlDir);
+   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
+   ctx.templates = loadTemplates(config.templatesDir);
+   ctx.links = new PublicLinks(ctx);
+   ctx.challenges = new Challenges();
+-  app.addHook('onReady', async () => ctx.updates.start());
+-  app.addHook('onClose', async () => ctx.updates.stop());
+-  app.addHook('onReady', async () => ctx.links.sync());
++  ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
++  ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
++  ctx.mode.whenLead(() => undefined, () => closeOpenSockets(app));
++  app.addHook('onReady', async () => {
++    ctx.mode.start();
++    await ctx.mode.settled();
++  });
++  app.addHook('onClose', async () => ctx.mode.stop());
+   await app.register(cookie);
+   await app.register(websocket, SOCKET_OPTIONS);
+   /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+-  app.addHook('onRequest', async (req, reply) => handOverSession(req, reply, deps.db, deps.config));
++  app.addHook('onRequest', async (req, reply) => {
++    if (ctx.mode.current() === 'lead') await handOverSession(req, reply, deps.db, deps.config);
++  });
+   /* After the socket plugin, so a refused socket is closed by it. */
++  app.addHook('onRequest', modeGate(ctx.mode));
+   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
+   if (web) await serveWebApp(app, deps.config.webDist);
+-  publicRoutes(app, deps);
++  publicRoutes(app, ctx);
+   setupRoutes(app, ctx);
+   authRoutes(app, deps);
+   peopleRoutes(app, ctx);
+   orgRoutes(app, ctx);
+   subscriptionRoutes(app, ctx);
+   signinRoutes(app, ctx);
+   nodeRoutes(app, ctx);
+   nodeSocket(app, ctx);
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index 2866a80f..e3f20a13 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -31,16 +31,18 @@ export type Config = {
+   /* The folder the app shares with the updater service. */
+   controlDir: string;
+   /* Role and skill templates, loaded once at start. */
+   templatesDir: string;
+   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+   relayUrl: string;
+   /* The tunnel container's host name: only requests from it may say they came in over https. */
+   tunnelHost?: string;
++  /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
++  keeper: boolean;
+   /* How much all the files on the company's tasks may take together. */
+   taskFilesBytes: number;
+   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
+   hostId: string | null;
+ };
+ 
+ /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
+ const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+@@ -66,16 +68,17 @@ const Env = z.object({
+   PORT: wholeNumber(1, 65535, 'PORT must be a number between 1 and 65535.'),
+   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
+   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
+   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
+   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
+   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
++  HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
+   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+   HORNHOOF_HOST_ID: z.preprocess(
+     unset,
+     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+   ),
+ });
+ 
+ /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+@@ -113,12 +116,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
+     nodeBuild: nodeBuildOf(env),
+     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
+     registryUrl: set.REGISTRY_URL,
+     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+     tunnelHost: set.TUNNEL_HOST,
++    keeper: set.HORNHOOF_KEEPER === 'on',
+     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+     hostId: set.HORNHOOF_HOST_ID ?? null,
+   };
+ }
+diff --git a/apps/server/src/errors.ts b/apps/server/src/errors.ts
+index 9e3fce1e..f5f8c091 100644
+--- a/apps/server/src/errors.ts
++++ b/apps/server/src/errors.ts
+@@ -86,17 +86,20 @@ export type ErrorReason =
+   | 'turn_open'
+   | 'turn_unknown'
+   | 'repo_invalid'
+   | 'attachment_invalid'
+   | 'attachment_unknown'
+   | 'relay_unreachable'
+   | 'link_taken'
+   | 'link_reserved'
+-  | 'link_invalid';
++  | 'link_invalid'
++  | 'maintenance'
++  | 'read_only'
++  | 'starting';
+ 
+ /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
+ export class ApiError extends Error {
+   constructor(
+     readonly status: number,
+     readonly code: ErrorCode,
+     message: string,
+     readonly reason?: ErrorReason,
+diff --git a/apps/server/src/modules/agents/timers.ts b/apps/server/src/modules/agents/timers.ts
+index 4126b01d..0fa8fe77 100644
+--- a/apps/server/src/modules/agents/timers.ts
++++ b/apps/server/src/modules/agents/timers.ts
+@@ -119,20 +119,28 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
+     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
+     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
+     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+     checkTestTimes(ctx).catch(failed('checking test run times failed')),
+     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+   ]);
+ }
+ 
+-/* Does the minute round while the server runs; left-behind turns and old files are looked at as it starts too. */
++/* Does the minute round while the app leads; left-behind turns and old files are looked at as it starts leading, and the
++   timer stops with it, after waiting for a round that runs. */
+ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
+   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
+-  app.addHook('onReady', async () => {
++  let timer: NodeJS.Timeout | null = null;
++  let round: Promise<void> = Promise.resolve();
++  const enter = () => {
+     void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
+     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
+     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
+-  });
+-  const timer = setInterval(() => void minuteRound(ctx, new Date(), failed), TICK_MS);
+-  timer.unref();
+-  app.addHook('onClose', async () => clearInterval(timer));
++    timer = setInterval(() => (round = minuteRound(ctx, new Date(), failed)), TICK_MS);
++    timer.unref();
++  };
++  const leave = async () => {
++    if (timer) clearInterval(timer);
++    timer = null;
++    await round;
++  };
++  ctx.mode.whenLead(enter, leave);
+ }
+diff --git a/apps/server/src/modules/keeper/app-mode.ts b/apps/server/src/modules/keeper/app-mode.ts
+new file mode 100644
+index 00000000..65d545e4
+--- /dev/null
++++ b/apps/server/src/modules/keeper/app-mode.ts
+@@ -0,0 +1,118 @@
++import type { FastifyRequest } from 'fastify';
++import { ApiError } from '../../errors.js';
++import { freshState, type Mode } from './state.js';
++
++const CHECK_EVERY_MS = 1000;
++
++export const READ_ONLY_MESSAGE = 'Hornhoof only reads on this machine now, so nothing was changed.';
++const MESSAGES = {
++  read_only: READ_ONLY_MESSAGE,
++  maintenance: 'Hornhoof is installing an update and takes no changes until it ends.',
++  starting: 'Hornhoof is starting.',
++} as const;
++type Refusal = keyof typeof MESSAGES;
++
++type Hook = { enter: () => unknown; leave: () => unknown };
++export type AppModeOptions = {
++  dir: string;
++  fromKeeper: boolean;
++  everyMs?: number;
++  staleMs?: number;
++  now?: () => number;
++  log: (line: string) => void;
++};
++
++/* The mode the app runs in: lead, read, maintenance or off. The keeper says it in keeper.json; an app with no keeper
++   (tests, a compose file of an older build) leads. Work only a leader does registers with whenLead. */
++export class AppMode {
++  private mode: Mode = 'off';
++  private readonly hooks: Hook[] = [];
++  private timer: NodeJS.Timeout | null = null;
++  /* Hook runs, one after another, so a quick lead, read, lead never overlaps its own work. */
++  private pending: Promise<void> = Promise.resolve();
++
++  constructor(private readonly opts: AppModeOptions) {}
++
++  current(): Mode {
++    return this.mode;
++  }
++
++  start(): void {
++    if (!this.opts.fromKeeper) return this.change('lead');
++    void this.check();
++    this.timer = setInterval(() => void this.check(), this.opts.everyMs ?? CHECK_EVERY_MS);
++    this.timer.unref();
++  }
++
++  /* Resolves when the work of the start or of any change so far has ended. */
++  settled(): Promise<void> {
++    return this.pending;
++  }
++
++  async stop(): Promise<void> {
++    if (this.timer) clearInterval(this.timer);
++    this.timer = null;
++    this.change('off');
++    await this.pending;
++  }
++
++  async check(): Promise<void> {
++    const word = this.opts.fromKeeper ? freshState(this.opts.dir, (this.opts.now ?? Date.now)(), this.opts.staleMs) : null;
++    if (word) this.change(word.mode);
++    await this.pending;
++  }
++
++  whenLead(enter: () => unknown, leave: () => unknown): void {
++    const hook = { enter, leave };
++    this.hooks.push(hook);
++    if (this.mode === 'lead') this.pending = Promise.all([this.pending, this.run('enter', [hook])]).then(() => undefined);
++  }
++
++  private change(next: Mode): void {
++    const was = this.mode;
++    if (was === next) return;
++    this.mode = next;
++    this.opts.log(`Hornhoof now runs in ${next} mode.`);
++    const hooks = [...this.hooks];
++    if (next === 'lead') this.pending = this.pending.then(() => this.run('enter', hooks));
++    else if (was === 'lead') this.pending = this.pending.then(() => this.run('leave', hooks));
++  }
++
++  /* A hook that throws costs one log line and stops neither the others nor the change. */
++  private async run(which: 'enter' | 'leave', hooks: Hook[]): Promise<void> {
++    for (const hook of hooks) {
++      try {
++        await hook[which]();
++      } catch (err) {
++        this.opts.log(`A ${which} hook of lead mode failed: ${err instanceof Error ? err.message : String(err)}`);
++      }
++    }
++  }
++}
++
++type Asked = Pick<FastifyRequest, 'method' | 'url' | 'headers'>;
++const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
++const pathOf = (url: string): string => url.split('?')[0]!;
++const wantsSocket = (req: Asked): boolean => String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
++
++/* Why this mode turns the request away, or null when it lets it through. */
++export function refusalOf(mode: Mode, req: Asked): Refusal | null {
++  if (mode === 'lead') return null;
++  if (mode === 'off') return req.method === 'GET' && pathOf(req.url) === '/api/health' ? null : 'starting';
++  return READS.has(req.method) && !wantsSocket(req) ? null : mode === 'read' ? 'read_only' : 'maintenance';
++}
++
++export function modeGate(mode: AppMode): (req: FastifyRequest) => Promise<void> {
++  return async req => {
++    const refusal = refusalOf(mode.current(), req);
++    if (refusal) throw new ApiError(503, 'unavailable', MESSAGES[refusal], refusal);
++  };
++}
++
++/* Work that runs only while leading, judged when the call runs: a call queued in lead that comes up after the app left
++   it does nothing. */
++export function whileLeading<A extends unknown[]>(mode: AppMode, work: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
++  return async (...args) => {
++    if (mode.current() === 'lead') await work(...args);
++  };
++}
+diff --git a/apps/server/src/modules/keeper/state.ts b/apps/server/src/modules/keeper/state.ts
+new file mode 100644
+index 00000000..3410db55
+--- /dev/null
++++ b/apps/server/src/modules/keeper/state.ts
+@@ -0,0 +1,43 @@
++import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { z } from 'zod';
++
++export const KEEPER_FILE = 'keeper.json';
++const FRESH_MS = 10_000;
++
++export const MODES = ['lead', 'read', 'maintenance', 'off'] as const;
++export type Mode = (typeof MODES)[number];
++
++const KeeperStateShape = z.object({
++  mode: z.enum(MODES),
++  at: z.string(),
++  link: z.object({ host: z.string().nullable(), fingerprint256: z.string().nullable() }).nullable(),
++});
++export type KeeperState = z.infer<typeof KeeperStateShape>;
++
++/* The keeper's last word, or null when the file is missing, cut short or not this shape: the app then keeps what it has. */
++export function readKeeperState(dir: string): KeeperState | null {
++  try {
++    const parsed = KeeperStateShape.safeParse(JSON.parse(readFileSync(join(dir, KEEPER_FILE), 'utf8')));
++    return parsed.success ? parsed.data : null;
++  } catch {
++    return null;
++  }
++}
++
++/* Written whole and then renamed, so the app never reads half a word. The file holds no key and no token, so any
++   reader may have it. */
++export function writeKeeperState(dir: string, state: KeeperState): void {
++  const path = join(dir, KEEPER_FILE);
++  const partial = `${path}.${process.pid}.tmp`;
++  writeFileSync(partial, JSON.stringify(state));
++  chmodSync(partial, 0o644);
++  renameSync(partial, path);
++}
++
++/* The word, only while it is recent: a keeper that stopped writing is not obeyed. */
++export function freshState(dir: string, now: number, staleMs = FRESH_MS): KeeperState | null {
++  const state = readKeeperState(dir);
++  if (!state) return null;
++  return now - Date.parse(state.at) <= staleMs ? state : null;
++}
+diff --git a/apps/server/test/app-mode.test.ts b/apps/server/test/app-mode.test.ts
+new file mode 100644
+index 00000000..e82c253a
+--- /dev/null
++++ b/apps/server/test/app-mode.test.ts
+@@ -0,0 +1,280 @@
++import { eq } from 'drizzle-orm';
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { sessions } from '../src/db/schema.js';
++import { hashToken } from '../src/crypto/tokens.js';
++import { AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
++import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
++import { as, connectNode, listen, setUpCompany, testApp, TUNNEL, until, viaLink } from './helpers.js';
++
++const NOW = 1_700_000_000_000;
++const NODE_KEY = 'k'.repeat(40);
++
++function folder(): string {
++  const dir = mkdtempSync(join(tmpdir(), 'hh-mode-'));
++  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
++  return dir;
++}
++
++const stateOf = (mode: Mode, at: number = NOW): KeeperState => ({ mode, at: new Date(at).toISOString(), link: null });
++
++function modeIn(dir: string, extra: Partial<ConstructorParameters<typeof AppMode>[0]> = {}) {
++  const lines: string[] = [];
++  const mode = new AppMode({ dir, fromKeeper: true, now: () => NOW, log: line => lines.push(line), ...extra });
++  return { mode, lines };
++}
++
++describe('the keeper file', () => {
++  it('is written whole and read back', () => {
++    const dir = folder();
++    const state: KeeperState = { mode: 'lead', at: new Date(NOW).toISOString(), link: { host: 'acme.hornhoof.test', fingerprint256: null } };
++    writeKeeperState(dir, state);
++    expect(readKeeperState(dir)).toEqual(state);
++  });
++
++  it('reads as nothing when it is missing, not JSON, or not this shape', () => {
++    const dir = folder();
++    expect(readKeeperState(dir)).toBeNull();
++    writeFileSync(join(dir, KEEPER_FILE), 'not json');
++    expect(readKeeperState(dir)).toBeNull();
++    writeFileSync(join(dir, KEEPER_FILE), '{"mode":"nope"}');
++    expect(readKeeperState(dir)).toBeNull();
++  });
++
++  it('counts a word fresh for ten seconds', () => {
++    const dir = folder();
++    writeKeeperState(dir, stateOf('lead', NOW - 10_000));
++    expect(freshState(dir, NOW)?.mode).toBe('lead');
++    writeKeeperState(dir, stateOf('lead', NOW - 10_001));
++    expect(freshState(dir, NOW)).toBeNull();
++    expect(freshState(dir, NOW, 20_000)?.mode).toBe('lead');
++  });
++});
++
++describe('AppMode', () => {
++  it('leads at once without a keeper', () => {
++    const { mode, lines } = modeIn(folder(), { fromKeeper: false });
++    expect(mode.current()).toBe('off');
++    mode.start();
++    expect(mode.current()).toBe('lead');
++    expect(lines).toEqual(['Hornhoof now runs in lead mode.']);
++  });
++
++  it('is off until the keeper writes, then takes its mode', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    await mode.check();
++    expect(mode.current()).toBe('off');
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    expect(mode.current()).toBe('lead');
++    writeKeeperState(dir, stateOf('maintenance'));
++    await mode.check();
++    expect(mode.current()).toBe('maintenance');
++  });
++
++  it("keeps its mode when the keeper's word is stale or unreadable", async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    writeKeeperState(dir, stateOf('maintenance', NOW - 11_000));
++    await mode.check();
++    expect(mode.current()).toBe('lead');
++    writeFileSync(join(dir, KEEPER_FILE), '{"mode":"nope"}');
++    await mode.check();
++    expect(mode.current()).toBe('lead');
++  });
++
++  it('runs lead work on the way in and out', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    const counts = { enter: 0, leave: 0 };
++    mode.whenLead(() => void counts.enter++, () => void counts.leave++);
++    for (const next of ['lead', 'maintenance', 'lead'] as const) {
++      writeKeeperState(dir, stateOf(next));
++      await mode.check();
++    }
++    await mode.stop();
++    expect(counts).toEqual({ enter: 2, leave: 2 });
++  });
++
++  it('enters a hook registered while leading at once, and in the order hooks were registered', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    const order: string[] = [];
++    mode.whenLead(() => void order.push('first in'), () => void order.push('first out'));
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    mode.whenLead(() => void order.push('late in'), () => void order.push('late out'));
++    expect(order).toEqual(['first in', 'late in']);
++    writeKeeperState(dir, stateOf('read'));
++    await mode.check();
++    expect(order.slice(2)).toEqual(['first out', 'late out']);
++  });
++
++  it('lets the next hook run when one throws, and says so in one log line', async () => {
++    const dir = folder();
++    const { mode, lines } = modeIn(dir);
++    let second = 0;
++    mode.whenLead(() => { throw new Error('boom'); }, () => undefined);
++    mode.whenLead(() => void second++, () => undefined);
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    expect(second).toBe(1);
++    expect(mode.current()).toBe('lead');
++    expect(lines.filter(line => line.includes('boom'))).toHaveLength(1);
++  });
++
++  it('waits for a slow leave hook in the check that leaves', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    let finished = false;
++    mode.whenLead(() => undefined, () => new Promise<void>(done => setTimeout(() => { finished = true; done(); }, 200)));
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    writeKeeperState(dir, stateOf('maintenance'));
++    await mode.check();
++    expect(finished).toBe(true);
++  });
++});
++
++describe('whileLeading', () => {
++  it('does its work in lead, and in maintenance and off resolves without doing it', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    const calls: number[] = [];
++    const work = whileLeading(mode, async (n: number) => void calls.push(n));
++    await work(0);
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    await work(1);
++    writeKeeperState(dir, stateOf('maintenance'));
++    await mode.check();
++    await work(2);
++    expect(calls).toEqual([1]);
++  });
++
++  it('does not run a call that was queued in lead once the app has left it', async () => {
++    const dir = folder();
++    const { mode } = modeIn(dir);
++    const calls: string[] = [];
++    const work = whileLeading(mode, async (name: string) => void calls.push(name));
++    writeKeeperState(dir, stateOf('lead'));
++    await mode.check();
++    let release!: () => void;
++    const slow = new Promise<void>(done => (release = done));
++    const queued = slow.then(() => work('late'));
++    writeKeeperState(dir, stateOf('maintenance'));
++    await mode.check();
++    release();
++    await queued;
++    expect(calls).toEqual([]);
++  });
++});
++
++describe('what each mode allows', () => {
++  const ask = (mode: Mode, method: string, url: string, upgrade?: string) => refusalOf(mode, { method, url, headers: upgrade ? { upgrade } : {} });
++
++  it('lets everything through in lead', () => {
++    expect(ask('lead', 'POST', '/api/anything')).toBeNull();
++    expect(ask('lead', 'GET', '/api/nodes/socket', 'websocket')).toBeNull();
++  });
++
++  it('lets reads through in read and maintenance, and names the reason of the rest', () => {
++    for (const method of ['GET', 'HEAD', 'OPTIONS']) expect(ask('read', method, '/api/me')).toBeNull();
++    expect(ask('maintenance', 'GET', '/api/me')).toBeNull();
++    expect(ask('read', 'POST', '/mcp')).toBe('read_only');
++    expect(ask('maintenance', 'DELETE', '/api/x')).toBe('maintenance');
++    expect(ask('read', 'GET', '/api/nodes/socket', 'WebSocket')).toBe('read_only');
++    expect(ask('maintenance', 'GET', '/api/nodes/socket', 'websocket')).toBe('maintenance');
++  });
++
++  it('lets only the health answer through in off', () => {
++    expect(ask('off', 'GET', '/api/health')).toBeNull();
++    expect(ask('off', 'GET', '/api/health?x=1')).toBeNull();
++    expect(ask('off', 'GET', '/api/me')).toBe('starting');
++    expect(ask('off', 'POST', '/api/health')).toBe('starting');
++  });
++
++  it('refuses with a 503 that carries the reason and its words', async () => {
++    const { mode } = modeIn(folder());
++    await expect(modeGate(mode)({ method: 'GET', url: '/api/me', headers: {} } as never)).rejects.toMatchObject({
++      status: 503,
++      code: 'unavailable',
++      reason: 'starting',
++      message: 'Hornhoof is starting.',
++    });
++  });
++});
++
++async function appWithKeeper(first?: Mode) {
++  const dir = folder();
++  if (first) writeKeeperState(dir, stateOf(first, Date.now()));
++  const made = await testApp({ HORNHOOF_KEEPER: 'on', HORNHOOF_CONTROL_DIR: dir, NODE_KEY, TUNNEL_HOST: TUNNEL });
++  const say = (mode: Mode) => writeKeeperState(dir, stateOf(mode, Date.now()));
++  const modeNow = async () => (await made.app.inject({ url: '/api/health' })).json().mode;
++  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 4000);
++  return { ...made, dir, say, reaches };
++}
++
++describe('the app behind a keeper', () => {
++  it('answers only health while off', async () => {
++    const { app, config } = await appWithKeeper();
++    const health = await app.inject({ url: '/api/health' });
++    expect(health.statusCode).toBe(503);
++    expect(health.json()).toEqual({ ok: false, version: config.version, commit: config.commit, mode: 'off' });
++    const me = await app.inject({ url: '/api/me' });
++    expect(me.statusCode).toBe(503);
++    expect(me.json().error.reason).toBe('starting');
++  });
++
++  it('keeps the health answer a bare ok over the link', async () => {
++    const { app } = await appWithKeeper('lead');
++    const health = await app.inject({ url: '/api/health', ...viaLink() });
++    expect(health.json()).toEqual({ ok: true });
++  });
++
++  const refusesChanges = async (first: Mode, then: Mode, reason: string) => {
++    const { app, say, reaches } = await appWithKeeper(first);
++    const token = await setUpCompany(app);
++    say(then);
++    await reaches(then);
++    expect((await app.inject({ url: '/api/me', ...as(token) })).statusCode).toBe(200);
++    const mcp = await app.inject({ method: 'POST', url: '/mcp', payload: {}, ...as(token) });
++    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'a@b.test', password: 'x' } });
++    const socket = await app.inject({ url: '/api/nodes/socket', headers: { upgrade: 'websocket', connection: 'upgrade' } });
++    for (const refused of [mcp, login, socket]) {
++      expect(refused.statusCode).toBe(503);
++      expect(refused.json().error).toMatchObject({ code: 'unavailable', reason });
++    }
++  };
++
++  it('serves reads and refuses changes in maintenance', () => refusesChanges('lead', 'maintenance', 'maintenance'));
++
++  it('answers read_only in read', () => refusesChanges('lead', 'read', 'read_only'));
++
++  it('hands over no session outside lead', async () => {
++    const { app, db, say, reaches } = await appWithKeeper('lead');
++    const token = await setUpCompany(app);
++    await db.update(sessions).set({ beforeHostCookie: true }).where(eq(sessions.tokenHash, hashToken(token)));
++    const before = await db.select().from(sessions);
++    say('maintenance');
++    await reaches('maintenance');
++    const res = await app.inject({ url: '/api/me', ...viaLink(), cookies: { hh_session: token } });
++    expect(res.cookies.some(cookie => cookie.name === '__Host-hh_session')).toBe(false);
++    expect(await db.select().from(sessions)).toEqual(before);
++  });
++
++  it('closes open sockets when it leaves lead, and refuses new ones while it is away', async () => {
++    const { app, say } = await appWithKeeper('lead');
++    const url = await listen(app);
++    const node = await connectNode(url, NODE_KEY);
++    say('maintenance');
++    const code = await Promise.race([node.closed, new Promise<number>(done => setTimeout(() => done(-1), 4000))]);
++    expect(code).toBe(1012);
++    await expect(connectNode(url, NODE_KEY)).rejects.toThrow(/503/);
++  });
++});
+diff --git a/apps/server/test/config.test.ts b/apps/server/test/config.test.ts
+index ceab7bbf..4c428ed2 100644
+--- a/apps/server/test/config.test.ts
++++ b/apps/server/test/config.test.ts
+@@ -43,16 +43,23 @@ describe('loadConfig', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).relayUrl).toBe('https://hornhoof.org');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL: '' }).relayUrl).toBe('https://hornhoof.org');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL: 'http://127.0.0.1:9000/' }).relayUrl).toBe('http://127.0.0.1:9000');
+     for (const RELAY_URL of ['hornhoof.org', 'ftp://hornhoof.org', 'https://']) {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL })).toThrow('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.');
+     }
+   });
+ 
++  it('runs behind a keeper only when HORNHOOF_KEEPER says on', () => {
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).keeper).toBe(false);
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: '' }).keeper).toBe(false);
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'on' }).keeper).toBe(true);
++    expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'yes' })).toThrow('HORNHOOF_KEEPER must be on, or not set.');
++  });
++
+   it('knows the tunnel container by a plain host name', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).tunnelHost).toBeUndefined();
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: 'tunnel' }).tunnelHost).toBe('tunnel');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: '172.18.0.5' }).tunnelHost).toBe('172.18.0.5');
+     for (const TUNNEL_HOST of ['http://tunnel', 'tun nel', 'tunnel:8080']) {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST })).toThrow('TUNNEL_HOST must be the host name of the tunnel container, like tunnel.');
+     }
+   });
+diff --git a/apps/server/test/version.test.ts b/apps/server/test/version.test.ts
+index b6288bf1..6a188a0d 100644
+--- a/apps/server/test/version.test.ts
++++ b/apps/server/test/version.test.ts
+@@ -7,17 +7,17 @@ const migrations = readdirSync(root('apps/server/drizzle')).filter(f => f.endsWi
+ 
+ describe('version', () => {
+   it('reports its version and build', async () => {
+     const { app } = await testApp({ HORNHOOF_VERSION: '9.9.9', HORNHOOF_COMMIT: 'abc1234def' });
+     const version = await app.inject({ method: 'GET', url: '/api/version' });
+     expect(version.statusCode).toBe(200);
+     expect(version.json()).toEqual({ version: '9.9.9', commit: 'abc1234def', migrations });
+     const health = await app.inject({ method: 'GET', url: '/api/health' });
+-    expect(health.json()).toEqual({ ok: true, version: '9.9.9', commit: 'abc1234def' });
++    expect(health.json()).toEqual({ ok: true, version: '9.9.9', commit: 'abc1234def', mode: 'lead' });
+   });
+ 
+   it('falls back to the product version and a local build', async () => {
+     const { app } = await testApp();
+     const product = JSON.parse(readFileSync(root('package.json'), 'utf8')).version;
+     expect((await app.inject({ method: 'GET', url: '/api/version' })).json()).toMatchObject({ version: product, commit: 'local' });
+   });
+ 
+
+## 91d9673a Split loadConfig and give the minute timer a block body
+
+The author check was red: loadConfig was CRAP 23 once it read HORNHOOF_KEEPER, so
+the secret, the node key, the checked environment and the build facts each moved
+into their own small function. The minute timer callback returned a promise to
+setInterval, which lint forbids; it now assigns inside a block. No behaviour
+changed; the config, health and app-mode tests pass as before.
+
+---
+ apps/server/src/config.ts                | 43 +++++++++++++++++++++++---------
+ apps/server/src/modules/agents/timers.ts |  4 ++-
+ 2 files changed, 34 insertions(+), 13 deletions(-)
+
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index e3f20a13..b260c5d4 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -81,47 +81,66 @@ const Env = z.object({
+   ),
+ });
+ 
+ /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+ const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
+ const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
+ const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
+ 
+-export function loadConfig(env: NodeJS.ProcessEnv): Config {
++function secretOf(env: NodeJS.ProcessEnv): Buffer {
+   const raw = env.HORNHOOF_SECRET;
+   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
+   const secret = Buffer.from(raw, 'base64');
+   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
++  return secret;
++}
++
++function nodeKeyOf(env: NodeJS.ProcessEnv): string | undefined {
++  const nodeKey = env.NODE_KEY || undefined;
++  if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
++  return nodeKey;
++}
+ 
++function checkedEnv(env: NodeJS.ProcessEnv): z.infer<typeof Env> {
+   const checked = Env.safeParse(env);
+   if (!checked.success) throw new Error(checked.error.issues.map(issue => issue.message).join('\n'));
+-  const set = checked.data;
++  return checked.data;
++}
++
++/* The running build and where its published images come from. */
++function buildOf(env: NodeJS.ProcessEnv, set: z.infer<typeof Env>): Pick<Config, 'version' | 'commit' | 'migrations' | 'nodeBuild' | 'image' | 'registryUrl' | 'updateCheckMs'> {
++  return {
++    version: env.HORNHOOF_VERSION || productVersion(),
++    commit: env.HORNHOOF_COMMIT || 'local',
++    migrations: migrationCount(),
++    nodeBuild: nodeBuildOf(env),
++    image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
++    registryUrl: set.REGISTRY_URL,
++    updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
++  };
++}
++
++export function loadConfig(env: NodeJS.ProcessEnv): Config {
++  const secret = secretOf(env);
++  const set = checkedEnv(env);
+   const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+-  const nodeKey = env.NODE_KEY || undefined;
+-  if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
+   return {
++    ...buildOf(env, set),
+     databaseUrl: env.DATABASE_URL || undefined,
+     secret,
+     publicUrl,
+     port: set.PORT ?? 8080,
+     secureCookies: publicUrl.startsWith('https://'),
+     webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
+     installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
+-    nodeKey,
++    nodeKey: nodeKeyOf(env),
+     nodePingMs: set.NODE_PING_MS ?? 20000,
+     streamPingMs: set.STREAM_PING_MS ?? 25000,
+     runsPerHost: set.MAX_RUNS_PER_HOST,
+-    version: env.HORNHOOF_VERSION || productVersion(),
+-    commit: env.HORNHOOF_COMMIT || 'local',
+-    migrations: migrationCount(),
+-    nodeBuild: nodeBuildOf(env),
+-    image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
+-    registryUrl: set.REGISTRY_URL,
+-    updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+     tunnelHost: set.TUNNEL_HOST,
+     keeper: set.HORNHOOF_KEEPER === 'on',
+     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+     hostId: set.HORNHOOF_HOST_ID ?? null,
+   };
+diff --git a/apps/server/src/modules/agents/timers.ts b/apps/server/src/modules/agents/timers.ts
+index 0fa8fe77..2ad790b3 100644
+--- a/apps/server/src/modules/agents/timers.ts
++++ b/apps/server/src/modules/agents/timers.ts
+@@ -129,17 +129,19 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
+ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
+   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
+   let timer: NodeJS.Timeout | null = null;
+   let round: Promise<void> = Promise.resolve();
+   const enter = () => {
+     void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
+     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
+     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
+-    timer = setInterval(() => (round = minuteRound(ctx, new Date(), failed)), TICK_MS);
++    timer = setInterval(() => {
++      round = minuteRound(ctx, new Date(), failed);
++    }, TICK_MS);
+     timer.unref();
+   };
+   const leave = async () => {
+     if (timer) clearInterval(timer);
+     timer = null;
+     await round;
+   };
+   ctx.mode.whenLead(enter, leave);
+
+## 24d08cf4 Split the rest of loadConfig by what it reads
+
+The second author check still found loadConfig at CRAP 13, since the defaults
+for folders and for limits sat in one object. Folders and scripts now come from
+placesOf, intervals and limits from limitsOf. No behaviour changed; the config
+tests pass as before.
+
+---
+ apps/server/src/config.ts | 32 +++++++++++++++++++++++---------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index b260c5d4..a95dd8ee 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -114,34 +114,48 @@ function buildOf(env: NodeJS.ProcessEnv, set: z.infer<typeof Env>): Pick<Config,
+     migrations: migrationCount(),
+     nodeBuild: nodeBuildOf(env),
+     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
+     registryUrl: set.REGISTRY_URL,
+     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+   };
+ }
+ 
++/* Folders and scripts, each with the place the image keeps it. */
++function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScript' | 'controlDir' | 'templatesDir'> {
++  return {
++    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
++    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
++    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
++    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
++  };
++}
++
++/* Intervals and limits, with their defaults. */
++function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes'> {
++  return {
++    port: set.PORT ?? 8080,
++    nodePingMs: set.NODE_PING_MS ?? 20000,
++    streamPingMs: set.STREAM_PING_MS ?? 25000,
++    runsPerHost: set.MAX_RUNS_PER_HOST,
++    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
++  };
++}
++
+ export function loadConfig(env: NodeJS.ProcessEnv): Config {
+   const secret = secretOf(env);
+   const set = checkedEnv(env);
+   const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+   return {
+     ...buildOf(env, set),
++    ...placesOf(env),
++    ...limitsOf(set),
+     databaseUrl: env.DATABASE_URL || undefined,
+     secret,
+     publicUrl,
+-    port: set.PORT ?? 8080,
+     secureCookies: publicUrl.startsWith('https://'),
+-    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
+-    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
+     nodeKey: nodeKeyOf(env),
+-    nodePingMs: set.NODE_PING_MS ?? 20000,
+-    streamPingMs: set.STREAM_PING_MS ?? 25000,
+-    runsPerHost: set.MAX_RUNS_PER_HOST,
+-    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+-    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+     tunnelHost: set.TUNNEL_HOST,
+     keeper: set.HORNHOOF_KEEPER === 'on',
+-    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+     hostId: set.HORNHOOF_HOST_ID ?? null,
+   };
+ }
+

@@ -1,0 +1,30 @@
+== changed files
+apps/web/test/async-wait-timeout.test.tsx
+apps/web/test/setup.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/web tests
+ [32m✓[39m test/async-wait-timeout.test.tsx [2m([22m[2m1 test[22m[2m)[22m[33m 1549[2mms[22m[39m
+   [33m[2m✓[22m[39m finds an element that appears a little after one second[33m 1546[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m50 passed[39m[22m[90m (50)[39m
+[2m   Affected [22m 50 of 50 test files [2m(related to 2 files)[22m
+[2m      Tests [22m [1m[32m770 passed[39m[22m[90m (770)[39m
+[2m   Start at [22m 02:56:18
+[2m   Duration [22m 209.97s[2m (tests 75%, environment 17%, setup 4%, import 3%, transform 2%, worker 1%)[22m
+
+[2m    Isolate [22m [33m50 workers spawned[39m[2m · ~2.34s startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~36.64s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+worst changed CRAP: 0.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at c5c09acb

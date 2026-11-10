@@ -1,0 +1,66 @@
+
+In test-remote.sh line 9:
+CONTAINER_ROOT=/home/altera/hornhoof-network
+^------------^ SC2034 (warning): CONTAINER_ROOT appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 112:
+containers_named() { ls "$FAKE_STATE/containers" 2>/dev/null | grep -c "$1"; }
+                     ^-- SC2010 (warning): Don't use ls | grep. Use a glob or a for loop with a condition to allow non-alphanumeric filenames.
+
+
+In test-remote.sh line 133:
+  log=$(ls "$HNB_ROOT"/network-build/runs/remote-lab-*.log 2>/dev/null | head -1)
+  ^-^ SC2034 (warning): log appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 193:
+  local call dind; call=$(run_call lab); dind=$(calls | grep -E '^docker run .*--name hnb-dind-')
+                                         ^--^ SC2034 (warning): dind appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 212:
+  local snap; snap=$(snapshot_dir first)
+              ^--^ SC2034 (warning): snap appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 228:
+  local npm_runs='calls | grep -c "name hnb-npm-"'
+        ^------^ SC2034 (warning): npm_runs appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 372:
+  local running; running=$(ls "$FAKE_STATE/containers" | grep hnb-run-busy | head -1)
+                           ^-- SC2010 (warning): Don't use ls | grep. Use a glob or a for loop with a condition to allow non-alphanumeric filenames.
+
+
+In test-remote.sh line 485:
+  call=$(run_call lab)
+  ^--^ SC2034 (warning): call appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 530:
+  local snap_a snap_b; snap_a=$(snapshot_dir first); snap_b=$(snapshot_dir second)
+                       ^----^ SC2034 (warning): snap_a appears unused. Verify use (or export if used externally).
+                                                     ^----^ SC2034 (warning): snap_b appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 582:
+  REMOTE_HORNHOOF_TREE=$HNB_ROOT/wt/hornhoof "$REMOTE_SH" run lab 'true' > /dev/null 2>&1; rc=$?
+                                                                                           ^-- SC2034 (warning): rc appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 594:
+  local base; base=$(tests_home)/base
+              ^--^ SC2034 (warning): base appears unused. Verify use (or export if used externally).
+
+
+In test-remote.sh line 623:
+  out=$(LIGHT=1 DOCKER_HOST=tcp://127.0.0.1:2375 "$build/heavy.sh" sh -c 'echo "$DOCKER_HOST|$PATH"')
+  ^-^ SC2034 (warning): out appears unused. Verify use (or export if used externally).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2010 -- Don't use ls | grep. Use a glob o...
+  https://www.shellcheck.net/wiki/SC2034 -- CONTAINER_ROOT appears unused. Ve...
+shellcheck-warning-exit=1
+setup-quality-exit=0

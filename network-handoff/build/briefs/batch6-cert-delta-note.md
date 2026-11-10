@@ -1,0 +1,3 @@
+# A delta read
+
+You raised the findings in `network-build/runs/batch6-cert-r2-agy.md`. The list given to the writer is `network-build/runs/batch6-cert-merged.md`. The package is only the fix's commit. Items 1 to 6 of that list: say ADDRESSED or NOT ADDRESSED, and whether its test fails without the fix. Item 2 (SAN case) was checked by the writer: say if the claim in the commit holds. Then read the fix itself for new breakage: a good chain now refused, a key or certificate text reaching a log line, `linkMode` now throwing, and a caller that reads `linkMode` with two arguments. Nothing here runs against a live service.

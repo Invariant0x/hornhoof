@@ -1,0 +1,25 @@
+npm warn deprecated @esbuild-kit/core-utils@3.3.2: Merged into tsx: https://tsx.hirok.io
+npm warn deprecated @esbuild-kit/esm-loader@2.6.5: Merged into tsx: https://tsx.hirok.io
+
+> hornhoof@0.6.0 prepare
+> node -e "const fs=require('node:fs');if(fs.existsSync('node_modules/@vitest/coverage-v8'))for(const w of['packages/protocol','apps/node','apps/server','apps/web']){fs.mkdirSync(w+'/node_modules/@vitest',{recursive:true});fs.rmSync(w+'/node_modules/@vitest/coverage-v8',{recursive:true,force:true});fs.symlinkSync('../../../../node_modules/@vitest/coverage-v8',w+'/node_modules/@vitest/coverage-v8')}"
+
+
+added 440 packages, and audited 445 packages in 28s
+
+127 packages are looking for funding
+  run `npm fund` for details
+
+15 moderate severity vulnerabilities
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+

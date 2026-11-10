@@ -1,0 +1,6 @@
+Let each machine of a link log in once, offer its peer services, and visit them
+
+Separate link, peer, and visitor identities and restrict their services.
+Keep visitor credentials within a binding lifetime and guard concurrent release.
+
+Verify the contract against local frps 0.71.1 on Python 3.12 and 3.14.

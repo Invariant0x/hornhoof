@@ -1,0 +1,1386 @@
+# Review package: batch 9, slice journal
+
+## 2df69d65 Journal every change and commit it only under a lease the keeper holds
+
+Every row change in public now writes a row to net.journal in the same transaction, and a deferred constraint trigger on
+that table asks net.assert_lease at commit, so a machine without a lease commits nothing (fence 1). migrateDb takes the
+journal off before the migrations and puts it back after, also after a failed run, because each table's journal function
+names its columns and a migration that drops one and writes that table would otherwise fail. Foreign keys become
+deferrable after every run, so a later migration's new key is too. public.applied, public.tool_calls and task_events.uuid
+come with it, and both new tables are closed to the agent roles.
+
+Superusers that do not say hornhoof.fenced = on pass, so plan 2's build, migrate and an owner's psql keep writing. Agent
+roles are fenced whatever they set. The whole PGlite suite now runs fenced under an endless lease.
+
+Migrations are 0056_sources and 0057_net by build ruling 5, and the plan's tests read so (0044_link_tls is 0055_link_tls).
+Proved by test/journal.test.ts, migrations.test.ts, orchestrator-control.test.ts and test/real/journal.test.ts. The real
+tests were also seen red against code with the fence off, the detach off and the put-back off, each for its own reason.
+
+Ruling: tasks_turn_id and tasks_product_id not added and their test not repeated - why: both are already in schema.ts and 0045_task_lookup_indexes, and migrations.test.ts "creates both indexes on a fresh install" makes the same pg_indexes check - cost if wrong: none, the check stays.
+Ruling: added net.write_journal, net.pair_for_journal and net.source_of_journal beyond the plan's list - why: one place makes a journal row and small functions build each table's body; their names do not start with journal_, so detach_journal leaves them - cost if wrong: plan 3 Task 4's problems() sees three more functions of net, all revoked from PUBLIC.
+Ruling: hasCode added to db/errors.ts, a file the task does not list - why: isLeaseRefused would otherwise repeat isUniqueViolation's walk over causes - cost if wrong: none, its behaviour is pinned by the existing tests.
+Ruling: an update's key is the new row's key - why: the plan does not say which; a changed primary key column still shows in cols and old - cost if wrong: plan 8's merge reads the old key from old in that rare case.
+Ruling: attach_journal answers how many triggers it newly attached, so 0 on a second run - why: the plan says how many tables it attached - cost if wrong: nothing reads the number yet.
+Ruling: a json column is not handled, since IS DISTINCT FROM has no equality for it - why: the schema has only jsonb, smallest edit - cost if wrong: a later migration adding json fails the first update of that table, which the fenced suite shows at once.
+Ruling: added two tests beyond the plan's list, no lease or state row refuses and a table without a key or with a long name raises - why: both are fail closed behaviour the plan requires and a fresh install starts with no rows - cost if wrong: about 3 s of test time.
+
+---
+ apps/server/drizzle/0056_sources.sql          |  15 ++
+ apps/server/drizzle/0057_net.sql              | 205 ++++++++++++++++++++++++++
+ apps/server/drizzle/meta/_journal.json        |  14 ++
+ apps/server/src/db/agent-sql.ts               |   5 +-
+ apps/server/src/db/client.ts                  |  27 +++-
+ apps/server/src/db/errors.ts                  |   8 +-
+ apps/server/src/db/net.ts                     |  24 +++
+ apps/server/src/db/schema.ts                  |  17 +++
+ apps/server/src/modules/tools/database.ts     |   8 +-
+ apps/server/test/global-setup.ts              |   9 ++
+ apps/server/test/helpers.ts                   |  14 +-
+ apps/server/test/journal.test.ts              | 173 ++++++++++++++++++++++
+ apps/server/test/migration-history.test.ts    |   4 +-
+ apps/server/test/migrations.test.ts           |  69 +++++++++
+ apps/server/test/orchestrator-control.test.ts |   4 +-
+ apps/server/test/real/journal.test.ts         | 131 ++++++++++++++++
+ 16 files changed, 712 insertions(+), 15 deletions(-)
+
+diff --git a/apps/server/drizzle/0056_sources.sql b/apps/server/drizzle/0056_sources.sql
+new file mode 100644
+index 00000000..28883365
+--- /dev/null
++++ b/apps/server/drizzle/0056_sources.sql
+@@ -0,0 +1,15 @@
++CREATE TABLE "applied" (
++	"source" text PRIMARY KEY NOT NULL,
++	"at" timestamp with time zone DEFAULT now() NOT NULL
++);
++--> statement-breakpoint
++CREATE TABLE "tool_calls" (
++	"id" uuid PRIMARY KEY NOT NULL,
++	"job_id" uuid NOT NULL,
++	"answer" jsonb,
++	"at" timestamp with time zone DEFAULT now() NOT NULL
++);
++--> statement-breakpoint
++ALTER TABLE "task_events" ADD COLUMN "uuid" uuid DEFAULT gen_random_uuid() NOT NULL;--> statement-breakpoint
++ALTER TABLE "tool_calls" ADD CONSTRAINT "tool_calls_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
++ALTER TABLE "task_events" ADD CONSTRAINT "task_events_uuid_unique" UNIQUE("uuid");
+\ No newline at end of file
+diff --git a/apps/server/drizzle/0057_net.sql b/apps/server/drizzle/0057_net.sql
+new file mode 100644
+index 00000000..158a4d8d
+--- /dev/null
++++ b/apps/server/drizzle/0057_net.sql
+@@ -0,0 +1,205 @@
++CREATE SCHEMA net;
++--> statement-breakpoint
++CREATE SCHEMA net_local;
++--> statement-breakpoint
++CREATE TABLE net_local.state (
++  id boolean PRIMARY KEY DEFAULT true CHECK (id),
++  term_number bigint NOT NULL,
++  term_machine text NOT NULL,
++  term_split boolean NOT NULL DEFAULT false,
++  machine text NOT NULL,
++  cluster text NOT NULL
++);
++--> statement-breakpoint
++CREATE TABLE net_local.lease (
++  id boolean PRIMARY KEY DEFAULT true CHECK (id),
++  term_number bigint NOT NULL,
++  term_machine text NOT NULL,
++  term_split boolean NOT NULL DEFAULT false,
++  kind text NOT NULL CHECK (kind IN ('normal', 'split', 'maintenance')),
++  until timestamptz NOT NULL,
++  sync text CHECK (sync IN ('copy', 'relay_off', 'alone'))
++);
++--> statement-breakpoint
++CREATE TABLE net_local.maintenance (
++  id boolean PRIMARY KEY DEFAULT true CHECK (id),
++  version text NOT NULL,
++  since timestamptz NOT NULL,
++  until timestamptz NOT NULL
++);
++--> statement-breakpoint
++CREATE TABLE net.journal (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  xact uuid NOT NULL,
++  term_number bigint,
++  term_machine text,
++  term_split boolean,
++  machine text,
++  at timestamptz NOT NULL DEFAULT clock_timestamp(),
++  tbl text NOT NULL,
++  op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
++  key jsonb NOT NULL,
++  cols text[] NOT NULL,
++  old jsonb
++);
++--> statement-breakpoint
++CREATE INDEX journal_at ON net.journal (at);
++--> statement-breakpoint
++-- Every condition that comes out null, as with a missing row, falls through to the refusal, so what cannot decide refuses.
++CREATE FUNCTION net.assert_lease(margin interval, invocation uuid) RETURNS void
++LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  st net_local.state;
++  le net_local.lease;
++BEGIN
++  IF (SELECT rolsuper FROM pg_roles WHERE rolname = session_user)
++     AND current_setting('hornhoof.fenced', true) IS DISTINCT FROM 'on' THEN
++    RETURN;
++  END IF;
++  SELECT * INTO st FROM net_local.state;
++  SELECT * INTO le FROM net_local.lease;
++  IF (le.term_number, le.term_machine, le.term_split) = (st.term_number, st.term_machine, st.term_split)
++     AND le.kind IN ('normal', 'split')
++     AND le.until > clock_timestamp() + margin
++     AND current_setting('synchronous_commit') = 'on'
++     AND (le.kind = 'split' OR le.sync IS NOT NULL) THEN
++    RETURN;
++  END IF;
++  RAISE EXCEPTION 'This machine holds no lease now, so nothing was changed.' USING ERRCODE = 'HHF01';
++END
++$fn$;
++--> statement-breakpoint
++CREATE FUNCTION net.fence_check() RETURNS trigger
++LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++BEGIN
++  PERFORM net.assert_lease('0 s', NULL);
++  RETURN NULL;
++END
++$fn$;
++--> statement-breakpoint
++CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.journal
++DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
++--> statement-breakpoint
++-- The one place a journal row is made, for every table's function. The transaction's uuid comes from its id, which no session can set.
++CREATE FUNCTION net.write_journal(changed_table text, change text, row_key jsonb, named_columns text[], old_values jsonb) RETURNS void
++LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  st net_local.state;
++BEGIN
++  SELECT * INTO st FROM net_local.state;
++  INSERT INTO net.journal (xact, term_number, term_machine, term_split, machine, tbl, op, key, cols, old)
++  VALUES (
++    md5(COALESCE(st.cluster, (SELECT system_identifier::text FROM pg_control_system())) || ':' || pg_current_xact_id()::text)::uuid,
++    st.term_number, st.term_machine, st.term_split, st.machine, changed_table, change, row_key, named_columns, old_values
++  );
++END
++$fn$;
++--> statement-breakpoint
++-- A column's value as the journal keeps it, written as SQL over NEW or OLD. A file stays out of the journal: only its hash goes in.
++CREATE FUNCTION net.pair_for_journal(side text, col name, type_of_col oid) RETURNS text
++LANGUAGE sql SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++  SELECT format('jsonb_build_object(%L, %s)', col,
++    CASE WHEN type_of_col = 'bytea'::regtype
++      THEN format($sql$'sha256:' || encode(sha256(%s.%I), 'hex')$sql$, side, col)
++      ELSE format('%s.%I', side, col)
++    END);
++$fn$;
++--> statement-breakpoint
++-- The body of one table's journal function. It names the table's columns, so a migration must take it off before it drops one.
++-- Pairs go through || because jsonb_build_object takes at most 100 arguments, which a wide table would pass.
++CREATE FUNCTION net.source_of_journal(tbl oid, table_name text) RETURNS text
++LANGUAGE plpgsql SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  key_of_new text;
++  key_of_old text;
++  every_column text;
++  whole_old_row text;
++  checks text;
++BEGIN
++  SELECT string_agg(net.pair_for_journal('NEW', a.attname, a.atttypid), ' || '), string_agg(net.pair_for_journal('OLD', a.attname, a.atttypid), ' || ')
++    INTO key_of_new, key_of_old
++    FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
++    WHERE i.indrelid = tbl AND i.indisprimary;
++  IF key_of_new IS NULL THEN
++    RAISE EXCEPTION 'Table public.% has no primary key, so the journal could not name its rows.', table_name;
++  END IF;
++  SELECT 'ARRAY[' || string_agg(quote_literal(a.attname), ', ') || ']::text[]',
++         string_agg(net.pair_for_journal('OLD', a.attname, a.atttypid), ' || '),
++         string_agg(format('IF NEW.%1$I IS DISTINCT FROM OLD.%1$I THEN changed := changed || %2$L::text; was := was || %3$s; END IF;',
++           a.attname, a.attname, net.pair_for_journal('OLD', a.attname, a.atttypid)), E'\n')
++    INTO every_column, whole_old_row, checks
++    FROM pg_attribute a
++    WHERE a.attrelid = tbl AND a.attnum > 0 AND NOT a.attisdropped;
++  RETURN format($src$
++DECLARE
++  changed text[] := '{}';
++  was jsonb := '{}';
++BEGIN
++  IF TG_OP = 'INSERT' THEN
++    PERFORM net.write_journal(%1$L, 'insert', %2$s, %4$s, NULL);
++  ELSIF TG_OP = 'DELETE' THEN
++    PERFORM net.write_journal(%1$L, 'delete', %3$s, %4$s, %5$s);
++  ELSE
++    %6$s
++    PERFORM net.write_journal(%1$L, 'update', %2$s, changed, was);
++  END IF;
++  RETURN NULL;
++END
++$src$, table_name, key_of_new, key_of_old, every_column, whole_old_row, checks);
++END
++$fn$;
++--> statement-breakpoint
++CREATE FUNCTION net.attach_journal() RETURNS integer
++LANGUAGE plpgsql SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  t record;
++  attached integer := 0;
++BEGIN
++  FOR t IN SELECT c.oid, c.relname::text AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
++           WHERE n.nspname = 'public' AND c.relkind = 'r' LOOP
++    IF octet_length(t.name) > 55 THEN
++      RAISE EXCEPTION 'Table public.% has a name over 55 characters, too long for its journal function.', t.name;
++    END IF;
++    EXECUTE format('CREATE OR REPLACE FUNCTION net.%I() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, net_local, pg_temp AS %L',
++      'journal_' || t.name, net.source_of_journal(t.oid, t.name));
++    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = t.oid AND tgname = 'net_journal') THEN
++      EXECUTE format('CREATE TRIGGER net_journal AFTER INSERT OR UPDATE OR DELETE ON public.%I FOR EACH ROW EXECUTE FUNCTION net.%I()', t.name, 'journal_' || t.name);
++      attached := attached + 1;
++    END IF;
++  END LOOP;
++  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;
++  RETURN attached;
++END
++$fn$;
++--> statement-breakpoint
++CREATE FUNCTION net.detach_journal() RETURNS integer
++LANGUAGE plpgsql SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  fn record;
++  detached integer := 0;
++BEGIN
++  FOR fn IN SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
++            WHERE n.nspname = 'net' AND p.proname LIKE 'journal\_%' LOOP
++    EXECUTE format('DROP FUNCTION net.%I() CASCADE', fn.proname);
++    detached := detached + 1;
++  END LOOP;
++  RETURN detached;
++END
++$fn$;
++--> statement-breakpoint
++CREATE FUNCTION net.defer_foreign_keys() RETURNS integer
++LANGUAGE plpgsql SET search_path = pg_catalog, net_local, pg_temp AS $fn$
++DECLARE
++  fk record;
++  made_deferrable integer := 0;
++BEGIN
++  FOR fk IN SELECT k.conname, t.relname FROM pg_constraint k JOIN pg_class t ON t.oid = k.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
++            WHERE k.contype = 'f' AND NOT k.condeferrable AND n.nspname = 'public' LOOP
++    EXECUTE format('ALTER TABLE public.%I ALTER CONSTRAINT %I DEFERRABLE INITIALLY IMMEDIATE', fk.relname, fk.conname);
++    made_deferrable := made_deferrable + 1;
++  END LOOP;
++  RETURN made_deferrable;
++END
++$fn$;
++--> statement-breakpoint
++REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;
+diff --git a/apps/server/drizzle/meta/_journal.json b/apps/server/drizzle/meta/_journal.json
+index a344fcb7..8a28e80c 100644
+--- a/apps/server/drizzle/meta/_journal.json
++++ b/apps/server/drizzle/meta/_journal.json
+@@ -381,11 +381,25 @@
+       "breakpoints": true
+     },
+     {
+       "idx": 55,
+       "version": "7",
+       "when": 1793836754489,
+       "tag": "0055_link_tls",
+       "breakpoints": true
++    },
++    {
++      "idx": 56,
++      "version": "7",
++      "when": 1793844426024,
++      "tag": "0056_sources",
++      "breakpoints": true
++    },
++    {
++      "idx": 57,
++      "version": "7",
++      "when": 1793844426713,
++      "tag": "0057_net",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index bcf82bd2..61c8c368 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -7,18 +7,19 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
+ /* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
+ export type SqlMode = 'write' | 'read';
+ 
+ /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
+ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+ 
+ /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
+    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. The link's
+-   certificate too: it holds the sealed keys, and its mode decides how the link runs. */
+-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'sign_in_attempts', 'link_tls'];
++   certificate too: it holds the sealed keys, and its mode decides how the link runs. And Hornhoof's records of where
++   changes came from: a row put there would make a real retry look done. */
++export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls'];
+ /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
+    every join from it, so it is one too. The account a node is signed in to names a person's email. */
+ export const SECRET: Record<string, string[]> = {
+   people: ['password_hash'],
+   jobs: ['tool_token_hash'],
+   subscriptions: ['secret_enc'],
+   nodes: ['key_hash', 'account'],
+   machines: ['machine_key'],
+diff --git a/apps/server/src/db/client.ts b/apps/server/src/db/client.ts
+index 132bcdd3..3d6b36ea 100644
+--- a/apps/server/src/db/client.ts
++++ b/apps/server/src/db/client.ts
+@@ -1,16 +1,17 @@
+ import { readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { sql } from 'drizzle-orm';
+ import { readMigrationFiles, type MigrationConfig } from 'drizzle-orm/migrator';
+ import { drizzle } from 'drizzle-orm/node-postgres';
+ import { migrate } from 'drizzle-orm/node-postgres/migrator';
+ import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+ import pg from 'pg';
++import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS } from './net.js';
+ import * as schema from './schema.js';
+ 
+ export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
+ 
+ export const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url));
+ 
+ export const APP_NAME = 'hornhoof-app';
+ export const MIGRATE_NAME = 'hornhoof-migrate';
+@@ -33,29 +34,49 @@ const warnDropped = (err: Error) => console.warn(`Lost a database connection, wi
+ 
+ /* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. */
+ export function openDb(url: string, name: string, opts: { statementTimeoutMs?: number } = {}): Db {
+   return drizzle(openPool(url, warnDropped, name, opts), { schema });
+ }
+ 
+ /* Runs on a pool with no timeouts, since a migration may take as long as it needs. Answers how many migrations the
+    database has recorded. */
+-export async function migrateDb(url: string): Promise<number> {
++export async function migrateDb(url: string, folder: string = MIGRATIONS): Promise<number> {
+   const pool = openPool(url, warnDropped, MIGRATE_NAME);
+   try {
+     const db = drizzle(pool, { schema });
+-    await migrate(db, { migrationsFolder: MIGRATIONS });
+-    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
++    await pool.query(BEFORE_MIGRATIONS);
++    await withJournalBackAfter(pool, async () => {
++      await migrate(db, { migrationsFolder: folder });
++      await applyMissingMigrations(db, { migrationsFolder: folder });
++    });
+     const { rows } = await pool.query<{ count: string }>('SELECT count(*) FROM drizzle.__drizzle_migrations');
+     return Number(rows[0]!.count);
+   } finally {
+     await pool.end();
+   }
+ }
+ 
++/* The journal goes back also after a failed run, whose failure stays what the caller gets. A failure to put it back after a
++   good run is thrown too: the company must not go on without it. An older database has no such function yet. */
++async function withJournalBackAfter(pool: pg.Pool, migrations: () => Promise<void>): Promise<void> {
++  try {
++    await migrations();
++  } catch (err) {
++    await putJournalBack(pool).catch((failed: Error) => console.warn(`Could not put the journal back after a failed migration: ${failed.message}`));
++    throw err;
++  }
++  await putJournalBack(pool);
++}
++
++async function putJournalBack(pool: pg.Pool): Promise<void> {
++  const { rows } = await pool.query<{ there: boolean }>(`SELECT to_regprocedure('net.attach_journal()') IS NOT NULL AS there`);
++  if (rows[0]!.there) await pool.query(AFTER_MIGRATIONS);
++}
++
+ /* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
+ export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<void> {
+   const recorded = await db.select({ when: sql<string>`created_at` }).from(sql`drizzle.__drizzle_migrations`);
+   const applied = new Set(recorded.map(row => Number(row.when)));
+   const migrations = readMigrationFiles(config);
+   const journal = JSON.parse(readFileSync(`${config.migrationsFolder}/meta/_journal.json`, 'utf8')) as { entries: { tag: string }[] };
+   for (const [i, migration] of migrations.entries()) {
+     if (applied.has(migration.folderMillis)) continue;
+diff --git a/apps/server/src/db/errors.ts b/apps/server/src/db/errors.ts
+index 92ac161b..665ad0ad 100644
+--- a/apps/server/src/db/errors.ts
++++ b/apps/server/src/db/errors.ts
+@@ -1,7 +1,11 @@
+ /* Drizzle wraps driver errors, so the Postgres code can sit on the error or on its cause. */
+-export function isUniqueViolation(err: unknown): boolean {
++export function hasCode(err: unknown, code: string): boolean {
+   for (let e: unknown = err; e && typeof e === 'object'; e = (e as { cause?: unknown }).cause) {
+-    if ((e as { code?: unknown }).code === '23505') return true;
++    if ((e as { code?: unknown }).code === code) return true;
+   }
+   return false;
+ }
++
++export function isUniqueViolation(err: unknown): boolean {
++  return hasCode(err, '23505');
++}
+diff --git a/apps/server/src/db/net.ts b/apps/server/src/db/net.ts
+new file mode 100644
+index 00000000..c64adcad
+--- /dev/null
++++ b/apps/server/src/db/net.ts
+@@ -0,0 +1,24 @@
++import { hasCode } from './errors.js';
++
++/* What net.assert_lease raises when this machine holds no lease a commit may stand on. */
++export const LEASE_REFUSED = 'HHF01';
++/* A superuser session that sets this to 'on' is fenced; one that does not, as an older build's, passes unchecked. */
++export const FENCED = 'hornhoof.fenced';
++export const JOURNAL_TRIGGER = 'net_journal';
++export const FENCE_TRIGGER = 'net_fence';
++
++export type LeaseKind = 'normal' | 'split' | 'maintenance';
++export type LeaseSync = 'copy' | 'relay_off' | 'alone';
++export type Term = { number: number; machine: string; split: boolean };
++
++/* Each table's journal function names its columns, so a migration that drops a column and then writes that table would
++   fail inside drizzle's one transaction, which nothing can join. The journal comes off first and goes back after. */
++export const BEFORE_MIGRATIONS = `DO $$ BEGIN
++  IF to_regprocedure('net.detach_journal()') IS NOT NULL THEN PERFORM net.detach_journal(); END IF;
++END $$`;
++/* After every run and not once, so that a later migration's new table and new foreign key are covered too. */
++export const AFTER_MIGRATIONS = 'SELECT net.attach_journal(); SELECT net.defer_foreign_keys();';
++
++export function isLeaseRefused(err: unknown): boolean {
++  return hasCode(err, LEASE_REFUSED);
++}
+diff --git a/apps/server/src/db/schema.ts b/apps/server/src/db/schema.ts
+index 2475fd0a..59a107dd 100644
+--- a/apps/server/src/db/schema.ts
++++ b/apps/server/src/db/schema.ts
+@@ -518,16 +518,18 @@ export const tasks = pgTable(
+ export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped'] as const;
+ export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
+ 
+ /* Everything that happened to a task, with the person or agent who did it. */
+ export const taskEvents = pgTable(
+   'task_events',
+   {
+     id: bigserial('id', { mode: 'number' }).primaryKey(),
++    /* What names this event across machines, where the serial id of each differs. */
++    uuid: uuid('uuid').notNull().defaultRandom().unique(),
+     companyId: companyId(),
+     taskId: uuid('task_id').notNull().references(() => tasks.id),
+     kind: text('kind', { enum: TASK_EVENT_KINDS }).notNull(),
+     personId: uuid('person_id').references(() => people.id),
+     agentId: uuid('agent_id').references(() => agents.id),
+     text: text('text').notNull().default(''),
+     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+     createdAt: createdAt(),
+@@ -830,8 +832,23 @@ export const linkTls = pgTable('link_tls', {
+   /* The last failure's AcmeError type, else its kind; null after a success. */
+   failure: text('failure'),
+   failedAt: timestamp('failed_at', { withTimezone: true }),
+   mode: text('mode', { enum: ['http', 'https'] }).notNull().default('http'),
+   /* No switch to https before this. */
+   httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+ });
++
++/* Where a change came from: a node message or a web request, written in the change's own transaction, so a retry finds
++   its source listed. */
++export const applied = pgTable('applied', {
++  source: text('source').primaryKey(),
++  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
++});
++
++/* Where a tool's change came from: the call's invocation id, so a call repeated after a lost answer finds it. */
++export const toolCalls = pgTable('tool_calls', {
++  id: uuid('id').primaryKey(),
++  jobId: uuid('job_id').notNull().references(() => jobs.id),
++  answer: jsonb('answer'),
++  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
++});
+diff --git a/apps/server/src/modules/tools/database.ts b/apps/server/src/modules/tools/database.ts
+index cec9050f..b3daec5b 100644
+--- a/apps/server/src/modules/tools/database.ts
++++ b/apps/server/src/modules/tools/database.ts
+@@ -7,17 +7,19 @@ import { answersCeoOrDelegate, withInputLock } from '../conversation/decision-co
+ type ToolJob = { id: string; companyId: string; agentId: string };
+ 
+ /* Answers longer than this are cut, as view's are. */
+ const MAX_ANSWER = 30_000;
+ 
+ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
+ 
+ const SECRETS = Object.values(SECRET).flat().join(', ');
+-const CLOSED = 'Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.';
++/* The closed tables but the first, which each text below starts in its own way. */
++const CLOSED_AFTER_SIGN_INS = "invites, install codes, sealed plan sign-ins, the public link and Hornhoof's records of where changes came from";
++const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
+ export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
+ /* The orchestrator's in a turn that answers nobody who takes the CEO's decisions. */
+ export const READS_IN_THIS_TURN = 'In this turn the tool only reads: it answers neither the CEO nor the CEO delegate. A change waits for a turn of theirs.';
+ const DECISIONS = 'Requests, cards and the logs of tasks and conversations change only through the other tools: a request closes only with answer_request.';
+ const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
+ const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
+ const TESTS = 'Test runs and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
+ /* What the orchestrator may not do with a table, in the words he acts on. */
+@@ -57,23 +59,23 @@ function refusal(err: Error & { code?: string }, mode: SqlMode, readOnly = READ_
+   } else if (table) why = [RULES[table], secretsOf(table)].filter(Boolean).join(' ') || undefined;
+   return `The database answered: ${err.message}${why ? `. ${why}` : ''}`;
+ }
+ 
+ const DESCRIPTIONS: Record<SqlMode, string> = {
+   write:
+     "Runs SQL on Hornhoof's own Postgres database, for what no other tool does: fixing a stuck row, changing a field, removing what the screens cannot. " +
+     'Several statements run in one transaction and are undone together when one fails; a call may take 15 seconds. It reads and changes the rows of every table ' +
+-    `but sign-ins, invites, install codes, sealed plan sign-ins and the public link, and never the columns with secrets (${SECRETS}), so name columns instead of * on those tables. ` +
++    `but sign-ins, ${CLOSED_AFTER_SIGN_INS}, and never the columns with secrets (${SECRETS}), so name columns instead of * on those tables. ` +
+     "People and their access, subscriptions, machines, repositories, an employee's kind, role, skills and subscription, a head's department and a turn but its status change only through the other tools. " +
+     'It cannot change the tables themselves. A change skips the checks and notices the other tools make, so prefer them, read before you write and change only ' +
+     'the rows you mean. Each statement comes back as { rows, changed }.',
+   read:
+     "Reads Hornhoof's own Postgres database, to find what went wrong: stuck rows, failed turns, who changed what and when. Several statements run in one " +
+-    'transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, invites, install codes, sealed plan sign-ins and the public link, and never the columns ' +
++    `transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, ${CLOSED_AFTER_SIGN_INS}, and never the columns ` +
+     `with secrets (${SECRETS}), so name columns instead of * on those tables. ${READ_ONLY} Each statement comes back as { rows, changed }.`,
+ };
+ 
+ /* What the tool says of itself, and why a read-only call refused a write, in each mode. */
+ const DESCRIBED: Record<SqlMode, string> = {
+   write: `${DESCRIPTIONS.write} In a turn that answers neither the CEO nor the CEO delegate it only reads.`,
+   read: DESCRIPTIONS.read,
+ };
+diff --git a/apps/server/test/global-setup.ts b/apps/server/test/global-setup.ts
+index 6e86e2ee..64daee5b 100644
+--- a/apps/server/test/global-setup.ts
++++ b/apps/server/test/global-setup.ts
+@@ -1,34 +1,43 @@
+ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { PGlite } from '@electric-sql/pglite';
+ import { drizzle } from 'drizzle-orm/pglite';
+ import { migrate } from 'drizzle-orm/pglite/migrator';
+ import type { TestProject } from 'vitest/node';
+ import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
++import { AFTER_MIGRATIONS } from '../src/db/net.js';
+ import * as schema from '../src/db/schema.js';
+ 
+ declare module 'vitest' {
+   export interface ProvidedContext {
+     /* The dump of the migrated database every test database starts from. */
+     migratedDataDir: string;
+   }
+ }
+ 
++/* Every test database holds this lease and says it is fenced (helpers.ts), so the whole suite runs under fence 1. */
++export const ENDLESS_LEASE = `
++  INSERT INTO net_local.state (term_number, term_machine, machine, cluster)
++    SELECT 1, 'test', 'test', system_identifier::text FROM pg_control_system();
++  INSERT INTO net_local.lease (term_number, term_machine, kind, until, sync) VALUES (1, 'test', 'normal', 'infinity', 'alone');`;
++
+ /* A new PGlite runs initdb, about two seconds of a processor, and the migrations add half a second more. The run pays for
+    that once, before any test file starts, and keeps the dump in a file the test databases open in a fraction of a second. */
+ export default async function setup(project: TestProject): Promise<() => void> {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-test-db-'));
+   const file = join(dir, 'migrated.tar');
+   const client = new PGlite();
+   try {
+     const db = drizzle(client, { schema });
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+     await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
++    await client.exec(AFTER_MIGRATIONS);
++    await client.exec(ENDLESS_LEASE);
+     writeFileSync(file, Buffer.from(await (await client.dumpDataDir('none')).arrayBuffer()));
+   } finally {
+     await client.close();
+   }
+   project.provide('migratedDataDir', file);
+   return () => rmSync(dir, { recursive: true, force: true });
+ }
+diff --git a/apps/server/test/helpers.ts b/apps/server/test/helpers.ts
+index dca7c5dc..b4b0efc2 100644
+--- a/apps/server/test/helpers.ts
++++ b/apps/server/test/helpers.ts
+@@ -1,23 +1,24 @@
+ import { readFileSync } from 'node:fs';
+ import type { AddressInfo } from 'node:net';
+ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+ import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
+ import { PGlite } from '@electric-sql/pglite';
+-import { eq } from 'drizzle-orm';
++import { eq, sql } from 'drizzle-orm';
+ import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
+ import WebSocket from 'ws';
+ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+ import { inject, onTestFinished, vi } from 'vitest';
+ import { buildApp, type Deps } from '../src/app.js';
+ import { loadConfig, type Config } from '../src/config.js';
+ import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
+ import type { Db } from '../src/db/client.js';
++import { FENCED, type LeaseKind, type LeaseSync } from '../src/db/net.js';
+ import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
+ import * as schema from '../src/db/schema.js';
+ import { setupCode } from '../src/modules/setup/code.js';
+ import { ask, createTask } from '../src/modules/tasks/engine.js';
+ 
+ export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
+ export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';
+ export const SETUP = {
+@@ -32,20 +33,31 @@ export const SETUP = {
+ 
+ /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
+ let migrated: Blob | undefined;
+ type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
+ 
+ async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
+   migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
+   const client = new PGlite({ loadDataDir: migrated });
++  /* PGlite applies no ALTER DATABASE or ALTER ROLE setting when it loads a dump, so each one says it for itself. */
++  await client.exec(`SET ${FENCED} = 'on'`);
+   const db = drizzle(client, { schema });
+   return { client, db };
+ }
+ 
++type LeaseChange = { until?: string; kind?: LeaseKind; sync?: LeaseSync | null; termNumber?: number };
++const LEASE_COLUMNS: Record<keyof LeaseChange, string> = { until: 'until', kind: 'kind', sync: 'sync', termNumber: 'term_number' };
++
++/* Changes what the test database's lease says. The until is a timestamptz as text: '-infinity' or an ISO time. */
++export async function setLease(db: Db, change: LeaseChange): Promise<void> {
++  const columns = (Object.keys(change) as (keyof LeaseChange)[]).map(name => sql`${sql.identifier(LEASE_COLUMNS[name])} = ${change[name] ?? null}`);
++  await db.execute(sql`UPDATE net_local.lease SET ${sql.join(columns, sql`, `)}`);
++}
++
+ /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
+    cannot race in a test; this shows instead that a move takes the locks that make them go one after the other. */
+ export function statements(): { sql: string; params: unknown[] }[] {
+   const seen: { sql: string; params: unknown[] }[] = [];
+   const execute = PglitePreparedQuery.prototype.execute;
+   const spy = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockImplementation(function (this: PglitePreparedQuery<never>, values) {
+     const q = this as unknown as { queryString: string; params: unknown[] };
+     seen.push({ sql: q.queryString, params: q.params });
+diff --git a/apps/server/test/journal.test.ts b/apps/server/test/journal.test.ts
+new file mode 100644
+index 00000000..b57d88e1
+--- /dev/null
++++ b/apps/server/test/journal.test.ts
+@@ -0,0 +1,173 @@
++import { createHash } from 'node:crypto';
++import { sql } from 'drizzle-orm';
++import { describe, expect, it } from 'vitest';
++import { isLeaseRefused, type LeaseKind, type LeaseSync } from '../src/db/net.js';
++import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
++import { createTestDb, setLease, testApp } from './helpers.js';
++
++type TestDb = Awaited<ReturnType<typeof createTestDb>>;
++type JournalRow = {
++  xact: string;
++  term_number: number;
++  term_machine: string;
++  term_split: boolean;
++  machine: string;
++  tbl: string;
++  op: string;
++  key: Record<string, unknown>;
++  cols: string[];
++  old: Record<string, unknown> | null;
++};
++
++const journalOf = async (db: TestDb, table: string): Promise<JournalRow[]> =>
++  (await db.execute<JournalRow>(sql`select *, term_number::int as term_number from net.journal where tbl = ${table} order by at, id`)).rows;
++
++const columnsOf = async (db: TestDb, table: string): Promise<string[]> =>
++  (await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = ${table}`)).rows.map(row => row.column_name);
++
++const aCompany = async (db: TestDb): Promise<string> => (await db.insert(companies).values({ name: 'Acme' }).returning())[0]!.id;
++
++const aDepartment = (name: string, companyId: string) => ({ companyId, name, roleCode: name.toUpperCase() });
++
++async function anAgent(db: TestDb): Promise<typeof agents.$inferSelect> {
++  const [agent] = await db.insert(agents).values({ companyId: await aCompany(db), kind: 'worker', name: 'Bruno', model: '' }).returning();
++  return agent!;
++}
++
++/* What a commit answered: nothing when it went through, else whether the lease refused it. */
++const refusal = (commit: Promise<unknown>): Promise<boolean | 'committed'> => commit.then(() => 'committed' as const, isLeaseRefused);
++
++describe('the journal', () => {
++  it("writes one journal row per changed row, with its transaction's uuid", async () => {
++    const db = await createTestDb();
++    const companyId = await aCompany(db);
++    const together = await db.transaction(tx => tx.insert(departments).values([aDepartment('Sales', companyId), aDepartment('Dev', companyId)]).returning());
++    const [alone] = await db.insert(departments).values(aDepartment('Ops', companyId)).returning();
++
++    const rows = await journalOf(db, 'departments');
++
++    expect(rows.map(row => row.key)).toEqual([...together, alone!].map(({ id }) => ({ id })));
++    expect(rows[0]!.xact).toBe(rows[1]!.xact);
++    expect(rows[2]!.xact).not.toBe(rows[0]!.xact);
++    for (const row of rows) expect(row).toMatchObject({ term_number: 1, term_machine: 'test', term_split: false, machine: 'test', tbl: 'departments', op: 'insert' });
++  });
++
++  it("takes a transaction's uuid from nothing a session can set", async () => {
++    const db = await createTestDb();
++    const companyId = await aCompany(db);
++    const expected = await db.transaction(async tx => {
++      await tx.execute(sql`SET LOCAL net.xact = '00000000-0000-4000-8000-0000000000aa'`);
++      await tx.insert(departments).values(aDepartment('Sales', companyId));
++      return (await tx.execute<{ xact: string }>(sql`select md5(cluster || ':' || pg_current_xact_id()::text)::uuid as xact from net_local.state`)).rows[0]!.xact;
++    });
++    expect((await journalOf(db, 'departments'))[0]!.xact).toBe(expected);
++  });
++
++  it('keeps the changed columns and their old values', async () => {
++    const db = await createTestDb();
++    const agent = await anAgent(db);
++    const everyColumn = await columnsOf(db, 'agents');
++    await db.execute(sql`UPDATE agents SET name = 'Clara' WHERE id = ${agent.id}`);
++    const before = (await db.execute<{ row: Record<string, unknown> }>(sql`select to_jsonb(a) as row from agents a where id = ${agent.id}`)).rows[0]!.row;
++    await db.execute(sql`DELETE FROM agents WHERE id = ${agent.id}`);
++
++    const [inserted, updated, deleted] = await journalOf(db, 'agents');
++
++    expect(inserted).toMatchObject({ op: 'insert', key: { id: agent.id }, old: null });
++    expect([...inserted!.cols].sort()).toEqual([...everyColumn].sort());
++    expect(updated).toMatchObject({ op: 'update', key: { id: agent.id }, cols: ['name'], old: { name: 'Bruno' } });
++    expect(deleted).toMatchObject({ op: 'delete', key: { id: agent.id } });
++    expect([...deleted!.cols].sort()).toEqual([...everyColumn].sort());
++    expect(deleted!.old).toEqual(before);
++  });
++
++  it('keeps a hash of a file, not its bytes', async () => {
++    const db = await createTestDb();
++    const agent = await anAgent(db);
++    const [person] = await db.insert(people).values({ companyId: agent.companyId, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company' }).returning();
++    const [plan] = await db.insert(subscriptions).values({ companyId: agent.companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Plan', ownerPersonId: person!.id, status: 'ready' }).returning();
++    const [job] = await db.insert(jobs).values({ companyId: agent.companyId, subscriptionId: plan!.id, agentId: agent.id, prompt: '', timeoutMs: 1000 }).returning();
++    const bytes = Buffer.from('the bytes of a file');
++    const [file] = await db.insert(attachments).values({ companyId: agent.companyId, jobId: job!.id, agentId: agent.id, mediaType: 'text/plain', bytes, size: bytes.length }).returning();
++
++    await db.execute(sql`DELETE FROM attachments WHERE id = ${file!.id}`);
++
++    const deleted = (await journalOf(db, 'attachments')).find(row => row.op === 'delete')!;
++    expect(deleted.old!.bytes).toBe(`sha256:${createHash('sha256').update(bytes).digest('hex')}`);
++  });
++
++  it('journals an update that changes nothing', async () => {
++    const db = await createTestDb();
++    const agent = await anAgent(db);
++    await db.execute(sql`UPDATE agents SET name = name WHERE id = ${agent.id}`);
++    const updates = (await journalOf(db, 'agents')).filter(row => row.op === 'update');
++    expect(updates).toHaveLength(1);
++    expect(updates[0]!.cols).toEqual([]);
++  });
++
++  it("journals what the orchestrator's role changes", async () => {
++    const { app, db } = await testApp();
++    const testDb = db as unknown as TestDb;
++    await aCompany(testDb);
++    const [answer] = await app.ctx.agentSql!.run(`INSERT INTO notebook_notes (company_id, number, text) SELECT id, 1, 'A note' FROM companies RETURNING id`, 'write');
++    expect((await journalOf(testDb, 'notebook_notes')).map(row => row.key)).toEqual([{ id: answer!.rows[0]!.id }]);
++  });
++});
++
++describe('fence 1', () => {
++  it('refuses a commit once the lease has ended, at the commit and not before', async () => {
++    const db = await createTestDb();
++    await setLease(db, { until: '-infinity' });
++    await db.$client.exec('BEGIN');
++    await db.$client.exec(`INSERT INTO companies (name) VALUES ('Acme')`);
++    expect((await db.$client.query('SELECT name FROM companies')).rows).toEqual([{ name: 'Acme' }]);
++
++    expect(await refusal(db.$client.exec('COMMIT'))).toBe(true);
++
++    expect((await db.$client.query('SELECT name FROM companies')).rows).toEqual([]);
++  });
++
++  it.each<[string, { kind?: LeaseKind; sync?: LeaseSync | null; termNumber?: number }]>([
++    ['a maintenance lease', { kind: 'maintenance' }],
++    ['a normal lease without sync', { sync: null }],
++    ['a lease of another term', { termNumber: 2 }],
++  ])('refuses %s', async (_name, change) => {
++    const db = await createTestDb();
++    await setLease(db, change);
++    expect(await refusal(db.transaction(tx => tx.insert(companies).values({ name: 'Acme' })))).toBe(true);
++  });
++
++  it('refuses a commit without synchronous commit', async () => {
++    const db = await createTestDb();
++    const commit = db.transaction(async tx => {
++      await tx.execute(sql`SET LOCAL synchronous_commit = local`);
++      await tx.insert(companies).values({ name: 'Acme' });
++    });
++    expect(await refusal(commit)).toBe(true);
++  });
++
++  it('refuses when this machine has no lease row or no state row', async () => {
++    for (const table of ['lease', 'state']) {
++      const db = await createTestDb();
++      await db.execute(sql`DELETE FROM ${sql.raw(`net_local.${table}`)}`);
++      expect(await refusal(db.insert(companies).values({ name: 'Acme' })), table).toBe(true);
++    }
++  });
++
++  it('commits under a split lease, which has no sync', async () => {
++    const db = await createTestDb();
++    await setLease(db, { kind: 'split', sync: null });
++    expect(await refusal(db.insert(companies).values({ name: 'Acme' }))).toBe('committed');
++  });
++
++  it('lets a superuser session that does not say it is fenced pass', async () => {
++    const db = await createTestDb();
++    await setLease(db, { until: '-infinity' });
++    await db.$client.exec('SET hornhoof.fenced = off');
++    const companyId = await aCompany(db);
++    expect(await journalOf(db, 'companies')).toHaveLength(1);
++
++    await db.$client.exec('SET hornhoof.fenced = on');
++    expect(await refusal(db.insert(departments).values(aDepartment('Sales', companyId)))).toBe(true);
++  });
++});
+diff --git a/apps/server/test/migration-history.test.ts b/apps/server/test/migration-history.test.ts
+index 83676c0b..f5fe933d 100644
+--- a/apps/server/test/migration-history.test.ts
++++ b/apps/server/test/migration-history.test.ts
+@@ -83,18 +83,18 @@ describe('migration histories merged in turn 5', () => {
+ 
+     for (const [index, table] of tables.entries()) {
+       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
+       const after = await copy.query(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
+       expect(after.rows, table).toEqual(before[index]!.rows);
+     }
+     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+     expect(recorded).toEqual(expect.arrayContaining(recordedBefore));
+-    expect(recorded).toHaveLength(55);
+-    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(55);
++    expect(recorded).toHaveLength(57);
++    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(57);
+     expect(recorded.map(row => Number(row.created_at))).toEqual(expect.arrayContaining([
+       1793700000000, 1793714531704, 1793714572653, 1793716912449, 1793727699000, 1793727700000, 1793739121203,
+     ]));
+     const indexes = await copy.query<{ indexname: string }>(`select indexname from pg_indexes where indexname in (
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+       'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner')`);
+     expect(indexes.rows).toHaveLength(8);
+ 
+diff --git a/apps/server/test/migrations.test.ts b/apps/server/test/migrations.test.ts
+index 294a69b5..7af32506 100644
+--- a/apps/server/test/migrations.test.ts
++++ b/apps/server/test/migrations.test.ts
+@@ -6,16 +6,17 @@ import { sql } from 'drizzle-orm';
+ import { getTableConfig } from 'drizzle-orm/pg-core';
+ import type { MigrationConfig } from 'drizzle-orm/migrator';
+ import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
+ import { migrate as migrateDrizzle } from 'drizzle-orm/pglite/migrator';
+ import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+ import { hashToken } from '../src/crypto/tokens.js';
+ import { isUniqueViolation } from '../src/db/errors.js';
++import { AFTER_MIGRATIONS } from '../src/db/net.js';
+ import { tasks } from '../src/db/schema.js';
+ import { appOn, approvalAsked, as } from './helpers.js';
+ 
+ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<void> {
+   await migrateDrizzle(db, config);
+   await applyMissingMigrations(db, config);
+ }
+ 
+@@ -927,8 +928,76 @@ describe('migration session_handover', () => {
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0052_dismissed_command_blocks') });
+     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+     await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values ('older', ${person}, now() + interval '1 day')`);
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+     expect((await db.execute(sql`select before_host_cookie from sessions`)).rows).toEqual([{ before_host_cookie: true }]);
+   });
+ });
++
++describe('migration 0056', () => {
++  it('gives each task event of an older install its own uuid', async () => {
++    const client = new PGlite();
++    onTestFinished(() => client.close());
++    const db = drizzle(client);
++    await migrate(db, { migrationsFolder: await migrationsUpTo('0055_link_tls') });
++    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
++    const task = (await db.execute<{ id: string }>(sql`insert into tasks (company_id, number, title) values (${company}, 1, 'Task') returning id`)).rows[0]!.id;
++    await db.execute(sql`insert into task_events (company_id, task_id, kind) values (${company}, ${task}, 'comment'), (${company}, ${task}, 'comment')`);
++
++    await migrate(db, { migrationsFolder: MIGRATIONS });
++
++    const uuids = (await db.execute<{ uuid: string }>(sql`select uuid from task_events`)).rows.map(row => row.uuid);
++    expect(uuids).toHaveLength(2);
++    expect(uuids[0]).toMatch(/^[0-9a-f-]{36}$/);
++    expect(uuids[0]).not.toBe(uuids[1]);
++  });
++});
++
++describe('migration 0057', () => {
++  const tablesOfPublic = sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by 1`;
++  const journaledTables = sql`select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
++    where t.tgname = 'net_journal' and n.nspname = 'public' order by 1`;
++
++  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
++    const client = new PGlite();
++    onTestFinished(() => client.close());
++    const db = drizzle(client);
++    await migrate(db, { migrationsFolder: MIGRATIONS });
++    return { client, db };
++  }
++
++  it('adds the fences, and the journal once migrated', async () => {
++    const { client, db } = await fullyMigrated();
++    const schemas = await db.execute(sql`select nspname from pg_namespace where nspname in ('net', 'net_local') order by 1`);
++    expect(schemas.rows).toEqual([{ nspname: 'net' }, { nspname: 'net_local' }]);
++    expect((await db.execute(journaledTables)).rows).toEqual([]);
++
++    await client.exec(AFTER_MIGRATIONS);
++
++    expect((await db.execute(journaledTables)).rows).toEqual((await db.execute(tablesOfPublic)).rows);
++    const fence = await db.execute(sql`select t.tgdeferrable, t.tginitdeferred from pg_trigger t where t.tgname = 'net_fence' and t.tgrelid = 'net.journal'::regclass`);
++    expect(fence.rows).toEqual([{ tgdeferrable: true, tginitdeferred: true }]);
++    const keys = await db.execute(sql`select distinct c.condeferrable, c.condeferred from pg_constraint c join pg_namespace n on n.oid = c.connamespace where c.contype = 'f' and n.nspname = 'public'`);
++    expect(keys.rows).toEqual([{ condeferrable: true, condeferred: false }]);
++    const withoutKey = await db.execute(sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
++      where n.nspname = 'public' and c.relkind = 'r' and not exists (select 1 from pg_constraint k where k.conrelid = c.oid and k.contype = 'p')`);
++    expect(withoutKey.rows).toEqual([]);
++
++    const runnableByPublic = sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'net' and has_function_privilege('public', p.oid, 'EXECUTE')`;
++    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
++    await client.exec(`CREATE FUNCTION net.later() RETURNS integer LANGUAGE sql AS 'SELECT 1'`);
++    await client.exec(AFTER_MIGRATIONS);
++    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
++
++    await client.exec('SELECT net.detach_journal()');
++    expect((await db.execute(journaledTables)).rows).toEqual([]);
++  });
++
++  it('refuses a table it could not journal, rather than leave it out', async () => {
++    const { client } = await fullyMigrated();
++    await client.exec('CREATE TABLE no_key (a integer)');
++    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/no_key/);
++    await client.exec(`DROP TABLE no_key; CREATE TABLE "${'n'.repeat(56)}" (a integer PRIMARY KEY)`);
++    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/too long/);
++  });
++});
+diff --git a/apps/server/test/orchestrator-control.test.ts b/apps/server/test/orchestrator-control.test.ts
+index 5026f9d7..2bb58bc2 100644
+--- a/apps/server/test/orchestrator-control.test.ts
++++ b/apps/server/test/orchestrator-control.test.ts
+@@ -418,22 +418,22 @@ describe('the orchestrator reads and changes the database itself', () => {
+     expect(JSON.parse(text(write))).toEqual([{ rows: [], changed: 1 }]);
+     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno Diaz');
+     expect(heard).toEqual(['org']);
+   });
+ 
+   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
+     const { app } = await company();
+     const client = await mcp(app, TOKEN);
+-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
++    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM applied', 'SELECT * FROM tool_calls', 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toMatch(/permission denied|must be owner/);
+     }
+-    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.');
++    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain("Sign-ins, invites, install codes, sealed plan sign-ins, the public link and Hornhoof's records of where changes came from are closed to this tool.");
+     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+   });
+ 
+   it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
+     const { app, db, bruno, task } = await company();
+     const client = await mcp(app, TOKEN);
+     const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
+     for (const table of ['requests', 'proposals', 'agent_events', 'task_events']) {
+diff --git a/apps/server/test/real/journal.test.ts b/apps/server/test/real/journal.test.ts
+new file mode 100644
+index 00000000..141a6ae4
+--- /dev/null
++++ b/apps/server/test/real/journal.test.ts
+@@ -0,0 +1,131 @@
++import { createHash, randomBytes } from 'node:crypto';
++import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import pg from 'pg';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { openAgentSql } from '../../src/db/agent-sql.js';
++import { APP_NAME, MIGRATIONS, migrateDb } from '../../src/db/client.js';
++import { FENCED, JOURNAL_TRIGGER, LEASE_REFUSED } from '../../src/db/net.js';
++import { ENDLESS_LEASE } from '../global-setup.js';
++import { realDatabase, type RealDatabase } from './pg.js';
++
++const END_LEASE = `UPDATE net_local.lease SET until = '-infinity'`;
++const A_NOTE = `INSERT INTO notebook_notes (company_id, number, text) SELECT id, (SELECT count(*) + 1 FROM notebook_notes), 'A note' FROM companies`;
++const FENCED_OPTION = `-c ${FENCED}=on`;
++
++/* A migrated database of its own with a company, under the lease every test database holds. */
++async function leasedDatabase(): Promise<RealDatabase> {
++  const real = await realDatabase();
++  onTestFinished(() => real.drop());
++  await migrateDb(real.url);
++  await real.admin.query(ENDLESS_LEASE);
++  await real.admin.query(`INSERT INTO companies (name) VALUES ('Acme')`);
++  return real;
++}
++
++async function connected(real: RealDatabase, config: pg.ClientConfig): Promise<pg.Client> {
++  const client = new pg.Client({ connectionString: real.url, ...config });
++  await client.connect();
++  onTestFinished(() => client.end());
++  return client;
++}
++
++/* A copy of the migrations with one more, as a later build would bring it. */
++async function migrationsWith(text: string): Promise<string> {
++  const folder = await mkdtemp(join(tmpdir(), 'hh-real-migrations-'));
++  onTestFinished(() => rm(folder, { recursive: true, force: true }));
++  await cp(MIGRATIONS, folder, { recursive: true });
++  const file = join(folder, 'meta', '_journal.json');
++  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[] };
++  const last = journal.entries.at(-1)!;
++  journal.entries.push({ idx: last.idx + 1, version: last.version, when: last.when + 1, tag: '9999_later', breakpoints: true });
++  await writeFile(file, JSON.stringify(journal));
++  await writeFile(join(folder, '9999_later.sql'), text);
++  return folder;
++}
++
++const tablesWithoutJournal = async (real: RealDatabase): Promise<string[]> =>
++  (
++    await real.admin.query<{ relname: string }>(
++      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
++        WHERE n.nspname = 'public' AND c.relkind = 'r'
++          AND NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = c.oid AND t.tgname = $1)`,
++      [JOURNAL_TRIGGER],
++    )
++  ).rows.map(row => row.relname);
++
++const journalOfNotes = async (real: RealDatabase): Promise<string> =>
++  (await real.admin.query<{ definition: string }>(`SELECT pg_get_functiondef('net."journal_notebook_notes"'::regproc) AS definition`)).rows[0]!.definition;
++
++describe('the fence on real Postgres', () => {
++  it("fences the app's commits and lets older builds through", async () => {
++    const real = await leasedDatabase();
++    const app = await connected(real, { application_name: APP_NAME, options: FENCED_OPTION });
++    await app.query(A_NOTE);
++    await real.admin.query(END_LEASE);
++
++    await expect(app.query(A_NOTE)).rejects.toMatchObject({ code: LEASE_REFUSED });
++
++    const older = await connected(real, {});
++    await older.query(A_NOTE);
++    const journaled = await real.admin.query(`SELECT 1 FROM net.journal WHERE tbl = 'notebook_notes'`);
++    const notes = await real.admin.query('SELECT 1 FROM notebook_notes');
++    expect(notes.rowCount).toBe(2);
++    expect(journaled.rowCount).toBe(2);
++  });
++
++  it('fences the agent role whatever it sets', async () => {
++    const real = await leasedDatabase();
++    const agents = (await openAgentSql(real.url))!;
++    onTestFinished(() => agents.close());
++    await real.admin.query(END_LEASE);
++
++    await expect(agents.run(`SET ${FENCED} = off; ${A_NOTE}`, 'write')).rejects.toMatchObject({ code: LEASE_REFUSED });
++
++    expect((await real.admin.query('SELECT 1 FROM notebook_notes')).rowCount).toBe(0);
++  });
++});
++
++describe('migrating on real Postgres', () => {
++  it('takes the journal off for the migrations and puts it back', async () => {
++    const real = await leasedDatabase();
++    await real.admin.query(A_NOTE);
++    expect(await journalOfNotes(real)).toContain('by_orchestrator');
++    const later = await migrationsWith(`ALTER TABLE notebook_notes DROP COLUMN by_orchestrator;
++--> statement-breakpoint
++UPDATE notebook_notes SET text = 'Changed by the migration';`);
++
++    await migrateDb(real.url, later);
++
++    expect((await real.admin.query('SELECT text FROM notebook_notes')).rows).toEqual([{ text: 'Changed by the migration' }]);
++    expect(await journalOfNotes(real)).not.toContain('by_orchestrator');
++    expect(await tablesWithoutJournal(real)).toEqual([]);
++  });
++
++  it('puts the journal back after a migration that failed, and still answers with its failure', async () => {
++    const real = await leasedDatabase();
++    const failing = await migrationsWith('SELECT 1/0;');
++
++    await expect(migrateDb(real.url, failing)).rejects.toSatisfy((err: Error) => /division by zero/.test(`${err.message} ${String(err.cause)}`));
++
++    expect(await tablesWithoutJournal(real)).toEqual([]);
++  });
++});
++
++describe('a large file on real Postgres', () => {
++  it("commits a 50 MB file within the app's limit, and journals its hash", async () => {
++    const real = await leasedDatabase();
++    await real.admin.query('CREATE TABLE public.big (id int PRIMARY KEY, b bytea)');
++    await real.admin.query('SELECT net.attach_journal()');
++    const app = await connected(real, { options: `-c transaction_timeout=5s ${FENCED_OPTION}` });
++    const bytes = randomBytes(50 * 1024 * 1024);
++
++    await app.query('INSERT INTO big (id, b) VALUES (1, $1)', [bytes]);
++    await app.query('DELETE FROM big WHERE id = 1');
++
++    const { rows } = await real.admin.query<{ old: { b: string } }>(`SELECT old FROM net.journal WHERE tbl = 'big' AND op = 'delete'`);
++    const matches = rows[0]!.old.b === `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
++    expect(matches).toBe(true);
++  });
++});
+
+## 44507786 Read the latest migration snapshot from the journal, not by its tag
+
+migration-metadata.test.ts named the latest snapshot as 0055_link_tls, so 0056_sources' new task_events.uuid column made the
+database differ from a snapshot that was no longer the latest. Each new migration would meet the same red after a whole
+suite run, so the test now asks the journal which snapshot is the latest.
+
+Proved by test/migration-metadata.test.ts, which failed on public.task_events before and passes now, and by the author check
+on this commit. The CRAP 20 on hasCode in the red check came from that same failure: vitest writes no coverage when a test
+fails, and with coverage its CRAP is 4.
+
+Ruling: changed test/migration-metadata.test.ts, a file the task does not list - why: it pins the latest migration by name, a third pin beside migration-history.test.ts's two - cost if wrong: none, it checks the same things on the same snapshot.
+
+---
+ apps/server/test/migration-metadata.test.ts | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/apps/server/test/migration-metadata.test.ts b/apps/server/test/migration-metadata.test.ts
+index 82164709..e77ef0d3 100644
+--- a/apps/server/test/migration-metadata.test.ts
++++ b/apps/server/test/migration-metadata.test.ts
+@@ -13,19 +13,24 @@ type Snapshot = { id: string; prevId: string; tables: Record<string, { columns:
+ async function journal(): Promise<{ entries: JournalEntry[] }> {
+   return JSON.parse(await readFile(join(folder, 'meta', '_journal.json'), 'utf8')) as { entries: JournalEntry[] };
+ }
+ 
+ async function snapshot(tag: string): Promise<Snapshot> {
+   return JSON.parse(await readFile(join(folder, 'meta', `${tag.slice(0, 4)}_snapshot.json`), 'utf8')) as Snapshot;
+ }
+ 
++/* Named by the journal and not by a tag, so that each new migration does not have to move these tests along. */
++async function latestSnapshot(): Promise<Snapshot> {
++  return snapshot((await journal()).entries.at(-1)!.tag);
++}
++
+ describe('merged migration metadata', () => {
+   it('carries both histories into the latest snapshot used to generate the next migration', async () => {
+-    const latest = await snapshot('0055_link_tls');
++    const latest = await latestSnapshot();
+     expect(Object.keys(latest.tables['public.jobs']!.columns)).toEqual(expect.arrayContaining([
+       'failure', 'not_before', 'restarted_at', 'requested_prompt',
+     ]));
+     expect(Object.keys(latest.tables['public.agent_events']!.indexes)).toEqual(expect.arrayContaining([
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+     ]));
+     expect(Object.keys(latest.tables['public.node_codes']!.columns)).toContain('dismissed_subscription_ids');
+     expect(Object.keys(latest.tables['public.node_codes']!.indexes)).toContain('node_codes_active_owner');
+@@ -54,17 +59,17 @@ describe('merged migration metadata', () => {
+       previous = current.id;
+     }
+   });
+ 
+   it('describes the columns and regular indexes of a freshly migrated database', async () => {
+     const client = new PGlite();
+     onTestFinished(() => client.close());
+     await migrate(drizzle(client), { migrationsFolder: folder });
+-    const latest = await snapshot('0055_link_tls');
++    const latest = await latestSnapshot();
+     for (const [table, definition] of Object.entries(latest.tables)) {
+       const name = table.slice('public.'.length);
+       const columns = await client.query<{ column_name: string }>('select column_name from information_schema.columns where table_schema = $1 and table_name = $2', ['public', name]);
+       expect(columns.rows.map(column => column.column_name).sort(), table).toEqual(Object.keys(definition.columns).sort());
+       const indexes = await client.query<{ indexname: string }>(`select indexname from pg_indexes i
+         where schemaname = $1 and tablename = $2
+           and not exists (select 1 from pg_constraint c where c.conindid = (quote_ident(i.schemaname) || '.' || quote_ident(i.indexname))::regclass)`, ['public', name]);
+       expect(indexes.rows.map(index => index.indexname).sort(), table).toEqual(Object.keys(definition.indexes).sort());
+
+## 4582e356 Pick each tick's lease step from the two clocks, ahead of the keeper that will call it
+
+The keeper's fence 4 rests on one decision each second: take a term, renew, or fence. It lives in a pure function of two
+plain clocks, so that a Mac that sleeps or a Docker VM whose clock jumps can be shown in a table, with no timer and no
+database. A lease ends when either clock says so, and a tick late on either clock, or a wall clock gone back more than
+a second, fences a lease that still looks valid. This is the pure part of plan 3 task 4; nothing calls it yet, and the
+lease store and the keeper's loop come with that task's own writer.
+
+Tests: the plan's table, then each limit on both sides of it with the clocks apart, then the rows where two rules match
+and only the order decides. Each boundary and order rule was broken by hand once, 23 edits, and a row failed every time.
+
+Ruling: a tick both late and with the wall clock gone back names the late gap - why: the plan lists the late gap first and gives no order between the two reasons, and the step is a fence either way - cost if wrong: one log line names the other reason.
+Ruling: a held lease with last null skips the tick's check and goes to leaseValid - why: the type allows it and there is no gap to measure, while the lease's own age still fails closed - cost if wrong: none the keeper can reach, since last is set from the first tick and held only after it.
+Ruling: renew's kind is maintenance or normal, also for a held split lease - why: plan 3 has no split input and nothing here takes a split lease; plan 10 task 3 adds the input - cost if wrong: none before plan 10, which replaces that line.
+
+---
+ apps/server/src/modules/keeper/lease.ts |  43 +++++++++++++
+ apps/server/test/lease.test.ts          | 108 ++++++++++++++++++++++++++++++++
+ 2 files changed, 151 insertions(+)
+
+diff --git a/apps/server/src/modules/keeper/lease.ts b/apps/server/src/modules/keeper/lease.ts
+new file mode 100644
+index 00000000..3de35131
+--- /dev/null
++++ b/apps/server/src/modules/keeper/lease.ts
+@@ -0,0 +1,43 @@
++import type { LeaseKind, Term } from '../../db/net.js';
++
++export const LEASE_MS = 10_000;
++// A gap over this between two ticks, on either clock, is a tick more than 5 s late.
++export const LATE_MS = 6_000;
++// The wall clock going back more than this. A smaller step is the clock being corrected, and a tick survives it.
++export const BACK_MS = 1_000;
++
++// Date.now() and performance.now(). Both are kept because a machine that sleeps stops one and not the other.
++export type Clocks = { wall: number; mono: number };
++// The last renewal that committed, by when it was sent, since a renewal cannot promise more than its send time allows.
++export type Held = { term: Term; kind: LeaseKind; sent: Clocks };
++export type LeaseStep = { do: 'take'; kind: LeaseKind } | { do: 'fence'; why: string } | { do: 'renew'; kind: LeaseKind; endSessions: boolean };
++
++const secondsToATenth = (ms: number): number => Math.round(ms / 100) / 10;
++
++export function leaseValid(held: Held | null, now: Clocks): boolean {
++  if (held === null) return false;
++  return now.wall - held.sent.wall < LEASE_MS && now.mono - held.sent.mono < LEASE_MS;
++}
++
++function whyTickIsLate(last: Clocks, now: Clocks): string | null {
++  const gap = Math.max(now.mono - last.mono, now.wall - last.wall);
++  if (gap > LATE_MS) return `a tick came ${secondsToATenth(gap)} s after the one before`;
++  const back = last.wall - now.wall;
++  if (back > BACK_MS) return `the clock went back ${secondsToATenth(back)} s`;
++  return null;
++}
++
++// A late tick goes first: it fences a lease that still looks valid, and it names what happened when the lease lapsed too.
++function whyFence(held: Held, last: Clocks | null, now: Clocks): string | null {
++  const late = last === null ? null : whyTickIsLate(last, now);
++  if (late !== null) return late;
++  return leaseValid(held, now) ? null : `no renewal for ${secondsToATenth(LEASE_MS)} s`;
++}
++
++export function nextLeaseStep(o: { now: Clocks; last: Clocks | null; held: Held | null; maintenance: boolean }): LeaseStep {
++  const kind: LeaseKind = o.maintenance ? 'maintenance' : 'normal';
++  if (o.held === null) return { do: 'take', kind };
++  const why = whyFence(o.held, o.last, o.now);
++  if (why !== null) return { do: 'fence', why };
++  return { do: 'renew', kind, endSessions: o.maintenance && o.held.kind !== 'maintenance' };
++}
+diff --git a/apps/server/test/lease.test.ts b/apps/server/test/lease.test.ts
+new file mode 100644
+index 00000000..1c5d2b02
+--- /dev/null
++++ b/apps/server/test/lease.test.ts
+@@ -0,0 +1,108 @@
++import { describe, expect, it } from 'vitest';
++import type { LeaseKind } from '../src/db/net.js';
++import { leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from '../src/modules/keeper/lease.js';
++
++const t0: Clocks = { wall: 1e12, mono: 5e3 };
++
++// Offsets from t0 in milliseconds, wall clock first. Literals on purpose: a changed limit must fail these rows.
++const at = (wall: number, mono: number = wall): Clocks => ({ wall: t0.wall + wall, mono: t0.mono + mono });
++
++const holding = (kind: LeaseKind, sent: Clocks = t0): Held => ({ term: { number: 1, machine: 'a', split: false }, kind, sent });
++const normalLease = holding('normal');
++const maintenanceLease = holding('maintenance');
++
++const take = (kind: LeaseKind): LeaseStep => ({ do: 'take', kind });
++const fence = (why: string): LeaseStep => ({ do: 'fence', why });
++const renew = (kind: LeaseKind, endSessions = false): LeaseStep => ({ do: 'renew', kind, endSessions });
++
++type Row = [name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: LeaseStep];
++
++const picksThisStep = (_name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: LeaseStep) => {
++  expect(nextLeaseStep({ now, last, held, maintenance })).toEqual(step);
++};
++
++describe('leaseValid', () => {
++  const rows: [name: string, held: Held | null, now: Clocks, valid: boolean][] = [
++    ['nothing held', null, at(0), false],
++    ['just sent', normalLease, at(0), true],
++    ['9.9 s after on both clocks', normalLease, at(9900), true],
++    ['just short of 10 s on both clocks', normalLease, at(9999), true],
++    ['exactly 10 s after on the wall clock alone', normalLease, at(10000, 0), false],
++    ['exactly 10 s after on the monotonic clock alone', normalLease, at(0, 10000), false],
++    ['10 s after on the monotonic clock while the wall clock went back', normalLease, at(-5000, 10000), false],
++    // Only the tick's check ends these two, which is why nextLeaseStep looks at the tick before the lease.
++    ['the wall clock gone back, the monotonic clock within', normalLease, at(-1500, 2000), true],
++    ['8 s after, a late tick for the keeper but not yet the end of the lease', normalLease, at(8000), true]
++  ];
++
++  it.each(rows)('%s', (_name, held, now, valid) => {
++    expect(leaseValid(held, now)).toBe(valid);
++  });
++});
++
++describe('nextLeaseStep', () => {
++  const planTable: Row[] = [
++    ['no lease on the first tick', null, null, at(0), false, take('normal')],
++    ['no lease on the first tick, in maintenance', null, null, at(0), true, take('maintenance')],
++    ['a tick on time', normalLease, at(0), at(1000), false, renew('normal')],
++    ['a tick late on both clocks', normalLease, at(1000), at(8000), false, fence('a tick came 7 s after the one before')],
++    ['a tick late on the wall clock alone', normalLease, at(1000), at(8000, 2000), false, fence('a tick came 7 s after the one before')],
++    ['the wall clock back by more than a second', normalLease, at(1000), at(-1500, 2000), false, fence('the clock went back 2.5 s')],
++    ['the wall clock back by less than a second', normalLease, at(1000), at(500, 2000), false, renew('normal')],
++    ['10 s since the renewal on both clocks', normalLease, at(9000), at(10000), false, fence('no renewal for 10 s')],
++    ['10 s since the renewal on the wall clock alone', normalLease, at(9500), at(10200, 9800), false, fence('no renewal for 10 s')],
++    ['maintenance begins', normalLease, at(0), at(1000), true, renew('maintenance', true)],
++    ['maintenance goes on', maintenanceLease, at(0), at(1000), true, renew('maintenance')],
++    ['maintenance ends', maintenanceLease, at(0), at(1000), false, renew('normal')],
++    ['no lease on a late tick', null, at(1000), at(9000), false, take('normal')]
++  ];
++
++  it.each(planTable)("picks each tick's step from the two clocks: %s", picksThisStep);
++
++  const renewedAt = (offset: number): Held => holding('normal', at(offset));
++  const boundaries: Row[] = [
++    ['a gap of exactly 6 s on the monotonic clock', renewedAt(1000), at(1000), at(2000, 7000), false, renew('normal')],
++    ['a gap just over 6 s on the monotonic clock', renewedAt(1000), at(1000), at(2000, 7001), false, fence('a tick came 6 s after the one before')],
++    ['a gap of exactly 6 s on the wall clock', renewedAt(1000), at(1000), at(7000, 2000), false, renew('normal')],
++    ['a gap just over 6 s on the wall clock', renewedAt(1000), at(1000), at(7001, 2000), false, fence('a tick came 6 s after the one before')],
++    ['the wall clock back by exactly 1 s', renewedAt(5000), at(5000), at(4000, 6000), false, renew('normal')],
++    ['the wall clock back by just over 1 s', renewedAt(5000), at(5000), at(3999, 6000), false, fence('the clock went back 1 s')],
++    ['just short of 10 s since the renewal', normalLease, at(8000), at(9999), false, renew('normal')],
++    ['exactly 10 s since the renewal on the wall clock alone', normalLease, at(8000), at(10000, 9000), false, fence('no renewal for 10 s')],
++    ['exactly 10 s since the renewal on the monotonic clock alone', normalLease, at(8000), at(9000, 10000), false, fence('no renewal for 10 s')],
++    ['the monotonic clock jumping while the wall clock does not', normalLease, at(1000), at(2000, 8000), false, fence('a tick came 7 s after the one before')]
++  ];
++
++  it.each(boundaries)('stands on the right side of each limit: %s', picksThisStep);
++
++  const reasons: Row[] = [
++    ['the wall gap when it is the larger', normalLease, at(1000), at(10000, 8000), false, fence('a tick came 9 s after the one before')],
++    ['the monotonic gap when it is the larger', normalLease, at(1000), at(8000, 10000), false, fence('a tick came 9 s after the one before')],
++    ['a gap rounded down to a tenth', normalLease, at(1000), at(8340), false, fence('a tick came 7.3 s after the one before')],
++    ['a gap rounded up to a tenth', normalLease, at(1000), at(8350), false, fence('a tick came 7.4 s after the one before')],
++    ['a step back rounded to a tenth', normalLease, at(1000), at(-1240, 2000), false, fence('the clock went back 2.2 s')]
++  ];
++
++  it.each(reasons)('says why it fences: %s', picksThisStep);
++
++  // Each row here has two rules that match, and only the order says which one wins.
++  const order: Row[] = [
++    ['no lease comes before a late tick, in maintenance too', null, at(1000), at(9000), true, take('maintenance')],
++    ['a late tick comes before the lapse', normalLease, at(1000), at(12000), false, fence('a tick came 11 s after the one before')],
++    ['a clock going back comes before the lapse', normalLease, at(9000), at(7000, 10000), false, fence('the clock went back 2 s')],
++    ['a late tick comes before a clock going back', normalLease, at(1000), at(-1500, 8000), false, fence('a tick came 7 s after the one before')],
++    ['a late tick comes before maintenance beginning', normalLease, at(1000), at(8000), true, fence('a tick came 7 s after the one before')],
++    ['a lapse comes before maintenance beginning', normalLease, at(9000), at(10000), true, fence('no renewal for 10 s')],
++    ['a late tick ends a maintenance lease too', maintenanceLease, at(1000), at(8000), true, fence('a tick came 7 s after the one before')]
++  ];
++
++  it.each(order)('goes through its rules in order: %s', picksThisStep);
++
++  const others: Row[] = [
++    ['a valid lease with no earlier tick to compare', normalLease, null, at(1000), false, renew('normal')],
++    ['a lapsed lease with no earlier tick to compare', normalLease, null, at(10000), false, fence('no renewal for 10 s')],
++    ['a split lease going into maintenance ends the sessions as well', holding('split'), at(0), at(1000), true, renew('maintenance', true)]
++  ];
++
++  it.each(others)('%s', picksThisStep);
++});
+

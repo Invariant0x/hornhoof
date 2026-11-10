@@ -1,0 +1,28 @@
+== changed files
+Dockerfile
+apps/server/test/compose.test.ts
+apps/server/test/install-script.test.ts
+apps/server/test/pins.test.ts
+compose.yaml
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ [32m✓[39m test/migrate-masking.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 441[2mms[22m[39m
+   [32m✓[39m the migrate entry point when the driver repeats the database address [2m(1)[22m
+     [33m[2m✓[22m[39m says the reason and keeps the password out of the line[33m 436[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m129 passed[39m[22m[90m (129)[39m
+[2m      Tests [22m [1m[32m2493 passed[39m[22m[90m (2493)[39m
+[2m   Start at [22m 11:26:35
+[2m   Duration [22m 1543.75s[2m (tests 94%, import 6%)[22m
+
+[2m    Isolate [22m [33m129 workers spawned[39m[2m · ~294ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~12.33s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+AUTHOR CHECK OK at bbdb1478

@@ -1,0 +1,527 @@
+remote: snapshot p1t8-final314-20261104-172046-156603 ready after 46 s, waiting for a slot
+remote: started after 2805 s, log /home/altera/hornhoof-network/network-build/runs/remote-p1t8-final314-20261104-172046-156603.log
+test_installed_caddy_is_kept_without_a_download (test_edge_today.CaddyDownloadTests.test_installed_caddy_is_kept_without_a_download) ... ok
+test_unknown_platform_fails_before_any_download (test_edge_today.CaddyDownloadTests.test_unknown_platform_fails_before_any_download) ... ok
+test_wrong_checksum_fails_and_installs_nothing (test_edge_today.CaddyDownloadTests.test_wrong_checksum_fails_and_installs_nothing) ... ok
+test_api_through_caddy (test_edge_today.EdgeTodayTests.test_api_through_caddy) ... ok
+test_blocked_410 (test_edge_today.EdgeTodayTests.test_blocked_410) ... ok
+test_http_mode_company (test_edge_today.EdgeTodayTests.test_http_mode_company) ... ok
+test_reload_leaves_a_tunnel_alone (test_edge_today.EdgeTodayTests.test_reload_leaves_a_tunnel_alone) ... ok
+test_reserved_and_unknown (test_edge_today.EdgeTodayTests.test_reserved_and_unknown) ... ok
+test_stub (test_edge_today.EdgeTodayTests.test_stub) ... ok
+test_a_replacement_that_finds_nothing_raises (test_edge_today.RenderTests.test_a_replacement_that_finds_nothing_raises) ... ok
+test_every_replacement_is_applied_in_order (test_edge_today.RenderTests.test_every_replacement_is_applied_in_order) ... ok
+test_admin_command_that_fails_raises (test_edge_today.StackCaddyTests.test_admin_command_that_fails_raises) ... ok
+test_caddy_asks_for_no_certificate (test_edge_today.StackCaddyTests.test_caddy_asks_for_no_certificate) ... ok
+test_caddy_listens_on_loopback_only (test_edge_today.StackCaddyTests.test_caddy_listens_on_loopback_only) ... ok
+test_caddy_state_stays_in_the_test_folder (test_edge_today.StackCaddyTests.test_caddy_state_stays_in_the_test_folder) ... ok
+test_every_site_shows_the_test_certificate (test_edge_today.StackCaddyTests.test_every_site_shows_the_test_certificate) ... ok
+test_reload_that_never_finishes_raises (test_edge_today.StackCaddyTests.test_reload_that_never_finishes_raises) ... ok
+test_rendered_file_points_at_nothing_of_the_droplet (test_edge_today.StackCaddyTests.test_rendered_file_points_at_nothing_of_the_droplet) ... ok
+test_unknown_way_in_is_refused (test_edge_today.StackCaddyTests.test_unknown_way_in_is_refused) ... ok
+test_failed_download_script_stops_the_run (test_edge_today.StackFailureTests.test_failed_download_script_stops_the_run) ... ok
+test_no_caddy_unless_asked (test_edge_today.StackFailureTests.test_no_caddy_unless_asked) ... ok
+test_process_that_exits_during_startup_raises_with_its_log (test_edge_today.StackFailureTests.test_process_that_exits_during_startup_raises_with_its_log) ... ok
+test_unreadable_certificate_raises_instead_of_naming_nothing (test_edge_today.StackFailureTests.test_unreadable_certificate_raises_instead_of_naming_nothing) ... ok
+test_close_ends_caddy_and_kept_connections (test_edge_today.StackRequestTests.test_close_ends_caddy_and_kept_connections) ... ok
+test_http_answer_names_its_own_port (test_edge_today.StackRequestTests.test_http_answer_names_its_own_port) ... ok
+test_keep_on_a_refused_connection_gives_no_connection (test_edge_today.StackRequestTests.test_keep_on_a_refused_connection_gives_no_connection) ... ok
+test_kept_connection_carries_a_second_request_on_the_same_socket (test_edge_today.StackRequestTests.test_kept_connection_carries_a_second_request_on_the_same_socket) ... ok
+test_kept_connection_never_dials_again_once_closed (test_edge_today.StackRequestTests.test_kept_connection_never_dials_again_once_closed) ... ok
+test_method_and_body_reach_the_company (test_edge_today.StackRequestTests.test_method_and_body_reach_the_company) ... ok
+test_refused_connections_read_as_failures (test_edge_today.StackRequestTests.test_refused_connections_read_as_failures) ... ok
+test_server_name_is_what_the_handshake_carries (test_edge_today.StackRequestTests.test_server_name_is_what_the_handshake_carries) ... ok
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.16 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.19 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.22 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 6.19 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 31.17 s
+ok
+test_r1_5_availability_and_binding_rate_limits_still_apply (test_keys.KeyAuthorizationTests.test_r1_5_availability_and_binding_rate_limits_still_apply) ... bound 8fashj21xgcbaph97in3o99x for 127.0.0.1
+bound fkjnlgnif031zq3qulmykuxc for 127.0.0.1
+bound 61ynmxnpxvqpe9zz3k8xekzx for 127.0.0.1
+bound 0ml9613nqh2i2f5o8a7jfvb7 for 127.0.0.1
+bound emfmaue48b483ymbi166kbqr for 127.0.0.1
+ok
+test_r1_5_https_route_is_taken_and_ambiguous_routes_are_unknown (test_keys.KeyAuthorizationTests.test_r1_5_https_route_is_taken_and_ambiguous_routes_are_unknown) ... ok
+test_r1_5_local_name_restrictions_precede_unknown_dashboard (test_keys.KeyAuthorizationTests.test_r1_5_local_name_restrictions_precede_unknown_dashboard) ... bound 5e6azvpa7cm8n2tqrf6w9b42 for 127.0.0.1
+ok
+test_r6_1_authentication_and_wrong_key_limit (test_keys.KeyAuthorizationTests.test_r6_1_authentication_and_wrong_key_limit) ... new link key for acme
+ok
+test_r6_1_authorized_before_ban_cannot_replace_key (test_keys.KeyAuthorizationTests.test_r6_1_authorized_before_ban_cannot_replace_key) ... ok
+test_r6_1_authorized_before_release_cannot_overwrite_next_owner (test_keys.KeyAuthorizationTests.test_r6_1_authorized_before_release_cannot_overwrite_next_owner) ... ok
+test_r6_1_busy_write_preserves_authorizing_key (test_keys.KeyAuthorizationTests.test_r6_1_busy_write_preserves_authorizing_key) ... ok
+test_r6_1_retired_ping_cannot_bypass_ban_release_or_rebind (test_keys.KeyAuthorizationTests.test_r6_1_retired_ping_cannot_bypass_ban_release_or_rebind) ... new link key for acme
+new link key for acme
+new link key for acme
+ok
+test_r6_1_rotation_rolls_back_if_heartbeat_retention_fails (test_keys.KeyAuthorizationTests.test_r6_1_rotation_rolls_back_if_heartbeat_retention_fails) ... new link key for acme
+ok
+test_ban_today_client_cut_by_ping (test_keys.KeyTests.test_ban_today_client_cut_by_ping) ... ok
+test_ban_without_a_restart (test_keys.KeyTests.test_ban_without_a_restart) ... ok
+test_caddy_blocks_before_frps (test_keys.KeyTests.test_caddy_blocks_before_frps) ... ok
+test_r1_5_cannot_tell (test_keys.KeyTests.test_r1_5_cannot_tell) ... ok
+test_r1_5_freed_name_waits_for_its_tunnel (test_keys.KeyTests.test_r1_5_freed_name_waits_for_its_tunnel) ... ok
+test_r6_1_change_key (test_keys.KeyTests.test_r6_1_change_key) ... ok
+test_r6_1_legacy_survives_rotation_and_relay_restart_through_ping (test_keys.KeyTests.test_r6_1_legacy_survives_rotation_and_relay_restart_through_ping) ... ok
+test_r6_1_old_key_refused_by_every_public_endpoint (test_keys.KeyTests.test_r6_1_old_key_refused_by_every_public_endpoint) ... ok
+test_legacy_run_id_namespace_with_absent_and_offline_answers (test_peers.LoginReadBudgetTests.test_legacy_run_id_namespace_with_absent_and_offline_answers) ... ok
+test_login_run_id_read_is_filtered_and_fast_good_answer_passes (test_peers.LoginReadBudgetTests.test_login_run_id_read_is_filtered_and_fast_good_answer_passes) ... ok
+test_login_run_id_read_refuses_a_hang_within_the_budget (test_peers.LoginReadBudgetTests.test_login_run_id_read_refuses_a_hang_within_the_budget) ... ok
+test_login_run_id_read_refuses_a_slow_answer_within_the_budget (test_peers.LoginReadBudgetTests.test_login_run_id_read_refuses_a_slow_answer_within_the_budget) ... ok
+test_login_run_id_read_with_a_spent_budget_never_reaches_the_dashboard (test_peers.LoginReadBudgetTests.test_login_run_id_read_with_a_spent_budget_never_reaches_the_dashboard) ... ok
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 43990)
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1000, in do_GET
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+test_wire_foreign_takeover_of_recorded_legacy_refused (test_peers.NativeLoginTakeoverTests.test_wire_foreign_takeover_of_recorded_legacy_refused) ... ok
+test_wire_foreign_takeover_of_unrecorded_legacy_refused (test_peers.NativeLoginTakeoverTests.test_wire_foreign_takeover_of_unrecorded_legacy_refused) ... ----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 43980)
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1000, in do_GET
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+ok
+test_wire_genuine_legacy_reconnect_after_disconnect_kept (test_peers.NativeLoginTakeoverTests.test_wire_genuine_legacy_reconnect_after_disconnect_kept) ... ok
+test_wire_legacy_login_matching_peer_run_id_refused (test_peers.NativeLoginTakeoverTests.test_wire_legacy_login_matching_peer_run_id_refused) ... ok
+test_wire_legacy_reconnect_with_proven_route_kept (test_peers.NativeLoginTakeoverTests.test_wire_legacy_reconnect_with_proven_route_kept) ... ok
+test_wire_legacy_reserved_identity_absent_refused (test_peers.NativeLoginTakeoverTests.test_wire_legacy_reserved_identity_absent_refused) ... ok
+test_wire_legacy_reserved_identity_offline_refused (test_peers.NativeLoginTakeoverTests.test_wire_legacy_reserved_identity_offline_refused) ... ok
+test_wire_login_positive_control (test_peers.NativeLoginTakeoverTests.test_wire_login_positive_control) ... ok
+test_wire_peer_run_id_equal_client_id_kept (test_peers.NativeLoginTakeoverTests.test_wire_peer_run_id_equal_client_id_kept) ... ok
+test_dash_client_records_shape_pinned_fail_closed (test_peers.PeerTests.test_dash_client_records_shape_pinned_fail_closed) ... ok
+test_dash_clients_run_id_filter_against_real_frps (test_peers.PeerTests.test_dash_clients_run_id_filter_against_real_frps) ... ok
+test_newproxy_empty_run_id_registers (test_peers.PeerTests.test_newproxy_empty_run_id_registers) ... ok
+test_newproxy_malformed_run_id_keeps_existing_route (test_peers.PeerTests.test_newproxy_malformed_run_id_keeps_existing_route) ... ok
+test_newproxy_malformed_run_id_refused (test_peers.PeerTests.test_newproxy_malformed_run_id_refused) ... ok
+test_r1_3_blocked_binding_refused (test_peers.PeerTests.test_r1_3_blocked_binding_refused) ... ok
+test_r1_3_foreign_client_id_refused (test_peers.PeerTests.test_r1_3_foreign_client_id_refused) ... ok
+test_r1_3_legacy_login_with_foreign_run_id_refused (test_peers.PeerTests.test_r1_3_legacy_login_with_foreign_run_id_refused) ... ok
+test_r1_3_legacy_reconnection_kept (test_peers.PeerTests.test_r1_3_legacy_reconnection_kept) ... ok
+test_r1_3_legacy_run_id_of_another_binding_refused (test_peers.PeerTests.test_r1_3_legacy_run_id_of_another_binding_refused) ... ok
+test_r1_3_malformed_client_ids_refused (test_peers.PeerTests.test_r1_3_malformed_client_ids_refused) ... ok
+test_r1_3_non_string_ids_refused (test_peers.PeerTests.test_r1_3_non_string_ids_refused) ... ok
+test_r1_3_run_id_check_fails_closed_when_frps_cannot_tell (test_peers.PeerTests.test_r1_3_run_id_check_fails_closed_when_frps_cannot_tell) ... ok
+test_r1_3_run_id_of_another_client (test_peers.PeerTests.test_r1_3_run_id_of_another_client) ... ok
+test_r1_3_second_login_same_id_refused (test_peers.PeerTests.test_r1_3_second_login_same_id_refused) ... second login with one client id after the drop: 4.95 s
+ok
+test_r1_4_two_companies_one_machine (test_peers.PeerTests.test_r1_4_two_companies_one_machine) ... ok
+test_r5_1_peer_limits (test_peers.PeerTests.test_r5_1_peer_limits) ... ok
+test_r5_1_peer_services (test_peers.PeerTests.test_r5_1_peer_services) ... ok
+test_r5_1_stcp_registration_keeps_the_link_route (test_peers.PeerTests.test_r5_1_stcp_registration_keeps_the_link_route) ... ok
+test_r6_2_visitor_key (test_peers.PeerTests.test_r6_2_visitor_key) ... ok
+test_r6_2_visitor_key_busy_keeps_the_old_hash (test_peers.PeerTests.test_r6_2_visitor_key_busy_keeps_the_old_hash) ... ok
+test_r6_2_visitor_key_dies_with_the_binding_admin (test_peers.PeerTests.test_r6_2_visitor_key_dies_with_the_binding_admin) ... ok
+test_r6_2_visitor_key_dies_with_the_binding_api (test_peers.PeerTests.test_r6_2_visitor_key_dies_with_the_binding_api) ... ok
+test_r6_2_visitor_key_needs_the_link_key (test_peers.PeerTests.test_r6_2_visitor_key_needs_the_link_key) ... ok
+test_admin_release_diagnostic_hides_visitor_key (test_peers.VisitorKeyDiagnosticTests.test_admin_release_diagnostic_hides_visitor_key) ... ok
+test_api_release_diagnostic_hides_visitor_key (test_peers.VisitorKeyDiagnosticTests.test_api_release_diagnostic_hides_visitor_key) ... ok
+test_admin_unban_placeholder_removes_credential_and_old_visitor_access (test_peers.VisitorKeyLifecycleTests.test_admin_unban_placeholder_removes_credential_and_old_visitor_access) ... ok
+test_admin_unban_real_binding_keeps_binding_and_credential (test_peers.VisitorKeyLifecycleTests.test_admin_unban_real_binding_keeps_binding_and_credential) ... /home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156020>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157b50>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156110>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155210>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0acc70>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157e20>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0acf40>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ad5d0>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0adf30>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ac6d0>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ad990>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0acb80>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ada80>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ad300>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1557b0>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1563e0>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0add50>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0adc60>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae110>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ad8a0>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1078: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae890>
+  class Handler(BaseHTTPRequestHandler):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_concurrent_issuer_cannot_plant_credential_during_release (test_peers.VisitorKeyLifecycleTests.test_concurrent_issuer_cannot_plant_credential_during_release) ... ok
+test_http_delete_authorized_before_ban_preserves_blocked_binding (test_peers.VisitorKeyLifecycleTests.test_http_delete_authorized_before_ban_preserves_blocked_binding) ... ok
+test_http_delete_authorized_before_release_cannot_drop_new_owner (test_peers.VisitorKeyLifecycleTests.test_http_delete_authorized_before_release_cannot_drop_new_owner) ... released acme for 127.0.0.1
+ok
+test_http_visitor_key_authorized_before_release_answers_404 (test_peers.VisitorKeyLifecycleTests.test_http_visitor_key_authorized_before_release_answers_404) ... new visitor key for acme
+ok
+test_release_rolls_back_when_binding_delete_fails (test_peers.VisitorKeyLifecycleTests.test_release_rolls_back_when_binding_delete_fails) ... ok
+test_stale_authorization_cannot_store_after_release_and_rebind (test_peers.VisitorKeyStoreTests.test_stale_authorization_cannot_store_after_release_and_rebind) ... /home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156200>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155990>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156e30>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157b50>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157100>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156f20>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0af010>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0af2e0>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155030>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae110>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0adc60>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:784: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0aca90>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_store_and_release_are_atomic_with_the_binding (test_peers.VisitorKeyStoreTests.test_store_and_release_are_atomic_with_the_binding) ... ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... private-words: none here, skipped
+ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... /home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156890>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157a60>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed154f40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157b50>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1576a0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157f10>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157010>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156d40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1566b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1575b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155b70>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1567a0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1556c0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155d50>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1572e0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155300>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156e30>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155990>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156200>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1563e0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed156b60>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1565c0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1564d0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155c60>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155a80>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1571f0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1555d0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155120>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed155f30>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1562f0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed157e20>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed1557b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed2a2d40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0acc70>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ace50>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0adf30>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0aca90>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0af5b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae2f0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae200>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ac8b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae980>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0aee30>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0aed40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ac130>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae110>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0af2e0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0adb70>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae890>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ac5e0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ae6b0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed208d60>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0afc40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ec0ac400>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed209f30>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed20a3e0>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed2c6d40>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed20a020>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py:489: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7d71ed2c6b60>
+  self.wfile.flush() #actually send the response if not already done.
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_call_does_not_clobber_caller_variables (test_setup.WritePrivateTests.test_call_does_not_clobber_caller_variables) ... ok
+test_changed_content_replaces_the_destination (test_setup.WritePrivateTests.test_changed_content_replaces_the_destination) ... ok
+test_failed_rename_reports_failure (test_setup.WritePrivateTests.test_failed_rename_reports_failure) ... ok
+test_failing_producer_keeps_the_destination (test_setup.WritePrivateTests.test_failing_producer_keeps_the_destination) ... ok
+test_setup_feeds_write_private_only_checked_content (test_setup.WritePrivateTests.test_setup_feeds_write_private_only_checked_content) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_fixes_mode_and_group_in_place (test_setup.WritePrivateTests.test_unchanged_content_fixes_mode_and_group_in_place) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_r2_4_authentication (test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 171 tests in 519.518s
+
+OK
+remote: command exited 0 after 3337 s

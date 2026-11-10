@@ -1,0 +1,20 @@
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 6.31 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.02 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 87.968s
+
+OK

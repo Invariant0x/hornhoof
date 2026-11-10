@@ -1,0 +1,92 @@
+remote: snapshot batch3d-20261104-235806-1203255 ready after 18 s, waiting for a slot
+remote: started after 775 s, log /home/altera/hornhoof-network/network-build/runs/remote-batch3d-20261104-235806-1203255.log
+.../home/altera/hornhoof-network/hornhoof-edge/relay/test/.bin/download.26eCl3/caddy.tgz: OK
+.............................eviction took 20.20 s (network)
+.eviction took 20.21 s (network)
+.eviction took 20.20 s (today)
+..client-id retry after silent client dropped: 5.92 s
+..proxy-name retry after first stopped: 31.09 s
+..bound globex for 203.0.113.7
+.bound qbgu8dwf9sp11n1gli5xeih7 for 203.0.113.7
+.bound qs1fvbp6z2sigcw2vr6l3lyd for 203.0.113.7
+...bound j3zkbz90jonwseqj12yf6gjv for 203.0.113.7
+bound va2dkd5p5apojcawm319034y for 203.0.113.8
+....bound dgaxyrvlmmbi4tcrupogzoc7 for 203.0.113.7
+.bound 1v9ubjifle0728eygrt5pp4l for 198.51.100.2
+bound 6cat8nh5ygs7h5ko3ioisa94 for 198.51.100.0
+bound b9zkcja7gnguore0ra2jron7 for 198.51.100.14
+.....new link key for acme
+...new link key for acme
+.new visitor key for acme
+..new link key for acme
+bound kb8yrqn0gwxjjy73x4nmg6ax for 127.0.0.1
+...new link key for acme
+new link key for acme
+new visitor key for acme
+.bound ds8r6h8a5w40ggns056vf4pk for 127.0.0.1
+bound uaqi46gsfwglpgqxs6pyps47 for 127.0.0.1
+bound lm1qliywqexwgazri4w7nvuq for 127.0.0.1
+bound rxmmx65ohyljxigpzbviyrab for 127.0.0.1
+bound m9ajjt4z9vf4puwizty6442i for 127.0.0.1
+..bound 0jjpyqf1mcln32h1x1y7978n for 127.0.0.1
+..new link key for acme
+.....new link key for acme
+new link key for acme
+new link key for acme
+.new link key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+released acme for 127.0.0.1
+...............----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 51020)
+Traceback (most recent call last):
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 766, in __init__
+    self.handle()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 428, in handle_one_request
+    method()
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1001, in do_GET
+    self.wfile.write(body)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+.----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 42064)
+Traceback (most recent call last):
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 766, in __init__
+    self.handle()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 428, in handle_one_request
+    method()
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1001, in do_GET
+    self.wfile.write(body)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+......................second login with one client id after the drop: 5.50 s
+................released acme for 127.0.0.1
+.new visitor key for acme
+........private-words: none here, skipped
+.............................................................................................
+----------------------------------------------------------------------
+Ran 233 tests in 557.845s
+
+OK
+remote: command exited 0 after 1338 s
+exit 0

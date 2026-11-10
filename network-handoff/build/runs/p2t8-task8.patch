@@ -1,0 +1,361 @@
+diff --git a/apps/server/test/install-script.test.ts b/apps/server/test/install-script.test.ts
+index 056a64ec..3dcf3601 100644
+--- a/apps/server/test/install-script.test.ts
++++ b/apps/server/test/install-script.test.ts
+@@ -16,7 +16,7 @@ const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
+ const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;
+ 
+ /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
+-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum'];
++const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum', 'tee'];
+ /* The installer runs Docker's and Homebrew's install scripts only when their SHA-256 is the one it pins. */
+ const sha256 = (stub: string) => createHash('sha256').update(readFileSync(join(STUBS, stub))).digest('hex');
+ 
+@@ -64,6 +64,20 @@ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-an
+ 
+ const indexOf = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
+ 
++/* The installer as an updater runs it: in a server folder that has a .env, with the compose file the build brought. */
++function fromUpdater(env: Record<string, string> = {}, dotEnv = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n') {
++  const folder = mkdtempSync(join(tmpdir(), 'hh-server-'));
++  writeFileSync(join(folder, '.env'), dotEnv);
++  const compose = join(folder, 'brought.yaml');
++  writeFileSync(compose, 'services: {app: {}}\n');
++  const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: folder, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose, ...env } });
++  return { ...r, folder, dotEnv: () => readFileSync(join(folder, '.env'), 'utf8') };
++}
++/* One key's lines of a .env, so a failed check never prints the secrets beside them. */
++const linesOf = (dotEnv: string, key: string) => dotEnv.split('\n').filter(line => line.startsWith(`${key}=`));
++const COMPOSE_STEP = /^docker compose (stop|up|pull)/;
++const UPDATER_REF = `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`;
++
+ describe('install.sh', () => {
+   it('records an update intent and stops an old node gracefully before replacing it', () => {
+     const name = 'hornhoof-claude-1c07dac4';
+@@ -652,7 +666,7 @@ describe('install.sh', () => {
+       args: ['server'],
+       tty: '',
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_PULLED: '1',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+@@ -679,7 +693,7 @@ describe('install.sh', () => {
+     expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
+     /* The updater downloaded every image before it saved the database, so this only starts them. */
+     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
++    expect(r.calls).toContain('docker compose up -d --no-build app node');
+     expect(r.calls).not.toContain('docker compose up -d --no-build');
+     expect(r.calls.find(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toMatch(new RegExp(` ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`));
+   });
+@@ -691,10 +705,10 @@ describe('install.sh', () => {
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+     const compose = join(dir, 'brought.yaml');
+     writeFileSync(compose, 'services: {app: {}}\n');
+-    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
++    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
+     expect(r.code).toBe(0);
+     expect(indexOf(r.calls, 'docker compose pull')).toBeGreaterThanOrEqual(0);
+-    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node tunnel'));
++    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build app node'));
+     const env = readFileSync(join(dir, '.env'), 'utf8');
+     expect(env).toMatch(/^HORNHOOF_APP_REF=ghcr\.io\/invariant0x\/hornhoof:0\.4\.1$/m);
+     expect(env).toMatch(/^HORNHOOF_NODE_REF=ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/m);
+@@ -707,7 +721,7 @@ describe('install.sh', () => {
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_TUNNEL_SETTINGS: '{"url":"https://acme.hornhoof.test","name":"acme","key":"secret","tunnel":{"serverAddr":"hornhoof.test"}}',
+@@ -727,7 +741,7 @@ describe('install.sh', () => {
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_TUNNEL_SETTINGS: '{"url":"https://a b.test; rm -rf /","tunnel":{}}',
+@@ -744,7 +758,7 @@ describe('install.sh', () => {
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test hornhoof-codex-9f1e2d3c=https://other.example.test',
+@@ -769,7 +783,7 @@ describe('install.sh', () => {
+       args: ['server'],
+       tty: '',
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_PULLED: '1',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+@@ -782,8 +796,8 @@ describe('install.sh', () => {
+       },
+     });
+     expect(r.code).toBe(0);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel');
+-    expect(r.calls).not.toContain('docker compose up -d --no-build db app node tunnel');
++    expect(r.calls).toContain('docker compose up -d --no-build app');
++    expect(r.calls).not.toContain('docker compose up -d --no-build app node');
+     expect(r.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker run -d'))).toBe(false);
+     expect(r.calls.some(c => c.includes('tunnel.json'))).toBe(false);
+   });
+@@ -803,7 +817,7 @@ describe('install.sh', () => {
+       },
+     });
+     expect(r.code).toBe(0);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel updater');
++    expect(r.calls).toContain('docker compose up -d --no-build app updater');
+     expect(r.calls).not.toContain('docker compose up -d --no-build');
+     expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-claude') || c.startsWith('docker run -d'))).toBe(false);
+ 
+@@ -823,7 +837,67 @@ describe('install.sh', () => {
+     const stopped = indexOf(changed.calls, 'docker stop --time 5 nodecid');
+     expect(intent).toBeGreaterThanOrEqual(0);
+     expect(stopped).toBeGreaterThan(intent);
+-    expect(indexOf(changed.calls, 'docker compose up -d --no-build')).toBeGreaterThan(stopped);
++    expect(changed.calls.indexOf('docker compose up -d --no-build')).toBeGreaterThan(stopped);
++  });
++
++  it('starts the database, then the keeper and front, then the app, which migrates first', () => {
++    const r = install({ args: ['server'], tty: '\n' });
++    expect(r.code).toBe(0);
++    const steps = ['docker compose stop app', 'docker compose up -d --no-build --remove-orphans --wait db', 'docker compose up -d --no-build keeper front', 'docker compose up -d --no-build'].map(step => r.calls.indexOf(step));
++    expect(steps.every(index => index >= 0)).toBe(true);
++    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
++  });
++
++  it('says where to look when the database cannot be brought up to this build', () => {
++    const r = install({ args: ['server'], tty: '\n', env: { STUB_MIGRATE: 'fail' } });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain(`Hornhoof could not bring its database up to this build. Run docker compose logs migrate in ${join(r.dir, 'home', 'hornhoof')} to see why.`);
++  });
++
++  it('writes the machine id once: the host id by hand, a random one from the updater', () => {
++    const byHand = install({ args: ['server'], tty: '\n' });
++    expect(byHand.code).toBe(0);
++    const made = readFileSync(join(byHand.dir, 'home', 'hornhoof', '.env'), 'utf8');
++    expect(linesOf(made, 'HORNHOOF_MACHINE_ID')[0].split('=')[1]).toBe(linesOf(made, 'HORNHOOF_HOST_ID')[0].split('=')[1]);
++    const updater = fromUpdater({ HORNHOOF_UPDATER_REV: '2' });
++    expect(updater.code).toBe(0);
++    expect(linesOf(updater.dotEnv(), 'HORNHOOF_MACHINE_ID')[0]).toMatch(/^HORNHOOF_MACHINE_ID=[0-9a-f]{32}$/);
++
++    const kept = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_MACHINE_ID=0123abcd\n';
++    const fromKept = fromUpdater({ HORNHOOF_UPDATER_REV: '2' }, kept).dotEnv();
++    const handDir = mkdtempSync(join(tmpdir(), 'hh-server-'));
++    writeFileSync(join(handDir, '.env'), kept);
++    expect(install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: handDir } }).code).toBe(0);
++    for (const env of [fromKept, readFileSync(join(handDir, '.env'), 'utf8')]) expect(linesOf(env, 'HORNHOOF_MACHINE_ID')).toEqual(['HORNHOOF_MACHINE_ID=0123abcd']);
++  });
++
++  it("hands an update to this build's updater when an older updater runs it", () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_HANDOVER_WAIT: '1' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain("This build's updater takes over the update first.");
++    expect(r.out).toContain(`The updater of this build did not take over, so nothing changed. Run install.sh server in ${r.folder}.`);
++    expect(readFileSync(join(r.folder, 'compose.yaml'), 'utf8')).toBe('services: {app: {}}\n');
++    const project = linesOf(r.dotEnv(), 'COMPOSE_PROJECT_NAME')[0].split('=')[1];
++    expect(r.calls).toContain(`docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${r.folder}:${r.folder} -v ${project}_control:/control -e HORNHOOF_SERVER_DIR=${r.folder} ${UPDATER_REF} --take-over`);
++    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
++  });
++
++  it('stops when the hand-over helper does not start', () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, STUB_RUN: 'fail' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain('Could not start the updater of this build, so nothing changed.');
++    expect(r.out).not.toContain('did not take over');
++    expect(linesOf(r.dotEnv(), 'HORNHOOF_VERSION')).toEqual(['HORNHOOF_VERSION=0.4.1']);
++    expect(linesOf(r.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
++    expect(existsSync(join(r.folder, 'compose.yaml'))).toBe(true);
++    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
++  });
++
++  it('goes on without a handover under an updater of revision 2', () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_PULLED: '1' });
++    expect(r.code).toBe(0);
++    expect(r.calls.some(c => c.includes('--take-over'))).toBe(false);
++    expect(r.calls).toContain('docker compose up -d --no-build app node');
+   });
+ 
+   it('refuses a server name it cannot use as a folder', () => {
+diff --git a/apps/server/test/install-stubs/docker b/apps/server/test/install-stubs/docker
+index 2811dc69..01e9cdfc 100755
+--- a/apps/server/test/install-stubs/docker
++++ b/apps/server/test/install-stubs/docker
+@@ -17,6 +17,17 @@ id_of() {
+   for w in ${STUB_IMAGE_IDS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s\n' "${w#*=}"; return; }; done
+   printf 'id-%s\n' "$1"
+ }
++# The services a "compose ... up" names: nothing when it starts them all.
++up_services() {
++  while [ $# -gt 0 ] && [ "$1" != up ]; do shift; done
++  [ $# -gt 0 ] && shift
++  for word in "$@"; do case "$word" in -*) ;; *) printf '%s ' "$word" ;; esac; done
++}
++# STUB_MIGRATE=fail: compose runs migrate first for every up that starts the app, and migrate fails.
++migrate_runs() {
++  case " $(up_services "$@") " in '  ' | *' app '*) ;; *) return 0 ;; esac
++  if [ "${STUB_MIGRATE:-}" = fail ]; then echo "service \"migrate\" didn't complete successfully: exit 1" >&2; exit 1; fi
++}
+ case "$1" in
+   info) echo "Server Version: 28.0.0" ;;
+   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+@@ -33,6 +44,7 @@ case "$1" in
+   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
+   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
+   compose)
++    case " $* " in *' up '*) migrate_runs "$@" ;; esac
+     case "$*" in
+       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
+       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
+@@ -42,7 +54,7 @@ case "$1" in
+   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
+   run)
+     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
+-    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
++    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+   exec)
+     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
+     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.
+diff --git a/scripts/install.sh b/scripts/install.sh
+index 96e3c7cc..4e5d2c75 100755
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -12,7 +12,8 @@
+ # starts: by the build's tag, or as HORNHOOF_APP_REF, HORNHOOF_NODE_REF and HORNHOOF_UPDATER_REF give them. The updater
+ # service runs the installer of the build it moves to with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup,
+ # the compose file it brings, the images it checked by digest, and this server's nodes on this machine move to the
+-# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them.
++# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them. An updater
++# that does not say HORNHOOF_UPDATER_REV=2 or later hands the update to the updater of this build first.
+ #
+ # Several companies can share a computer: each node carries the address of the server it works for, and an
+ # update or an uninstall touches only that server's nodes.
+@@ -269,10 +270,12 @@ pull_image() {
+   fi
+ }
+ 
++random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
++
+ machine_id() {
+   mkdir -p "$STATE_DIR"
+   if ! grep -Eq '^[0-9a-f]{32}$' "$STATE_DIR/machine" 2> /dev/null; then
+-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$STATE_DIR/machine"
++    random_hex 16 > "$STATE_DIR/machine"
+   fi
+   cat "$STATE_DIR/machine"
+ }
+@@ -653,7 +656,7 @@ uninstall_mode() {
+ new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
+ 
+ # The database password goes into the database address, so it is hex.
+-new_password() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
++new_password() { random_hex 24; }
+ 
+ # The port a server's .env keeps; one from before servers kept a port has the first one.
+ port_of() {
+@@ -773,27 +776,69 @@ prepare_builtin_stop() {
+   prepare_node_stop "$cid" hornhoof_update
+ }
+ 
++# What the last compose step said, for what a failure tells the person.
++STEP_OUTPUT=''
++# compose_step <compose command...>: runs in the server folder, showing what compose says as it comes.
++compose_step() {
++  local said rc=0
++  said=$(mktemp)
++  (cd "$SERVER_DIR" && "$@") 2>&1 | tee "$said" || rc=$?
++  STEP_OUTPUT=$(cat "$said")
++  rm -f "$said"
++  return "$rc"
++}
++
++start_failed() {
++  if [ -n "$FROM_UPDATER" ]; then fail "Hornhoof did not start."; fi
++  fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++}
++
++# The app waits for migrate, so compose runs it first and a failed start may be the database not reaching this build.
++# Older versions of Compose 2 say "didn't completed", so the check stops before that word.
++start_app() {
++  compose_step "$@" && return 0
++  case "$STEP_OUTPUT" in
++    *'"migrate" didn'*) fail "Hornhoof could not bring its database up to this build. Run docker compose logs migrate in $SERVER_DIR to see why." ;;
++  esac
++  start_failed
++}
++
++# The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
++# comes back, so the maintenance answer is up while migrate runs.
+ start_server_services() {
++  say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
++  (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
++  compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
++  compose_step "$@" up -d --no-build keeper front || start_failed
+   if [ -n "$FROM_UPDATER" ]; then
+-    say "Starting Hornhoof ${PIN:-latest}."
+     if node_unchanged "$@"; then
+-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
++      start_app "$@" up -d --no-build app
+     else
+       prepare_builtin_stop "$@"
+-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
++      start_app "$@" up -d --no-build app node
+       sweep_nodes "$@"
+     fi
+     return 0
+   fi
+-  say "Starting Hornhoof."
+   if node_unchanged "$@"; then
+-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++    start_app "$@" up -d --no-build app updater
+   else
+     prepare_builtin_stop "$@"
+-    (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++    start_app "$@" up -d --no-build
+   fi
+ }
+ 
++# An older updater cannot run this build's move, so this build's updater takes the update over: the helper starts it,
++# which replaces the updater this script runs under, and with it this script. Until then only .env and compose.yaml
++# have changed, and the old installer writes both back on the way back.
++hand_over_update() {
++  say "This build's updater takes over the update first."
++  "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
++    fail "Could not start the updater of this build, so nothing changed."
++  sleep "${HORNHOOF_HANDOVER_WAIT:-300}"
++  fail "The updater of this build did not take over, so nothing changed. Run install.sh server in $SERVER_DIR."
++}
++
+ server_mode() {
+   local env_file url public port local_url project link fact id i=0
+   local -a compose
+@@ -860,6 +905,9 @@ server_mode() {
+     id=$(host_id)
+     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
+   fi
++  # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
++  # random hex from the updater, whose container cannot read that key.
++  if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
+   local_url="http://localhost:$(port_of "$env_file")"
+   public=$(env_value PUBLIC_URL)
+   [ -n "$public" ] || public=$local_url
+@@ -873,6 +921,8 @@ server_mode() {
+     compose_from_image
+   fi
+ 
++  if [ -n "$FROM_UPDATER" ] && [ "${HORNHOOF_UPDATER_REV:-1}" -lt 2 ]; then hand_over_update "$project"; fi
++
+   # The updater downloads them before it saves the database; an updater from before leaves it to this.
+   if [ -z "$PULLED" ]; then
+     say "Downloading the Hornhoof images."

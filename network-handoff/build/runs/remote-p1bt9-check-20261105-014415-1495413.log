@@ -1,0 +1,52 @@
+== changed files
+README.md
+SECURITY.md
+apps/web/src/i18n/en.ts
+apps/web/src/i18n/ru.ts
+apps/web/src/screens/Machines.tsx
+apps/web/src/screens/Settings.tsx
+apps/web/src/screens/Setup.tsx
+apps/web/src/types.ts
+apps/web/src/ui/LetsEncryptNote.tsx
+apps/web/src/ui/LinkName.tsx
+apps/web/src/ui/LinkReady.tsx
+apps/web/test/Machines.test.tsx
+apps/web/test/Settings.test.tsx
+apps/web/test/Setup.test.tsx
+guide/public-link.md
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/web tests
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m48 passed[39m[22m[90m (49)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m780 passed[39m[22m[90m (781)[39m
+[2m   Start at [22m 01:47:08
+[2m   Duration [22m 169.31s[2m (tests 75%, environment 16%, setup 3%, import 3%, transform 2%, worker 1%)[22m
+
+[2m    Isolate [22m [33m49 workers spawned[39m[2m · ~1.87s startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~28.75s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+OVER 10: apps/web/src/screens/Machines.tsx:45 endingSoon CRAP 20.0
+OVER 10: apps/web/src/screens/Machines.tsx:59 useLinkTls CRAP 20.0
+OVER 10: apps/web/src/screens/Machines.tsx:313 Machines CRAP 1260.0
+OVER 10: apps/web/src/screens/Settings.tsx:14 Encryption CRAP 12.0
+OVER 10: apps/web/src/screens/Settings.tsx:27 Settings CRAP 552.0
+OVER 10: apps/web/src/screens/Setup.tsx:24 Setup CRAP 2162.0
+OVER 10: apps/web/src/ui/LinkName.tsx:34 LinkName CRAP 506.0
+OVER 10: apps/web/src/ui/LinkReady.tsx:17 useCertificateStage CRAP 30.0
+OVER 10: apps/web/src/ui/LinkReady.tsx:40 LinkReady CRAP 20.0
+worst changed CRAP: 2162.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at 8ae359d9

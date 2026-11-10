@@ -1,0 +1,3729 @@
+# Review package: batch 8, slice keeper
+
+## 0bfa1677 Add the keeper: the app's mode, and the doors from front and the link to the app
+
+The keeper derives maintenance from the updater's status.json and gives the app its word in keeper.json at start and
+every second, so an update's state survives a restart of any container. A status file it cannot read changes nothing,
+and a word it cannot write costs one log line and closes no door, since the app keeps its mode while the word is stale.
+
+Its two doors carry everything to the app. On the front port x-forwarded-for is believed only from front's address,
+looked up by name each time, and no x-forwarded-proto gets through, so the built-in node cannot pass as a visitor or as
+the link. The link's http door listens on 127.0.0.1 alone, for the keeper's own frpc, and marks its traffic as https.
+While the app is down the keeper answers maintenance during an update and starting otherwise.
+
+config.ts gains machineId from HORNHOOF_MACHINE_ID, and TUNNEL_HOST's message names the keeper container.
+
+Proved by test/keeper.test.ts and test/config.test.ts, written first: the seam with state.ts through freshState, the
+app taking link traffic as over the link and front's as local, a forged header from a socket that is not front, the
+updater's health check through front in maintenance, and the entry point's ports and its exit. Eight key lines were
+broken by hand and each was caught by the test named for it.
+
+Ruling: the plan's acmeDirectory assertion in "loads the keeper's environment and nothing more" is left out - why: this lane's config.ts has no acmeDirectory, it comes with plan 1b Task 7, which has not landed; ACME_DIRECTORY '' is still passed and does not throw - cost if wrong: one assertion to add when 1b T7 lands.
+Ruling: maintenanceAnswer takes the JSON or page split from startingAnswer's Content-Type instead of a second copy of the path rule - why: UNDER_API_OR_MCP is private to proxy.ts, which is not this task's file, and one decision lives in one place - cost if wrong: one line, and an export in proxy.ts.
+Ruling: the maintenance sentence stands in keeper.ts and in app-mode.ts, and one test holds both answers to the same text - why: app-mode.ts does not export it and is not this task's file - cost if wrong: one exported constant.
+Ruling: Keeper.stop() gives connections 5 s and then resolves, whatever is still open - why: the plan does not say, a socket never ends by itself and Docker kills at 10 s, front does the same - cost if wrong: one constant.
+Ruling: a keeper.json that cannot be written is logged once until a write works and does not stop the keeper - why: the plan does not say, and its Global Constraints ask to fail toward a working company - cost if wrong: a silent stale word after the one line, which the app already tolerates.
+
+---
+ apps/server/src/config.ts                        |  11 +-
+ apps/server/src/keeper.ts                        |  13 +
+ apps/server/src/modules/keeper/keeper.ts         | 145 ++++++++
+ apps/server/src/modules/keeper/updater-status.ts |  21 ++
+ apps/server/test/config.test.ts                  |  28 +-
+ apps/server/test/keeper.test.ts                  | 415 +++++++++++++++++++++++
+ 6 files changed, 630 insertions(+), 3 deletions(-)
+
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index 02dc3398..fb03b248 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -30,26 +30,28 @@ export type Config = {
+   registryUrl?: string;
+   updateCheckMs: number;
+   /* The folder the app shares with the updater service. */
+   controlDir: string;
+   /* Role and skill templates, loaded once at start. */
+   templatesDir: string;
+   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+   relayUrl: string;
+-  /* The tunnel container's host name: only requests from it may say they came in over https. */
++  /* The keeper container's host name: only requests from it may say they came in over https. */
+   tunnelHost?: string;
+   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
+   keeper: boolean;
+   /* How much all the files on the company's tasks may take together. */
+   taskFilesBytes: number;
+   /* The ACME directory the link's certificate comes from; null with certificates off. */
+   acmeDirectory: string | null;
+   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
+   hostId: string | null;
++  /* This install's id, which install.sh writes once and never changes; null for one installed before. */
++  machineId: string | null;
+ };
+ 
+ /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
+ const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+ const DEFAULT_INSTALL_SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
+ const ROOT_PACKAGE = new URL('../../../package.json', import.meta.url);
+ const DEFAULT_TEMPLATES = fileURLToPath(new URL('../../../templates', import.meta.url));
+ const MIGRATIONS = new URL('../drizzle', import.meta.url);
+@@ -71,27 +73,31 @@ const Env = z.object({
+   PUBLIC_URL: webAddress('PUBLIC_URL must be the address people open Hornhoof at, starting with http:// or https://, like https://hornhoof.example.com.'),
+   PORT: wholeNumber(1, 65535, 'PORT must be a number between 1 and 65535.'),
+   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
+   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
+   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
+   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
+   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+-  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
++  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
+   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
+   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+   ACME_DIRECTORY: z.preprocess(
+     unset,
+     z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
+   ),
+   HORNHOOF_HOST_ID: z.preprocess(
+     unset,
+     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+   ),
++  HORNHOOF_MACHINE_ID: z.preprocess(
++    unset,
++    z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
++  ),
+ });
+ 
+ /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+ const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
+ const acmeDirectoryOf = (set: string | undefined): string | null => (set === CERTIFICATES_OFF ? null : (set ?? LETS_ENCRYPT));
+ const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
+ const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
+ 
+@@ -162,10 +168,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
+     publicUrl,
+     secureCookies: publicUrl.startsWith('https://'),
+     nodeKey: nodeKeyOf(env),
+     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+     tunnelHost: set.TUNNEL_HOST,
+     keeper: set.HORNHOOF_KEEPER === 'on',
+     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
+     hostId: set.HORNHOOF_HOST_ID ?? null,
++    machineId: set.HORNHOOF_MACHINE_ID ?? null,
+   };
+ }
+diff --git a/apps/server/src/keeper.ts b/apps/server/src/keeper.ts
+new file mode 100644
+index 00000000..7ba5f1c7
+--- /dev/null
++++ b/apps/server/src/keeper.ts
+@@ -0,0 +1,13 @@
++import { loadConfig } from './config.js';
++import { KEEPER_NAME, openDb } from './db/client.js';
++import { Keeper } from './modules/keeper/keeper.js';
++
++const config = loadConfig(process.env);
++const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
++const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line) });
++
++await keeper.start();
++
++for (const signal of ['SIGINT', 'SIGTERM'] as const) {
++  process.once(signal, () => void keeper.stop().then(() => process.exit(0)));
++}
+diff --git a/apps/server/src/modules/keeper/keeper.ts b/apps/server/src/modules/keeper/keeper.ts
+new file mode 100644
+index 00000000..72f68e78
+--- /dev/null
++++ b/apps/server/src/modules/keeper/keeper.ts
+@@ -0,0 +1,145 @@
++import { lookup } from 'node:dns/promises';
++import type http from 'node:http';
++import type { AddressInfo } from 'node:net';
++import type { Config } from '../../config.js';
++import type { Db } from '../../db/client.js';
++import { firstForwarded, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
++import { writeKeeperState, type Mode } from './state.js';
++import { updaterBusy } from './updater-status.js';
++
++export const KEEPER_PORTS = { peer: 7070, front: 7080, linkHttp: 7081 } as const;
++
++export type KeeperOptions = {
++  config: Config;
++  /* Where the link and its certificate will be read from; nothing reads it until the link moves in here. */
++  db: Db | null;
++  app: Target;
++  /* Null: no socket on the front port is front. */
++  frontHost: string | null;
++  log: (line: string) => void;
++  /* Where the front port listens. */
++  host?: string;
++  ports?: { front?: number; linkHttp?: number; linkTls?: number };
++  everyMs?: number;
++};
++
++const EVERY_MS = 1000;
++/* Only this keeper's own frpc child reaches the link's doors, which is why they may believe what it sends. */
++const LINK_HOST = '127.0.0.1';
++/* Docker waits 10 s after its stop signal. A request in flight gets half of that to finish; an open socket, which never
++   ends by itself, does not hold the stop up for longer. */
++const STOP_GRACE_MS = 5000;
++
++const MAINTENANCE_JSON = JSON.stringify({
++  error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
++});
++const MAINTENANCE_TEXT = 'Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n';
++
++/* A status the keeper cannot tell anything from keeps the mode it has, so a torn file never ends a maintenance. */
++function modeAfter(busy: boolean | null, was: Mode): Mode {
++  if (busy === null) return was;
++  return busy ? 'maintenance' : 'lead';
++}
++
++/* startingAnswer already decides who gets JSON and who gets a page, so the two answers cannot split differently. */
++function maintenanceAnswer(req: http.IncomingMessage): Refusal {
++  const contentType = startingAnswer(req).headers['Content-Type']!;
++  const body = contentType === 'application/json' ? MAINTENANCE_JSON : MAINTENANCE_TEXT;
++  return { status: 503, headers: { 'Content-Type': contentType, 'Retry-After': '10' }, body };
++}
++
++/* Looked up by name each time, since a container gets a new address when it starts again. */
++async function isAddressOf(name: string | null, address: string): Promise<boolean> {
++  if (!name) return false;
++  try {
++    return (await lookup(name, { all: true })).some(found => found.address === address);
++  } catch {
++    return false;
++  }
++}
++
++/* Anyone on the default network can reach the front port and write a header, so what it says counts only from front. */
++const visitorFromFront =
++  (frontHost: string | null) =>
++  async (req: http.IncomingMessage): Promise<Record<string, string>> => {
++    const said = firstForwarded(req);
++    const believed = said !== '' && (await isAddressOf(frontHost, socketAddress(req)));
++    return { 'x-forwarded-for': believed ? said : socketAddress(req) };
++  };
++
++/* What frps wrote, its first entry being the visitor. Only link traffic is ever marked as https. */
++function visitorFromLink(req: http.IncomingMessage): Record<string, string> {
++  return { 'x-forwarded-for': firstForwarded(req) || socketAddress(req), 'x-forwarded-proto': 'https' };
++}
++
++function listenOn(server: http.Server, port: number, host: string): Promise<number> {
++  return new Promise((resolve, reject) => {
++    /* It stays on: after the start an error is one failed accept, and the next visitor should still get through. */
++    server.on('error', reject);
++    server.listen(port, host, () => resolve((server.address() as AddressInfo).port));
++  });
++}
++
++function closeWithin(server: http.Server, ms: number): Promise<void> {
++  return new Promise(resolve => {
++    const giveUp = setTimeout(resolve, ms);
++    server.close(() => {
++      clearTimeout(giveUp);
++      resolve();
++    });
++  });
++}
++
++/* Sets the app's mode and carries what comes in from front and the link to the app. */
++export class Keeper {
++  private current: Mode = 'lead';
++  private timer: NodeJS.Timeout | null = null;
++  private doors: http.Server[] = [];
++  /* A word that cannot be written is said once in the log, not once a second. */
++  private wordFails = false;
++
++  constructor(private readonly opts: KeeperOptions) {}
++
++  mode(): Mode {
++    return this.current;
++  }
++
++  async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
++    const { host, ports, frontHost, everyMs } = this.opts;
++    this.giveWord();
++    const front = await this.open(visitorFromFront(frontHost), ports?.front ?? KEEPER_PORTS.front, host ?? '0.0.0.0');
++    const linkHttp = await this.open(visitorFromLink, ports?.linkHttp ?? KEEPER_PORTS.linkHttp, LINK_HOST);
++    this.timer = setInterval(() => this.giveWord(), everyMs ?? EVERY_MS);
++    /* The link's TLS door does not exist yet, so it has no port to report. */
++    return { front, linkHttp, linkTls: 0 };
++  }
++
++  async stop(): Promise<void> {
++    if (this.timer) clearInterval(this.timer);
++    this.timer = null;
++    await Promise.all(this.doors.map(door => closeWithin(door, STOP_GRACE_MS)));
++  }
++
++  /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */
++  private giveWord(): void {
++    const dir = this.opts.config.controlDir;
++    this.current = modeAfter(updaterBusy(dir), this.current);
++    try {
++      writeKeeperState(dir, { mode: this.current, at: new Date().toISOString(), link: null });
++      this.wordFails = false;
++    } catch (err) {
++      if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);
++      this.wordFails = true;
++    }
++  }
++
++  private open(headers: PassOptions['headers'], port: number, host: string): Promise<number> {
++    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req) }));
++    this.doors.push(door);
++    return listenOn(door, port, host);
++  }
++
++  private appIsDown(req: http.IncomingMessage): Refusal {
++    return this.current === 'maintenance' ? maintenanceAnswer(req) : startingAnswer(req);
++  }
++}
+diff --git a/apps/server/src/modules/keeper/updater-status.ts b/apps/server/src/modules/keeper/updater-status.ts
+new file mode 100644
+index 00000000..303459a0
+--- /dev/null
++++ b/apps/server/src/modules/keeper/updater-status.ts
+@@ -0,0 +1,21 @@
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { z } from 'zod';
++
++/* The old build works on while images download, so the pull is not among these. */
++const BUSY_STEPS = new Set<unknown>(['backup', 'install', 'health', 'rollback']);
++
++const StatusShape = z.object({ state: z.string(), step: z.unknown().optional() });
++
++/* Whether the updater's own status file says an update has the company in maintenance. The file outlives every
++   container, so a restart of anything keeps the answer. Null when it cannot be told now: only a person removes the file,
++   so a missing one means no update runs, while one that cannot be read or parsed says nothing either way. */
++export function updaterBusy(dir: string): boolean | null {
++  try {
++    const status = StatusShape.safeParse(JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8')));
++    if (!status.success) return null;
++    return status.data.state === 'running' && BUSY_STEPS.has(status.data.step);
++  } catch (err) {
++    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? false : null;
++  }
++}
+diff --git a/apps/server/test/config.test.ts b/apps/server/test/config.test.ts
+index e6f724b4..a9fc783f 100644
+--- a/apps/server/test/config.test.ts
++++ b/apps/server/test/config.test.ts
+@@ -1,8 +1,9 @@
++import { randomBytes } from 'node:crypto';
+ import { describe, expect, it } from 'vitest';
+ import { loadConfig } from '../src/config.js';
+ import { LETS_ENCRYPT } from '../src/modules/tls/acme.js';
+ import { TEST_SECRET } from './helpers.js';
+ 
+ describe('loadConfig', () => {
+   it('limits simultaneous parts on one host to a positive whole number, one by default', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).runsPerHost).toBe(1);
+@@ -66,30 +67,55 @@ describe('loadConfig', () => {
+     expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'yes' })).toThrow('HORNHOOF_KEEPER must be on, or not set.');
+   });
+ 
+   it('knows the tunnel container by a plain host name', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).tunnelHost).toBeUndefined();
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: 'tunnel' }).tunnelHost).toBe('tunnel');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: '172.18.0.5' }).tunnelHost).toBe('172.18.0.5');
+     for (const TUNNEL_HOST of ['http://tunnel', 'tun nel', 'tunnel:8080']) {
+-      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST })).toThrow('TUNNEL_HOST must be the host name of the tunnel container, like tunnel.');
++      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST })).toThrow('TUNNEL_HOST must be the host name of the keeper container, like keeper.');
+     }
+   });
+ 
+   it('knows the computer it runs on by the hash install.sh gives, and none without one', () => {
+     const id = 'ab'.repeat(32);
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).hostId).toBeNull();
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID: '' }).hostId).toBeNull();
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID: id }).hostId).toBe(id);
+     for (const HORNHOOF_HOST_ID of ['mac-0001-abcd', 'AB'.repeat(32), 'ab'.repeat(31)]) {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID })).toThrow('HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.');
+     }
+   });
+ 
++  it('knows this install by the id install.sh gives, and none without one', () => {
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).machineId).toBeNull();
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID: '' }).machineId).toBeNull();
++    for (const id of ['ab'.repeat(16), 'ab'.repeat(32)]) {
++      expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID: id }).machineId).toBe(id);
++    }
++    for (const HORNHOOF_MACHINE_ID of ['XYZ', 'AB'.repeat(16), 'ab'.repeat(24), 'ab'.repeat(16) + '\n']) {
++      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID })).toThrow('HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.');
++    }
++  });
++
++  it("loads the keeper's environment and nothing more", () => {
++    const config = loadConfig({
++      DATABASE_URL: 'postgres://hornhoof:hornhoof@db:5432/hornhoof',
++      HORNHOOF_SECRET: randomBytes(32).toString('base64'),
++      ACME_DIRECTORY: '',
++      HORNHOOF_MACHINE_ID: '',
++      RELAY_URL: '',
++    });
++    expect(config.controlDir).toBe('/control');
++    expect(config.machineId).toBeNull();
++    expect(config.relayUrl).toBe('https://hornhoof.org');
++    expect(config.databaseUrl).toBe('postgres://hornhoof:hornhoof@db:5432/hornhoof');
++  });
++
+   it('gives task files 2 GB unless TASK_FILES_MB names other whole megabytes', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '' }).taskFilesBytes).toBe(2048 * 1024 * 1024);
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '512' }).taskFilesBytes).toBe(512 * 1024 * 1024);
+     for (const TASK_FILES_MB of ['2GB', '0', '-1', '1.5']) {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB })).toThrow('TASK_FILES_MB must be a whole number of megabytes, like 2048.');
+     }
+   });
+ 
+diff --git a/apps/server/test/keeper.test.ts b/apps/server/test/keeper.test.ts
+new file mode 100644
+index 00000000..70f91b2b
+--- /dev/null
++++ b/apps/server/test/keeper.test.ts
+@@ -0,0 +1,415 @@
++import { spawn } from 'node:child_process';
++import { once } from 'node:events';
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import http from 'node:http';
++import type { AddressInfo } from 'node:net';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { createInterface } from 'node:readline';
++import { setTimeout as sleep } from 'node:timers/promises';
++import { fileURLToPath } from 'node:url';
++import type { FastifyInstance } from 'fastify';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import WebSocket, { WebSocketServer } from 'ws';
++import { clientAddress } from '../src/auth/tunnel.js';
++import { loadConfig } from '../src/config.js';
++import { Keeper, KEEPER_PORTS, type KeeperOptions } from '../src/modules/keeper/keeper.js';
++import { freshState, readKeeperState } from '../src/modules/keeper/state.js';
++import { updaterBusy } from '../src/modules/keeper/updater-status.js';
++import type { Target } from '../src/net/proxy.js';
++import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
++
++const FAST = { everyMs: 50 };
++const MAINTENANCE_MESSAGE = 'Hornhoof is installing an update and takes no changes until it ends.';
++
++function folder(): string {
++  const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-'));
++  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
++  return dir;
++}
++
++function statusSays(dir: string, state: string, step: string): void {
++  writeFileSync(join(dir, 'status.json'), JSON.stringify({ id: 'u1', version: '1.2.3', state, step, log: '', at: '2026-01-01T00:00:00.000Z' }));
++}
++
++const wordIn = (dir: string) => readKeeperState(dir)?.mode;
++
++async function listening(server: http.Server): Promise<Target> {
++  onTestFinished(() => {
++    server.closeAllConnections();
++    server.close();
++  });
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  return { host: '127.0.0.1', port: (server.address() as AddressInfo).port };
++}
++
++const echoHeaders = () =>
++  listening(
++    http.createServer((req, res) => {
++      req.resume();
++      res.end(JSON.stringify(req.headers));
++    }),
++  );
++
++/* A port with nobody on it, as the app's is while it is stopped. */
++async function appIsDown(): Promise<Target> {
++  const server = http.createServer();
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  const { port } = server.address() as AddressInfo;
++  await new Promise(resolve => server.close(resolve));
++  return { host: '127.0.0.1', port };
++}
++
++async function appListening(app: FastifyInstance): Promise<Target> {
++  await app.listen({ host: '127.0.0.1', port: 0 });
++  return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
++}
++
++async function keeperOn(app: Target, extra: Partial<KeeperOptions> = {}, dir: string = folder()) {
++  const lines: string[] = [];
++  const keeper = new Keeper({
++    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: dir }),
++    db: null,
++    app,
++    frontHost: null,
++    log: line => lines.push(line),
++    host: '127.0.0.1',
++    ports: { front: 0, linkHttp: 0, linkTls: 0 },
++    ...extra,
++  });
++  const ports = await keeper.start();
++  onTestFinished(() => keeper.stop());
++  const door = (port: number): Target => ({ host: '127.0.0.1', port });
++  return { keeper, dir, lines, ports, front: door(ports.front), link: door(ports.linkHttp) };
++}
++
++type Answer = { status: number; headers: http.IncomingHttpHeaders; body: string };
++
++function send(to: Target, options: http.RequestOptions = {}, body?: string): Promise<Answer> {
++  return new Promise((resolve, reject) => {
++    const out = http.request({ ...to, agent: false, ...options }, res => {
++      const chunks: Buffer[] = [];
++      res.on('data', chunk => chunks.push(chunk));
++      res.on('error', reject);
++      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() }));
++    });
++    out.on('error', reject);
++    out.end(body);
++  });
++}
++
++const seenWith = async (door: Target, headers: http.OutgoingHttpHeaders = {}) => JSON.parse((await send(door, { headers })).body);
++const forwardedWith = async (door: Target, sent: string) => (await seenWith(door, { 'x-forwarded-for': sent }))['x-forwarded-for'];
++
++const health = async (door: Target) => JSON.parse((await send(door, { path: '/api/health' })).body);
++
++/* Only the names: a session's value is never compared or shown. */
++async function signIn(door: Target): Promise<{ status: number; body: string; cookies: string[] }> {
++  const payload = JSON.stringify({ email: 'ivan@acme.com', password: SETUP.password });
++  const answer = await send(door, { method: 'POST', path: '/api/auth/login', headers: { 'content-type': 'application/json' } }, payload);
++  return { status: answer.status, body: answer.body, cookies: (answer.headers['set-cookie'] ?? []).map(cookie => cookie.split('=')[0]!) };
++}
++
++describe('updaterBusy', () => {
++  it.each(['backup', 'install', 'health', 'rollback'])('is true while a running update is at step %s', step => {
++    const dir = folder();
++    statusSays(dir, 'running', step);
++    expect(updaterBusy(dir)).toBe(true);
++  });
++
++  it.each([
++    ['running', 'pull'],
++    ['done', 'finished'],
++    ['failed', 'install'],
++    ['rolled_back', 'rollback'],
++  ])('is false for state %s at step %s', (state, step) => {
++    const dir = folder();
++    statusSays(dir, state, step);
++    expect(updaterBusy(dir)).toBe(false);
++  });
++
++  it('is false for a running update that names no step, and without a file', () => {
++    const dir = folder();
++    expect(updaterBusy(dir)).toBe(false);
++    writeFileSync(join(dir, 'status.json'), '{"state":"running"}');
++    expect(updaterBusy(dir)).toBe(false);
++  });
++
++  it.each(['{', '[]', 'null', '{"state":1}', '{"step":"install"}'])('is null for %s, which it cannot tell anything from', text => {
++    const dir = folder();
++    writeFileSync(join(dir, 'status.json'), text);
++    expect(updaterBusy(dir)).toBeNull();
++  });
++
++  it('is null for a file it cannot read', () => {
++    const dir = folder();
++    mkdirSync(join(dir, 'status.json'));
++    expect(updaterBusy(dir)).toBeNull();
++  });
++});
++
++describe('the keeper', () => {
++  it('writes its mode every second, maintenance while the updater installs', async () => {
++    const { keeper, dir } = await keeperOn(await echoHeaders());
++    /* What the app's own reader takes, so the two sides of the file cannot drift apart. */
++    expect(freshState(dir, Date.now(), 2000)).toMatchObject({ mode: 'lead', link: null });
++    const first = readKeeperState(dir)?.at;
++    await until(() => readKeeperState(dir)?.at !== first);
++    statusSays(dir, 'running', 'install');
++    await until(() => wordIn(dir) === 'maintenance');
++    expect(keeper.mode()).toBe('maintenance');
++    expect(freshState(dir, Date.now(), 2000)?.mode).toBe('maintenance');
++    statusSays(dir, 'done', 'finished');
++    await until(() => wordIn(dir) === 'lead');
++    expect(keeper.mode()).toBe('lead');
++  });
++
++  it('keeps maintenance through a status file it cannot read', async () => {
++    const { keeper, dir } = await keeperOn(await echoHeaders(), FAST);
++    statusSays(dir, 'running', 'install');
++    await until(() => wordIn(dir) === 'maintenance');
++    writeFileSync(join(dir, 'status.json'), '{');
++    const end = Date.now() + 3000;
++    while (Date.now() < end) {
++      expect(wordIn(dir)).toBe('maintenance');
++      expect(keeper.mode()).toBe('maintenance');
++      await sleep(100);
++    }
++    statusSays(dir, 'failed', 'install');
++    await until(() => wordIn(dir) === 'lead');
++  });
++
++  it('takes its first word from the status file, and leads when it cannot read it', async () => {
++    const duringUpdate = folder();
++    statusSays(duringUpdate, 'running', 'health');
++    const restarted = await keeperOn(await echoHeaders(), {}, duringUpdate);
++    expect(restarted.keeper.mode()).toBe('maintenance');
++    expect(wordIn(duringUpdate)).toBe('maintenance');
++
++    const broken = folder();
++    writeFileSync(join(broken, 'status.json'), '{');
++    const fresh = await keeperOn(await echoHeaders(), {}, broken);
++    expect(fresh.keeper.mode()).toBe('lead');
++    expect(wordIn(broken)).toBe('lead');
++  });
++
++  it('keeps its doors open when it cannot write its word, and says so once until it can again', async () => {
++    const dir = join(folder(), 'not-there-yet');
++    const { front, lines } = await keeperOn(await echoHeaders(), { everyMs: 20 }, dir);
++    expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
++    await sleep(150);
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toMatch(/could not write/);
++    mkdirSync(dir);
++    await until(() => wordIn(dir) === 'lead');
++  });
++
++  it('takes the visitor from front and from nobody else', async () => {
++    const app = await echoHeaders();
++    const fromFront = await keeperOn(app, { frontHost: 'localhost' });
++    expect(await forwardedWith(fromFront.front, '203.0.113.5')).toBe('203.0.113.5');
++    expect(await forwardedWith(fromFront.front, '203.0.113.5, 198.51.100.7')).toBe('203.0.113.5');
++    expect(await forwardedWith(fromFront.front, ', 203.0.113.5')).toBe('127.0.0.1');
++    const notFront = await keeperOn(app, { frontHost: 'front.invalid' });
++    expect(await forwardedWith(notFront.front, '203.0.113.5')).toBe('127.0.0.1');
++    const noFront = await keeperOn(app, { frontHost: null });
++    expect(await forwardedWith(noFront.front, '203.0.113.5')).toBe('127.0.0.1');
++  });
++
++  it("marks the link's http traffic as https, and only that", async () => {
++    const { front, link } = await keeperOn(await echoHeaders());
++    const overLink = await seenWith(link, { 'x-forwarded-for': '203.0.113.5, 198.51.100.7', 'x-forwarded-proto': 'http', 'x-hornhoof-via': 'x' });
++    expect(overLink['x-forwarded-for']).toBe('203.0.113.5');
++    expect(overLink['x-forwarded-proto']).toBe('https');
++    expect(overLink['x-hornhoof-via']).toBeUndefined();
++    expect((await seenWith(link))['x-forwarded-for']).toBe('127.0.0.1');
++    const overFront = await seenWith(front, { 'x-forwarded-proto': 'https', 'x-hornhoof-via': 'x', 'x-forwarded-host': 'corp.hornhoof.test' });
++    expect(overFront['x-forwarded-proto']).toBeUndefined();
++    expect(overFront['x-hornhoof-via']).toBeUndefined();
++    expect(overFront['x-forwarded-host']).toBe('corp.hornhoof.test');
++  });
++
++  it('answers maintenance while the app is down during an update, and starting otherwise', async () => {
++    const { keeper, dir, front, link } = await keeperOn(await appIsDown(), FAST);
++    const starting = await send(front, { path: '/api/me' });
++    expect(starting.status).toBe(502);
++    expect(starting.headers['retry-after']).toBe('5');
++    expect(JSON.parse(starting.body).error.reason).toBe('starting');
++
++    statusSays(dir, 'running', 'install');
++    await until(() => keeper.mode() === 'maintenance');
++    for (const door of [front, link]) {
++      for (const path of ['/api/me', '/mcp']) {
++        const answer = await send(door, { path, method: 'POST' });
++        expect(answer.status).toBe(503);
++        expect(answer.headers['retry-after']).toBe('10');
++        expect(answer.headers['content-type']).toBe('application/json');
++        expect(JSON.parse(answer.body)).toEqual({ error: { code: 'unavailable', message: MAINTENANCE_MESSAGE, reason: 'maintenance' } });
++      }
++    }
++    const page = await send(front, { path: '/tasks' });
++    expect(page.status).toBe(503);
++    expect(page.headers['retry-after']).toBe('10');
++    expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
++    expect(page.body).toContain('Hornhoof is installing an update. Try again in a few minutes.');
++    expect(page.body).toContain('Hornhoof ставит обновление. Попробуйте через несколько минут.');
++
++    statusSays(dir, 'done', 'finished');
++    await until(() => keeper.mode() === 'lead');
++    expect((await send(front, { path: '/tasks' })).status).toBe(502);
++  });
++
++  it("takes link traffic through the keeper as over the link, and front's as local", async () => {
++    const { app } = await testApp({ TUNNEL_HOST: 'localhost' });
++    await setUpCompany(app);
++    const { front, link } = await keeperOn(await appListening(app), { frontHost: 'localhost' });
++
++    expect(await health(link)).toEqual({ ok: true });
++    expect((await signIn(link)).cookies).toContain('__Host-hh_session');
++
++    expect(await health(front)).toMatchObject({ ok: true, version: expect.any(String), commit: expect.any(String) });
++    const overFront = await signIn(front);
++    expect(overFront.cookies).toContain('hh_session');
++    expect(overFront.cookies).not.toContain('__Host-hh_session');
++  });
++
++  it('believes no forged header that did not come through its door', async () => {
++    const { app, config } = await testApp({ TUNNEL_HOST: 'localhost' });
++    app.get('/who', async req => ({ address: await clientAddress(req, config), overLink: req.overLink }));
++    const target = await appListening(app);
++    const who = async (door: Target, headers: http.OutgoingHttpHeaders) => JSON.parse((await send(door, { path: '/who', headers })).body);
++    const forged = { 'x-forwarded-for': '198.51.100.7', 'x-forwarded-proto': 'https' };
++
++    /* The built-in node shares the network with the keeper's front port, and its socket is not front's. */
++    const fromNode = await keeperOn(target, { frontHost: 'front.invalid' });
++    expect(await who(fromNode.front, forged)).toEqual({ address: '127.0.0.1', overLink: false });
++
++    const fromFront = await keeperOn(target, { frontHost: 'localhost' });
++    expect(await who(fromFront.front, forged)).toEqual({ address: '198.51.100.7', overLink: false });
++
++    expect(await who(fromNode.link, { 'x-forwarded-for': '203.0.113.5, 198.51.100.7' })).toEqual({ address: '203.0.113.5', overLink: true });
++  });
++
++  it("lets the updater read the new build's health through front during maintenance, while changes wait", async () => {
++    const dir = folder();
++    const { app } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_KEEPER: 'on', HORNHOOF_CONTROL_DIR: dir });
++    const { front, link } = await keeperOn(await appListening(app), { ...FAST, frontHost: 'localhost' }, dir);
++    statusSays(dir, 'running', 'health');
++    await until(async () => {
++      await app.ctx.mode.check();
++      return app.ctx.mode.current() === 'maintenance';
++    });
++
++    const seen = await send(front, { path: '/api/health' });
++    expect(seen.status).toBe(200);
++    expect(JSON.parse(seen.body)).toMatchObject({ ok: true, commit: 'local', mode: 'maintenance' });
++    expect(await health(link)).toEqual({ ok: true });
++
++    /* The app's refusal, word for word what the keeper answers while the app is down, so the Update panel reads one state. */
++    const change = await signIn(front);
++    expect(change.status).toBe(503);
++    expect(JSON.parse(change.body)).toEqual({ error: { code: 'unavailable', message: MAINTENANCE_MESSAGE, reason: 'maintenance' } });
++  });
++
++  it('finishes a request in flight when it stops, then takes no other and writes no more', async () => {
++    let arrived = (): void => {};
++    const inFlight = new Promise<void>(resolve => {
++      arrived = resolve;
++    });
++    const app = await listening(
++      http.createServer(async (_req, res) => {
++        arrived();
++        await sleep(200);
++        res.end('whole');
++      }),
++    );
++    const { keeper, dir, front, ports } = await keeperOn(app, { everyMs: 20 });
++    const answer = send(front);
++    await inFlight;
++    await keeper.stop();
++    expect(await answer).toMatchObject({ status: 200, body: 'whole' });
++    await expect(send({ host: '127.0.0.1', port: ports.front })).rejects.toThrow('ECONNREFUSED');
++    const last = readKeeperState(dir)?.at;
++    await sleep(100);
++    expect(readKeeperState(dir)?.at).toBe(last);
++  });
++});
++
++describe('the keeper container', () => {
++  const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
++
++  /* The entry point has its ports and its app written in. This keeps them from reaching anything real on this machine:
++     it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
++  const PRELOAD = `
++    import http from 'node:http';
++    const { listen } = http.Server.prototype;
++    http.Server.prototype.listen = function (port, host, done) {
++      return listen.call(this, 0, '127.0.0.1', () => {
++        console.log(JSON.stringify({ asked: { port, host }, port: this.address().port }));
++        done();
++      });
++    };
++    const { request } = http;
++    http.request = options => {
++      console.log(JSON.stringify({ target: { host: options.host, port: options.port } }));
++      return request({ ...options, host: '127.0.0.1', port: Number(process.env.KEEPER_TEST_APP) });
++    };
++  `;
++
++  async function container(app: Target) {
++    const dir = folder();
++    const env = {
++      ...process.env,
++      HORNHOOF_SECRET: TEST_SECRET,
++      HORNHOOF_CONTROL_DIR: dir,
++      /* Nothing answers here, and nothing asks yet: the pool connects at its first query. */
++      DATABASE_URL: 'postgres://hornhoof:hornhoof@127.0.0.1:1/hornhoof',
++      KEEPER_TEST_APP: String(app.port),
++    };
++    const child = spawn(process.execPath, ['--import', 'tsx', '--import', `data:text/javascript,${encodeURIComponent(PRELOAD)}`, 'src/keeper.ts'], {
++      cwd: SERVER_DIR,
++      env,
++      stdio: ['ignore', 'pipe', 'inherit'],
++    });
++    onTestFinished(() => void child.kill('SIGKILL'));
++    const exit = once(child, 'exit');
++    const said: Record<string, unknown>[] = [];
++    const bothDoors = new Promise<void>(resolve => {
++      createInterface({ input: child.stdout as NodeJS.ReadableStream }).on('line', line => {
++        said.push(JSON.parse(line) as Record<string, unknown>);
++        if (said.filter(word => word.asked).length === 2) resolve();
++      });
++    });
++    await bothDoors;
++    const doors = said.filter(word => word.asked);
++    return { child, dir, said, doors, exit, front: { host: '127.0.0.1', port: doors[0]!.port as number } };
++  }
++
++  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link door to itself, and exits 0 on %s', async signal => {
++    const { child, dir, said, doors, exit, front } = await container(await echoHeaders());
++    expect(doors.map(door => door.asked)).toEqual([
++      { port: KEEPER_PORTS.front, host: '0.0.0.0' },
++      { port: KEEPER_PORTS.linkHttp, host: '127.0.0.1' },
++    ]);
++    expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
++    expect(said.find(word => word.target)?.target).toEqual({ host: 'app', port: 8080 });
++    expect(wordIn(dir)).toBe('lead');
++    child.kill(signal);
++    expect(await exit).toEqual([0, null]);
++  });
++
++  it('exits 0 in about 5 seconds with a socket that stays open', async () => {
++    const app = http.createServer();
++    new WebSocketServer({ server: app });
++    const { child, exit, front } = await container(await listening(app));
++    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
++    client.on('error', () => {});
++    onTestFinished(() => client.terminate());
++    await once(client, 'open');
++    const started = Date.now();
++    child.kill('SIGTERM');
++    expect(await exit).toEqual([0, null]);
++    expect(Date.now() - started).toBeGreaterThanOrEqual(4500);
++    expect(Date.now() - started).toBeLessThan(7000);
++  });
++});
+
+## e121ed24 Hand the keeper test's late answer to the server without a floating promise
+
+The author check's lint refused an async handler given straight to http.createServer, whose promise nobody takes. The
+handler now runs through void, as front.test.ts does. No behaviour changes; test/keeper.test.ts and eslint prove it.
+
+---
+ apps/server/test/keeper.test.ts | 13 ++++++-------
+ 1 file changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/apps/server/test/keeper.test.ts b/apps/server/test/keeper.test.ts
+index 70f91b2b..6cf17168 100644
+--- a/apps/server/test/keeper.test.ts
++++ b/apps/server/test/keeper.test.ts
+@@ -311,23 +311,22 @@ describe('the keeper', () => {
+     expect(JSON.parse(change.body)).toEqual({ error: { code: 'unavailable', message: MAINTENANCE_MESSAGE, reason: 'maintenance' } });
+   });
+ 
+   it('finishes a request in flight when it stops, then takes no other and writes no more', async () => {
+     let arrived = (): void => {};
+     const inFlight = new Promise<void>(resolve => {
+       arrived = resolve;
+     });
+-    const app = await listening(
+-      http.createServer(async (_req, res) => {
+-        arrived();
+-        await sleep(200);
+-        res.end('whole');
+-      }),
+-    );
++    const answerLate = async (res: http.ServerResponse) => {
++      arrived();
++      await sleep(200);
++      res.end('whole');
++    };
++    const app = await listening(http.createServer((_req, res) => void answerLate(res)));
+     const { keeper, dir, front, ports } = await keeperOn(app, { everyMs: 20 });
+     const answer = send(front);
+     await inFlight;
+     await keeper.stop();
+     expect(await answer).toMatchObject({ status: 200, body: 'whole' });
+     await expect(send({ host: '127.0.0.1', port: ports.front })).rejects.toThrow('ECONNREFUSED');
+     const last = readKeeperState(dir)?.at;
+     await sleep(100);
+
+## b221bb53 Carry the public link from the keeper, with the network's client id, and end its TLS there
+
+The tunnel container goes. The keeper reads the link and its certificate from the database every 3 s, runs frpc as its
+child under the client id the relay expects, and ends the link's TLS on 127.0.0.1:8443, so the app no longer holds a
+listener or reads linkVisitor. A failed read keeps the frpc and the certificate the keeper has, and keeper.json names a
+certificate only after the listener took it, so the app moves the link to https on what is really served.
+
+Tests: the plan's Done when (client, tunnel, link-listener, keeper-link, link-tls, link, auth) passes, and the types print
+nothing. Each new guard was seen red by breaking the code it guards.
+
+Ruling: frpc gets only PATH and the client's own env, not the keeper's environment - why: frpc 0.71.1 fills in {{ .Envs.NAME }} in its config (checked with frpc verify), the config carries the key text the relay gave, and the keeper holds HORNHOOF_SECRET and DATABASE_URL, so the plan's process.env would let a relay's answer read them - cost if wrong: an frpc that needs another variable does not start, which shows at the first rehearsal.
+Ruling: LinkListener.listen emits 'listening' on the server it hands connections to - why: Node times a connection's headers and finds its idle ones only on a server it saw listen, 1b's Fastify server listened and this third door does not, so a TLS visitor who never ends its headers would hold a connection for good - cost if wrong: it rests on Node's wiring, and the test on the 408 goes red on a Node that changes it.
+Ruling: servedCertificate gives no certificate with ACME_DIRECTORY off, which the plan does not say - why: LinkTls.serveOn then asks use(host, null), and a stored certificate in the keeper's word would time KeeperServed out with a false warning - cost if wrong: with certificates off the listener serves a stand-in, which nobody reaches since frpc runs http then.
+Ruling: a failed read or a certificate the listener refuses says one fixed line per outage, which the plan does not ask for - why: otherwise a keeper that cannot read its link says nothing at all, and a query's error can quote its values, so no detail goes out - cost if wrong: two more log lines in an outage.
+Ruling: isTunnelAddress and the listener's socketAddress leave listener.ts, as isAddressOf in auth/tunnel.ts shared with the keeper, and net/proxy's socketAddress - why: the listener is now the keeper's alone, and the keeper had the same lookup a second time - cost if wrong: none in behaviour, the auth and keeper tests cover both callers.
+Ruling: auth.test.ts is not changed - why: it has no cases on the listener's sockets, 1b's were in link-listener.test.ts and the path is now covered by keeper-link.test.ts - cost if wrong: none.
+Ruling: keeper.test.ts is changed though the task does not list it - why: its preload patched only http.Server's listen, so the entry point would have bound the real 8443, it counted two doors, and it parsed every line of stdout as JSON while the keeper now logs there - cost if wrong: none.
+Ruling: Settings loses the default of mode and tunnelSettings and writeTunnelSettings both parse through it - why: nothing reads an old tunnel.json any more, and data is checked where it enters - cost if wrong: a stored tunnel that is not a record fails the write with a log line instead of being written.
+
+---
+ apps/server/src/auth/tunnel.ts           |  31 +-
+ apps/server/src/main.ts                  |  38 ++-
+ apps/server/src/modules/keeper/keeper.ts | 138 ++++++--
+ apps/server/src/modules/keeper/served.ts |  31 ++
+ apps/server/src/modules/link/client.ts   |  45 ++-
+ apps/server/src/modules/link/link.ts     |  28 +-
+ apps/server/src/modules/link/tunnel.ts   |  63 ++--
+ apps/server/src/modules/tls/listener.ts  |  59 ++--
+ apps/server/src/modules/tls/store.ts     |  53 ++-
+ apps/server/src/tunnel.ts                |  20 --
+ apps/server/test/client.test.ts          |  59 ++--
+ apps/server/test/config.test.ts          |   1 +
+ apps/server/test/keeper-link.test.ts     | 552 +++++++++++++++++++++++++++++++
+ apps/server/test/keeper.test.ts          |  20 +-
+ apps/server/test/link-listener.test.ts   | 180 ++++------
+ apps/server/test/tunnel.test.ts          | 145 ++++++--
+ 16 files changed, 1093 insertions(+), 370 deletions(-)
+
+diff --git a/apps/server/src/auth/tunnel.ts b/apps/server/src/auth/tunnel.ts
+index b5f73880..3998525a 100644
+--- a/apps/server/src/auth/tunnel.ts
++++ b/apps/server/src/auth/tunnel.ts
+@@ -1,29 +1,36 @@
++import { lookup } from 'node:dns/promises';
+ import type { FastifyRequest } from 'fastify';
+ import type { Config } from '../config.js';
+-import { isTunnelAddress, linkVisitor, socketAddress } from '../modules/tls/listener.js';
++import { socketAddress } from '../net/proxy.js';
+ 
+-/* Whether the request came from the tunnel container's own address. */
+-const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean> => isTunnelAddress(socketAddress(req.socket), config);
++/* Looked up by name each time, since a container gets a new address when it starts again. */
++export async function isAddressOf(name: string | null | undefined, address: string): Promise<boolean> {
++  if (!name) return false;
++  try {
++    return (await lookup(name, { all: true })).some(found => found.address === address);
++  } catch {
++    return false;
++  }
++}
++
++/* Whether the request came from the keeper container's own address. */
++const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean> => isAddressOf(config.tunnelHost, socketAddress(req.raw));
+ 
+-/* A request through the TLS listener, or one the tunnel container passed on from https, as the relay's X-Forwarded-Proto
+-   says. Anyone can write that header, so it is believed only from the tunnel container. */
++/* A request the keeper passed on from the link, which only it marks as https. Anyone can write that header, so it is
++   believed only from the keeper container. */
+ async function cameOverHttps(req: FastifyRequest, config: Config): Promise<boolean> {
+-  if (linkVisitor(req.socket) !== undefined) return true;
+   const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim();
+   return proto === 'https' && (await fromTunnel(req, config));
+ }
+ 
+ /* Whether the request is one of a visitor of the public link, the one the __Host- session cookie belongs to. */
+ export async function overLink(req: FastifyRequest, config: Config): Promise<boolean> {
+   return cameOverHttps(req, config);
+ }
+ 
+-/* Who sent the request: through the TLS listener, the visitor it read, whatever the visitor's headers say; through the
+-   tunnel, the first address of X-Forwarded-For, where the relay puts the visitor in place of whatever the visitor wrote;
+-   otherwise the socket's own address. */
++/* Who sent the request: through the keeper, the first address of X-Forwarded-For, which the keeper writes whatever the
++   visitor wrote; otherwise the socket's own address. */
+ export async function clientAddress(req: FastifyRequest, config: Config): Promise<string> {
+-  const visitor = linkVisitor(req.socket);
+-  if (visitor !== undefined) return visitor;
+   const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim();
+-  return forwarded && (await fromTunnel(req, config)) ? forwarded : socketAddress(req.socket);
++  return forwarded && (await fromTunnel(req, config)) ? forwarded : socketAddress(req.raw);
+ }
+diff --git a/apps/server/src/main.ts b/apps/server/src/main.ts
+index 4efe87a0..3a097e4e 100644
+--- a/apps/server/src/main.ts
++++ b/apps/server/src/main.ts
+@@ -1,45 +1,47 @@
+ import { buildApp } from './app.js';
+ import { loadConfig } from './config.js';
+ import { openAgentSql } from './db/agent-sql.js';
+ import { APP_NAME, openDb } from './db/client.js';
++import { loggable } from './errors.js';
++import { KeeperServed } from './modules/keeper/served.js';
+ import { publicUrl } from './modules/link/link.js';
+ import { setupLink } from './modules/setup/code.js';
+-import { LINK_TLS_PORT, LinkListener } from './modules/tls/listener.js';
+ 
+ function requireDbUrl(url: string | undefined): string {
+   if (!url) throw new Error('DATABASE_URL is not set.');
+   return url;
+ }
+ 
+ const config = loadConfig(process.env);
+ const url = requireDbUrl(config.databaseUrl);
+ const db = openDb(url, APP_NAME);
+ const app = await buildApp({
+   db,
+   agentSql: await openAgentSql(url),
+   config,
+   logger: { level: process.env.LOG_LEVEL || 'info' },
+ });
+ await app.listen({ port: config.port, host: '0.0.0.0' });
+-const listener = new LinkListener({ app, config, log: app.log });
+-await listener.listen(LINK_TLS_PORT);
+-await app.ctx.tls.serveOn(listener);
+-/* A machine that only reads must not order or renew a certificate, so the manager's timers run only while the app leads. */
+-app.ctx.mode.whenLead(() => app.ctx.tls.start(), () => app.ctx.tls.stop());
++/* The keeper ends the link's TLS, so without one nothing could serve a certificate and none is ordered. A machine that only
++   reads must not order or renew one, so the manager's timers run only while the app leads. */
++if (config.keeper) {
++  void app.ctx.tls.serveOn(new KeeperServed({ dir: config.controlDir })).catch((err: unknown) => {
++    app.log.warn({ error: loggable(err) }, "Could not ask the keeper about the link's certificate.");
++  });
++  app.ctx.mode.whenLead(() => app.ctx.tls.start(), () => app.ctx.tls.stop());
++}
+ console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
+-/* Until a company exists, only the link with the setup code sets it up. */
+-const link = await setupLink(db, config);
+-if (link) console.log(`Open this link to set Hornhoof up: ${link}`);
+ 
+-/* The listener stops taking connections first; the app's close then ends the event streams and WebSockets on those it
+-   already has, which lets the listener finish. */
+-async function stop(): Promise<void> {
+-  const closing = listener.close();
+-  await app.close();
+-  await closing;
+-  process.exit(0);
+-}
++/* Until a company exists, only the link with the setup code sets it up. Said once, on the first way into lead, since a
++   server that does not lead yet may have a database still on its way there. */
++let setupLinkSaid = false;
++app.ctx.mode.whenLead(async () => {
++  if (setupLinkSaid) return;
++  setupLinkSaid = true;
++  const link = await setupLink(db, config);
++  if (link) console.log(`Open this link to set Hornhoof up: ${link}`);
++}, () => undefined);
+ 
+ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+-  process.once(signal, () => void stop());
++  process.once(signal, () => void app.close().then(() => process.exit(0)));
+ }
+diff --git a/apps/server/src/modules/keeper/keeper.ts b/apps/server/src/modules/keeper/keeper.ts
+index 72f68e78..0dbc7e46 100644
+--- a/apps/server/src/modules/keeper/keeper.ts
++++ b/apps/server/src/modules/keeper/keeper.ts
+@@ -1,34 +1,52 @@
+-import { lookup } from 'node:dns/promises';
+ import type http from 'node:http';
+ import type { AddressInfo } from 'node:net';
++import { isAddressOf } from '../../auth/tunnel.js';
+ import type { Config } from '../../config.js';
+ import type { Db } from '../../db/client.js';
+ import { firstForwarded, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
+-import { writeKeeperState, type Mode } from './state.js';
++import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
++import { tunnelSettings } from '../link/link.js';
++import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
++import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
++import { servedCertificate } from '../tls/store.js';
++import { certInfo } from '../tls/x509.js';
++import { writeKeeperState, type KeeperState, type Mode } from './state.js';
+ import { updaterBusy } from './updater-status.js';
+ 
+ export const KEEPER_PORTS = { peer: 7070, front: 7080, linkHttp: 7081 } as const;
+ 
+ export type KeeperOptions = {
+   config: Config;
+-  /* Where the link and its certificate will be read from; nothing reads it until the link moves in here. */
++  /* Where the link and its certificate are read from. Null: no link, as for a keeper with no DATABASE_URL. */
+   db: Db | null;
+   app: Target;
+   /* Null: no socket on the front port is front. */
+   frontHost: string | null;
+   log: (line: string) => void;
+   /* Where the front port listens. */
+   host?: string;
+   ports?: { front?: number; linkHttp?: number; linkTls?: number };
+   everyMs?: number;
++  /* How often the link and its certificate are read. */
++  linkEveryMs?: number;
++  /* What runs the link's traffic; frpc unless a test says otherwise. */
++  clientFor?: (settings: TunnelSettings, clientId: string, local: FrpcLocal) => Client;
+ };
+ 
++type LinkWord = NonNullable<KeeperState['link']>;
++type ToServe = Awaited<ReturnType<typeof servedCertificate>>;
++
+ const EVERY_MS = 1000;
++const LINK_EVERY_MS = 3000;
++const FRPC_RESTART_MS = 2000;
++const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
++const SETTINGS_KEPT = "The keeper cannot read the link's settings from the database: frpc stays as it is.";
++const CERTIFICATE_KEPT = "The keeper cannot read or serve the link's certificate: it keeps the one it serves.";
+ /* Only this keeper's own frpc child reaches the link's doors, which is why they may believe what it sends. */
+ const LINK_HOST = '127.0.0.1';
+ /* Docker waits 10 s after its stop signal. A request in flight gets half of that to finish; an open socket, which never
+    ends by itself, does not hold the stop up for longer. */
+ const STOP_GRACE_MS = 5000;
+ 
+ const MAINTENANCE_JSON = JSON.stringify({
+   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
+@@ -43,40 +61,70 @@ function modeAfter(busy: boolean | null, was: Mode): Mode {
+ 
+ /* startingAnswer already decides who gets JSON and who gets a page, so the two answers cannot split differently. */
+ function maintenanceAnswer(req: http.IncomingMessage): Refusal {
+   const contentType = startingAnswer(req).headers['Content-Type']!;
+   const body = contentType === 'application/json' ? MAINTENANCE_JSON : MAINTENANCE_TEXT;
+   return { status: 503, headers: { 'Content-Type': contentType, 'Retry-After': '10' }, body };
+ }
+ 
+-/* Looked up by name each time, since a container gets a new address when it starts again. */
+-async function isAddressOf(name: string | null, address: string): Promise<boolean> {
+-  if (!name) return false;
+-  try {
+-    return (await lookup(name, { all: true })).some(found => found.address === address);
+-  } catch {
+-    return false;
+-  }
+-}
+-
+ /* Anyone on the default network can reach the front port and write a header, so what it says counts only from front. */
+ const visitorFromFront =
+   (frontHost: string | null) =>
+   async (req: http.IncomingMessage): Promise<Record<string, string>> => {
+     const said = firstForwarded(req);
+     const believed = said !== '' && (await isAddressOf(frontHost, socketAddress(req)));
+     return { 'x-forwarded-for': believed ? said : socketAddress(req) };
+   };
+ 
+ /* What frps wrote, its first entry being the visitor. Only link traffic is ever marked as https. */
+ function visitorFromLink(req: http.IncomingMessage): Record<string, string> {
+   return { 'x-forwarded-for': firstForwarded(req) || socketAddress(req), 'x-forwarded-proto': 'https' };
+ }
+ 
++/* The listener read it from the PROXY header. Only this keeper's frpc reaches that port, and only link traffic is https. */
++function visitorFromTls(req: http.IncomingMessage): Record<string, string> {
++  return { 'x-forwarded-for': linkVisitor(req.socket) ?? socketAddress(req), 'x-forwarded-proto': 'https' };
++}
++
++/* What the app is told the listener holds. A stand-in has no fingerprint: the app asks for one only by the row's certificate. */
++function linkWordOf(toServe: ToServe): LinkWord {
++  return { host: toServe?.host ?? null, fingerprint256: toServe?.cert ? certInfo(toServe.cert.certPem).fingerprint256 : null };
++}
++
++const sameWord = (a: LinkWord, b: KeeperState['link']): boolean => a.host === b?.host && a.fingerprint256 === b.fingerprint256;
++
++/* What fails here answers undefined, which keeps what the keeper runs. It is said once an outage, with no detail, since a
++   query's error can quote its values. */
++function keepingOnFailure<T>(work: () => Promise<T>, say: () => void): () => Promise<T | undefined> {
++  let failing = false;
++  return async () => {
++    try {
++      const value = await work();
++      failing = false;
++      return value;
++    } catch {
++      if (!failing) say();
++      failing = true;
++      return undefined;
++    }
++  };
++}
++
++/* A read may outlast the pause between reads, and an older answer must not land after a newer one. The work never throws. */
++function oneAtATime(work: () => Promise<unknown>): () => Promise<void> {
++  let running = false;
++  return async () => {
++    if (running) return;
++    running = true;
++    await work();
++    running = false;
++  };
++}
++
+ function listenOn(server: http.Server, port: number, host: string): Promise<number> {
+   return new Promise((resolve, reject) => {
+     /* It stays on: after the start an error is one failed accept, and the next visitor should still get through. */
+     server.on('error', reject);
+     server.listen(port, host, () => resolve((server.address() as AddressInfo).port));
+   });
+ }
+ 
+@@ -85,61 +133,103 @@ function closeWithin(server: http.Server, ms: number): Promise<void> {
+     const giveUp = setTimeout(resolve, ms);
+     server.close(() => {
+       clearTimeout(giveUp);
+       resolve();
+     });
+   });
+ }
+ 
+-/* Sets the app's mode and carries what comes in from front and the link to the app. */
++/* Sets the app's mode, runs the public link's frpc as its child, ends the link's TLS, and carries what comes in from front
++   and the link to the app. */
+ export class Keeper {
+   private current: Mode = 'lead';
+   private timer: NodeJS.Timeout | null = null;
++  private certificateTimer: NodeJS.Timeout | null = null;
+   private doors: http.Server[] = [];
+   /* A word that cannot be written is said once in the log, not once a second. */
+   private wordFails = false;
+-
+-  constructor(private readonly opts: KeeperOptions) {}
++  private readonly listener: LinkListener;
++  private tunnel: TunnelKeeper | null = null;
++  /* What keeper.json says the listener holds. Null until the first read of the link. */
++  private link: KeeperState['link'] = null;
++
++  constructor(private readonly opts: KeeperOptions) {
++    const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
++    this.listener = new LinkListener({ server: this.door(visitorFromTls), log });
++  }
+ 
+   mode(): Mode {
+     return this.current;
+   }
+ 
+   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
+-    const { host, ports, frontHost, everyMs } = this.opts;
++    const { host, ports, frontHost, everyMs, db } = this.opts;
+     this.giveWord();
+     const front = await this.open(visitorFromFront(frontHost), ports?.front ?? KEEPER_PORTS.front, host ?? '0.0.0.0');
+     const linkHttp = await this.open(visitorFromLink, ports?.linkHttp ?? KEEPER_PORTS.linkHttp, LINK_HOST);
++    const linkTls = await this.listener.listen(ports?.linkTls ?? LINK_TLS_PORT);
+     this.timer = setInterval(() => this.giveWord(), everyMs ?? EVERY_MS);
+-    /* The link's TLS door does not exist yet, so it has no port to report. */
+-    return { front, linkHttp, linkTls: 0 };
++    if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
++    return { front, linkHttp, linkTls };
+   }
+ 
+   async stop(): Promise<void> {
+     if (this.timer) clearInterval(this.timer);
+-    this.timer = null;
+-    await Promise.all(this.doors.map(door => closeWithin(door, STOP_GRACE_MS)));
++    if (this.certificateTimer) clearInterval(this.certificateTimer);
++    this.timer = this.certificateTimer = null;
++    await Promise.all([this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+   }
+ 
+   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */
+   private giveWord(): void {
+     const dir = this.opts.config.controlDir;
+     this.current = modeAfter(updaterBusy(dir), this.current);
+     try {
+-      writeKeeperState(dir, { mode: this.current, at: new Date().toISOString(), link: null });
++      writeKeeperState(dir, { mode: this.current, at: new Date().toISOString(), link: this.link });
+       this.wordFails = false;
+     } catch (err) {
+       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);
+       this.wordFails = true;
+     }
+   }
+ 
+-  private open(headers: PassOptions['headers'], port: number, host: string): Promise<number> {
++  private door(headers: PassOptions['headers']): http.Server {
+     const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req) }));
+     this.doors.push(door);
+-    return listenOn(door, port, host);
++    return door;
++  }
++
++  private open(headers: PassOptions['headers'], port: number, host: string): Promise<number> {
++    return listenOn(this.door(headers), port, host);
+   }
+ 
+   private appIsDown(req: http.IncomingMessage): Refusal {
+     return this.current === 'maintenance' ? maintenanceAnswer(req) : startingAnswer(req);
+   }
++
++  /* The certificate is followed also without a machine id: the app goes by the keeper's word on it either way. */
++  private carryLink(db: Db, local: FrpcLocal): void {
++    const { config, log, linkEveryMs } = this.opts;
++    const everyMs = linkEveryMs ?? LINK_EVERY_MS;
++    const follow = oneAtATime(keepingOnFailure(() => this.serveCertificate(db), () => log(CERTIFICATE_KEPT)));
++    this.certificateTimer = setInterval(() => void follow(), everyMs);
++    void follow();
++    if (!config.machineId) return log(NO_MACHINE_ID);
++    const read = keepingOnFailure(() => tunnelSettings(db, config), () => log(SETTINGS_KEPT));
++    this.tunnel = new TunnelKeeper({ read, everyMs, restartMs: FRPC_RESTART_MS, clientFor: settings => this.frpc(settings, local), log });
++    this.tunnel.start();
++  }
++
++  private frpc(settings: TunnelSettings, local: FrpcLocal): Client {
++    const clientId = linkClientId(settings.name, this.opts.config.machineId!);
++    return this.opts.clientFor ? this.opts.clientFor(settings, clientId, local) : clientFor(settings, { clientId, local });
++  }
++
++  /* The word comes only after the listener took the certificate, since the app moves the link to https on it. */
++  private async serveCertificate(db: Db): Promise<void> {
++    const toServe = await servedCertificate(db, this.opts.config);
++    const word = linkWordOf(toServe);
++    if (sameWord(word, this.link)) return;
++    await this.listener.use(word.host, toServe?.cert ?? null);
++    this.link = word;
++  }
+ }
+diff --git a/apps/server/src/modules/keeper/served.ts b/apps/server/src/modules/keeper/served.ts
+new file mode 100644
+index 00000000..fad1d3eb
+--- /dev/null
++++ b/apps/server/src/modules/keeper/served.ts
+@@ -0,0 +1,31 @@
++import { setTimeout as sleep } from 'node:timers/promises';
++import type { Served } from '../tls/manager.js';
++import { certInfo } from '../tls/x509.js';
++import { freshState } from './state.js';
++
++type ServedOptions = { dir: string; timeoutMs?: number; everyMs?: number; now?: () => number };
++
++/* The keeper reads the link every 3 s and gives its word every second, so this leaves room for a busy machine. */
++const TIMEOUT_MS = 20_000;
++const EVERY_MS = 500;
++
++/* The app's end of the keeper's listener. The certificate's manager moves the link to https only on what this says, so it
++   goes by what the keeper's word says it holds, and never by what the app asked of it. The key stays out of it. */
++export class KeeperServed implements Served {
++  constructor(private readonly opts: ServedOptions) {}
++
++  async use(host: string | null, cert: { certPem: string; keyPem: string } | null): Promise<void> {
++    const fingerprint256 = cert ? certInfo(cert.certPem).fingerprint256 : null;
++    const { timeoutMs = TIMEOUT_MS, everyMs = EVERY_MS } = this.opts;
++    for (let waited = 0; waited < timeoutMs; waited += everyMs) {
++      if (this.says(host, fingerprint256)) return;
++      await sleep(everyMs);
++    }
++    throw new Error('The keeper does not serve this certificate yet.');
++  }
++
++  private says(host: string | null, fingerprint256: string | null): boolean {
++    const link = freshState(this.opts.dir, (this.opts.now ?? Date.now)())?.link;
++    return link?.host === host && link.fingerprint256 === fingerprint256;
++  }
++}
+diff --git a/apps/server/src/modules/link/client.ts b/apps/server/src/modules/link/client.ts
+index fe726143..af08baf6 100644
+--- a/apps/server/src/modules/link/client.ts
++++ b/apps/server/src/modules/link/client.ts
+@@ -1,63 +1,72 @@
+ import { writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { isLinkName } from '@hornhoof/protocol/link';
+ import { z } from 'zod';
+-import { LINK_TLS_PORT } from '../tls/listener.js';
+ import type { Client, TunnelSettings } from './tunnel.js';
+ 
++/* Where frpc hands the link's traffic, by where its TLS ends. */
++export type FrpcLocal = { http: { ip: string; port: number }; https: { ip: string; port: number } };
++type Identity = { clientId: string; local: FrpcLocal };
++
+ /* The parts of the relay's tunnel Hornhoof takes: the frps server and how to reach it. */
+ const Server = z.object({
+   serverAddr: z.string().regex(/^[A-Za-z0-9.-]{1,253}$/),
+   serverPort: z.number().int().min(1).max(65535),
+   protocol: z.literal('wss'),
+ });
+ 
+-/* What differs by where the link's TLS ends. At the relay, the app hears from the tunnel that a request came over https.
+-   At the app, the relay passes TLS on unread, so the tunnel's PROXY header is all that says who the visitor is. */
+-const PROXY: Record<TunnelSettings['mode'], { localPort: number; lastLine: string }> = {
+-  http: { localPort: 8080, lastLine: 'requestHeaders.set.x-forwarded-proto = "https"' },
+-  https: { localPort: LINK_TLS_PORT, lastLine: 'transport.proxyProtocolVersion = "v2"' },
++const CLIENT_ID = /^[a-z0-9-]{1,63}-[0-9a-f]{8}-link$/;
++
++/* What https adds: the relay passes TLS on unread, so the tunnel's PROXY header is all that says who the visitor is. */
++const LAST_LINES: Record<TunnelSettings['mode'], string> = {
++  http: '',
++  https: 'transport.proxyProtocolVersion = "v2"\n',
+ };
+ 
+ /* A TOML string: JSON escapes quotes, backslashes and line breaks the way TOML reads them. */
+ const quoted = (text: string) => JSON.stringify(text);
+ 
++/* The same on every start of this machine's frpc, so the relay knows it for the one that held the link before. */
++export const linkClientId = (name: string, machineId: string): string => `${name}-${machineId.slice(0, 8)}-link`;
++
+ /* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
+-   link's traffic to the app and to nothing else on the company's network, whatever the relay says. */
+-function configFor(settings: TunnelSettings): string {
++   link's traffic to the keeper's own door and to nothing else on the company's network, whatever the relay says. */
++export function configFor(settings: TunnelSettings, { clientId, local }: Identity): string {
+   const server = Server.parse(settings.tunnel);
+   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
+   if (!settings.key) throw new Error('the link has no key');
++  if (!CLIENT_ID.test(clientId) || !clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
+   /* The table's own names only: an object also answers to the names it inherits, such as toString. */
+-  if (!Object.hasOwn(PROXY, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
+-  const proxy = PROXY[settings.mode];
++  if (!Object.hasOwn(local, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
++  const door = local[settings.mode];
+   return `serverAddr = ${quoted(server.serverAddr)}
+ serverPort = ${server.serverPort}
+ loginFailExit = false
+ log.to = "console"
+ log.level = "info"
+ log.disablePrintColor = true
++clientID = ${quoted(clientId)}
+ transport.protocol = "wss"
+ transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+-transport.heartbeatInterval = 30
+-transport.heartbeatTimeout = 90
++transport.heartbeatInterval = -1
++transport.tcpMuxKeepaliveInterval = 10
+ metadatas.name = ${quoted(settings.name)}
+ metadatas.key = ${quoted(settings.key)}
++metadatas.client = ${quoted(clientId)}
+ 
+ [[proxies]]
+ name = ${quoted(settings.name)}
+ type = ${quoted(settings.mode)}
+ subdomain = ${quoted(settings.name)}
+-localIP = "app"
+-localPort = ${proxy.localPort}
+-${proxy.lastLine}
+-`;
++localIP = ${quoted(door.ip)}
++localPort = ${door.port}
++${LAST_LINES[settings.mode]}`;
+ }
+ 
+ /* frpc with the link's config, written where only this container's user reads it. */
+-export function clientFor(settings: TunnelSettings, dir = tmpdir()): Client {
++export function clientFor(settings: TunnelSettings, { dir = tmpdir(), ...identity }: Identity & { dir?: string }): Client {
+   const path = join(dir, 'frpc.toml');
+-  writeFileSync(path, configFor(settings), { mode: 0o600 });
++  writeFileSync(path, configFor(settings, identity), { mode: 0o600 });
+   return { program: 'frpc', args: ['-c', path] };
+ }
+diff --git a/apps/server/src/modules/link/link.ts b/apps/server/src/modules/link/link.ts
+index 35809623..1ca91acf 100644
+--- a/apps/server/src/modules/link/link.ts
++++ b/apps/server/src/modules/link/link.ts
+@@ -2,24 +2,26 @@ import { renameSync, rmSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { eq } from 'drizzle-orm';
+ import type { FastifyBaseLogger } from 'fastify';
+ import type { Config } from '../../config.js';
+ import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
+ import type { Db } from '../../db/client.js';
+ import { publicLinks } from '../../db/schema.js';
+ import { loggable } from '../../errors.js';
+-import { linkMode } from '../tls/store.js';
++import { linkMode, readLinkMode } from '../tls/store.js';
+ import { Relay, type Bound, type NameCheck } from './relay.js';
++import { Settings, type TunnelSettings } from './tunnel.js';
+ 
+ export type LinkView = { name: string; url: string };
+ 
+ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+ 
+-/* The tunnel container reads its settings from this file in the control folder and idles while there is none. */
++/* The tunnel's settings in the control folder: the updater keeps a copy with each backup, and the installer reads the
++   link's address from it. frpc itself goes by what the keeper reads from the database. */
+ export const TUNNEL_FILE = 'tunnel.json';
+ 
+ export async function linkOf(db: Db): Promise<LinkView | null> {
+   const [row] = await db.select({ name: publicLinks.name, url: publicLinks.url }).from(publicLinks).limit(1);
+   return row ?? null;
+ }
+ 
+ /* The address people and machines reach this Hornhoof at: its public link once it has one, PUBLIC_URL otherwise. */
+@@ -28,23 +30,33 @@ export async function publicUrl(db: Db, config: Config): Promise<string> {
+ }
+ 
+ /* Keeps a link the relay just gave, in place of the one before. */
+ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, bound: Bound): Promise<void> {
+   const row = { name: bound.name, url: bound.url, keyEnc: encryptSecret(bound.key, config.secret), tunnelEnc: encryptSecret(JSON.stringify(bound.tunnel), config.secret) };
+   await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, createdAt: new Date() } });
+ }
+ 
++async function settingsWith(db: Db, config: Config, modeOf: typeof linkMode): Promise<TunnelSettings | null> {
++  const [row] = await db.select().from(publicLinks).limit(1);
++  if (!row) return null;
++  return Settings.parse({ url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await modeOf(db, config) });
++}
++
++/* What the keeper runs frpc with. A failed read of any table throws and never reads as a change, so frpc stays as it is. */
++export function tunnelSettings(db: Db, config: Config): Promise<TunnelSettings | null> {
++  return settingsWith(db, config, readLinkMode);
++}
++
+ /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
+-   the tunnel never reads half a file. The link's key in them is for the tunnel container alone. */
++   nobody reads half a file. It holds the link's key, so only this container's user reads it. */
+ export async function writeTunnelSettings(db: Db, config: Config, log?: FastifyBaseLogger): Promise<void> {
+   const file = join(config.controlDir, TUNNEL_FILE);
+-  const [row] = await db.select().from(publicLinks).limit(1);
+-  if (!row) return rmSync(file, { force: true });
+-  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config, log) };
++  const settings = await settingsWith(db, config, (from, settingsOf) => linkMode(from, settingsOf, log));
++  if (!settings) return rmSync(file, { force: true });
+   rmSync(`${file}.new`, { force: true });
+   writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
+   renameSync(`${file}.new`, file);
+ }
+ 
+ /* The company's link at hornhoof.org: asking the relay for it, changing and removing it, and the tunnel settings that
+    follow it. Changes go one at a time, so two people renaming at once do not leave a link nobody keeps. */
+ export class PublicLinks {
+@@ -108,18 +120,18 @@ export class PublicLinks {
+   }
+ 
+   /* The tunnel's settings for the link the database holds, true once they are written. In turn with the changes of the
+      link, so a write that read the link before a change cannot land after the change's own. */
+   sync(): Promise<boolean> {
+     return this.inTurn(() => this.writeSettings());
+   }
+ 
+-  /* A control folder that cannot be written, as when Hornhoof runs outside compose, goes to the log: the link works once
+-     the tunnel reads the settings. */
++  /* A control folder that cannot be written, as when Hornhoof runs outside compose, goes to the log: the keeper reads the
++     link from the database, so the link works on. */
+   private async writeSettings(): Promise<boolean> {
+     try {
+       await writeTunnelSettings(this.ctx.db, this.ctx.config, this.ctx.log);
+       return true;
+     } catch (err) {
+       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
+       return false;
+     }
+diff --git a/apps/server/src/modules/link/tunnel.ts b/apps/server/src/modules/link/tunnel.ts
+index e4d99c43..d9aaf15c 100644
+--- a/apps/server/src/modules/link/tunnel.ts
++++ b/apps/server/src/modules/link/tunnel.ts
+@@ -1,109 +1,100 @@
+ import { spawn, type ChildProcess } from 'node:child_process';
+-import { readFileSync } from 'node:fs';
+ import { z } from 'zod';
+ 
+-/* What the app writes into the control folder for the public link: its address, name and key, what the relay gave the
+-   tunnel, and where the link's TLS ends. A file from before there was a mode still means the relay ends it. */
++/* The public link as frpc needs it: its address, name and key, what the relay gave the tunnel, and where its TLS ends. */
+ export const Settings = z.object({
+   url: z.string(),
+   name: z.string(),
+   key: z.string(),
+   tunnel: z.record(z.string(), z.unknown()),
+-  mode: z.enum(['http', 'https']).default('http'),
++  mode: z.enum(['http', 'https']),
+ });
+ export type TunnelSettings = z.infer<typeof Settings>;
+ 
+ /* The program that carries the link's traffic, as it is started. */
+ export type Client = { program: string; args: string[]; env?: Record<string, string> };
+ 
+ type Options = {
+-  file: string;
+-  /* How often the settings file is read. */
++  /* The settings now. Null: no link, and the client stops. Undefined: not known now, and the client it runs stays. */
++  read: () => Promise<TunnelSettings | null | undefined>;
++  /* How often the settings are read. */
+   everyMs: number;
+   /* The first pause before a client that ended starts again; it doubles up to a minute while it keeps ending. */
+   restartMs: number;
+   clientFor: (settings: TunnelSettings) => Client;
+   log: (line: string) => void;
+ };
+ 
+ const LONGEST_PAUSE_MS = 60_000;
+ /* A client that ran this long counts as having worked, so the next pause starts short again. */
+ const WORKED_MS = 60_000;
+ 
+-/* The tunnel container's whole job: it waits while the app has written no settings, runs the client with them once it
+-   has, starts it again with new ones, and stops it when they go. It reads only that one file, so the container needs
+-   no Docker socket and nothing from the app but the control folder. */
++/* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
++   when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
+ export class TunnelKeeper {
+   private timer: NodeJS.Timeout | null = null;
+   private text: string | null = null;
+   private child: ChildProcess | null = null;
+   private again: NodeJS.Timeout | null = null;
+   private pause: number;
++  /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
++  private reading = false;
+ 
+   constructor(private readonly opts: Options) {
+     this.pause = opts.restartMs;
+   }
+ 
+   start(): void {
+-    this.tick();
+-    this.timer = setInterval(() => this.tick(), this.opts.everyMs);
++    this.timer = setInterval(() => void this.tick(), this.opts.everyMs);
++    void this.tick();
+   }
+ 
+   async stop(): Promise<void> {
+     if (this.timer) clearInterval(this.timer);
+     this.timer = null;
+     this.text = null;
+     await this.end();
+   }
+ 
+-  private read(): string | null {
+-    try {
+-      return readFileSync(this.opts.file, 'utf8');
+-    } catch {
+-      return null;
+-    }
++  private async tick(): Promise<void> {
++    if (this.reading) return;
++    this.reading = true;
++    const settings = await this.opts.read();
++    this.reading = false;
++    /* The timer's going means it stopped during the read, and a client started now would outlive the stop. */
++    if (settings !== undefined && this.timer) this.follow(settings);
+   }
+ 
+-  private tick(): void {
+-    const text = this.read();
++  private follow(settings: TunnelSettings | null): void {
++    const text = settings && JSON.stringify(settings);
+     if (text === this.text) return;
+     this.text = text;
+     this.pause = this.opts.restartMs;
+     void this.end().then(() => {
+-      if (this.text !== text || text === null) {
+-        if (text === null) this.opts.log('No public link: the tunnel waits.');
+-        return;
+-      }
+-      const settings = this.parse(text);
+-      if (settings) this.run(text, settings);
++      if (this.text !== text) return;
++      if (text && settings) this.run(text, settings);
++      else this.opts.log('No public link: the tunnel waits.');
+     });
+   }
+ 
+-  private parse(text: string): TunnelSettings | null {
+-    try {
+-      return Settings.parse(JSON.parse(text));
+-    } catch {
+-      this.opts.log('Hornhoof cannot read the tunnel settings: the tunnel waits for the app to write them again.');
+-      return null;
+-    }
+-  }
+-
+   private run(text: string, settings: TunnelSettings): void {
+     let client: Client;
+     try {
+       client = this.opts.clientFor(settings);
+     } catch (err) {
+-      this.opts.log(`The tunnel cannot use these settings (${(err as Error).message}): it waits for the app to write new ones.`);
++      this.opts.log(`The tunnel cannot use these settings (${(err as Error).message}): it waits for new ones.`);
+       return;
+     }
+     const began = Date.now();
+     this.opts.log(`Carrying ${settings.url} to Hornhoof.`);
+-    const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, ...client.env } });
++    /* Not the keeper's own environment: frpc fills in {{ .Envs.NAME }} wherever its config says so, the config carries
++       what the relay gave, and that environment holds the company's secret and the database's password. */
++    const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, ...client.env } });
+     this.child = child;
+     child.on('error', err => this.opts.log(`The tunnel client did not start: ${err.message}`));
+     child.on('exit', (code, signal) => {
+       if (this.child !== child) return;
+       this.child = null;
+       if (this.text !== text) return;
+       if (Date.now() - began > WORKED_MS) this.pause = this.opts.restartMs;
+       this.opts.log(`The tunnel client ended (${signal ?? code}); it starts again in ${Math.round(this.pause / 1000)} s.`);
+diff --git a/apps/server/src/modules/tls/listener.ts b/apps/server/src/modules/tls/listener.ts
+index 9c0cc500..9caea070 100644
+--- a/apps/server/src/modules/tls/listener.ts
++++ b/apps/server/src/modules/tls/listener.ts
+@@ -1,51 +1,36 @@
+-import { lookup } from 'node:dns/promises';
++import type http from 'node:http';
+ import net, { type AddressInfo } from 'node:net';
+ import { createSecureContext, TLSSocket } from 'node:tls';
+-import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+-import type { Config } from '../../config.js';
++import type { FastifyBaseLogger } from 'fastify';
+ import { readProxyV2, type ProxyHeader } from './proxy-header.js';
+ import { selfSigned } from './x509.js';
+ 
+-/* The tunnel container reaches it on the default network; compose does not publish it. */
++/* Inside the keeper's container, where only the keeper's own frpc reaches it. */
+ export const LINK_TLS_PORT = 8443;
+ 
++const LISTEN_HOST = '127.0.0.1';
+ const STAND_IN_HOST = 'hornhoof.invalid';
+ const HEADER_MS = 5000;
+ const HANDSHAKE_MS = 10_000;
+ const CLOSE_GRACE_MS = 5000;
+ 
+ type WholeHeader = Extract<ProxyHeader, { state: 'done' }>;
++type ListenerOptions = { server: http.Server; log: FastifyBaseLogger | { warn(o: unknown, m?: string): void } };
+ 
+-/* Who each decrypted connection is for, kept beside the socket since Fastify only sees the socket. */
++/* Who each decrypted connection is for, kept beside the socket since the server it goes to only sees the socket. */
+ const visitors = new WeakMap<object, string>();
+ 
+ export function linkVisitor(socket: unknown): string | undefined {
+   return visitors.get(socket as object);
+ }
+ 
+-export const socketAddress = (socket: { remoteAddress?: string }): string => (socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+-
+-/* Whether an address is the tunnel container's, looked up by its name each time, since the container gets a new address
+-   when it starts again. */
+-export async function isTunnelAddress(address: string, config: Config): Promise<boolean> {
+-  if (!config.tunnelHost) return false;
+-  try {
+-    return (await lookup(config.tunnelHost, { all: true })).some(a => a.address === address);
+-  } catch {
+-    return false;
+-  }
+-}
+-
+-/* Anyone who reaches the port can write a header, so its source counts only from the tunnel container. */
+-async function visitorOf(raw: net.Socket, source: string | null, config: Config): Promise<string> {
+-  const address = socketAddress(raw);
+-  return source !== null && (await isTunnelAddress(address, config)) ? source : address;
+-}
++/* A visitor who leaves in the middle is no news, but an error with no handler would end the process. */
++const ignore = (): void => {};
+ 
+ /* Reads until the header is whole and leaves what came after it for TLS. Null when there will be no header: it was
+    refused, it took too long, or the connection ended. */
+ function wholeHeader(raw: net.Socket): Promise<WholeHeader | null> {
+   return new Promise(resolve => {
+     let read = Buffer.alloc(0);
+     const finish = (header: WholeHeader | null) => {
+       clearTimeout(deadline);
+@@ -65,78 +50,80 @@ function wholeHeader(raw: net.Socket): Promise<WholeHeader | null> {
+     };
+     const deadline = setTimeout(onClose, HEADER_MS);
+     raw.on('data', onData);
+     raw.once('close', onClose);
+   });
+ }
+ 
+ /* The company's end of the link's TLS. The link's frpc opens each connection with a PROXY v2 header and then the visitor's
+-   TLS, which ends here; the decrypted connection goes to Fastify's own http server, so every route, hook and WebSocket
+-   works on it unchanged. */
++   TLS, which ends here. The decrypted connection goes to the server it was given, so every request, stream and WebSocket
++   works on it unchanged. Every header is believed: only that frpc reaches the address this listens on. */
+ export class LinkListener {
+   private readonly server: net.Server;
+   private readonly connections = new Set<net.Socket>();
+   /* Replaced in listen before a connection can arrive, so a handshake always finds a certificate. */
+   private context = createSecureContext();
+   private uses = 0;
+ 
+-  constructor(private readonly opts: { app: FastifyInstance; config: Config; log: FastifyBaseLogger }) {
++  constructor(private readonly opts: ListenerOptions) {
+     this.server = net.createServer({ noDelay: true }, raw => this.accept(raw));
+-    this.server.on('error', err => opts.log.error({ err }, 'The link TLS listener failed.'));
++    this.server.on('error', err => opts.log.warn({ err }, 'The link TLS listener failed.'));
+   }
+ 
+-  async listen(port: number, host = '0.0.0.0'): Promise<number> {
++  async listen(port: number, host = LISTEN_HOST): Promise<number> {
+     await this.use(null, null);
+     await new Promise<void>((resolve, reject) => {
+       this.server.once('error', reject);
+       this.server.listen(port, host, () => {
+         this.server.off('error', reject);
+         resolve();
+       });
+     });
++    /* That server has no port of its own, and Node times a connection's headers and finds its idle ones only on a server
++       it has seen listen. Without this a visitor who never ends its headers would hold a connection for good. */
++    this.opts.server.emit('listening');
+     return (this.server.address() as AddressInfo).port;
+   }
+ 
+   /* For new connections. Making a stand-in takes a moment, so a later call may finish first, and the later call is the
+      one that counts. */
+   async use(host: string | null, cert: { certPem: string; keyPem: string } | null): Promise<void> {
+     const use = ++this.uses;
+     const served = cert ?? (await selfSigned(host ?? STAND_IN_HOST));
+     if (use === this.uses) this.context = createSecureContext({ cert: served.certPem, key: served.keyPem });
+   }
+ 
+-  /* The app's own close ends the event streams and WebSockets, so the grace is for what is left after that. */
++  /* An event stream or a WebSocket never ends by itself, so what is left after the grace is cut. */
+   async close(graceMs = CLOSE_GRACE_MS): Promise<void> {
+     const grace = setTimeout(() => this.connections.forEach(raw => raw.destroy()), graceMs);
+     await new Promise<void>(resolve => this.server.close(() => resolve()));
+     clearTimeout(grace);
+   }
+ 
+   private accept(raw: net.Socket): void {
+     this.connections.add(raw);
+     raw.once('close', () => this.connections.delete(raw));
+-    raw.on('error', err => this.opts.log.debug({ err }, 'A link connection failed.'));
++    raw.on('error', ignore);
+     this.open(raw).catch((err: unknown) => {
+       this.opts.log.warn({ err }, 'A link connection could not be opened.');
+       raw.destroy();
+     });
+   }
+ 
+   private async open(raw: net.Socket): Promise<void> {
+     const header = await wholeHeader(raw);
+     if (!header) return void raw.destroy();
+-    const visitor = await visitorOf(raw, header.source, this.opts.config);
+-    if (!raw.destroyed) this.startTls(raw, visitor);
++    if (!raw.destroyed) this.startTls(raw, header.source);
+   }
+ 
+-  private startTls(raw: net.Socket, visitor: string): void {
++  private startTls(raw: net.Socket, visitor: string | null): void {
+     const secure = new TLSSocket(raw, { isServer: true, secureContext: this.context, ALPNProtocols: ['http/1.1'] });
+-    visitors.set(secure, visitor);
++    if (visitor !== null) visitors.set(secure, visitor);
+     const handshake = setTimeout(() => secure.destroy(), HANDSHAKE_MS);
+     secure.once('close', () => clearTimeout(handshake));
+-    secure.on('error', err => this.opts.log.debug({ err }, 'A link connection failed in TLS.'));
++    secure.on('error', ignore);
+     secure.once('secure', () => {
+       clearTimeout(handshake);
+-      this.opts.app.server.emit('connection', secure);
++      this.opts.server.emit('connection', secure);
+     });
+   }
+ }
+diff --git a/apps/server/src/modules/tls/store.ts b/apps/server/src/modules/tls/store.ts
+index 7ff16673..5e597725 100644
+--- a/apps/server/src/modules/tls/store.ts
++++ b/apps/server/src/modules/tls/store.ts
+@@ -41,35 +41,64 @@ const isKeyOf = (certPem: string, keyPem: string) => new X509Certificate(certPem
+ function listenerCanServe(certPem: string, keyPem: string): boolean {
+   createSecureContext({ cert: certPem, key: keyPem });
+   return isKeyOf(certPem, keyPem);
+ }
+ 
+ /* NaN compares false, so a date that cannot be read counts as no time left. */
+ const hasTimeLeft = (notAfter: Date, now: Date) => notAfter.getTime() - now.getTime() > LEAST_LEFT_MS;
+ 
++const STAYS_ON_HTTP = 'The link stays on http: its certificate could not be checked.';
++
+ /* Whether this row may carry this link over https now: the manager chose https, for this very name, and what the
+    listener would serve is a certificate of the link's host with time left and its own key. A certificate or a key that
+    cannot be read throws, which linkMode takes as no. */
+ export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'certKeyEnc'>, link: LinkView, secret: Buffer, now: Date): boolean {
+   if (row.mode !== 'https' || row.name !== link.name || !row.certPem || !row.certKeyEnc) return false;
+   const info = certInfo(row.certPem);
+   if (!namesHost(info, new URL(link.url).hostname)) return false;
+   if (!hasTimeLeft(info.notAfter, now)) return false;
+   return listenerCanServe(row.certPem, decryptSecret(row.certKeyEnc, secret));
+ }
+ 
+-/* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
+-   relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
+-   app are the way back whatever the row says. A log, when the caller has one, says why an operator's link stays on http;
+-   loggable keeps no value the error was given, so no key reaches it. */
+-export async function linkMode(db: Db, config: Config, log?: FastifyBaseLogger): Promise<'http' | 'https'> {
+-  if (config.acmeDirectory === null) return 'http';
++/* Certificate data that cannot be read counts as a no, which is no failure of the database. A log, when the caller has
++   one, says why an operator's link stays on http; loggable keeps no value the error was given, so no key reaches it. */
++function passes(row: TlsRow, link: LinkView, secret: Buffer, log?: FastifyBaseLogger): boolean {
+   try {
+-    const [link] = await db.select().from(publicLinks).limit(1);
+-    if (!link) return 'http';
+-    const row = await tlsOf(db, link.companyId);
+-    return row && mayRunHttps(row, link, config.secret, new Date()) ? 'https' : 'http';
++    return mayRunHttps(row, link, secret, new Date());
+   } catch (err) {
+-    log?.warn({ error: loggable(err) }, 'The link stays on http: its certificate could not be checked.');
+-    return 'http';
++    log?.warn({ error: loggable(err) }, STAYS_ON_HTTP);
++    return false;
+   }
+ }
++
++/* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
++   relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
++   app are the way back whatever the row says. A failed read of the database throws, so a reader that keeps what it runs
++   does not take it for a change. */
++export async function readLinkMode(db: Db, config: Config, log?: FastifyBaseLogger): Promise<'http' | 'https'> {
++  if (config.acmeDirectory === null) return 'http';
++  const [link] = await db.select().from(publicLinks).limit(1);
++  if (!link) return 'http';
++  const row = await tlsOf(db, link.companyId);
++  return row && passes(row, link, config.secret, log) ? 'https' : 'http';
++}
++
++export function linkMode(db: Db, config: Config, log?: FastifyBaseLogger): Promise<'http' | 'https'> {
++  return readLinkMode(db, config, log).catch((err: unknown) => {
++    log?.warn({ error: loggable(err) }, STAYS_ON_HTTP);
++    return 'http' as const;
++  });
++}
++
++function certificateIn(row: TlsRow | null, name: string, secret: Buffer): { certPem: string; keyPem: string } | null {
++  if (row?.name !== name || !row.certPem || !row.certKeyEnc) return null;
++  return { certPem: row.certPem, keyPem: decryptSecret(row.certKeyEnc, secret) };
++}
++
++/* What the link's TLS listener is to serve: null without a link, and the link's host with the certificate of its own
++   name once there is one. With certificates off there is none, as the manager also tells the listener. */
++export async function servedCertificate(db: Db, config: Config): Promise<{ host: string; cert: { certPem: string; keyPem: string } | null } | null> {
++  const [link] = await db.select().from(publicLinks).limit(1);
++  if (!link) return null;
++  const row = config.acmeDirectory === null ? null : await tlsOf(db, link.companyId);
++  return { host: new URL(link.url).hostname, cert: certificateIn(row, link.name, config.secret) };
++}
+diff --git a/apps/server/src/tunnel.ts b/apps/server/src/tunnel.ts
+deleted file mode 100644
+index dbdd1bd0..00000000
+--- a/apps/server/src/tunnel.ts
++++ /dev/null
+@@ -1,20 +0,0 @@
+-import { join } from 'node:path';
+-import { clientFor } from './modules/link/client.js';
+-import { TunnelKeeper } from './modules/link/tunnel.js';
+-
+-/* The tunnel container: it carries the company's public link at hornhoof.org to the app, with the settings the app
+-   writes into the control folder, and waits while there are none. */
+-const keeper = new TunnelKeeper({
+-  file: join(process.env.HORNHOOF_CONTROL_DIR || '/control', 'tunnel.json'),
+-  everyMs: 3000,
+-  restartMs: 2000,
+-  clientFor,
+-  log: line => console.log(line),
+-});
+-keeper.start();
+-
+-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+-  process.once(signal, () => {
+-    void keeper.stop().then(() => process.exit(0));
+-  });
+-}
+diff --git a/apps/server/test/client.test.ts b/apps/server/test/client.test.ts
+index 540cc5fe..eac01434 100644
+--- a/apps/server/test/client.test.ts
++++ b/apps/server/test/client.test.ts
+@@ -1,16 +1,19 @@
+ import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+-import { clientFor } from '../src/modules/link/client.js';
+-import { Settings, type TunnelSettings } from '../src/modules/link/tunnel.js';
++import { clientFor, configFor, linkClientId, type FrpcLocal } from '../src/modules/link/client.js';
++import type { TunnelSettings } from '../src/modules/link/tunnel.js';
+ 
+ const KEY = 'Zm9vYmFyLWtleS1vZi10aGUtYmluZGluZy0wMTIzNDU2';
++const CLIENT_ID = 'acme-ab12cd34-link';
++const LOCAL: FrpcLocal = { http: { ip: '127.0.0.1', port: 7081 }, https: { ip: '127.0.0.1', port: 8443 } };
++const IDENTITY = { clientId: CLIENT_ID, local: LOCAL };
+ 
+ /* What the app writes for a link, with the tunnel as the relay hands it out, including its own config text. */
+ const settings = (tunnel: Record<string, unknown> = {}, more: Partial<TunnelSettings> = {}): TunnelSettings => ({
+   url: 'https://acme.hornhoof.org',
+   name: 'acme',
+   key: KEY,
+   tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss', config: 'localIP = "db"\nlocalPort = 5432\n', ...tunnel },
+   mode: 'http',
+@@ -18,87 +21,87 @@ const settings = (tunnel: Record<string, unknown> = {}, more: Partial<TunnelSett
+ });
+ 
+ const CONFIG = `serverAddr = "hornhoof.org"
+ serverPort = 443
+ loginFailExit = false
+ log.to = "console"
+ log.level = "info"
+ log.disablePrintColor = true
++clientID = "${CLIENT_ID}"
+ transport.protocol = "wss"
+ transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+-transport.heartbeatInterval = 30
+-transport.heartbeatTimeout = 90
++transport.heartbeatInterval = -1
++transport.tcpMuxKeepaliveInterval = 10
+ metadatas.name = "acme"
+ metadatas.key = "${KEY}"
++metadatas.client = "${CLIENT_ID}"
+ 
+ [[proxies]]
+ name = "acme"
+ type = "http"
+ subdomain = "acme"
+-localIP = "app"
+-localPort = 8080
+-requestHeaders.set.x-forwarded-proto = "https"
++localIP = "127.0.0.1"
++localPort = 7081
+ `;
+ 
+ const ABOVE_THE_PROXY = CONFIG.slice(0, CONFIG.indexOf('[[proxies]]'));
+ 
+ const HTTPS_PROXY = `[[proxies]]
+ name = "acme"
+ type = "https"
+ subdomain = "acme"
+-localIP = "app"
++localIP = "127.0.0.1"
+ localPort = 8443
+ transport.proxyProtocolVersion = "v2"
+ `;
+ 
+ describe('the tunnel client', () => {
+-  it('runs frpc with a config that carries the link to the app and nothing else', () => {
++  it("runs frpc with a config that carries the link to the keeper's own door and nothing else", () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     const path = join(dir, 'frpc.toml');
+-    expect(clientFor(settings(), dir)).toEqual({ program: 'frpc', args: ['-c', path] });
+-    /* The relay's own config text is not run: whatever it says, only the app is reachable through the tunnel. */
++    expect(clientFor(settings(), { ...IDENTITY, dir })).toEqual({ program: 'frpc', args: ['-c', path] });
++    /* The relay's own config text is not run: whatever it says, only the keeper's door is reachable through the tunnel. */
+     expect(readFileSync(path, 'utf8')).toBe(CONFIG);
+     /* It holds the key of the link. */
+     expect(statSync(path).mode & 0o077).toBe(0);
+   });
+ 
+-  it("runs an https proxy to the app's TLS port in https mode, with the visitor's address in a PROXY v2 header", () => {
+-    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+-    clientFor(settings({}, { mode: 'https' }), dir);
+-    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(`${ABOVE_THE_PROXY}${HTTPS_PROXY}`);
+-  });
+-
+-  it('reads settings with no mode as http', () => {
+-    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+-    /* What an app from before this mode wrote: the file stays as it is until the app writes it again. */
+-    const today = { url: 'https://acme.hornhoof.org', name: 'acme', key: KEY, tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss' } };
+-    clientFor(Settings.parse(JSON.parse(JSON.stringify(today))), dir);
+-    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(CONFIG);
++  it("runs an https proxy to the keeper's TLS listener in https mode, with the visitor's address in a PROXY v2 header", () => {
++    expect(configFor(settings({}, { mode: 'https' }), IDENTITY)).toBe(`${ABOVE_THE_PROXY}${HTTPS_PROXY}`);
+   });
+ 
+   it('refuses a mode that is only a name every object inherits', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     for (const mode of ['toString', 'constructor', '__proto__']) {
+       expect(() => clientFor(settings({}, { mode: mode as TunnelSettings['mode'] }), dir), mode).toThrow(`${mode} is not a tunnel mode`);
+     }
+   });
+ 
+   it('writes the key so that no character of it can break out of its line', () => {
+-    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+-    clientFor(settings({}, { key: 'abc"\nlocalIP = "db' }), dir);
+-    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toContain('metadatas.key = "abc\\"\\nlocalIP = \\"db"\n');
++    expect(configFor(settings({}, { key: 'abc"\nlocalIP = "db' }), IDENTITY)).toContain('metadatas.key = "abc\\"\\nlocalIP = \\"db"\n');
+   });
+ 
+   it('refuses tunnel settings it cannot use', () => {
+-    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     for (const bad of [
+       settings({ protocol: 'tcp' }),
+       settings({ serverAddr: 'hornhoof.org"\nlocalIP = "db' }),
+       settings({ serverPort: '443' }),
+       settings({ serverPort: 70000 }),
+       settings({}, { name: 'Not a name' }),
+       settings({}, { key: '' }),
+     ]) {
+-      expect(() => clientFor(bad, dir), JSON.stringify(bad)).toThrow();
++      expect(() => configFor(bad, IDENTITY), JSON.stringify(bad)).toThrow();
++    }
++  });
++});
++
++describe("the link's client id", () => {
++  it('is the name, the first 8 characters of the machine id, and link', () => {
++    expect(linkClientId('acme', `ab12cd34${'0'.repeat(24)}`)).toBe(CLIENT_ID);
++  });
++
++  it("is refused for another link's name, and in any other form", () => {
++    for (const clientId of ['globex-ab12cd34-link', 'acmeish-ab12cd34-link', 'acme-AB12CD34-link', 'acme-ab12cd3-link', 'acme-ab12cd34-node', `acme-${'a'.repeat(60)}-ab12cd34-link`, 'acme-ab12cd34-link"\nlocalIP = "db']) {
++      expect(() => configFor(settings(), { clientId, local: LOCAL }), clientId).toThrow();
+     }
+   });
+ });
+diff --git a/apps/server/test/config.test.ts b/apps/server/test/config.test.ts
+index a9fc783f..9fe53fa2 100644
+--- a/apps/server/test/config.test.ts
++++ b/apps/server/test/config.test.ts
+@@ -101,16 +101,17 @@ describe('loadConfig', () => {
+     const config = loadConfig({
+       DATABASE_URL: 'postgres://hornhoof:hornhoof@db:5432/hornhoof',
+       HORNHOOF_SECRET: randomBytes(32).toString('base64'),
+       ACME_DIRECTORY: '',
+       HORNHOOF_MACHINE_ID: '',
+       RELAY_URL: '',
+     });
+     expect(config.controlDir).toBe('/control');
++    expect(config.acmeDirectory).toBe(LETS_ENCRYPT);
+     expect(config.machineId).toBeNull();
+     expect(config.relayUrl).toBe('https://hornhoof.org');
+     expect(config.databaseUrl).toBe('postgres://hornhoof:hornhoof@db:5432/hornhoof');
+   });
+ 
+   it('gives task files 2 GB unless TASK_FILES_MB names other whole megabytes', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '' }).taskFilesBytes).toBe(2048 * 1024 * 1024);
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '512' }).taskFilesBytes).toBe(512 * 1024 * 1024);
+diff --git a/apps/server/test/keeper-link.test.ts b/apps/server/test/keeper-link.test.ts
+new file mode 100644
+index 00000000..e892e7e1
+--- /dev/null
++++ b/apps/server/test/keeper-link.test.ts
+@@ -0,0 +1,552 @@
++import { once } from 'node:events';
++import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import http from 'node:http';
++import net, { type AddressInfo } from 'node:net';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { setTimeout as sleep } from 'node:timers/promises';
++import tls, { type TLSSocket } from 'node:tls';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import WebSocket, { WebSocketServer } from 'ws';
++import { loadConfig, type Config } from '../src/config.js';
++import { encryptSecret } from '../src/crypto/secrets.js';
++import type { Db } from '../src/db/client.js';
++import { companies, linkTls, publicLinks } from '../src/db/schema.js';
++import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
++import { KeeperServed } from '../src/modules/keeper/served.js';
++import { readKeeperState, writeKeeperState } from '../src/modules/keeper/state.js';
++import { configFor, type FrpcLocal } from '../src/modules/link/client.js';
++import { saveLink, tunnelSettings, writeTunnelSettings } from '../src/modules/link/link.js';
++import type { TunnelSettings } from '../src/modules/link/tunnel.js';
++import type { Target } from '../src/net/proxy.js';
++import { newAccountKey } from '../src/modules/tls/acme.js';
++import { linkMode, readLinkMode, saveTls, servedCertificate, updateTls } from '../src/modules/tls/store.js';
++import { certInfo, selfSigned } from '../src/modules/tls/x509.js';
++import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
++import { visitorHeader } from './proxy-v2.js';
++
++const MACHINE_ID = `ab12cd34${'0'.repeat(24)}`;
++const CLIENT_ID = 'acme-ab12cd34-link';
++const HOST = 'acme.hornhoof.test';
++const VISITOR = '203.0.113.9';
++const OTHER_VISITOR = '203.0.113.10';
++const CERTIFICATES_ON = { ACME_DIRECTORY: 'https://ca.hornhoof.test/directory' };
++const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
++const THROUGH_AN_OUTAGE = 20;
++const WAIT_MS = 10_000;
++/* Nothing listens here, for the tests that send no traffic through to the app. */
++const NOWHERE: Target = { host: '127.0.0.1', port: 1 };
++
++function folder(): string {
++  const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-link-'));
++  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
++  return dir;
++}
++
++async function companyWithLink(env: NodeJS.ProcessEnv = {}) {
++  const { app, db, config } = await testApp(env);
++  await setUpCompany(app);
++  const [company] = await db.select().from(companies);
++  const companyId = company!.id;
++  const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
++  await saveLink(db, config, companyId, { name: 'acme', url: `https://${HOST}`, key: 'k'.repeat(32), tunnel });
++  return { app, db, config, companyId };
++}
++
++/* A link_tls row in https, as the manager leaves it; the certificate's fingerprint is what a visitor should see. */
++async function holdCertificate(db: Db, config: Config, companyId: string, name = 'acme'): Promise<string> {
++  const pair = await selfSigned(HOST);
++  const accountKeyEnc = encryptSecret(await newAccountKey(), config.secret);
++  const certKeyEnc = encryptSecret(pair.keyPem, config.secret);
++  await saveTls(db, companyId, { directory: CERTIFICATES_ON.ACME_DIRECTORY, accountKeyEnc, name, mode: 'https', certPem: pair.certPem, certKeyEnc });
++  return certInfo(pair.certPem).fingerprint256;
++}
++
++/* A stand-in for frpc: the config is the real one, and the child sleeps until it is stopped. */
++function fakeFrpc(dir: string) {
++  const configFile = join(dir, 'frpc.toml');
++  const startedFile = join(dir, 'started.txt');
++  const SLEEPER = `require('node:fs').appendFileSync(process.argv[1], process.pid + '\\n'); setInterval(() => {}, 1000);`;
++  const clientFor = (settings: TunnelSettings, clientId: string, local: FrpcLocal) => {
++    writeFileSync(configFile, configFor(settings, { clientId, local }));
++    return { program: process.execPath, args: ['-e', SLEEPER, startedFile] };
++  };
++  const started = () => (existsSync(startedFile) ? readFileSync(startedFile, 'utf8').trim().split('\n') : []);
++  const alive = (pid: string) => {
++    try {
++      process.kill(Number(pid), 0);
++      return true;
++    } catch {
++      return false;
++    }
++  };
++  return { clientFor, started, alive, config: () => readFileSync(configFile, 'utf8') };
++}
++
++async function keeperOn(db: Db, env: NodeJS.ProcessEnv = {}, extra: Partial<KeeperOptions> = {}) {
++  const dir = folder();
++  const frpc = fakeFrpc(dir);
++  const lines: string[] = [];
++  const keeper = new Keeper({
++    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: dir, HORNHOOF_MACHINE_ID: MACHINE_ID, ACME_DIRECTORY: 'off', ...env }),
++    db,
++    app: NOWHERE,
++    frontHost: null,
++    log: line => lines.push(line),
++    host: '127.0.0.1',
++    ports: { front: 0, linkHttp: 0, linkTls: 0 },
++    everyMs: 20,
++    linkEveryMs: 50,
++    clientFor: frpc.clientFor,
++    ...extra,
++  });
++  const ports = await keeper.start();
++  onTestFinished(() => keeper.stop());
++  const wordOfLink = () => readKeeperState(dir)?.link ?? null;
++  const namesCertificate = (fingerprint256: string | null) => until(() => wordOfLink()?.host === HOST && wordOfLink()?.fingerprint256 === fingerprint256, WAIT_MS);
++  return { keeper, dir, frpc, lines, ports, wordOfLink, namesCertificate };
++}
++
++/* The database, with the chosen tables' reads throwing while the test says. Queries go through select().from(). */
++function failingDb(db: Db, failsOn: (table: unknown) => boolean) {
++  const state = { on: false, failed: 0 };
++  const select = (...args: unknown[]) => {
++    const query = (db.select as (...a: unknown[]) => { from: (table: unknown) => unknown })(...args);
++    return new Proxy(query, {
++      get: (target, name, receiver) => {
++        if (name !== 'from') return Reflect.get(target, name, receiver) as unknown;
++        return (table: unknown) => {
++          if (state.on && failsOn(table)) {
++            state.failed++;
++            throw new Error('the database does not answer');
++          }
++          return target.from(table);
++        };
++      },
++    });
++  };
++  return { db: new Proxy(db, { get: (target, name, receiver) => (name === 'select' ? select : (Reflect.get(target, name, receiver) as unknown)) }), state };
++}
++
++/* A connection as the keeper's frpc opens it for a visitor: the PROXY header, then TLS. */
++async function overTls(port: number, visitor = VISITOR): Promise<TLSSocket> {
++  const raw = net.connect(port, '127.0.0.1');
++  raw.on('error', () => {});
++  onTestFinished(() => void raw.destroy());
++  await once(raw, 'connect');
++  raw.write(visitorHeader(visitor));
++  const secure = tls.connect({ socket: raw, servername: HOST, rejectUnauthorized: false });
++  secure.on('error', () => {});
++  await once(secure, 'secureConnect');
++  return secure;
++}
++
++const seenFingerprint = async (port: number) => {
++  const secure = await overTls(port);
++  const { fingerprint256 } = secure.getPeerCertificate();
++  secure.destroy();
++  return fingerprint256;
++};
++
++function askOver(socket: TLSSocket, options: http.RequestOptions, body?: string): Promise<{ status: number; body: string; cookies: string[] }> {
++  return new Promise((resolve, reject) => {
++    const out = http.request({ createConnection: () => socket, ...options, headers: { host: HOST, connection: 'close', ...options.headers } }, res => {
++      const chunks: Buffer[] = [];
++      res.on('data', chunk => chunks.push(chunk));
++      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), cookies: (res.headers['set-cookie'] ?? []).map(cookie => cookie.split('=')[0]!) }));
++    });
++    out.on('error', reject);
++    out.end(body);
++  });
++}
++
++async function listening(server: http.Server): Promise<Target> {
++  onTestFinished(() => {
++    server.closeAllConnections();
++    server.close();
++  });
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  return { host: '127.0.0.1', port: (server.address() as AddressInfo).port };
++}
++
++describe('the link in the keeper', () => {
++  it("runs frpc with the link's client id and the network transport, pointed at itself", async () => {
++    const { db } = await companyWithLink();
++    const { frpc, ports } = await keeperOn(db);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    const config = frpc.config();
++    expect(config).toContain(`clientID = "${CLIENT_ID}"`);
++    expect(config).toContain(`metadatas.client = "${CLIENT_ID}"`);
++    expect(config).toContain('transport.heartbeatInterval = -1');
++    expect(config).toContain('type = "http"');
++    expect(config).toContain(`localPort = ${ports.linkHttp}`);
++  });
++
++  it('runs https when linkMode says so', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    const { frpc, ports } = await keeperOn(db, CERTIFICATES_ON);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    expect(frpc.config()).toContain('type = "https"');
++    expect(frpc.config()).toContain(`localPort = ${ports.linkTls}`);
++    expect(frpc.config()).toContain('transport.proxyProtocolVersion = "v2"');
++  });
++
++  it("starts frpc again when the link's mode changes, and only then", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const { frpc } = await keeperOn(db, CERTIFICATES_ON);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    expect(frpc.config()).toContain('type = "http"');
++
++    await holdCertificate(db, config, companyId);
++    await until(() => frpc.started().length === 2, WAIT_MS);
++    expect(frpc.config()).toContain('type = "https"');
++    await sleep(200);
++    expect(frpc.started()).toHaveLength(2);
++  });
++
++  /* Only https may stay on in such an outage: a mode read as http on a failed read would restart frpc on every hiccup. */
++  it("keeps frpc in https when only the certificate's read fails", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const fingerprint = await holdCertificate(db, config, companyId);
++    const flaky = failingDb(db, table => table === linkTls);
++    const { frpc, ports, namesCertificate } = await keeperOn(flaky.db, CERTIFICATES_ON);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    await namesCertificate(fingerprint);
++
++    flaky.state.on = true;
++    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE, WAIT_MS);
++
++    expect(frpc.started()).toHaveLength(1);
++    expect(frpc.alive(frpc.started()[0]!)).toBe(true);
++    expect(frpc.config()).toContain('type = "https"');
++    expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
++  });
++
++  it('keeps frpc and the certificate when the database does not answer', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const fingerprint = await holdCertificate(db, config, companyId);
++    const flaky = failingDb(db, () => true);
++    const { frpc, ports, lines, wordOfLink, namesCertificate } = await keeperOn(flaky.db, CERTIFICATES_ON);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    await namesCertificate(fingerprint);
++
++    flaky.state.on = true;
++    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE, WAIT_MS);
++
++    expect(frpc.started()).toHaveLength(1);
++    expect(frpc.alive(frpc.started()[0]!)).toBe(true);
++    expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
++    expect(wordOfLink()).toEqual({ host: HOST, fingerprint256: fingerprint });
++    /* Once for each thing it reads, not once a read. */
++    expect(lines.filter(line => line.includes('cannot read'))).toHaveLength(2);
++  });
++
++  it('uses the same client id after the keeper starts again', async () => {
++    const { db } = await companyWithLink();
++    const first = await keeperOn(db);
++    await until(() => first.frpc.started().length === 1, WAIT_MS);
++    expect(first.frpc.config()).toContain(`clientID = "${CLIENT_ID}"`);
++    await first.keeper.stop();
++    expect(first.frpc.alive(first.frpc.started()[0]!)).toBe(false);
++
++    const second = await keeperOn(db);
++    await until(() => second.frpc.started().length === 1, WAIT_MS);
++    expect(second.frpc.config()).toContain(`clientID = "${CLIENT_ID}"`);
++  });
++
++  it('stops frpc when the link goes', async () => {
++    const { db } = await companyWithLink();
++    const { frpc, wordOfLink, namesCertificate } = await keeperOn(db);
++    await until(() => frpc.started().length === 1, WAIT_MS);
++    await namesCertificate(null);
++
++    await db.delete(publicLinks);
++
++    await until(() => !frpc.alive(frpc.started()[0]!), WAIT_MS);
++    await until(() => wordOfLink()?.host === null, WAIT_MS);
++    expect(wordOfLink()).toEqual({ host: null, fingerprint256: null });
++  });
++
++  it('runs no link without a machine id', async () => {
++    const { db } = await companyWithLink();
++    const { frpc, lines, namesCertificate } = await keeperOn(db, { HORNHOOF_MACHINE_ID: '' });
++    await namesCertificate(null);
++    await sleep(200);
++    expect(frpc.started()).toEqual([]);
++    expect(lines.filter(line => line === NO_MACHINE_ID)).toHaveLength(1);
++  });
++});
++
++describe("the link's certificate in the keeper", () => {
++  it("serves the link's stored certificate and names it in keeper.json", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const fingerprint = await holdCertificate(db, config, companyId);
++    const { ports, wordOfLink, namesCertificate } = await keeperOn(db, CERTIFICATES_ON);
++    await namesCertificate(fingerprint);
++    expect(wordOfLink()).toEqual({ host: HOST, fingerprint256: fingerprint });
++    expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
++  });
++
++  it('serves a stand-in for a certificate of another name', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId, 'old');
++    const { ports, namesCertificate } = await keeperOn(db, CERTIFICATES_ON);
++    await namesCertificate(null);
++    const secure = await overTls(ports.linkTls);
++    const seen = secure.getPeerCertificate();
++    secure.destroy();
++    expect(seen.subjectaltname).toBe(`DNS:${HOST}`);
++    expect(seen.issuer).toEqual(seen.subject);
++  });
++
++  it('takes a new certificate from the database', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    const { ports, namesCertificate } = await keeperOn(db, CERTIFICATES_ON);
++    const next = await selfSigned(HOST);
++    await updateTls(db, companyId, { certPem: next.certPem, certKeyEnc: encryptSecret(next.keyPem, config.secret) });
++    const fingerprint = certInfo(next.certPem).fingerprint256;
++    await namesCertificate(fingerprint);
++    expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
++  });
++
++  /* The app moves the link to https on the word, so the word says only what the listener really holds. */
++  it('names no certificate the listener did not take', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const fingerprint = await holdCertificate(db, config, companyId);
++    const { ports, lines, wordOfLink, namesCertificate } = await keeperOn(db, CERTIFICATES_ON);
++    await namesCertificate(fingerprint);
++
++    const other = await selfSigned(HOST);
++    const another = await selfSigned(HOST);
++    await updateTls(db, companyId, { certPem: other.certPem, certKeyEnc: encryptSecret(another.keyPem, config.secret) });
++    await until(() => lines.some(line => line.includes('cannot read or serve')), WAIT_MS);
++    await sleep(200);
++
++    expect(wordOfLink()).toEqual({ host: HOST, fingerprint256: fingerprint });
++    expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
++    /* Once, though each read tries again. */
++    expect(lines.filter(line => line.includes('cannot read or serve'))).toHaveLength(1);
++  });
++
++  it("lets the app's KeeperServed resolve only once the listener serves that certificate", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const { dir, ports } = await keeperOn(db, CERTIFICATES_ON);
++    const pair = await selfSigned(HOST);
++    const served = new KeeperServed({ dir, timeoutMs: WAIT_MS, everyMs: 10 });
++    const using = served.use(HOST, pair);
++
++    const accountKeyEnc = encryptSecret(await newAccountKey(), config.secret);
++    await saveTls(db, companyId, { directory: CERTIFICATES_ON.ACME_DIRECTORY, accountKeyEnc, name: 'acme', mode: 'http', certPem: pair.certPem, certKeyEnc: encryptSecret(pair.keyPem, config.secret) });
++
++    await using;
++    expect(await seenFingerprint(ports.linkTls)).toBe(certInfo(pair.certPem).fingerprint256);
++  });
++
++  it('keeps no key in keeper.json', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const fingerprint = await holdCertificate(db, config, companyId);
++    const { dir, namesCertificate } = await keeperOn(db, CERTIFICATES_ON);
++    await namesCertificate(fingerprint);
++    /* A boolean only: a failure here must not print a key. */
++    expect(readFileSync(join(dir, 'keeper.json'), 'utf8').includes('PRIVATE KEY')).toBe(false);
++  });
++});
++
++describe("the link's TLS door", () => {
++  const echoHeaders = () =>
++    listening(
++      http.createServer((req, res) => {
++        req.resume();
++        res.end(JSON.stringify(req.headers));
++      }),
++    );
++
++  it('passes link TLS traffic to the app with the visitor from the PROXY header', async () => {
++    const { db } = await companyWithLink();
++    const { ports } = await keeperOn(db, {}, { app: await echoHeaders() });
++    const forged = { 'x-forwarded-for': '198.51.100.7', 'x-forwarded-proto': 'http', 'x-hornhoof-via': 'x' };
++    const seen = JSON.parse((await askOver(await overTls(ports.linkTls), { headers: forged })).body) as http.IncomingHttpHeaders;
++    expect(seen['x-forwarded-for']).toBe(VISITOR);
++    expect(seen['x-forwarded-proto']).toBe('https');
++    expect(seen['x-hornhoof-via']).toBeUndefined();
++  });
++
++  it('carries a WebSocket, and closes it when the visitor goes', async () => {
++    const server = http.createServer();
++    const sockets = new WebSocketServer({ server });
++    const closedAtTheApp = new Promise<void>(resolve => {
++      sockets.on('connection', socket => {
++        socket.on('message', message => socket.send(`heard ${String(message)}`));
++        socket.on('close', () => resolve());
++      });
++    });
++    const { db } = await companyWithLink();
++    const { ports } = await keeperOn(db, {}, { app: await listening(server) });
++    const secure = await overTls(ports.linkTls);
++    const client = new WebSocket(`ws://${HOST}/socket`, { createConnection: () => secure });
++    onTestFinished(() => client.terminate());
++    await once(client, 'open');
++    client.send('hello');
++    const [message] = (await once(client, 'message')) as [Buffer];
++    expect(message.toString()).toBe('heard hello');
++    client.close();
++    await closedAtTheApp;
++  });
++
++  it('lets a stop end at once when its connections are idle', async () => {
++    const { db } = await companyWithLink();
++    const { keeper, ports } = await keeperOn(db, {}, { app: await echoHeaders() });
++    const secure = await overTls(ports.linkTls);
++    const answered = await askOver(secure, { headers: { connection: 'keep-alive' } });
++    expect(answered.status).toBe(200);
++    const started = performance.now();
++    await keeper.stop();
++    /* The grace for what is still in flight is 5 s. */
++    expect(performance.now() - started).toBeLessThan(4000);
++  });
++
++  it('takes this traffic as over the link, and counts sign-ins by the visitor', async () => {
++    const { app, db } = await companyWithLink({ TUNNEL_HOST: 'localhost' });
++    await app.listen({ host: '127.0.0.1', port: 0 });
++    const target = { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
++    const { ports } = await keeperOn(db, {}, { app: target });
++
++    const signIn = async (visitor: string, password: string) =>
++      askOver(await overTls(ports.linkTls, visitor), { method: 'POST', path: '/api/auth/login', headers: { 'content-type': 'application/json' } }, JSON.stringify({ email: 'ivan@acme.com', password }));
++
++    expect((await signIn(VISITOR, SETUP.password)).cookies).toContain('__Host-hh_session');
++    for (let i = 0; i < 10; i++) expect((await signIn(VISITOR, 'not the password')).status).toBe(401);
++    expect((await signIn(VISITOR, 'not the password')).status).toBe(429);
++    expect((await signIn(OTHER_VISITOR, 'not the password')).status).toBe(401);
++  });
++});
++
++describe('what the keeper reads', () => {
++  it('readLinkMode throws on a failed read, where linkMode says http', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    const on = { ...config, acmeDirectory: CERTIFICATES_ON.ACME_DIRECTORY };
++    const flaky = failingDb(db, table => table === linkTls);
++    expect(await readLinkMode(flaky.db, on)).toBe('https');
++
++    flaky.state.on = true;
++    await expect(readLinkMode(flaky.db, on)).rejects.toThrow('the database does not answer');
++    expect(await linkMode(flaky.db, on)).toBe('http');
++  });
++
++  it('readLinkMode says http for certificate data that does not pass', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    const on = { ...config, acmeDirectory: CERTIFICATES_ON.ACME_DIRECTORY };
++    await updateTls(db, companyId, { certPem: 'not a certificate' });
++    expect(await readLinkMode(db, on)).toBe('http');
++  });
++
++  it('tunnelSettings is what is written to tunnel.json, and null without a link', async () => {
++    const { db, config } = await companyWithLink();
++    const dir = folder();
++    const here = { ...config, controlDir: dir };
++    await writeTunnelSettings(db, here);
++    const written: unknown = JSON.parse(readFileSync(join(dir, 'tunnel.json'), 'utf8'));
++    expect(await tunnelSettings(db, here)).toEqual(written);
++
++    await db.delete(publicLinks);
++    expect(await tunnelSettings(db, here)).toBeNull();
++  });
++
++  it("tunnelSettings throws when only the certificate's read fails", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    const on = { ...config, acmeDirectory: CERTIFICATES_ON.ACME_DIRECTORY };
++    const flaky = failingDb(db, table => table === linkTls);
++    flaky.state.on = true;
++    await expect(tunnelSettings(flaky.db, on)).rejects.toThrow('the database does not answer');
++  });
++
++  it("servedCertificate gives the row's certificate with its key, for the link's name only", async () => {
++    const { db, config, companyId } = await companyWithLink();
++    const on = { ...config, acmeDirectory: CERTIFICATES_ON.ACME_DIRECTORY };
++    expect(await servedCertificate(db, on)).toEqual({ host: HOST, cert: null });
++
++    const pair = await selfSigned(HOST);
++    const accountKeyEnc = encryptSecret(await newAccountKey(), config.secret);
++    await saveTls(db, companyId, { directory: on.acmeDirectory, accountKeyEnc, name: 'acme', mode: 'http', certPem: pair.certPem, certKeyEnc: encryptSecret(pair.keyPem, config.secret) });
++    const served = await servedCertificate(db, on);
++    expect(served?.host).toBe(HOST);
++    expect(served?.cert?.certPem).toBe(pair.certPem);
++    /* A boolean only: a failure here must not print a key. */
++    expect(served?.cert?.keyPem === pair.keyPem).toBe(true);
++
++    await updateTls(db, companyId, { name: 'old' });
++    expect(await servedCertificate(db, on)).toEqual({ host: HOST, cert: null });
++  });
++
++  /* The manager gives the listener no certificate with certificates off, so the keeper's word must say the same. */
++  it('servedCertificate gives no certificate with certificates off', async () => {
++    const { db, config, companyId } = await companyWithLink();
++    await holdCertificate(db, config, companyId);
++    expect(config.acmeDirectory).toBeNull();
++    expect(await servedCertificate(db, config)).toEqual({ host: HOST, cert: null });
++  });
++
++  it('servedCertificate is null without a link', async () => {
++    const { db, config } = await companyWithLink();
++    await db.delete(publicLinks);
++    expect(await servedCertificate(db, config)).toBeNull();
++  });
++});
++
++describe('KeeperServed', () => {
++  const AT = Date.parse('2026-01-01T00:00:00.000Z');
++  const word = (dir: string, link: { host: string | null; fingerprint256: string | null } | null, at = AT) =>
++    writeKeeperState(dir, { mode: 'lead', at: new Date(at).toISOString(), link });
++  const served = (dir: string, now = AT) => new KeeperServed({ dir, timeoutMs: 100, everyMs: 5, now: () => now });
++
++  it('resolves once keeper.json names that host and fingerprint', async () => {
++    const dir = folder();
++    const pair = await selfSigned(HOST);
++    const fingerprint256 = certInfo(pair.certPem).fingerprint256;
++    word(dir, { host: HOST, fingerprint256: 'AA:BB' });
++    let resolved = false;
++    const using = served(dir)
++      .use(HOST, pair)
++      .then(() => {
++        resolved = true;
++      });
++    await sleep(30);
++    expect(resolved).toBe(false);
++    word(dir, { host: HOST, fingerprint256 });
++    await using;
++    expect(resolved).toBe(true);
++  });
++
++  it('takes a stand-in as a null fingerprint, and no link as a null host', async () => {
++    const dir = folder();
++    word(dir, { host: HOST, fingerprint256: null });
++    await expect(served(dir).use(HOST, null)).resolves.toBeUndefined();
++    word(dir, { host: null, fingerprint256: null });
++    await expect(served(dir).use(null, null)).resolves.toBeUndefined();
++  });
++
++  it('throws after timeoutMs otherwise', async () => {
++    const dir = folder();
++    const pair = await selfSigned(HOST);
++    const refused = 'The keeper does not serve this certificate yet.';
++    /* A keeper that has not read the link yet says link: null, which is not the word for no link. */
++    word(dir, null);
++    await expect(served(dir).use(null, null)).rejects.toThrow(refused);
++    word(dir, { host: HOST, fingerprint256: null });
++    await expect(served(dir).use(HOST, pair)).rejects.toThrow(refused);
++    word(dir, { host: 'other.hornhoof.test', fingerprint256: null });
++    await expect(served(dir).use(HOST, null)).rejects.toThrow(refused);
++  });
++
++  it('does not take a keeper.json whose at is 11 s old', async () => {
++    const dir = folder();
++    word(dir, { host: HOST, fingerprint256: null });
++    await expect(served(dir, AT + 11_000).use(HOST, null)).rejects.toThrow('The keeper does not serve this certificate yet.');
++    await expect(served(dir, AT + 9_000).use(HOST, null)).resolves.toBeUndefined();
++  });
++});
+diff --git a/apps/server/test/keeper.test.ts b/apps/server/test/keeper.test.ts
+index 6cf17168..dc907718 100644
+--- a/apps/server/test/keeper.test.ts
++++ b/apps/server/test/keeper.test.ts
+@@ -11,16 +11,17 @@ import { fileURLToPath } from 'node:url';
+ import type { FastifyInstance } from 'fastify';
+ import { describe, expect, it, onTestFinished } from 'vitest';
+ import WebSocket, { WebSocketServer } from 'ws';
+ import { clientAddress } from '../src/auth/tunnel.js';
+ import { loadConfig } from '../src/config.js';
+ import { Keeper, KEEPER_PORTS, type KeeperOptions } from '../src/modules/keeper/keeper.js';
+ import { freshState, readKeeperState } from '../src/modules/keeper/state.js';
+ import { updaterBusy } from '../src/modules/keeper/updater-status.js';
++import { LINK_TLS_PORT } from '../src/modules/tls/listener.js';
+ import type { Target } from '../src/net/proxy.js';
+ import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+ 
+ const FAST = { everyMs: 50 };
+ const MAINTENANCE_MESSAGE = 'Hornhoof is installing an update and takes no changes until it ends.';
+ 
+ function folder(): string {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-'));
+@@ -336,18 +337,19 @@ describe('the keeper', () => {
+ 
+ describe('the keeper container', () => {
+   const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
+ 
+   /* The entry point has its ports and its app written in. This keeps them from reaching anything real on this machine:
+      it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
+   const PRELOAD = `
+     import http from 'node:http';
+-    const { listen } = http.Server.prototype;
+-    http.Server.prototype.listen = function (port, host, done) {
++    import net from 'node:net';
++    const { listen } = net.Server.prototype;
++    net.Server.prototype.listen = function (port, host, done) {
+       return listen.call(this, 0, '127.0.0.1', () => {
+         console.log(JSON.stringify({ asked: { port, host }, port: this.address().port }));
+         done();
+       });
+     };
+     const { request } = http;
+     http.request = options => {
+       console.log(JSON.stringify({ target: { host: options.host, port: options.port } }));
+@@ -356,44 +358,46 @@ describe('the keeper container', () => {
+   `;
+ 
+   async function container(app: Target) {
+     const dir = folder();
+     const env = {
+       ...process.env,
+       HORNHOOF_SECRET: TEST_SECRET,
+       HORNHOOF_CONTROL_DIR: dir,
+-      /* Nothing answers here, and nothing asks yet: the pool connects at its first query. */
++      /* Nothing answers here, so the keeper reads no link and runs no frpc. */
+       DATABASE_URL: 'postgres://hornhoof:hornhoof@127.0.0.1:1/hornhoof',
+       KEEPER_TEST_APP: String(app.port),
+     };
+     const child = spawn(process.execPath, ['--import', 'tsx', '--import', `data:text/javascript,${encodeURIComponent(PRELOAD)}`, 'src/keeper.ts'], {
+       cwd: SERVER_DIR,
+       env,
+       stdio: ['ignore', 'pipe', 'inherit'],
+     });
+     onTestFinished(() => void child.kill('SIGKILL'));
+     const exit = once(child, 'exit');
+     const said: Record<string, unknown>[] = [];
+-    const bothDoors = new Promise<void>(resolve => {
++    const everyDoor = new Promise<void>(resolve => {
+       createInterface({ input: child.stdout as NodeJS.ReadableStream }).on('line', line => {
+-        said.push(JSON.parse(line) as Record<string, unknown>);
+-        if (said.filter(word => word.asked).length === 2) resolve();
++        /* The keeper's own log lines go here too. */
++        if (line.startsWith('{')) said.push(JSON.parse(line) as Record<string, unknown>);
++        if (said.filter(word => word.asked).length === 3) resolve();
+       });
+     });
+-    await bothDoors;
++    await everyDoor;
+     const doors = said.filter(word => word.asked);
+     return { child, dir, said, doors, exit, front: { host: '127.0.0.1', port: doors[0]!.port as number } };
+   }
+ 
+-  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link door to itself, and exits 0 on %s', async signal => {
++  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link doors to itself, and exits 0 on %s', async signal => {
+     const { child, dir, said, doors, exit, front } = await container(await echoHeaders());
+     expect(doors.map(door => door.asked)).toEqual([
+       { port: KEEPER_PORTS.front, host: '0.0.0.0' },
+       { port: KEEPER_PORTS.linkHttp, host: '127.0.0.1' },
++      { port: LINK_TLS_PORT, host: '127.0.0.1' },
+     ]);
+     expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
+     expect(said.find(word => word.target)?.target).toEqual({ host: 'app', port: 8080 });
+     expect(wordIn(dir)).toBe('lead');
+     child.kill(signal);
+     expect(await exit).toEqual([0, null]);
+   });
+ 
+diff --git a/apps/server/test/link-listener.test.ts b/apps/server/test/link-listener.test.ts
+index 733f72b5..a00362a0 100644
+--- a/apps/server/test/link-listener.test.ts
++++ b/apps/server/test/link-listener.test.ts
+@@ -1,54 +1,58 @@
+ import { once } from 'node:events';
+ import http from 'node:http';
+ import net from 'node:net';
+ import { Duplex } from 'node:stream';
+ import tls, { type TLSSocket } from 'node:tls';
+-import type { FastifyInstance } from 'fastify';
+-import { describe, expect, it, onTestFinished } from 'vitest';
+-import { LinkListener } from '../src/modules/tls/listener.js';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
++import { LinkListener, linkVisitor } from '../src/modules/tls/listener.js';
+ import { selfSigned } from '../src/modules/tls/x509.js';
+-import { as, listen, SETUP, setUpCompany, testApp } from './helpers.js';
+-import { visitorHeader } from './proxy-v2.js';
+-
+-const HOST = 'acme.hornhoof.org';
+-const VISITOR = '203.0.113.7';
+-const OTHER_VISITOR = '203.0.113.8';
+-const IS_TUNNEL = { TUNNEL_HOST: '127.0.0.1' };
+-const NOT_TUNNEL = { TUNNEL_HOST: '192.0.2.10' };
++import { proxyV2, visitorHeader } from './proxy-v2.js';
++
++const HOST = 'acme.hornhoof.test';
++const VISITOR = '203.0.113.9';
+ const TLS_CLIENT = { servername: HOST, rejectUnauthorized: false };
++const V2_LOCAL = 0x20;
++
++/* What the keeper's third door is here: a server with no port of its own, which says who the listener says it serves. */
++function sayingWho(options: http.ServerOptions = {}): http.Server {
++  return http.createServer(options, (req, res) => {
++    req.resume();
++    res.end(JSON.stringify({ visitor: linkVisitor(req.socket) ?? null }));
++  });
++}
+ 
+-async function listening(env: NodeJS.ProcessEnv = IS_TUNNEL) {
+-  const { app, config } = await testApp(env);
+-  const ceo = await setUpCompany(app);
+-  const listener = new LinkListener({ app, config, log: app.log });
+-  const port = await listener.listen(0, '127.0.0.1');
++const quietLog = { warn: () => {} };
++
++async function listening(server = sayingWho()) {
++  const listener = new LinkListener({ server, log: quietLog });
++  const port = await listener.listen(0);
+   onTestFinished(() => listener.close(0));
+-  return { app, config, ceo, listener, port };
++  return { listener, port, server };
+ }
+ 
+ async function rawConnection(port: number): Promise<net.Socket> {
+   const socket = net.connect(port, '127.0.0.1');
+   socket.on('error', () => {});
+   onTestFinished(() => void socket.destroy());
+   await once(socket, 'connect');
+   return socket;
+ }
+ 
+ async function secured(socket: TLSSocket): Promise<TLSSocket> {
+   onTestFinished(() => void socket.destroy());
+   await once(socket, 'secureConnect');
+   return socket;
+ }
+ 
+-/* A connection as the tunnel container opens it for a visitor: the PROXY header, then TLS. */
+-async function overTls(port: number, visitor = VISITOR): Promise<TLSSocket> {
++/* A connection as the keeper's frpc opens it for a visitor: the PROXY header, then TLS. */
++async function overTls(port: number, header = visitorHeader(VISITOR)): Promise<TLSSocket> {
+   const raw = await rawConnection(port);
+-  raw.write(visitorHeader(visitor));
++  raw.write(header);
+   return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
+ }
+ 
+ /* TLS whose first bytes leave in one write with the header, so that the listener reads both in one segment. */
+ async function overTlsInOneWrite(port: number): Promise<TLSSocket> {
+   const raw = await rawConnection(port);
+   let header: Buffer | null = visitorHeader(VISITOR);
+   const carrier = new Duplex({
+@@ -66,83 +70,39 @@ async function overTlsWithHeaderInTwoWrites(port: number): Promise<TLSSocket> {
+   const raw = await rawConnection(port);
+   const header = visitorHeader(VISITOR);
+   raw.write(header.subarray(0, 10));
+   await new Promise(resolve => setTimeout(resolve, 50));
+   raw.write(header.subarray(10));
+   return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
+ }
+ 
+-type Asked = { method?: string; path: string; body?: object; headers?: Record<string, string> };
+-type Answer = { status: number; cookies: string[]; body: string };
++type Answer = { status: number; body: string };
+ 
+ /* A request over a connection that is already open, as one http client would send it. */
+-function ask(socket: TLSSocket, { method = 'GET', path, body, headers = {} }: Asked): Promise<Answer> {
++function ask(socket: TLSSocket, { path }: { path: string }): Promise<Answer> {
+   return new Promise((resolve, reject) => {
+-    const typed = body ? { 'content-type': 'application/json' } : {};
+-    const request = http.request({ createConnection: () => socket, method, path, headers: { host: HOST, ...typed, ...headers } }, response => {
++    const request = http.request({ createConnection: () => socket, path, headers: { host: HOST } }, response => {
+       const chunks: Buffer[] = [];
+       response.on('data', chunk => chunks.push(chunk));
+-      response.on('end', () => resolve({ status: response.statusCode!, cookies: response.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }));
++      response.on('end', () => resolve({ status: response.statusCode!, body: Buffer.concat(chunks).toString() }));
+     });
+     request.on('error', reject);
+-    request.end(body ? JSON.stringify(body) : undefined);
++    request.end();
+   });
+ }
+ 
+ const health = { path: '/api/health' };
+ 
+-async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}, email = 'x@acme.com'): Promise<number> {
+-  const body = { email, password: 'not the password' };
+-  return (await ask(await overTls(port, visitor), { method: 'POST', path: '/api/auth/login', body, headers })).status;
+-}
+-
+-/* The per email and address limit stops the eleventh. */
+-const LIMITED_AFTER = 10;
+-
+-/* Wrong sign-ins from one visitor, each with another email, so that only the limit per address fills. */
+-const ADDRESS_LIMIT = 30;
+-async function fillAddressLimit(port: number, visitor: string): Promise<void> {
+-  for (let i = 0; i < ADDRESS_LIMIT; i++) expect(await wrongSignIn(port, visitor, {}, `x${i}@acme.com`)).toBe(401);
+-}
+-const wrongWithNewEmail = (port: number, visitor: string) => wrongSignIn(port, visitor, {}, `new-${visitor}@acme.com`);
+-
+ async function closedAfterMs(socket: net.Socket): Promise<number> {
+   const started = performance.now();
+   await once(socket, 'close');
+   return performance.now() - started;
+ }
+ 
+-const upgrade = (headers: string[] = []) =>
+-  [
+-    'GET /api/nodes/socket HTTP/1.1',
+-    `Host: ${HOST}`,
+-    'Upgrade: websocket',
+-    'Connection: Upgrade',
+-    'Sec-WebSocket-Version: 13',
+-    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+-    ...headers,
+-    '',
+-    '',
+-  ].join('\r\n');
+-
+-async function statusLineOf(socket: net.Socket, request: string): Promise<string> {
+-  socket.write(request);
+-  const [answer] = (await once(socket, 'data')) as [Buffer];
+-  return answer.toString().split('\r\n')[0]!;
+-}
+-
+-async function nodeKey(app: FastifyInstance, ceo: string): Promise<string> {
+-  const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+-  const code = (connected.json().command as string).split('--join ')[1]!;
+-  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload });
+-  return joined.json().nodes[0].key as string;
+-}
+-
+ describe('the certificate of the TLS listener', () => {
+   it("serves a stand-in for the link's host until it is given a certificate", async () => {
+     const { listener, port } = await listening();
+     expect((await overTls(port)).getPeerCertificate().subjectaltname).toBe('DNS:hornhoof.invalid');
+ 
+     await listener.use(HOST, null);
+     const standIn = (await overTls(port)).getPeerCertificate();
+     expect(standIn.subjectaltname).toBe(`DNS:${HOST}`);
+@@ -169,73 +129,45 @@ describe('the certificate of the TLS listener', () => {
+   it('keeps what it serves when it is given a certificate that does not load', async () => {
+     const { listener, port } = await listening();
+     await listener.use(HOST, null);
+     await expect(listener.use(HOST, { certPem: 'not a certificate', keyPem: 'not a key' })).rejects.toThrow();
+     expect((await overTls(port)).getPeerCertificate().subjectaltname).toBe(`DNS:${HOST}`);
+   });
+ });
+ 
+-describe('a request through the TLS listener', () => {
+-  it('answers as over the link', async () => {
++describe('a connection through the TLS listener', () => {
++  it('reaches the server it was given, with the visitor of the PROXY header', async () => {
+     const { port } = await listening();
+-    const answer = await ask(await overTls(port), health);
+-    expect(JSON.parse(answer.body)).toEqual({ ok: true });
+-
+-    const body = { email: 'ivan@acme.com', password: SETUP.password };
+-    const signedIn = await ask(await overTls(port), { method: 'POST', path: '/api/auth/login', body });
+-    expect(signedIn.status).toBe(200);
+-    expect(signedIn.cookies.some(cookie => cookie.startsWith('__Host-hh_session='))).toBe(true);
+-  });
+-
+-  it('takes the visitor from the PROXY header of the tunnel container only', async () => {
+-    const trusted = await listening(IS_TUNNEL);
+-    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(trusted.port, VISITOR)).toBe(401);
+-    expect(await wrongSignIn(trusted.port, VISITOR)).toBe(429);
+-    expect(await wrongSignIn(trusted.port, OTHER_VISITOR)).toBe(401);
+-
+-    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
+-    const other = await listening(NOT_TUNNEL);
+-    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(other.port, VISITOR)).toBe(401);
+-    expect(await wrongSignIn(other.port, OTHER_VISITOR)).toBe(429);
+-  });
+-
+-  it('counts the limit of 30 an hour per address by the visitor of the PROXY header', async () => {
+-    const trusted = await listening(IS_TUNNEL);
+-    await fillAddressLimit(trusted.port, VISITOR);
+-    expect(await wrongWithNewEmail(trusted.port, VISITOR)).toBe(429);
+-    expect(await wrongWithNewEmail(trusted.port, OTHER_VISITOR)).toBe(401);
+-
+-    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
+-    const other = await listening(NOT_TUNNEL);
+-    await fillAddressLimit(other.port, VISITOR);
+-    expect(await wrongWithNewEmail(other.port, OTHER_VISITOR)).toBe(429);
++    expect(JSON.parse((await ask(await overTls(port), health)).body)).toEqual({ visitor: VISITOR });
+   });
+ 
+-  it('does not believe an X-Forwarded-For the visitor wrote', async () => {
++  it('has no visitor when the PROXY header names none', async () => {
+     const { port } = await listening();
+-    for (let i = 0; i < LIMITED_AFTER; i++) {
+-      expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': `198.51.100.${i}` })).toBe(401);
+-    }
+-    expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': '198.51.100.99' })).toBe(429);
++    const answer = await ask(await overTls(port, proxyV2({ versionAndCommand: V2_LOCAL })), health);
++    expect(JSON.parse(answer.body)).toEqual({ visitor: null });
+   });
+ 
+-  it('carries a WebSocket upgrade', async () => {
+-    const { app, port } = await listening();
+-    const plain = new URL((await listen(app)).replace('ws:', 'http:'));
+-    const overHttp = await statusLineOf(await rawConnection(Number(plain.port)), upgrade());
+-    expect(overHttp).toMatch(/^HTTP\/1\.1 \d{3} /);
+-    expect(await statusLineOf(await overTls(port), upgrade())).toBe(overHttp);
++  it('carries an upgrade', async () => {
++    const server = sayingWho();
++    server.on('upgrade', (_req, socket) => socket.write('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
++    const { port } = await listening(server);
++    const client = await overTls(port);
++    client.write(`GET /socket HTTP/1.1\r\nHost: ${HOST}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
++    const [answer] = (await once(client, 'data')) as [Buffer];
++    expect(answer.toString().split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
+   });
+ 
+-  it('opens a WebSocket for a node with its key', async () => {
+-    const { app, ceo, port } = await listening();
+-    const key = await nodeKey(app, ceo);
+-    const line = await statusLineOf(await overTls(port), upgrade([`Authorization: Bearer ${key}`]));
+-    expect(line).toBe('HTTP/1.1 101 Switching Protocols');
++  /* The server has no port of its own, and Node times a connection's headers only on a server that listens. */
++  it('holds a connection to the time the server gives for its headers', async () => {
++    const { port } = await listening(sayingWho({ requestTimeout: 0, headersTimeout: 100, connectionsCheckingInterval: 20 }));
++    const client = await overTls(port);
++    client.write(`GET / HTTP/1.1\r\nHost: ${HOST}\r\n`);
++    const [answer] = (await once(client, 'data')) as [Buffer];
++    expect(answer.toString().split('\r\n')[0]).toBe('HTTP/1.1 408 Request Timeout');
+   });
+ });
+ 
+ describe('how a connection opens', () => {
+   it('reads a TLS hello that came in one segment with the header', async () => {
+     const { port } = await listening();
+     expect((await ask(await overTlsInOneWrite(port), health)).status).toBe(200);
+   });
+@@ -330,21 +262,29 @@ describe('how a connection opens', () => {
+ 
+     expect(await garbledMs).toBeLessThan(1000);
+     expect((await ask(await overTls(port), health)).status).toBe(200);
+   });
+ });
+ 
+ describe('opening the TLS listener', () => {
+   it('fails when the port is taken', async () => {
+-    const { app, config, port } = await listening();
+-    const second = new LinkListener({ app, config, log: app.log });
++    const { port } = await listening();
++    const second = new LinkListener({ server: sayingWho(), log: quietLog });
+     await expect(second.listen(port, '127.0.0.1')).rejects.toMatchObject({ code: 'EADDRINUSE' });
+     await second.close(0);
+   });
++
++  /* Every PROXY header is believed, which is safe only while nobody but the keeper's frpc can reach the port. */
++  it('listens on 127.0.0.1 unless told otherwise', async () => {
++    const asked = vi.spyOn(net.Server.prototype, 'listen');
++    onTestFinished(() => void asked.mockRestore());
++    await listening();
++    expect(asked.mock.calls[0]!.slice(0, 2)).toEqual([0, '127.0.0.1']);
++  });
+ });
+ 
+ describe('closing the TLS listener', () => {
+   it('stops taking connections when closed', async () => {
+     const { listener, port } = await listening();
+     const asking = await overTls(port);
+     const silent = await overTls(port);
+     const silentMs = closedAfterMs(silent);
+diff --git a/apps/server/test/tunnel.test.ts b/apps/server/test/tunnel.test.ts
+index 66f68069..b4422d0c 100644
+--- a/apps/server/test/tunnel.test.ts
++++ b/apps/server/test/tunnel.test.ts
+@@ -1,99 +1,136 @@
+-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+-import { describe, expect, it, onTestFinished } from 'vitest';
++import { setTimeout as sleep } from 'node:timers/promises';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
+ import { until } from './helpers.js';
+ 
+-/* A stand-in for the tunnel client: it writes the token it was started with and its process id, then runs until it is
+-   stopped, or ends at once when its token says so. */
++/* A stand-in for the tunnel client: it writes the token it was started with, its process id and whether it can see the
++   keeper's secret, then runs until it is stopped, or ends at once when its token says so. */
+ const FAKE_CLIENT = `
+ const [out, token] = process.argv.slice(1);
+-require('node:fs').appendFileSync(out, token + ' ' + process.pid + '\\n');
++require('node:fs').appendFileSync(out, [token, process.pid, 'HORNHOOF_SECRET' in process.env].join(' ') + '\\n');
+ if (token === 'ends') process.exit(3);
+ setInterval(() => {}, 1000);
+ `;
+ 
+-function tunnel() {
++type Answer = TunnelSettings | null | undefined;
++
++function tunnel({ program = process.execPath, first = null as Answer } = {}) {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-'));
+-  const file = join(dir, 'tunnel.json');
+   const out = join(dir, 'started.txt');
+   const lines: string[] = [];
++  let answer = first;
++  let reads = 0;
+   const keeper = new TunnelKeeper({
+-    file,
++    read: async () => {
++      reads++;
++      return answer;
++    },
+     everyMs: 20,
+     restartMs: 30,
+     clientFor: (s: TunnelSettings) => {
+       if (s.tunnel.token === 'unusable') throw new Error('The tunnel settings name no server.');
+-      return { program: process.execPath, args: ['-e', FAKE_CLIENT, out, String(s.tunnel.token)] };
++      return { program, args: ['-e', FAKE_CLIENT, out, String(s.tunnel.token)] };
+     },
+     log: line => lines.push(line),
+   });
+   onTestFinished(() => keeper.stop());
+-  const write = (token: string) => writeFileSync(file, JSON.stringify({ url: 'https://acme.hornhoof.test', name: 'acme', key: 'k', tunnel: { token } }));
++  const answers = (next: Answer) => {
++    answer = next;
++  };
++  const write = (token: string) => answers(settingsWith(token));
+   const started = () => (existsSync(out) ? readFileSync(out, 'utf8').trim().split('\n').map(l => l.split(' ')) : []);
+   const alive = (pid: string) => {
+     try {
+       process.kill(Number(pid), 0);
+       return true;
+     } catch {
+       return false;
+     }
+   };
+-  return { keeper, file, write, started, alive, lines };
++  const readsFrom = async (count: number) => {
++    const from = reads;
++    await until(() => reads >= from + count);
++  };
++  return { keeper, answers, write, started, alive, lines, readsFrom };
+ }
+ 
+-describe('the tunnel container', () => {
++const settingsWith = (token: string): TunnelSettings => ({ url: 'https://acme.hornhoof.test', name: 'acme', key: 'k', tunnel: { token }, mode: 'http' });
++
++describe('the tunnel keeper', () => {
+   it('waits while there are no settings, then starts the client with them', async () => {
+-    const { keeper, write, started } = tunnel();
++    const { keeper, write, started, readsFrom } = tunnel();
+     keeper.start();
+-    await new Promise(r => setTimeout(r, 100));
++    await readsFrom(3);
+     expect(started()).toEqual([]);
+     write('first');
+     await until(() => started().length === 1);
+     expect(started()[0]![0]).toBe('first');
+   });
+ 
+-  it('starts the client again with new settings, and stops it when they go', async () => {
+-    const { keeper, file, write, started, alive } = tunnel();
++  it('starts the client again with new settings', async () => {
++    const { keeper, write, started, alive } = tunnel();
+     write('first');
+     keeper.start();
+     await until(() => started().length === 1);
+     const firstPid = started()[0]![1]!;
+     write('second');
+     await until(() => started().length === 2);
+     expect(started()[1]![0]).toBe('second');
+     await until(() => !alive(firstPid));
+-    const secondPid = started()[1]![1]!;
+-    rmSync(file);
+-    await until(() => !alive(secondPid));
+-    await new Promise(r => setTimeout(r, 100));
+-    expect(started()).toHaveLength(2);
+   });
+ 
+-  it('starts a client that ended again, after a pause', async () => {
+-    const { keeper, write, started, lines } = tunnel();
+-    write('ends');
++  it('stops it when read answers null', async () => {
++    const { keeper, answers, write, started, alive, readsFrom } = tunnel();
++    write('first');
+     keeper.start();
+-    await until(() => started().length >= 3);
+-    expect(lines.some(l => l.includes('ended'))).toBe(true);
++    await until(() => started().length === 1);
++    answers(null);
++    await until(() => !alive(started()[0]![1]!));
++    await readsFrom(3);
++    expect(started()).toHaveLength(1);
++  });
++
++  it('keeps the client running while read answers undefined', async () => {
++    const { keeper, answers, write, started, alive, readsFrom } = tunnel();
++    write('first');
++    keeper.start();
++    await until(() => started().length === 1);
++    answers(undefined);
++    await readsFrom(5);
++    expect(started()).toHaveLength(1);
++    expect(alive(started()[0]![1]!)).toBe(true);
++
++    /* The same settings after that are no change, since each start may cost the link up to 40 s. */
++    write('first');
++    await readsFrom(5);
++    expect(started()).toHaveLength(1);
+   });
+ 
+-  it('keeps waiting on settings it cannot read', async () => {
+-    const { keeper, file, write, started, lines } = tunnel();
+-    writeFileSync(file, '{not json');
++  it('starts nothing while read answers undefined from the start', async () => {
++    const { keeper, write, started, readsFrom } = tunnel({ first: undefined });
+     keeper.start();
+-    await until(() => lines.some(l => l.includes('cannot read')));
++    await readsFrom(3);
+     expect(started()).toEqual([]);
+     write('first');
+     await until(() => started().length === 1);
+   });
+ 
++  it('starts a client that ended again, after a pause', async () => {
++    const { keeper, write, started, lines } = tunnel();
++    write('ends');
++    keeper.start();
++    await until(() => started().length >= 3);
++    expect(lines.some(l => l.includes('ended'))).toBe(true);
++  });
++
+   it('keeps waiting on settings the client cannot use', async () => {
+     const { keeper, write, started, lines } = tunnel();
+     write('unusable');
+     keeper.start();
+     await until(() => lines.some(l => l.includes('cannot use')));
+     expect(started()).toEqual([]);
+     write('first');
+     await until(() => started().length === 1);
+@@ -102,9 +139,57 @@ describe('the tunnel container', () => {
+   it('stops the client when it stops itself', async () => {
+     const { keeper, write, started, alive } = tunnel();
+     write('first');
+     keeper.start();
+     await until(() => started().length === 1);
+     await keeper.stop();
+     expect(alive(started()[0]![1]!)).toBe(false);
+   });
++
++  it('starts no client for a read that answers after it stopped', async () => {
++    let answerNow: (settings: TunnelSettings) => void = () => {};
++    const reading = new Promise<TunnelSettings>(resolve => {
++      answerNow = resolve;
++    });
++    const client = vi.fn(() => ({ program: process.execPath, args: ['-e', ''] }));
++    const keeper = new TunnelKeeper({ read: () => reading, everyMs: 1000, restartMs: 30, clientFor: client, log: () => {} });
++    keeper.start();
++    await keeper.stop();
++    answerNow(settingsWith('late'));
++    await sleep(20);
++    expect(client).not.toHaveBeenCalled();
++  });
++
++  it('reads once at a time, however long a read takes', async () => {
++    let reads = 0;
++    let finishRead = () => {};
++    const keeper = new TunnelKeeper({
++      read: () => {
++        reads++;
++        return new Promise(resolve => {
++          finishRead = () => resolve(null);
++        });
++      },
++      everyMs: 5,
++      restartMs: 30,
++      clientFor: () => ({ program: process.execPath, args: [] }),
++      log: () => {},
++    });
++    onTestFinished(() => keeper.stop());
++    keeper.start();
++    await sleep(50);
++    expect(reads).toBe(1);
++    finishRead();
++    await until(() => reads === 2);
++  });
++
++  /* frpc fills in the environment wherever its config says {{ .Envs.NAME }}, and the config carries what the relay gave. */
++  it("gives the client none of the keeper's secrets, and finds it by the PATH", async () => {
++    vi.stubEnv('HORNHOOF_SECRET', 'not a real secret');
++    onTestFinished(() => void vi.unstubAllEnvs());
++    const { keeper, write, started } = tunnel({ program: 'node' });
++    write('first');
++    keeper.start();
++    await until(() => started().length === 1);
++    expect(started()[0]![2]).toBe('false');
++  });
+ });
+
+## e79cc006 Take the keeper's door defaults in one place, so that start stays under the CRAP limit
+
+The author check on the commit before found start at CRAP 13.7: each door's default was its own branch, and the defaults
+are taken only by the container, which runs in a child process that coverage does not see. Nothing changes in what it
+does: the keeper tests pass, and the container test still sees the same ports and hosts asked for.
+
+---
+ apps/server/src/modules/keeper/keeper.ts | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/apps/server/src/modules/keeper/keeper.ts b/apps/server/src/modules/keeper/keeper.ts
+index 0dbc7e46..0c5a14c8 100644
+--- a/apps/server/src/modules/keeper/keeper.ts
++++ b/apps/server/src/modules/keeper/keeper.ts
+@@ -10,16 +10,18 @@ import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.j
+ import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
+ import { servedCertificate } from '../tls/store.js';
+ import { certInfo } from '../tls/x509.js';
+ import { writeKeeperState, type KeeperState, type Mode } from './state.js';
+ import { updaterBusy } from './updater-status.js';
+ 
+ export const KEEPER_PORTS = { peer: 7070, front: 7080, linkHttp: 7081 } as const;
+ 
++const DOOR_PORTS = { front: KEEPER_PORTS.front, linkHttp: KEEPER_PORTS.linkHttp, linkTls: LINK_TLS_PORT };
++
+ export type KeeperOptions = {
+   config: Config;
+   /* Where the link and its certificate are read from. Null: no link, as for a keeper with no DATABASE_URL. */
+   db: Db | null;
+   app: Target;
+   /* Null: no socket on the front port is front. */
+   frontHost: string | null;
+   log: (line: string) => void;
+@@ -157,22 +159,23 @@ export class Keeper {
+     this.listener = new LinkListener({ server: this.door(visitorFromTls), log });
+   }
+ 
+   mode(): Mode {
+     return this.current;
+   }
+ 
+   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
+-    const { host, ports, frontHost, everyMs, db } = this.opts;
++    const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, db } = this.opts;
++    const at = { ...DOOR_PORTS, ...ports };
+     this.giveWord();
+-    const front = await this.open(visitorFromFront(frontHost), ports?.front ?? KEEPER_PORTS.front, host ?? '0.0.0.0');
+-    const linkHttp = await this.open(visitorFromLink, ports?.linkHttp ?? KEEPER_PORTS.linkHttp, LINK_HOST);
+-    const linkTls = await this.listener.listen(ports?.linkTls ?? LINK_TLS_PORT);
+-    this.timer = setInterval(() => this.giveWord(), everyMs ?? EVERY_MS);
++    const front = await this.open(visitorFromFront(frontHost), at.front, host);
++    const linkHttp = await this.open(visitorFromLink, at.linkHttp, LINK_HOST);
++    const linkTls = await this.listener.listen(at.linkTls);
++    this.timer = setInterval(() => this.giveWord(), everyMs);
+     if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
+     return { front, linkHttp, linkTls };
+   }
+ 
+   async stop(): Promise<void> {
+     if (this.timer) clearInterval(this.timer);
+     if (this.certificateTimer) clearInterval(this.certificateTimer);
+     this.timer = this.certificateTimer = null;
+
+## e55719a6 Run front, keeper and migrate in place of the tunnel, and start the database for logical copies
+
+Front alone publishes the web port, the keeper holds the peer port and the control folder, and migrate runs once before the app starts. The app drops its port, believes the keeper, and waits for the database, migrate and the keeper. The database starts with the settings logical copies need. The updater keeps no depends_on, since the installer's take-over runs compose up updater without --no-deps. Every port has a :- default so an empty value in a new .env reads as unset. The Dockerfile CMD stays main.js for the app; front, keeper and migrate each override it through command.
+
+The keeper's environment keys are the plan's list: tunnelSettings, readLinkMode and servedCertificate read only databaseUrl, secret, acmeDirectory and machineId, and the keeper reads controlDir, so no field joined the list. RELAY_URL stays as the plan has it.
+
+Ruling: the empty-value test models compose's documented :- rule in a small fill function, since Docker is not run here - why: Docker never runs on this machine - cost if wrong: a compose version that treats an empty value differently would show only at the batch's rehearsal.
+
+---
+ Dockerfile                       |   2 +-
+ apps/server/test/compose.test.ts | 139 +++++++++++++++++++++++++++++++++++----
+ apps/server/test/pins.test.ts    |   9 ++-
+ compose.yaml                     |  88 +++++++++++++++++++------
+ 4 files changed, 202 insertions(+), 36 deletions(-)
+
+diff --git a/Dockerfile b/Dockerfile
+index b92dd753..f8105478 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -32,17 +32,17 @@ COPY --from=deps /app /app
+ COPY --from=build /app/packages/protocol/dist packages/protocol/dist
+ COPY --from=build /app/apps/server/dist apps/server/dist
+ COPY apps/server/drizzle apps/server/drizzle
+ COPY scripts/install.sh scripts/install.sh
+ COPY templates templates
+ # The updater takes the installer and the compose file of the build it moves to from this image.
+ COPY compose.yaml compose.yaml
+ COPY --from=build /app/apps/web/dist apps/web/dist
+-# The tunnel container runs this image too, and frpc carries the company's public link from hornhoof.org to the app.
++# The keeper runs frpc as its child, and frpc carries the company's public link from hornhoof.org to the keeper.
+ # It is the client the relay is built for, taken from its own image.
+ COPY --from=fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e /usr/bin/frpc /usr/local/bin/frpc
+ # The build this image is: CI passes the product version and the commit, and the node build the server's nodes should
+ # be, which the node image of this commit carries too.
+ ARG HORNHOOF_VERSION=
+ ARG HORNHOOF_COMMIT=
+ ARG HORNHOOF_NODE_BUILD=
+ ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT HORNHOOF_NODE_BUILD=$HORNHOOF_NODE_BUILD
+diff --git a/apps/server/test/compose.test.ts b/apps/server/test/compose.test.ts
+index 0df96e5d..1f6fa7e6 100644
+--- a/apps/server/test/compose.test.ts
++++ b/apps/server/test/compose.test.ts
+@@ -1,27 +1,142 @@
+-import { readFileSync } from 'node:fs';
++import { existsSync, readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { describe, expect, it } from 'vitest';
+ import { parse } from 'yaml';
++import { loadConfig } from '../src/config.js';
+ 
+-type Service = { image?: string; command?: string[]; volumes?: string[]; environment?: Record<string, string>; security_opt?: string[] };
+-const compose = parse(readFileSync(fileURLToPath(new URL('../../../compose.yaml', import.meta.url)), 'utf8')) as { services: Record<string, Service> };
++type DependsOn = Record<string, { condition: string }> | string[];
++type Service = {
++  image?: string;
++  command?: string[];
++  restart?: string;
++  ports?: string[];
++  volumes?: string[];
++  networks?: string[];
++  depends_on?: DependsOn;
++  environment?: Record<string, string>;
++  security_opt?: string[];
++};
++const composePath = fileURLToPath(new URL('../../../compose.yaml', import.meta.url));
++const composeText = readFileSync(composePath, 'utf8');
++const compose = parse(composeText) as { services: Record<string, Service> };
++const { front, keeper, migrate, app, db } = compose.services as Record<string, Service>;
+ 
+-describe('the tunnel service', () => {
+-  it("carries the public link with the app's own image, reading only the control folder", () => {
+-    const { tunnel, app } = compose.services;
+-    expect(tunnel!.image).toBe(app!.image);
+-    expect(tunnel!.command).toEqual(['node', 'apps/server/dist/tunnel.js']);
+-    expect(tunnel!.volumes).toEqual(['control:/control:ro']);
+-    expect(JSON.stringify(tunnel)).not.toContain('docker.sock');
++/* Compose fills `${NAME:-default}` when NAME is unset or empty, and stops on `${NAME:?message}` then. */
++function fill(value: string, env: Record<string, string>): string {
++  return value.replace(/\$\{(\w+):([-?])([^}]*)\}/g, (_all, name: string, kind: string, rest: string) => {
++    const set = env[name];
++    if (set) return set;
++    if (kind === '-') return rest;
++    throw new Error(`${name} is required`);
+   });
++}
+ 
+-  it('is the one container the app believes about https', () => {
+-    expect(compose.services.app!.environment!.TUNNEL_HOST).toBe('tunnel');
++const filled = (service: Service, env: Record<string, string>): Record<string, string> =>
++  Object.fromEntries(Object.entries(service.environment ?? {}).map(([key, value]) => [key, fill(String(value), env)]));
++
++const REQUIRED = { HORNHOOF_SECRET: Buffer.alloc(32, 7).toString('base64'), NODE_KEY: 'k'.repeat(40) };
++const FULL_ENV = {
++  ...REQUIRED,
++  POSTGRES_PASSWORD: 'pw',
++  ACME_DIRECTORY: 'https://acme.hornhoof.test/directory',
++  RELAY_URL: 'https://relay.hornhoof.test',
++  HORNHOOF_MACHINE_ID: 'a1b2c3d4'.repeat(4),
++};
++
++describe('the web port', () => {
++  it('is published by front alone, and no other service names it', () => {
++    expect(compose.services.tunnel).toBeUndefined();
++    expect(front!.ports).toEqual(['${HORNHOOF_PORT:-8080}:8080']);
++    expect(app!.ports).toBeUndefined();
++    for (const [name, service] of Object.entries(compose.services)) {
++      if (name !== 'front') expect(JSON.stringify(service)).not.toContain('HORNHOOF_PORT');
++    }
++  });
++
++  /* A new .env holds an empty HORNHOOF_PORT= through the pull, and only `:-` reads an empty value as unset. */
++  it('falls back to its default when .env holds the name empty', () => {
++    const ports = Object.values(compose.services).flatMap(service => service.ports ?? []);
++    for (const port of ports) expect(port).toMatch(/^"?\$\{\w+:-\d+\}:\d+$/);
++    expect(fill(front!.ports![0]!, { HORNHOOF_PORT: '' })).toBe('8080:8080');
++    expect(fill(keeper!.ports![0]!, { HORNHOOF_PEER_PORT: '' })).toBe('8180:7070');
++  });
++});
++
++describe('front, keeper and migrate', () => {
++  it("run from the app's own image, each with its own entry point", () => {
++    for (const [name, service] of Object.entries({ front, keeper, migrate })) {
++      expect(service!.image).toBe(app!.image);
++      expect(service!.command).toEqual(['node', `apps/server/dist/${name}.js`]);
++      expect(existsSync(fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url)))).toBe(true);
++    }
++  });
++
++  it('gives the keeper the peer port, the database, the control folder and nothing of Docker', () => {
++    expect(keeper!.ports).toEqual(['${HORNHOOF_PEER_PORT:-8180}:7070']);
++    expect(Object.keys(keeper!.environment!)).toEqual(['DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID']);
++    expect(keeper!.volumes).toEqual(['control:/control']);
++    expect(JSON.stringify(keeper)).not.toContain('docker.sock');
++    expect(keeper!.networks).toEqual(['default', 'internal']);
++  });
++
++  /* The keeper reads the link with the app's own functions, so these Config fields must come out the same in both. */
++  it("gives the keeper the app's value of every setting the link is read with", () => {
++    for (const env of [FULL_ENV, REQUIRED]) {
++      const ofApp = loadConfig(filled(app!, env));
++      const ofKeeper = loadConfig(filled(keeper!, env));
++      for (const field of ['databaseUrl', 'secret', 'acmeDirectory', 'relayUrl'] as const) expect(ofKeeper[field]).toEqual(ofApp[field]);
++      expect(ofKeeper.controlDir).toBe('/control');
++    }
++  });
++
++  it('puts migrate ahead of the app, on the internal network alone and without a restart', () => {
++    expect(app!.depends_on).toMatchObject({ migrate: { condition: 'service_completed_successfully' } });
++    expect(migrate!.restart).toBe('no');
++    expect(migrate!.networks).toEqual(['internal']);
++  });
++});
++
++describe('the app', () => {
++  it('believes only the keeper, and takes its mode from it', () => {
++    expect(app!.environment!.TUNNEL_HOST).toBe('keeper');
++    expect(app!.environment!.HORNHOOF_KEEPER).toBe('on');
++  });
++
++  it('starts after the database is healthy, migrate has ended well and the keeper has started', () => {
++    expect(app!.depends_on).toEqual({
++      db: { condition: 'service_healthy' },
++      migrate: { condition: 'service_completed_successfully' },
++      keeper: { condition: 'service_started' },
++    });
++  });
++});
++
++describe('the updater', () => {
++  /* The installer's take-over runs `compose up updater` without --no-deps, which would start whatever it waited for. */
++  it('waits for nothing', () => {
++    expect(compose.services.updater!.depends_on).toBeUndefined();
++  });
++});
++
++describe('the database', () => {
++  it('starts with what logical copies need', () => {
++    expect(db!.command).toEqual(['postgres', '-c', 'wal_level=logical', '-c', 'max_replication_slots=10', '-c', 'max_wal_senders=10', '-c', 'max_prepared_transactions=0']);
++  });
++});
++
++describe('the compose file', () => {
++  /* The updater loads the new file with the .env of the build before, which has only these two required lines. */
++  it('loads with a .env from before this build', () => {
++    const required = ['HORNHOOF_SECRET', 'NODE_KEY'];
++    for (const [, name, kind] of composeText.matchAll(/\$\{(\w+)(:[-?])?/g)) {
++      expect(kind === ':-' || (kind === ':?' && required.includes(name!))).toBe(true);
++    }
++    for (const service of Object.values(compose.services)) expect(() => filled(service, REQUIRED)).not.toThrow();
+   });
+ });
+ 
+ describe("the link's certificate", () => {
+   it('comes from the directory .env names, and from nothing else when that is empty', () => {
+     expect(compose.services.app!.environment!.ACME_DIRECTORY).toBe('${ACME_DIRECTORY:-}');
+   });
+ });
+diff --git a/apps/server/test/pins.test.ts b/apps/server/test/pins.test.ts
+index e64e6582..a44d9929 100644
+--- a/apps/server/test/pins.test.ts
++++ b/apps/server/test/pins.test.ts
+@@ -45,22 +45,25 @@ describe('what the build runs', () => {
+ 
+   it('runs the database from an image pinned by digest', () => {
+     expect(read('compose.yaml')).toMatch(/^ {4}image: postgres:17\.\d+@sha256:[0-9a-f]{64}$/m);
+   });
+ 
+   /* install.sh writes them into .env: by digest from the updater, which checked them, or by the build's tag. */
+   it("runs Hornhoof's own images as .env names them", () => {
+     const images = read('compose.yaml').split('\n').filter(l => /^ {4}image: /.test(l)).map(l => l.trim());
++    const app = 'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}';
++    /* Front, the keeper and migrate run the app's own image, so they move with the app. */
+     expect(images).toEqual([
+-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
++      app,
++      app,
++      app,
++      app,
+       expect.stringMatching(/^image: postgres:/),
+       'image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}',
+-      /* The tunnel runs the app's own image, so it moves with the app. */
+-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
+       'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
+     ]);
+   });
+ 
+   /* An unchanged node image keeps the same digest across releases so running agent programs stay up during an update. */
+   it('builds the node image reproducibly without per-commit labels, timestamps or provenance', () => {
+     const workflow = read('.github/workflows/images.yml');
+     for (const label of ['org.opencontainers.image.version', 'org.opencontainers.image.revision', 'io.hornhoof.title', 'io.hornhoof.migrations']) {
+diff --git a/compose.yaml b/compose.yaml
+index b25326e1..552ba45a 100644
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -1,28 +1,84 @@
+ services:
+-  app:
++  # Serves the company's web port and passes every request and socket on to the keeper. It holds nothing yet.
++  front:
+     build: .
+-    # install.sh names the exact image in .env: by the digest the updater checked, or by the build's tag.
+     image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
++    command: ["node", "apps/server/dist/front.js"]
+     restart: unless-stopped
+-    # install.sh picks a free port for each company's server on one computer and keeps it in .env.
++    # install.sh picks a free port for each company's server on one computer and keeps it in .env. An empty value in
++    # .env reads as unset because of the `:-`.
+     ports:
+       - "${HORNHOOF_PORT:-8080}:8080"
++    depends_on:
++      - keeper
++    networks:
++      - default
++
++  # Sets the app's mode, runs the public link's frpc as its child, ends the link's TLS and passes what comes in to the
++  # app. It reads the link from the database, and has the control folder and no Docker socket.
++  keeper:
++    build: .
++    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
++    command: ["node", "apps/server/dist/keeper.js"]
++    restart: unless-stopped
++    # The peer link's port, held from now on; nothing listens on it until the peer link's plan.
++    ports:
++      - "${HORNHOOF_PEER_PORT:-8180}:7070"
++    environment:
++      # The same database, secret, certificate directory and relay as the app, since the keeper reads the link with the
++      # app's own code.
++      DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
++      HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
++      ACME_DIRECTORY: ${ACME_DIRECTORY:-}
++      RELAY_URL: ${RELAY_URL:-}
++      # The id frpc logs in with, written once by install.sh.
++      HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
++    volumes:
++      - control:/control
++    depends_on:
++      db:
++        condition: service_healthy
++    networks:
++      - default
++      - internal
++
++  # Runs the database's migrations once, as the owner, before the app starts.
++  migrate:
++    build: .
++    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
++    command: ["node", "apps/server/dist/migrate.js"]
++    restart: "no"
++    environment:
++      DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
++    depends_on:
++      db:
++        condition: service_healthy
++    networks:
++      - internal
++
++  app:
++    build: .
++    # install.sh names the exact image in .env: by the digest the updater checked, or by the build's tag.
++    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
++    restart: unless-stopped
+     environment:
+       # install.sh puts a random database password into .env; a server set up before that keeps the one its database
+       # was made with.
+       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
+       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
+       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+-      # Where the company's public link comes from, and the one container whose word that a request came over https
+-      # the app believes.
++      # Where the company's public link comes from.
+       RELAY_URL: ${RELAY_URL:-}
+-      TUNNEL_HOST: tunnel
++      # The one container whose word on https and on the visitor's address the app believes.
++      TUNNEL_HOST: keeper
++      # The keeper sets the app's mode through the control folder.
++      HORNHOOF_KEEPER: "on"
+       # Where the link's certificate comes from: Let's Encrypt when empty, off for none.
+       ACME_DIRECTORY: ${ACME_DIRECTORY:-}
+       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
+       TASK_FILES_MB: ${TASK_FILES_MB:-}
+       # Parts of runs allowed on one physical computer at once; 1 when empty.
+       MAX_RUNS_PER_HOST: ${MAX_RUNS_PER_HOST:-}
+       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
+       # writes, so the pool counts that computer once when it joined as a machine too.
+@@ -33,23 +89,29 @@ services:
+       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+       interval: 10s
+       timeout: 5s
+       start_period: 20s
+       retries: 3
+     depends_on:
+       db:
+         condition: service_healthy
++      migrate:
++        condition: service_completed_successfully
++      keeper:
++        condition: service_started
+     networks:
+       - default
+       - internal
+ 
+   db:
+     # Pinned by digest, so every install runs the database image this build was tested with.
+     image: postgres:17.11@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
++    # Logical copies of the database need these settings.
++    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10", "-c", "max_prepared_transactions=0"]
+     restart: unless-stopped
+     environment:
+       POSTGRES_USER: hornhoof
+       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hornhoof}
+       POSTGRES_DB: hornhoof
+     volumes:
+       - pgdata:/var/lib/postgresql/data
+     healthcheck:
+@@ -97,30 +159,16 @@ services:
+     security_opt:
+       - no-new-privileges:true
+       - apparmor:unconfined
+     depends_on:
+       - app
+     networks:
+       - default
+ 
+-  # Carries the company's public link at hornhoof.org to the app. The app writes the link's settings into the control
+-  # folder; until it does, this waits. It reads nothing else, holds no Docker socket, and runs the app's own image.
+-  tunnel:
+-    build: .
+-    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
+-    command: ["node", "apps/server/dist/tunnel.js"]
+-    restart: unless-stopped
+-    volumes:
+-      - control:/control:ro
+-    depends_on:
+-      - app
+-    networks:
+-      - default
+-
+   # Moves this server to another build when someone updates from the web app: it downloads the build's images, saves
+   # the database, runs the installer that comes inside that build, and goes back if the new server does not answer.
+   # It holds the Docker socket, so it reads nothing from the app but the tag and the digests of Hornhoof's images.
+   # The server folder is mounted at the same path as on the host, so compose finds the same files from inside.
+   # While the CEO keeps access to the computer open, it also runs the orchestrator's commands on the computer, as root,
+   # in a container of its own image.
+   updater:
+     image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}
+
+## 4bb6dfb8 Count the database password default in compose four times in the install test
+
+The keeper and migrate now read POSTGRES_PASSWORD with the same default as the app, so the compose file names it four times, not twice. The author check of the first commit showed this one red test.
+
+Ruling: edit test/install-script.test.ts outside the task's file list - why: this task's compose change turns its count of the password default from 2 to 4 and nothing else in it changes - cost if wrong: Task 8, which owns the install path, may touch the same line and need a trivial merge.
+
+---
+ apps/server/test/install-script.test.ts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/apps/server/test/install-script.test.ts b/apps/server/test/install-script.test.ts
+index d2870de9..f2f7a361 100644
+--- a/apps/server/test/install-script.test.ts
++++ b/apps/server/test/install-script.test.ts
+@@ -524,20 +524,20 @@ describe('install.sh', () => {
+   it('keeps an existing .env and adds a missing NODE_KEY', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n');
+     const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+     expect(r.code).toBe(0);
+     const env = readFileSync(join(dir, '.env'), 'utf8');
+     expect(env).toContain('HORNHOOF_SECRET=keep-me');
+     expect(env).toMatch(/^NODE_KEY=.{44}$/m);
+-    /* Its database was made with the password compose gives when .env names none. */
++    /* Its database was made with the password compose gives when .env names none; the database, the app, the keeper and migrate each read it. */
+     expect(env).not.toContain('POSTGRES_PASSWORD');
+     const compose = readFileSync(fileURLToPath(new URL('../../../compose.yaml', import.meta.url)), 'utf8');
+-    expect(compose.match(/\$\{POSTGRES_PASSWORD:-hornhoof\}/g)).toHaveLength(2);
++    expect(compose.match(/\$\{POSTGRES_PASSWORD:-hornhoof\}/g)).toHaveLength(4);
+   });
+ 
+   it('replaces an existing .env whole and leaves it readable by its owner only', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     const file = join(dir, '.env');
+     writeFileSync(file, 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n', { mode: 0o644 });
+     chmodSync(file, 0o644);
+     const before = statSync(file).ino;
+

@@ -1,0 +1,85 @@
+I will inspect the pending diff against `75e8a3d`, read the changed files (`relay/relay.py`, `README.md`, `relay/test/test_peers.py`, `relay/test/test_route.py`), and check the task notes and writer report.
+I have read all changed files, the full diff against `75e8a3d`, and the task notes and writer report. Next, I will run the full test suite (`Done when`) in the background while comparing every requirement, edge case, and test assertion line by line against the brief.
+Waiting for the background `unittest` suite run to finish before running read-only verification probes against the local `frps` 0.71.1 binary in `$TMPDIR`.
+### Critical
+
+1. **[`relay/relay.py:618`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L618) - Empty-`client_id` (legacy) `Login` skips the `run_id` ownership check, letting any link key take over and drop any live session in `frps` (including another company's)**
+   - **What is wrong:** [`login_reason`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L610-L620) gates [`run_id_conflict`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L305-L317) on `if client_id and isinstance(run_id, str) and run_id:`. Although the Task 6 Interfaces bullet phrased this as "With a non-empty `run_id` and a client id", an empty `client_id` is accepted for legacy tunnels (`metas.key` with no `metas.client`), and in `frps` 0.71.1 a login with `client_id=""` and a live `run_id` still replaces the live control session for that `run_id`, violating Contract R1.3 (*"a live session is taken over only with its own run id and client id"*).
+   - **Reproduction:** Start `globex-3f2a9c1b-link` (`globex.hornhoof.org` returns `200`, `/api/clients` shows `runID = r_globex`). Send a wire `Login` frame to `frps` with `metas={"name": "acme", "key": acme_key}`, `client_id=""`, and `run_id=r_globex`. The plugin returns `{"reject": false, "unchange": true}`; `frps` accepts the login, replaces `globex-3f2a9c1b-link` with `(clientID=r_globex, online=True)`, and `globex.hornhoof.org` immediately drops to `404`.
+   - **Required fix:** Run [`run_id_conflict`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L305-L317) whenever `run_id` is non-empty, even when `client_id` is empty. For an empty `client_id`, `frps` sets `clientID == runID` (as [`check_route_holder`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L343) already relies on) and a legacy `run_id` never matches [`CLIENT`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L66), so pass `expected = client_id if client_id else ("" if CLIENT.fullmatch(run_id) else run_id)` (and refuse if `routes` records `run_id` under another binding `name`). Update the fake-dashboard fixture in [`relay/test/test_route.py:538`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_route.py#L538) (omit `'run_id': 'r1'` on initial login or register `/api/clients?runId=r1` -> `200 []`) and add a test in [`relay/test/test_peers.py`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py) proving empty-`client_id` + live `run_id` is refused.
+
+2. **[`relay/relay.py:1077`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1077), [`relay/relay.py:1125`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1125), [`relay/relay.py:1057`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1057) - Releasing a binding leaves its `visitor_keys` row intact, letting the old owner's visitor key authenticate after another company binds the name**
+   - **What is wrong:** [`do_DELETE`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1064-L1080) and [`admin`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1112-L1127) delete only from `bindings`, and [`create_binding`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L1057) / `admin add` do not clear `visitor_keys`. If a freed name is bound again by a new owner who has not issued a visitor key, [`authenticate`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L783-L798) matches the new `bindings` row with the previous owner's `visitor_keys` row.
+   - **Reproduction:** Bind `acme`, `POST /api/v1/links/acme/visitor-key` to get `vk1`, `DELETE /api/v1/bindings/acme` (`204`), bind `acme` again (getting a new link key), then `POST /frp/handler` `Login` with `metas={"name": "acme", "visitor": vk1, "client": "acme-77aa0011-visit"}` and `client_id="acme-77aa0011-visit"`. It returns `{"reject": false, "unchange": true}`.
+   - **Required fix:** Delete from `visitor_keys` via `write('DELETE FROM visitor_keys WHERE name = ?', (name,))` on binding deletion (`do_DELETE`, `admin` `release`, operator-block `unban`) and/or binding creation (`create_binding`, `admin add`), and test in [`relay/test/test_peers.py`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py) that `vk1` is rejected after `DELETE` + rebind.
+
+---
+
+### Important
+
+1. **[`relay/test/test_peers.py:68`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L68), [`relay/test/test_peers.py:215-239`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L215-L239) - `test_r5_1_peer_services` uses one shared target instead of two echo servers, and no test verifies that `stcp` services leave `routes` and `generation` untouched**
+   - **What is wrong:** Step 1 requires *"two echo servers as targets"* so visiting `-app` proves traffic reached the `-app` target rather than `-data`. [`stcp_proxies`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L59-L70) points both `-data` and `-app` at the single `self.stack.echo_port`. Also, the Interfaces require *"stcp services get no row in `routes` and no generation"*, yet `routes` is never checked anywhere in [`relay/test/test_peers.py`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py).
+   - **Reproduction:** Point `-app` at `-data`'s target in `stcp_proxies`, or make [`peer_proxy_reason`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L640-L652) insert a `routes` row / increment `generation`: all 10 tests in `test_peers.py` still pass.
+   - **Required fix:** Start two distinct echo servers returning distinct payloads for `-data` and `-app`, verify the `-app` visitor receives the app payload (and optionally verify `-data`), and assert after `stcp` registration that `routes` has no row for `acme`, `GET /api/v1/links/acme/route` stays `state == "empty"` at `generation == 0`, and an active `-link` route's `generation` does not move when `-peer` registers `stcp` services.
+
+2. **[`relay/test/test_peers.py:93-105`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L93-L105), [`relay/test/test_peers.py:233-238`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L233-L238) - `echo_closes_silent` passes on empty-body HTTP answers and leaves `request()` unguarded**
+   - **What is wrong:** [`echo_closes_silent`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L93-L105) calls `HTTPConnection.getresponse()` and checks `response.read() == b''`. Any HTTP response with `Content-Length: 0` (e.g. `200 OK` or `403` with empty body) passes `answer == b''`, failing to prove *"its connection closes with no answer"*. Also, `connection.request(...)` at line 97 is outside the reset `try` block, risking flakes if the socket resets during write.
+   - **Reproduction:** Have a local listener return `HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n`; `echo_closes_silent` passes.
+   - **Required fix:** Use a raw `socket.create_connection(("127.0.0.1", port), timeout=10)`, guard `sendall` + `recv(4096)` for `ConnectionResetError`/`BrokenPipeError`, and assert zero raw bytes (`b""`) are received before EOF/reset. (Two `[[visitors]]` blocks on `acme-77aa0011-visit` can also test both right and wrong secrets under the single client ID named in Step 1.)
+
+3. **[`relay/relay.py:299`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L299), [`relay/test/test_peers.py:169-191`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L169-L191) - `dash_clients` caps `/api/clients?runId=` at `0.5` s instead of `1` s, and `test_r1_3_run_id_of_another_client` neither pins `?runId=` nor tests with a second online client or slow dashboard**
+   - **What is wrong:**
+     1) Interfaces specify `GET <api>/api/clients?runId=<run_id> (1 s)`. [`dash_clients`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L296-L302) calls [`_dash_get`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L234) with default `cap=0.5`, refusing a good `0.7` s dashboard response during `Login` even though `Login` makes only one dashboard read inside the `1.0` s `PLUGIN_CALL_S` budget. No test checks `Login`'s 1 s deadline on slow/hanging `/api/clients?runId=` reads.
+     2) [`test_r1_3_run_id_of_another_client`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L174) pins `dash('/api/clients')` instead of `dash(f'/api/clients?runId={run_id}')`, and runs with only one online client in `frps`.
+   - **Reproduction:**
+     1) Against a fake dashboard returning `200 []` with `delay=0.7` on `/api/clients?runId=r1`, `plugin('Login', ...)` rejects with `'relay error: frps does not answer'`.
+     2) Change `dash_clients` to request `/api/clients` (ignoring `run_id`): `test_r1_3_run_id_of_another_client` and all 84 tests still pass, though in production every reconnect would fail whenever a second client is online.
+   - **Required fix:** Pass `cap=PLUGIN_CALL_S` in `dash_clients` (still bounded by `call_deadline()`), pin `dash(f'/api/clients?runId={run_id}')` (and `dash('/api/clients?runId=missing') == (200, [])`) while a second client (e.g. `globex-3f2a9c1b-link`) is also online during `test_r1_3_run_id_of_another_client`, and add fake-dashboard timing tests proving `Login` accepts a `0.7` s answer and refuses a `> 1` s hang within ~`1` s.
+
+4. **[`relay/relay.py:290-292`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L290-L292), [`relay/relay.py:603`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L603), [`relay/relay.py:628-634`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L628-L634) - Fail-closed input/dashboard boundary gaps (`empty clientID`, trailing `\n` in `CLIENT.match`, non-string `metas.client`)**
+   - **What is wrong:**
+     1) [`dash_client_records`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L290-L292) allows `{"clientID": "", "online": true}` instead of raising [`FrpsUnknown`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L230) (unlike [`dash_answer`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L275)).
+     2) `CLIENT.match(client_id)` at lines 603 and 634 uses `$`, which in Python `re` matches before a trailing `\n`, letting `'acme-3f2a9c1b-link\n'` pass `Login` and `NewProxy`.
+     3) [`offer_reason`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L628-L630) coerces non-string `metas.get('client')` (e.g. `123`) to `''` and calls `client_id_reason(name, kind, client_id, client_id)` instead of passing `metas.get('client')`, treating it as a legacy client and letting [`upsert_route`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L559) write `'123'` into `routes.client` (breaking `GET /route` with `503 unknown`).
+   - **Reproduction:**
+     - `dash_client_records(b'[{"clientID": "", "online": true}]')` returns `[{'clientID': '', 'online': True}]` instead of raising `FrpsUnknown`.
+     - `client_id_reason('acme', 'link', 'acme-3f2a9c1b-link\n', 'acme-3f2a9c1b-link\n')` returns `None`.
+     - `plugin('NewProxy', {'user': {'user': '', 'metas': {'name': 'acme', 'key': k, 'client': 123}, 'run_id': 'r1'}, 'proxy_name': 'acme', 'proxy_type': 'http', 'subdomain': 'acme'})` returns `{'reject': False, ...}` and writes `client='123'` into `routes`.
+   - **Required fix:** Require `bool(entry.get('clientID'))` in `dash_client_records`, use `CLIENT.fullmatch(client_id)` at lines 603 and 634, and reject non-string `client_id`, `run_id`, and `metas.client` (passing `metas.get('client')` as `meta_client` in `offer_reason`).
+
+5. **[`relay/test/test_peers.py:192-214`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L192-L214), [`relay/test/test_peers.py:269-272`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L269-L272), [`relay/test/test_peers.py:288-306`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L288-L306) - Missing tests for malformed `CLIENT` ids, visitor `http` proxy refusal, and `POST /visitor-key` `503 busy` contention**
+   - **What is wrong:**
+     1) [`test_r1_3_foreign_client_id_refused`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L192-L214) tests only empty or grammatically valid `<link>-<8hex>-<kind>` strings; no case tests invalid `CLIENT` syntax (bad `m8` length, non-hex/uppercase `m8`, unknown `kind`, trailing `\n`).
+     2) [`test_r5_1_peer_limits`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L269-L272) tests visitor `NewProxy` refusal only for `stcp`, not `http` (Step 1: *"for a visitor-key session: any proxy"*).
+     3) [`test_r6_2_visitor_key`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L288-L306) does not test `503 {"error": "busy"}` with `Retry-After: 1` under SQLite write-lock contention (unlike `test_route.py:213` and `test_sync.py:215`), nor missing-`Authorization` / visitor-key-as-Bearer `401`.
+   - **Reproduction:** Broadening `m8` in `CLIENT` from `[0-9a-f]{8}` to `[a-zA-Z0-9]+` leaves all 84 tests green.
+   - **Required fix:** Add malformed `CLIENT` cases to `test_r1_3_foreign_client_id_refused`, add a visitor `'http'` `NewProxy` case to `test_r5_1_peer_limits`, and add a write-lock contention test (`503 busy`, `Retry-After: 1`, existing hash preserved) plus no-key/visitor-key-as-Bearer `401` checks to `test_r6_2_visitor_key`.
+
+---
+
+### Minor
+
+1. **[`relay/relay.py:762-798`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L762-L798) - `authenticate` queries SQLite and reports `'... is blocked'` before checking key presence/validity**
+   - **What is wrong:** At `75e8a3d`, `binding_ok` returned `'this tunnel has no Hornhoof relay binding (metadatas.name and metadatas.key)'` when no key was sent and checked `key_hash` before `banned_at`. [`authenticate`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L792) runs [`binding_state`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L762-L769) first, so `{name: "acme"}` with neither `key` nor `visitor` queries SQLite and returns `'no binding acme with this key'` (or `'acme.hornhoof.org is blocked'` on a banned name even with a wrong/missing key).
+   - **Required fix:** Require either a non-empty string `metas.key` or (absent `metas.key`) a non-empty string `metas.visitor` before querying `bindings`, and check key match before returning `'... is blocked'` if exact pre-Task-6 ordering on wrong keys is wanted.
+
+2. **[`relay/test/test_peers.py:159`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_peers.py#L159) - `frps.log()` offset `mark` is captured after waiting on `second.log()` instead of before `first.pause()`**
+   - **What is wrong:** If `second` ever took close to its 15 s wait under heavy CPU load, `first`'s ~20 s eviction (`client exit success`) could land in `frps.log()` before `mark` is recorded at line 159.
+   - **Required fix:** Record `mark = len(self.stack.frps.log())` immediately before `first.pause()` at line 155.
+
+3. **[`README.md:41`](file:///Users/0x/Projects/hornhoof-edge/README.md#L41) - Logging description omits visitor-key rotation log line**
+   - **What is wrong:** [`visitor_key_answer`](file:///Users/0x/Projects/hornhoof-edge/relay/relay.py#L971) logs `new visitor key for {name}`, while [`README.md:41`](file:///Users/0x/Projects/hornhoof-edge/README.md#L41) mentions only links made or freed and `frps` logins.
+   - **Required fix:** Note in `README.md:41` that the relay also logs when a link's visitor key is replaced (naming only the link, never the key).
+
+---
+
+### Deviation Judgment ([`relay/test/test_route.py:428`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_route.py#L428), [`434`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_route.py#L434), [`449`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_route.py#L449), [`506`](file:///Users/0x/Projects/hornhoof-edge/relay/test/test_route.py#L506))
+
+- **Accepted.** Those four synthetic fixture strings in `DashboardContractTests` (`acme-c1-link`, `acme-c2-link`) predate Task 6's 8-hex `m8` grammar and call `plugin('NewProxy', ...)` directly. Without replacing them with valid IDs (`acme-a1b2c3d4-link`, `acme-d4c3b2a1-link`), `offer_reason` would reject them at `client_id_reason` before reaching the held-conflict, lock-deadline, and SQLite-busy paths those tests verify. No assertions or test semantics were weakened.
+
+---
+
+### Done When
+
+- **Command:** `PYTHONDONTWRITEBYTECODE=1 nice -n 10 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v`
+- **Result:** `OK` - **84 passed, 0 failed, 0 errors** (in 362.6 s; no processes left running, no repository files modified).

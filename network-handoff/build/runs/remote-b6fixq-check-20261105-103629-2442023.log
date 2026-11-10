@@ -1,0 +1,32 @@
+== changed files
+apps/server/src/db/sql-check.ts
+apps/server/src/db/sql-parser.ts
+apps/server/test/sql-check.test.ts
+apps/server/test/sql-parser.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+   [32m✓[39m the check as the built server runs it [2m(1)[22m
+     [33m[2m✓[22m[39m starts its worker from dist, and leaves the process free to end[33m 5191[2mms[22m[39m
+ [32m✓[39m test/sql-check.test.ts [2m([22m[2m123 tests[22m[2m)[22m[33m 22702[2mms[22m[39m
+   [32m✓[39m the check on the orchestrator's SQL [2m(123)[22m
+     [33m[2m✓[22m[39m keeps answering after a flood of texts too deep for the parser[33m 21674[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m   Affected [22m 2 of 126 test files [2m(related to 4 files)[22m
+[2m      Tests [22m [1m[32m135 passed[39m[22m[90m (135)[39m
+[2m   Start at [22m 10:39:05
+[2m   Duration [22m 28.32s[2m (tests 100%)[22m
+
+== crapper
+worst changed CRAP: 4.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 802eb186

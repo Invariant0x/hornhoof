@@ -1,0 +1,1851 @@
+# Review package: batch 4, slice delta
+
+## cc742d93 Count IPv4 visitors by their address, read a long challenge token, and say nothing false about an account
+
+The fix round of batch 4 on sign-in limits, the TLS listener and ACME, from its one review (runs/batch4-sec-merged.md).
+
+addressKey now parses a colon address into its eight groups once. An IPv4-mapped address in any form counts by its
+IPv4, others by the /64. readProxyV2 writes family 0x21 as eight plain groups, which the old pattern did not know, so
+every such visitor shared 0:0:0:0::/64 with ::1, and one stranger's 30 failures locked all of them out for an hour.
+
+The challenge route is a wildcard, with TOKEN as its bound. Fastify's maxParamLength of 100 sits under TOKEN's 128, so a
+token of 101 to 128 characters got index.html from the web app and issuance failed.
+
+account() gives back a URL it already holds and asks the CA nothing, so it no longer says a stored URL is good when a
+swallowed update said otherwise. A URL got in this very call still ignores the follow-up update's failure, and that
+failure leaves no lastProblem for a later local failure to read as its own. A failure of the create itself is thrown as
+before. issue() now calls account() as it is, since the check for a held URL lives there alone.
+
+Tests. The seam test of the listener and the limit of 30 per address replaces its it.todo. A new test reads pg_locks at
+each try's insert: the lock is still held there, and gone after. On PGlite's one connection the 100-at-once test passes
+with db.transaction removed, and this one does not, which is what holds the limit on a pool. A real race waits for plan
+3's Postgres harness; the note is beside the test.
+
+While there: longestWait seeds from the first wait, so a 60 minute limit in its last second does not say 15 minutes.
+retryAfterSeconds hands Date.parse only the form of an HTTP date, so "-5" and "retry 10" read as no header and not as no
+wait. problemOf's content type is case-insensitive. closedPort is one function for its two test files.
+
+Correction to ceb0e8a3: its message says the limits on sign-ins and invites live in the database. Only sign-ins moved;
+invites stay on the in-memory limiter.
+
+Proof: each new test seen failing for its reason first (0:0:0:0::/64; text/html for the token; /account/1 asked; refused
+with malformed in place of unreachable; 15 minutes in place of 60). The tests that pinned code already right were run
+against it broken: the seam test fails when clientAddress ignores the listener's visitor and when any address is
+believed, the lock test fails with the transaction removed, and the token tests fail with TOKEN's bound removed.
+
+Ruling: the one transaction is shown by asking pg_locks at each insert on its own connection handle, not by spying what opens the transaction - why: the database's own word tells a lock still held from one already gone, where a count of opened transactions says nothing of what ran inside them; it catches a removed transaction, a lock moved to another one and a missing lock - cost if wrong: the test reads one more thing of PGlite's, and plan 3's real race covers it anyway
+Ruling: closedPort lives in test/closed-port.ts, not in helpers.ts - why: a change in helpers.ts makes the author check run the whole server package, the lead's condition for moving it - cost if wrong: one more small test file
+Ruling: retryAfterSeconds reads an HTTP date only in IMF-fixdate, not RFC 9110's two obsolete forms - why: it is the form CAs send, a shape check is what keeps nonsense from Date.parse, and the asctime form would read in the machine's time zone - cost if wrong: a CA that sends an obsolete form gets the default wait in place of its own
+Ruling: every failure of the follow-up update is ignored when this call got the URL, a 5xx or no answer too, not only a refusal - why: this is the writer's way the lead kept, the URL is in hand, and the next order meets the same CA - cost if wrong: the same failure is told one request later by createOrder
+
+---
+ apps/server/src/auth/sign-in-limit.ts     | 22 ++++++----
+ apps/server/src/modules/tls/acme.ts       | 20 ++++++---
+ apps/server/src/modules/tls/challenges.ts |  7 ++--
+ apps/server/test/acme-fake.test.ts        | 50 ++++++++++++++++++-----
+ apps/server/test/ari.test.ts              |  9 +---
+ apps/server/test/challenges.test.ts       | 34 +++++++++++++++-
+ apps/server/test/closed-port.ts           | 10 +++++
+ apps/server/test/link-listener.test.ts    | 24 +++++++++--
+ apps/server/test/proxy-header.test.ts     |  9 +---
+ apps/server/test/proxy-v2.ts              |  8 ++++
+ apps/server/test/sign-in-limit.test.ts    | 68 ++++++++++++++++++++++++++++++-
+ 11 files changed, 210 insertions(+), 51 deletions(-)
+
+diff --git a/apps/server/src/auth/sign-in-limit.ts b/apps/server/src/auth/sign-in-limit.ts
+index 9f8a008d..c5f9219c 100644
+--- a/apps/server/src/auth/sign-in-limit.ts
++++ b/apps/server/src/auth/sign-in-limit.ts
+@@ -15,54 +15,58 @@ export const SIGN_IN_LIMITS = {
+ 
+ type LimitName = keyof typeof SIGN_IN_LIMITS;
+ const LIMIT_NAMES = Object.keys(SIGN_IN_LIMITS) as LimitName[];
+ const KEEP_MS = Math.max(...LIMIT_NAMES.map(name => SIGN_IN_LIMITS[name].windowMs));
+ 
+ /* The pg_advisory_xact_lock key of sign-in tries, used for nothing else. */
+ export const SIGN_IN_LOCK = 0x68680001;
+ 
+-const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
+ const DOTTED_TAIL = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+ 
+ const hexGroup = (n: number) => n.toString(16);
+ const asGroups = (side: string) => (side ? side.split(':') : []);
+ 
+ /* Replaces a trailing dotted IPv4 with its two hex groups, so every address is plain colon groups. */
+ function withoutDottedTail(address: string): string {
+   const tail = DOTTED_TAIL.exec(address);
+   if (!tail) return address;
+   const [a, b, c, d] = tail.slice(1).map(Number) as [number, number, number, number];
+   return `${address.slice(0, tail.index)}${hexGroup(a * 256 + b)}:${hexGroup(c * 256 + d)}`;
+ }
+ 
+-function firstFourGroups(address: string): string[] {
++/* The eight groups of a colon address, in whatever form it came: with `::`, a dotted tail or a zone, in any case. */
++function eightGroups(address: string): number[] {
+   const [left = '', right = ''] = withoutDottedTail(address.split('%')[0]!).split('::');
+   const head = asGroups(left);
+-  const tail = address.includes('::') ? asGroups(right) : [];
++  const tail = asGroups(right);
+   const gap = Array<string>(Math.max(0, 8 - head.length - tail.length)).fill('0');
+-  return [...head, ...gap, ...tail].slice(0, 4).map(group => hexGroup(parseInt(group, 16)));
++  return [...head, ...gap, ...tail].map(group => parseInt(group, 16));
+ }
+ 
+-/* What the limit counts an address as: an IPv4 as its text, an IPv6 as its /64, since one visitor holds a whole /64. */
++const isIpv4Mapped = (groups: number[]) => groups.slice(0, 5).every(group => group === 0) && groups[5] === 0xffff;
++const asIpv4 = ([high, low]: number[]) => [high! >> 8, high! & 0xff, low! >> 8, low! & 0xff].join('.');
++
++/* What the limit counts an address as: an IPv4 as its text, in whichever form it came, an IPv6 as its /64, since one
++   visitor holds a whole /64. */
+ export function addressKey(address: string): string {
+-  const mapped = IPV4_MAPPED.exec(address);
+-  if (mapped) return mapped[1]!;
+-  return address.includes(':') ? `${firstFourGroups(address).join(':')}::/64` : address;
++  if (!address.includes(':')) return address;
++  const groups = eightGroups(address);
++  return isIpv4Mapped(groups) ? asIpv4(groups.slice(6)) : `${groups.slice(0, 4).map(hexGroup).join(':')}::/64`;
+ }
+ 
+ export interface FullLimit {
+   oldest: Date;
+   windowMs: number;
+ }
+ 
+ /* How long to wait: the longest of the full limits, each free again when its oldest try leaves its window. */
+ export function longestWait(full: FullLimit[], now: Date): { retryAfterS: number; windowMs: number } {
+   const waits = full.map(({ oldest, windowMs }) => ({ retryAfterS: Math.ceil((oldest.getTime() + windowMs - now.getTime()) / 1000), windowMs }));
+-  const longest = waits.reduce((a, b) => (b.retryAfterS > a.retryAfterS ? b : a), { retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
++  const longest = waits.reduce((a, b) => (b.retryAfterS > a.retryAfterS ? b : a), waits[0] ?? { retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
+   return { ...longest, retryAfterS: Math.max(1, longest.retryAfterS) };
+ }
+ 
+ /* Db is generic over the driver, so a raw statement's result is unknown here; both drivers answer { rows }. */
+ const rowsIn = <T>(result: unknown): T[] => (result as { rows: T[] }).rows;
+ 
+ type Hashes = { e: string; a: string };
+ 
+diff --git a/apps/server/src/modules/tls/acme.ts b/apps/server/src/modules/tls/acme.ts
+index 4c6a44fa..bec1d082 100644
+--- a/apps/server/src/modules/tls/acme.ts
++++ b/apps/server/src/modules/tls/acme.ts
+@@ -2,16 +2,19 @@ import * as acme from 'acme-client';
+ import { z } from 'zod';
+ 
+ export const LETS_ENCRYPT: string = acme.directory.letsencrypt.production;
+ 
+ const KEY_CURVE = 'P-256';
+ const REQUEST_TIMEOUT_MS = 15000;
+ const DETAIL_LIMIT = 200;
+ const NO_ANSWER = 'no answer';
++const PROBLEM_TYPE = 'application/problem+json';
++// The form an HTTP date is sent in. Date.parse alone also takes words like "retry 10" for some date.
++const HTTP_DATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+ const DEFAULT_BACKOFF: Backoff = { attempts: 10, min: 2000, max: 10000 };
+ 
+ export type ChallengeHooks = { answer(token: string, keyAuthorization: string): void; forget(token: string): void };
+ export type AcmeErrorKind = 'not_ready' | 'refused' | 'invalid' | 'unreachable';
+ export type Backoff = { attempts: number; min: number; max: number };
+ export type Problem = { status: number; type: string; detail: string | null; retryAfterS: number | null };
+ 
+ type Issued = { certPem: string; keyPem: string };
+@@ -35,24 +38,25 @@ export class AcmeError extends Error {
+     this.type = opts.type ?? null;
+     this.retryAfterS = opts.retryAfterS ?? null;
+   }
+ }
+ 
+ // A Retry-After is either seconds or an HTTP date, and anything else says nothing.
+ export function retryAfterSeconds(header: unknown, nowMs: number = Date.now()): number | null {
+   if (typeof header !== 'string') return null;
+-  if (/^\d+$/.test(header.trim())) return Number(header);
+-  const at = Date.parse(header);
++  const value = header.trim();
++  if (/^\d+$/.test(value)) return Number(value);
++  const at = HTTP_DATE.test(value) ? Date.parse(value) : Number.NaN;
+   return Number.isNaN(at) ? null : Math.max(0, Math.ceil((at - nowMs) / 1000));
+ }
+ 
+ // The ACME problem document in an answer, or null when the answer is not one.
+ export function problemOf(status: number, contentType: unknown, body: unknown, retryAfter: unknown): Problem | null {
+-  if (typeof contentType !== 'string' || !contentType.startsWith('application/problem+json')) return null;
++  if (typeof contentType !== 'string' || !contentType.toLowerCase().startsWith(PROBLEM_TYPE)) return null;
+   const parsed = ProblemBody.safeParse(body);
+   if (!parsed.success) return null;
+   return { status, type: parsed.data.type, detail: parsed.data.detail ?? null, retryAfterS: retryAfterSeconds(retryAfter) };
+ }
+ 
+ // acme-client's errors carry only the problem's text, so the type and the Retry-After are read here. Only one ACME flow
+ // runs at a time in the app, so the last answer's problem is the failed step's.
+ let lastProblem: Problem | null = null;
+@@ -123,42 +127,46 @@ export class AcmeAccount {
+       accountKey: accountKeyPem,
+       accountUrl: accountUrl ?? undefined,
+       backoffAttempts: backoff.attempts,
+       backoffMin: backoff.min,
+       backoffMax: backoff.max,
+     });
+   }
+ 
++  // A URL already held is given back unasked: nothing is verified, so nothing false is said. The next order is what
++  // meets the CA.
+   account(): Promise<string> {
+     return saying(async () => {
+-      await this.makeOrFind();
++      if (!this.holdsAccountUrl()) await this.makeOrFind();
+       return this.client.getAccountUrl();
+     });
+   }
+ 
+   issue(host: string, hooks: ChallengeHooks, opts: { replaces?: string; selfCheck?: boolean } = {}): Promise<Issued> {
+     return saying(async () => {
+-      if (!this.holdsAccountUrl()) await this.account();
++      await this.account();
+       const order = await this.client.createOrder(orderRequest(host, opts.replaces));
+       for (const authz of await this.client.getAuthorizations(order)) {
+         if (authz.status !== 'valid') await this.prove(authz, order, hooks, opts.selfCheck ?? true);
+       }
+       return this.finish(order, host);
+     });
+   }
+ 
+   // No contact is sent, by decision: the first order accepts the CA's terms and gives no one's address. For a key the CA
+   // knows, acme-client follows the first answer with an update that says nothing new, and a CA may refuse that update, as
+-  // Pebble does. The account's URL came with the first answer, so such a refusal changes nothing.
++  // Pebble does. Called with no URL held, so a URL held after a throw came with this first answer, and such a refusal
++  // changes nothing: no later failure may read it as its own.
+   private async makeOrFind(): Promise<void> {
+     try {
+       await this.client.createAccount({ termsOfServiceAgreed: true });
+     } catch (err) {
+       if (!this.holdsAccountUrl()) throw err;
++      lastProblem = null;
+     }
+   }
+ 
+   private holdsAccountUrl(): boolean {
+     try {
+       this.client.getAccountUrl();
+       return true;
+     } catch {
+diff --git a/apps/server/src/modules/tls/challenges.ts b/apps/server/src/modules/tls/challenges.ts
+index 926f15ca..ac1d70ff 100644
+--- a/apps/server/src/modules/tls/challenges.ts
++++ b/apps/server/src/modules/tls/challenges.ts
+@@ -15,17 +15,18 @@ export class Challenges {
+     this.answers.delete(token);
+   }
+ 
+   get(token: string): string | undefined {
+     return this.answers.get(token);
+   }
+ }
+ 
+-// The CA asks with no session and over any port, so this route needs neither and says nothing but the answer.
++// The CA asks with no session and over any port, so this route needs neither and says nothing but the answer. A wildcard,
++// since a named parameter stops at Fastify's maxParamLength of 100, under what TOKEN allows; TOKEN is the bound.
+ export function challengeRoutes(app: FastifyInstance, challenges: Challenges): void {
+-  app.get<{ Params: { token: string } }>('/.well-known/acme-challenge/:token', async (req, reply) => {
+-    const { token } = req.params;
++  app.get<{ Params: { '*': string } }>('/.well-known/acme-challenge/*', async (req, reply) => {
++    const token = req.params['*'];
+     const keyAuthorization = TOKEN.test(token) ? challenges.get(token) : undefined;
+     if (keyAuthorization === undefined) throw new ApiError(404, 'not_found', 'Not found.');
+     return reply.type('text/plain').send(keyAuthorization);
+   });
+ }
+diff --git a/apps/server/test/acme-fake.test.ts b/apps/server/test/acme-fake.test.ts
+index c08a5376..0cadbe14 100644
+--- a/apps/server/test/acme-fake.test.ts
++++ b/apps/server/test/acme-fake.test.ts
+@@ -1,14 +1,15 @@
+ import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+ import type { AddressInfo } from 'node:net';
+ import * as acme from 'acme-client';
+ import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+-import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, retryAfterSeconds } from '../src/modules/tls/acme.js';
++import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, problemOf, retryAfterSeconds } from '../src/modules/tls/acme.js';
+ import { selfSigned } from '../src/modules/tls/x509.js';
++import { closedPort } from './closed-port.js';
+ 
+ const RATE_LIMITED = 'urn:ietf:params:acme:error:rateLimited';
+ const BAD_NONCE = 'urn:ietf:params:acme:error:badNonce';
+ const CONNECTION = 'urn:ietf:params:acme:error:connection';
+ const SERVER_INTERNAL = 'urn:ietf:params:acme:error:serverInternal';
+ const QUICK = { backoff: { attempts: 3, min: 50, max: 50 } };
+ const HOST = 'acme.test';
+ const TOKEN = 'tok-1';
+@@ -43,17 +44,17 @@ function readBody(req: IncomingMessage): Promise<string> {
+ 
+ // An ACME server on a local port: a directory, nonces, and whatever else the test gives it. It checks no signature.
+ async function fakeAcme(routes: Record<string, Handler>) {
+   const seen: { path: string; payload: Record<string, unknown> }[] = [];
+   const server = createServer((req, res) => {
+     void readBody(req).then((raw) => {
+       const path = req.url ?? '';
+       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+-      if (path === '/dir') return send(res, { body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account`, newOrder: `${base}/new-order` } });
++      if (path === '/dir') return send(res, routes[path]?.(base) ?? { body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account`, newOrder: `${base}/new-order` } });
+       if (path === '/nonce') return send(res, {});
+       seen.push({ path, payload: payloadOf(raw) });
+       return send(res, routes[path]?.(base) ?? { status: 404, text: 'not here' });
+     });
+   });
+   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+   onTestFinished(async () => {
+     server.closeAllConnections();
+@@ -118,24 +119,16 @@ function orderToProve(chain: string, authz: Handler, more: Record<string, Handle
+     '/challenge/1': () => ({ body: { status: 'processing' } }),
+     '/finalize': (base) => ({ body: orderBody(base, 'processing', authorizations(base)) }),
+     '/order/1': (base) => ({ body: orderBody(base, 'valid', { ...authorizations(base), certificate: `${base}/cert` }) }),
+     '/cert': chainAnswer(chain),
+     ...more,
+   };
+ }
+ 
+-async function closedPort(): Promise<number> {
+-  const server = createServer();
+-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+-  const { port } = server.address() as AddressInfo;
+-  await new Promise<void>((resolve) => server.close(() => resolve()));
+-  return port;
+-}
+-
+ function recordingHooks() {
+   const calls: string[] = [];
+   const answers = new Map<string, string>();
+   const hooks: ChallengeHooks = {
+     answer: (token, keyAuthorization) => {
+       calls.push(`answer ${token}`);
+       answers.set(token, keyAuthorization);
+     },
+@@ -242,16 +235,42 @@ describe('AcmeAccount, on a fake ACME server', () => {
+     const fake = await fakeAcme({
+       '/new-account': (base) => ({ ...accountMade(base), status: 200 }),
+       '/account/1': () => problem(400, 'urn:ietf:params:acme:error:malformed', 'Use POST-as-GET'),
+     });
+     expect(await (await newAccountOn(fake)).account()).toBe(fake.accountUrl);
+     expect(fake.hits('/account/1')).toBe(1);
+   });
+ 
++  it('leaves nothing of a refused update behind for a later failure to read', async () => {
++    const fake = await fakeAcme({
++      // With no newOrder, the step after the account fails on this side, before a new answer could replace the last one.
++      '/dir': (base) => ({ body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account` } }),
++      '/new-account': (base) => ({ ...accountMade(base), status: 200 }),
++      '/account/1': () => problem(400, 'urn:ietf:params:acme:error:malformed', 'Use POST-as-GET'),
++    });
++    const { hooks } = recordingHooks();
++    await expect((await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false })).rejects.toMatchObject({ kind: 'unreachable', type: null });
++  });
++
++  it('gives back a URL it was given and asks the CA nothing, since it can vouch for nothing', async () => {
++    const fake = await fakeAcme({ '/new-account': accountMade, '/account/1': () => ({ status: 500 }) });
++    const account = new AcmeAccount(fake.directoryUrl, await newAccountKey(), fake.accountUrl, QUICK);
++    expect(await account.account()).toBe(fake.accountUrl);
++    expect(fake.paths()).toEqual([]);
++  });
++
++  it('asks the CA for the account once, however often it is asked', async () => {
++    const fake = await fakeAcme({ '/new-account': accountMade });
++    const account = await newAccountOn(fake);
++    expect(await account.account()).toBe(fake.accountUrl);
++    expect(await account.account()).toBe(fake.accountUrl);
++    expect(fake.paths()).toEqual(['/new-account']);
++  });
++
+   it('accepts the terms and gives no contact', async () => {
+     const fake = await fakeAcme({ '/new-account': accountMade });
+     await (await newAccountOn(fake)).account();
+     expect(fake.payloads('/new-account')).toEqual([{ termsOfServiceAgreed: true }]);
+   });
+ 
+   it('downloads the certificate of an order that was ready from the start', async () => {
+     const { certPem: chain } = await selfSigned(HOST);
+@@ -398,9 +417,20 @@ describe('Retry-After', () => {
+   it('reads a date that has passed as no wait', () => {
+     expect(retryAfterSeconds('Wed, 04 Nov 2026 11:00:00 GMT', NOW)).toBe(0);
+   });
+ 
+   it('has nothing to say for no header or for nonsense', () => {
+     expect(retryAfterSeconds(undefined, NOW)).toBeNull();
+     expect(retryAfterSeconds('soon', NOW)).toBeNull();
+   });
++
++  it.each(['-5', 'retry 10', '12 Nov', 'Sunny 10', '2026-11-04'])('does not take %s for a date', (header) => {
++    expect(retryAfterSeconds(header, NOW)).toBeNull();
++  });
++});
++
++describe('a problem document', () => {
++  it('is known by its content type in any case', () => {
++    const body = { type: BAD_NONCE, detail: 'stale' };
++    expect(problemOf(400, 'Application/Problem+JSON; charset=utf-8', body, undefined)).toEqual({ status: 400, ...body, retryAfterS: null });
++  });
+ });
+diff --git a/apps/server/test/ari.test.ts b/apps/server/test/ari.test.ts
+index 508e43ef..f07c17b5 100644
+--- a/apps/server/test/ari.test.ts
++++ b/apps/server/test/ari.test.ts
+@@ -1,14 +1,15 @@
+ import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+ import type { AddressInfo } from 'node:net';
+ import * as peculiar from '@peculiar/x509';
+ import { describe, expect, it, onTestFinished } from 'vitest';
+ import { certId, certIdFrom, renewalInfo } from '../src/modules/tls/ari.js';
+ import { selfSigned } from '../src/modules/tls/x509.js';
++import { closedPort } from './closed-port.js';
+ 
+ const HOST = 'acme.hornhoof.org';
+ const WINDOW = { start: '2026-12-01T00:00:00Z', end: '2026-12-02T00:00:00Z' };
+ const MALFORMED = 'urn:ietf:params:acme:error:malformed';
+ 
+ type Answer = (res: ServerResponse) => void;
+ 
+ function jsonAnswer(status: number, body: unknown, headers: Record<string, string> = {}): Answer {
+@@ -30,24 +31,16 @@ async function ariServer(answer: Answer, renewalInfoPath: string | null = '/rene
+     const renewal = renewalInfoPath ? { renewalInfo: `http://127.0.0.1:${port}${renewalInfoPath}` } : {};
+     return jsonAnswer(200, renewal)(res);
+   });
+   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+   onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
+   return { directory: `http://127.0.0.1:${(server.address() as AddressInfo).port}/dir`, paths };
+ }
+ 
+-async function closedPort(): Promise<number> {
+-  const server = createServer();
+-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+-  const { port } = server.address() as AddressInfo;
+-  await new Promise<void>((resolve) => server.close(() => resolve()));
+-  return port;
+-}
+-
+ describe('the certificate id', () => {
+   it('builds the certificate id as RFC 9773 shows it', () => {
+     expect(certIdFrom('69885b6b87464041e1b37b847ba0ae2cde01c8d4', '0087654321')).toBe('aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE');
+   });
+ 
+   it("keeps the serial's leading zero", async () => {
+     const { certPem } = await selfSigned(HOST, { serial: '0089abcdef' });
+     const id = certId(certPem)!;
+diff --git a/apps/server/test/challenges.test.ts b/apps/server/test/challenges.test.ts
+index bd547143..d8743a54 100644
+--- a/apps/server/test/challenges.test.ts
++++ b/apps/server/test/challenges.test.ts
+@@ -1,15 +1,26 @@
+-import { describe, expect, it } from 'vitest';
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { describe, expect, it, onTestFinished } from 'vitest';
+ import { TUNNEL, testApp, viaLink } from './helpers.js';
+ 
+ const TOKEN = 'abc_-1';
+ const KEY_AUTHORIZATION = `${TOKEN}.thumbprint`;
+ const path = (token: string) => `/.well-known/acme-challenge/${token}`;
+ 
++/* The web app's files, as a company runs with them, where a path no route takes gets index.html. */
++function webDist(): string {
++  const dir = mkdtempSync(join(tmpdir(), 'hornhoof-web-'));
++  onTestFinished(() => rmSync(dir, { recursive: true }));
++  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>Hornhoof</title>');
++  return dir;
++}
++
+ describe('ACME challenge answers', () => {
+   it('answers a token it holds as text, and nothing else', async () => {
+     const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
+     const get = (token: string) => app.inject({ method: 'GET', url: path(token) });
+     expect((await get(TOKEN)).statusCode).toBe(404);
+ 
+     app.ctx.challenges.answer(TOKEN, KEY_AUTHORIZATION);
+ 
+@@ -26,9 +37,30 @@ describe('ACME challenge answers', () => {
+     expect((await get(TOKEN)).statusCode).toBe(404);
+   });
+ 
+   it('does not answer a token outside the shape of one, even when it holds it', async () => {
+     const { app } = await testApp();
+     app.ctx.challenges.answer('a.b', KEY_AUTHORIZATION);
+     expect((await app.inject({ method: 'GET', url: path('a.b') })).statusCode).toBe(404);
+   });
++
++  it('answers a token as long as the shape allows, and not one longer', async () => {
++    const { app } = await testApp({ WEB_DIST: webDist() });
++    const [longest, tooLong] = ['a'.repeat(128), 'a'.repeat(129)] as const;
++    app.ctx.challenges.answer(longest, KEY_AUTHORIZATION);
++    app.ctx.challenges.answer(tooLong, KEY_AUTHORIZATION);
++
++    const answer = await app.inject({ method: 'GET', url: path(longest) });
++    expect(answer.statusCode).toBe(200);
++    expect(answer.headers['content-type']).toMatch(/^text\/plain/);
++    expect(answer.body).toBe(KEY_AUTHORIZATION);
++    expect((await app.inject({ method: 'GET', url: path(tooLong) })).statusCode).toBe(404);
++  });
++
++  it('answers nothing for no token, or for a path below one', async () => {
++    const { app } = await testApp();
++    app.ctx.challenges.answer('', KEY_AUTHORIZATION);
++    app.ctx.challenges.answer('a/b', KEY_AUTHORIZATION);
++    expect((await app.inject({ method: 'GET', url: path('') })).statusCode).toBe(404);
++    expect((await app.inject({ method: 'GET', url: path('a/b') })).statusCode).toBe(404);
++  });
+ });
+diff --git a/apps/server/test/closed-port.ts b/apps/server/test/closed-port.ts
+new file mode 100644
+index 00000000..530144a0
+--- /dev/null
++++ b/apps/server/test/closed-port.ts
+@@ -0,0 +1,10 @@
++import { createServer, type AddressInfo } from 'node:net';
++
++/* A local port that nothing listens on, since it was free a moment ago and its listener has gone. */
++export async function closedPort(): Promise<number> {
++  const server = createServer();
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  const { port } = server.address() as AddressInfo;
++  await new Promise<void>((resolve) => server.close(() => resolve()));
++  return port;
++}
+diff --git a/apps/server/test/link-listener.test.ts b/apps/server/test/link-listener.test.ts
+index ef779e4c..733f72b5 100644
+--- a/apps/server/test/link-listener.test.ts
++++ b/apps/server/test/link-listener.test.ts
+@@ -85,24 +85,31 @@ function ask(socket: TLSSocket, { method = 'GET', path, body, headers = {} }: As
+     });
+     request.on('error', reject);
+     request.end(body ? JSON.stringify(body) : undefined);
+   });
+ }
+ 
+ const health = { path: '/api/health' };
+ 
+-async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}): Promise<number> {
+-  const body = { email: 'x@acme.com', password: 'not the password' };
++async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}, email = 'x@acme.com'): Promise<number> {
++  const body = { email, password: 'not the password' };
+   return (await ask(await overTls(port, visitor), { method: 'POST', path: '/api/auth/login', body, headers })).status;
+ }
+ 
+ /* The per email and address limit stops the eleventh. */
+ const LIMITED_AFTER = 10;
+ 
++/* Wrong sign-ins from one visitor, each with another email, so that only the limit per address fills. */
++const ADDRESS_LIMIT = 30;
++async function fillAddressLimit(port: number, visitor: string): Promise<void> {
++  for (let i = 0; i < ADDRESS_LIMIT; i++) expect(await wrongSignIn(port, visitor, {}, `x${i}@acme.com`)).toBe(401);
++}
++const wrongWithNewEmail = (port: number, visitor: string) => wrongSignIn(port, visitor, {}, `new-${visitor}@acme.com`);
++
+ async function closedAfterMs(socket: net.Socket): Promise<number> {
+   const started = performance.now();
+   await once(socket, 'close');
+   return performance.now() - started;
+ }
+ 
+ const upgrade = (headers: string[] = []) =>
+   [
+@@ -186,18 +193,27 @@ describe('a request through the TLS listener', () => {
+     expect(await wrongSignIn(trusted.port, OTHER_VISITOR)).toBe(401);
+ 
+     /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
+     const other = await listening(NOT_TUNNEL);
+     for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(other.port, VISITOR)).toBe(401);
+     expect(await wrongSignIn(other.port, OTHER_VISITOR)).toBe(429);
+   });
+ 
+-  /* The plan's own form of the test above, 30 wrong sign-ins with other emails, needs the address limit of its Task 3. */
+-  it.todo('counts the limit of 30 an hour per address by the visitor of the PROXY header');
++  it('counts the limit of 30 an hour per address by the visitor of the PROXY header', async () => {
++    const trusted = await listening(IS_TUNNEL);
++    await fillAddressLimit(trusted.port, VISITOR);
++    expect(await wrongWithNewEmail(trusted.port, VISITOR)).toBe(429);
++    expect(await wrongWithNewEmail(trusted.port, OTHER_VISITOR)).toBe(401);
++
++    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
++    const other = await listening(NOT_TUNNEL);
++    await fillAddressLimit(other.port, VISITOR);
++    expect(await wrongWithNewEmail(other.port, OTHER_VISITOR)).toBe(429);
++  });
+ 
+   it('does not believe an X-Forwarded-For the visitor wrote', async () => {
+     const { port } = await listening();
+     for (let i = 0; i < LIMITED_AFTER; i++) {
+       expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': `198.51.100.${i}` })).toBe(401);
+     }
+     expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': '198.51.100.99' })).toBe(429);
+   });
+diff --git a/apps/server/test/proxy-header.test.ts b/apps/server/test/proxy-header.test.ts
+index 1e35ec88..78d95f30 100644
+--- a/apps/server/test/proxy-header.test.ts
++++ b/apps/server/test/proxy-header.test.ts
+@@ -1,21 +1,14 @@
+ import { describe, expect, it } from 'vitest';
+ import { readProxyV2 } from '../src/modules/tls/proxy-header.js';
+-import { ipv4Addresses, proxyV2, visitorHeader } from './proxy-v2.js';
++import { ipv4Addresses, ipv6Addresses, proxyV2, TCP_OVER_IPV6, visitorHeader } from './proxy-v2.js';
+ 
+ const LOCAL_V2 = 0x20;
+ const TCP_OVER_IPV4 = 0x11;
+-const TCP_OVER_IPV6 = 0x21;
+-
+-function ipv6Addresses(source: number[]): Buffer {
+-  const addresses = Buffer.alloc(36);
+-  source.forEach((group, i) => addresses.writeUInt16BE(group, i * 2));
+-  return addresses;
+-}
+ 
+ describe('readProxyV2', () => {
+   it('reads an IPv4 visitor', () => {
+     expect(readProxyV2(visitorHeader('203.0.113.7'))).toEqual({ state: 'done', length: 28, source: '203.0.113.7' });
+   });
+ 
+   it('counts the TLVs after the addresses in the length', () => {
+     const header = proxyV2({ addresses: Buffer.concat([ipv4Addresses('203.0.113.7'), Buffer.alloc(7)]) });
+diff --git a/apps/server/test/proxy-v2.ts b/apps/server/test/proxy-v2.ts
+index 7c645da6..4f79c437 100644
+--- a/apps/server/test/proxy-v2.ts
++++ b/apps/server/test/proxy-v2.ts
+@@ -1,13 +1,14 @@
+ /* The bytes of a PROXY protocol v2 header, for the tests of the code that reads them from the network. */
+ const SIGNATURE = Buffer.from('0d0a0d0a000d0a515549540a', 'hex');
+ 
+ const PROXY_V2 = 0x21;
+ const TCP_OVER_IPV4 = 0x11;
++export const TCP_OVER_IPV6 = 0x21;
+ const PORTS = Buffer.from([0xc7, 0x38, 0x20, 0xfb]); // 51000 and 8443
+ 
+ export type ProxyV2Fields = {
+   /* The byte at 12: the version in the high nibble and the command in the low one. */
+   versionAndCommand?: number;
+   family?: number;
+   addresses?: Buffer;
+   /* What the bytes at 14 and 15 claim, when a test has them lie about what follows. */
+@@ -21,10 +22,17 @@ export function proxyV2(fields: ProxyV2Fields = {}): Buffer {
+   fixed[1] = fields.family ?? TCP_OVER_IPV4;
+   fixed.writeUInt16BE(fields.declaredLength ?? addresses.length, 2);
+   return Buffer.concat([SIGNATURE, fixed, addresses]);
+ }
+ 
+ export const ipv4Addresses = (source: string): Buffer =>
+   Buffer.concat([Buffer.from(source.split('.').map(Number)), Buffer.from([127, 0, 0, 1]), PORTS]);
+ 
++/* Room for both IPv6 addresses and ports, with the source's groups given and the rest zero. */
++export function ipv6Addresses(source: number[]): Buffer {
++  const addresses = Buffer.alloc(36);
++  source.forEach((group, i) => addresses.writeUInt16BE(group, i * 2));
++  return addresses;
++}
++
+ /* A PROXY header over IPv4 from this visitor to the listener. */
+ export const visitorHeader = (visitor: string): Buffer => proxyV2({ addresses: ipv4Addresses(visitor) });
+diff --git a/apps/server/test/sign-in-limit.test.ts b/apps/server/test/sign-in-limit.test.ts
+index a77d813f..bd7b0747 100644
+--- a/apps/server/test/sign-in-limit.test.ts
++++ b/apps/server/test/sign-in-limit.test.ts
+@@ -1,27 +1,76 @@
+ import type { PGlite } from '@electric-sql/pglite';
+ import { sql } from 'drizzle-orm';
+-import { describe, expect, it } from 'vitest';
++import { PglitePreparedQuery } from 'drizzle-orm/pglite';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { addressKey, longestWait, SIGN_IN_LIMITS, SIGN_IN_LOCK } from '../src/auth/sign-in-limit.js';
++import { readProxyV2 } from '../src/modules/tls/proxy-header.js';
+ import { appOn, SETUP, setUpCompany, statements, testApp } from './helpers.js';
++import { ipv6Addresses, proxyV2, TCP_OVER_IPV6 } from './proxy-v2.js';
+ 
+ const login = (email: string, password: string, remoteAddress: string) => ({ method: 'POST' as const, url: '/api/auth/login', payload: { email, password }, remoteAddress });
+ const WRONG = 'wrong password!';
+ const rowsOf = (result: unknown) => (result as { rows: Record<string, unknown>[] }).rows;
++const SIGN_IN_LOCK_HOLDERS = `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = ${SIGN_IN_LOCK}`;
++
++/* How many hold the sign-in lock as each try's insert starts, as the database itself says, asked on the insert's own
++   connection handle. A transaction's lock lasts until its commit, and without a transaction it is gone with its own
++   statement, so this tells the two apart where PGlite's one connection cannot race them. */
++function lockHoldersAtEachInsert(): number[] {
++  const holders: number[] = [];
++  const execute = PglitePreparedQuery.prototype.execute;
++  const spy = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockImplementation(async function (this: PglitePreparedQuery<never>, values) {
++    const { queryString, client } = this as unknown as { queryString: string; client: PGlite };
++    if (queryString.includes('INSERT INTO sign_in_attempts')) {
++      const { rows } = await client.query<{ n: number }>(SIGN_IN_LOCK_HOLDERS);
++      holders.push(rows[0]!.n);
++    }
++    return execute.call(this, values);
++  });
++  onTestFinished(() => spy.mockRestore());
++  return holders;
++}
+ 
+ describe('addressKey', () => {
+   it('reads an address as the limit counts it', () => {
+     expect(addressKey('203.0.113.5')).toBe('203.0.113.5');
+     expect(addressKey('::ffff:203.0.113.5')).toBe('203.0.113.5');
+     expect(addressKey('2001:db8:1:2:3:4:5:6')).toBe('2001:db8:1:2::/64');
+     expect(addressKey('2001:0db8:0001:0002::ffff')).toBe('2001:db8:1:2::/64');
+     expect(addressKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+     expect(addressKey('::1')).toBe('0:0:0:0::/64');
+   });
++
++  it.each([
++    ['with a dotted tail', '::ffff:203.0.113.5'],
++    ['in capitals', '::FFFF:203.0.113.5'],
++    ['as eight groups', '0:0:0:0:0:ffff:cb00:7105'],
++    ['as eight groups with their zeros', '0000:0000:0000:0000:0000:FFFF:CB00:7105'],
++    ['shortened, in hex', '::ffff:cb00:7105'],
++    ['as six groups and a dotted tail', '0:0:0:0:0:ffff:203.0.113.5'],
++    ['with a zone', '::ffff:203.0.113.5%eth0'],
++  ])('counts an IPv4-mapped address by its IPv4 %s', (_form, address) => {
++    expect(addressKey(address)).toBe('203.0.113.5');
++  });
++
++  it('counts by its /64 an address that only looks IPv4-mapped', () => {
++    expect(addressKey('::fffe:cb00:7105')).toBe('0:0:0:0::/64');
++    expect(addressKey('1::ffff:cb00:7105')).toBe('1:0:0:0::/64');
++  });
++
++  it('reads the source a PROXY header over IPv6 gives', () => {
++    const keyOf = (groups: number[]) => {
++      const header = readProxyV2(proxyV2({ family: TCP_OVER_IPV6, addresses: ipv6Addresses(groups) }));
++      return addressKey((header as { source: string }).source);
++    };
++    expect(keyOf([0, 0, 0, 0, 0, 0xffff, 0xcb00, 0x7107])).toBe('203.0.113.7');
++    expect(keyOf([0, 0, 0, 0, 0, 0xffff, 0xc633, 0x6414])).toBe('198.51.100.20');
++    expect(keyOf([0x2001, 0xdb8, 1, 2, 3, 4, 5, 6])).toBe('2001:db8:1:2::/64');
++  });
+ });
+ 
+ describe('longestWait', () => {
+   const now = new Date('2026-01-01T12:00:00Z');
+   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
+ 
+   it('waits until the oldest try of a full limit leaves its window, rounded up to whole seconds', () => {
+     const window = SIGN_IN_LIMITS.emailAddress.windowMs;
+@@ -30,16 +79,21 @@ describe('longestWait', () => {
+   });
+ 
+   it('answers the longest wait of the full limits, with that limit window', () => {
+     const short = { oldest: minutesAgo(14), windowMs: SIGN_IN_LIMITS.emailAddress.windowMs };
+     const long = { oldest: minutesAgo(5), windowMs: SIGN_IN_LIMITS.address.windowMs };
+     expect(longestWait([short, long], now)).toEqual({ retryAfterS: 55 * 60, windowMs: SIGN_IN_LIMITS.address.windowMs });
+   });
+ 
++  it('names the window of a full limit in its last second', () => {
++    const lastSecond = new Date(minutesAgo(60).getTime() + 500);
++    expect(longestWait([{ oldest: lastSecond, windowMs: SIGN_IN_LIMITS.address.windowMs }], now)).toEqual({ retryAfterS: 1, windowMs: SIGN_IN_LIMITS.address.windowMs });
++  });
++
+   it('answers one second when no limit is full any more', () => {
+     expect(longestWait([], now)).toEqual({ retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
+   });
+ 
+   it('never answers less than one second', () => {
+     expect(longestWait([{ oldest: minutesAgo(15), windowMs: SIGN_IN_LIMITS.emailAddress.windowMs }], now).retryAfterS).toBe(1);
+   });
+ });
+@@ -104,17 +158,27 @@ describe('POST /api/auth/login limits in the database', () => {
+ 
+   it('lets 30 of 100 wrong sign-ins at once from one address reach the password check', async () => {
+     const { app } = await testApp();
+     await setUpCompany(app);
+     const seen = statements();
+     const answers = await Promise.all(Array.from({ length: 100 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
+     expect(answers.filter(a => a.statusCode === 401)).toHaveLength(30);
+     expect(answers.filter(a => a.statusCode === 429)).toHaveLength(70);
+-    /* PGlite has one connection, so the order of the statements is what shows the lock holds the limit on a pool. */
++    /* PGlite has one connection, so this shows the order of the lock and the insert, and the next test their one
++       transaction; tries really racing on a pool of connections wait for plan 3's Postgres harness. */
+     const inserts = seen.flatMap((s, at) => (s.sql.includes('INSERT INTO sign_in_attempts') ? [at] : []));
+     expect(inserts).toHaveLength(100);
+     for (const at of inserts) {
+       expect(seen[at - 1]?.sql).toContain('pg_advisory_xact_lock');
+       expect(seen[at - 1]?.params).toEqual([SIGN_IN_LOCK]);
+     }
+   });
++
++  it('still holds the lock when the insert of a try runs, and lets it go with the try', async () => {
++    const { app, db } = await testApp();
++    await setUpCompany(app);
++    const holders = lockHoldersAtEachInsert();
++    await Promise.all(Array.from({ length: 5 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
++    expect(holders).toEqual([1, 1, 1, 1, 1]);
++    expect(rowsOf(await db.execute(sql.raw(SIGN_IN_LOCK_HOLDERS)))).toEqual([{ n: 0 }]);
++  });
+ });
+
+## 78c0c7e2 Keep a removed node from revoking its own new key, and lose no node message on a reconnect or a full disk
+
+Batch 4's one fix round on the node's messages, runs/batch4-node-merged.md. Each fix came from a test that failed first.
+
+A removed in the outbox outlived the removal: set-key brought the node back, the node replayed it after hello and wiped its
+new key. set-key now clears the outbox when the node was removed, or its server or subscription changed. A socket drop while
+remove waited lost the word for good, since stop() closed the connection at once and Hornhoof kept the key of a node that was
+gone. The node now stays connected until removed is confirmed, was sent to a server that confirms nothing, or its key is
+refused, which is how a server that took removed and closed the socket answers the next connection.
+
+A hello past 100 runs or parts was dropped by the server, and the node got no more work. The protocol's bound goes up to
+HELLO_IDS_MAX, and helloIds caps at 100 for an older server, the runs still going first.
+
+runOne and testOne held an end a second time, so an end that a new connection sent and Hornhoof confirmed while the limits were
+read went out again under a new number. They now number what is held, and nothing when none is.
+
+sendPending dropped what it never sent on an older server; it now drops up to the last that really went. A failed write left a
+file with no stream line, or a line cut short that spoiled the next one, and a restart then lost messages. Both catches now mark
+the file dirty, so it is rewritten whole from memory. flush() gets its test across two drop cycles with no close.
+
+Skills followed: test-driven-development, systematic-debugging, verification-before-completion.
+
+Ruling: HELLO_IDS_MAX is 20,000, the outbox's own cap - why: a node never drops an end, so the bound only has to stay far above what a node can owe, and both lists at that length leave half of the socket's 4 MiB for the rest of the hello - cost if wrong: an end past the bound is not listed, so the hello gives its job up as machine_restarted.
+Ruling: finding 4 is reproduced with a next() that stops taking messages, directly on sendPending, moved to outbox.ts for that - why: a real socket does not change state inside the synchronous flush of onOpen, so no socket test can show it - cost if wrong: none, the fix only drops less.
+Ruling: finding 6 has no code to fail against, so its test was proved by breaking flush() by hand two ways (timer left set, no rewrite); both failed it, then flush() was restored - why: flush() has no bug, the finding is a missing test - cost if wrong: none.
+Ruling: a node that restarts while removed still waits stays idle, and does not say it again - why: the list fixes the live connection, and a removed flag still means idle at start; the server already gives such a node no work, because its subscription's removedAt stops the hello - cost if wrong: Hornhoof keeps that node's key until the machine is set up again, as for any node that never comes back.
+Ruling: set-key also clears the outbox when node.json is missing or unreadable - why: nothing then says whose its messages were, and an old removed must not reach a new key - cost if wrong: a node whose node.json broke loses what waited when it is set up again.
+Ruling: the removal's wait is tested against a fake server only - why: the server part of plan 4 Task 4 (acks, the hub) is not in this lane - cost if wrong: if that server part neither confirms removed nor refuses the key after it, the node stays connected, idle, until Docker stops it.
+
+---
+ apps/node/src/main.ts                   |  52 ++++----
+ apps/node/src/outbox.ts                 |  43 ++++++-
+ apps/node/src/removal.ts                |  22 ++++
+ apps/node/test/commands.test.ts         |  45 +++++++
+ apps/node/test/main.test.ts             | 180 ++++++++++++++++++++++++++++
+ apps/node/test/outbox.test.ts           | 206 +++++++++++++++++++++++++++++++-
+ apps/node/test/removal.test.ts          |  47 ++++++++
+ packages/protocol/src/index.ts          |   9 +-
+ packages/protocol/test/protocol.test.ts |  16 +++
+ 9 files changed, 589 insertions(+), 31 deletions(-)
+
+diff --git a/apps/node/src/main.ts b/apps/node/src/main.ts
+index 746773cc..1cf5d5dd 100644
+--- a/apps/node/src/main.ts
++++ b/apps/node/src/main.ts
+@@ -7,17 +7,18 @@ import { join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+ import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
+ import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
+ import { bootFacts } from './boot.js';
+ import { connect } from './connection.js';
+ import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
+ import { machineLoad } from './load.js';
+-import { endId, isEnd, Outbox, type Entry } from './outbox.js';
++import { removalWatch } from './removal.js';
++import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
+ import { adapterFor, programFor } from './providers/index.js';
+ import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
+ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
+ import { nodeIdentity, seal, unseal } from './keys.js';
+ import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
+ import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+ import { partFiles, runTests } from './tests.js';
+ import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
+@@ -166,18 +167,23 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+ 
+   const emit = (m: NodeMessage) => {
+     const current = withPrograms(m, programs);
+     if (isNumbered(current)) return void sendNumbered(current);
+     if (!send?.(current)) waiting.push(current);
+   };
+   /* An end is numbered when its turn comes, after the messages of its job; the rest are numbered as they are made. */
+   const sendNumbered = (m: NodeMessage) => {
+-    if (isEnd(m)) outbox.hold(m);
+-    const entry = isEnd(m) ? outbox.number(endId(m)) : outbox.add(m);
++    if (!isEnd(m)) return deliver(outbox.add(m));
++    outbox.hold(m);
++    sendHeld(endId(m));
++  };
++  /* The turn of an end that was held has come. None is held when a new connection numbered and sent it meanwhile. */
++  const sendHeld = (id: string) => {
++    const entry = outbox.number(id);
+     if (entry) deliver(entry);
+   };
+   /* A message that cannot go out now stays numbered in the outbox and goes after the next hello. */
+   const deliver = (entry: Entry) => {
+     if (send?.(entry.msg) && !confirmed && !isEnd(entry.msg)) outbox.dropSent(entry.n);
+   };
+   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
+   const learn = async (more: (string | null | undefined)[] = []) => {
+@@ -232,67 +238,64 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+   const status = async () => {
+     /* A program that cannot list its models now keeps those it listed before. */
+     models = await readModels().catch(() => models);
+     tellStatus();
+   };
+ 
+   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
+   const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
++  /* The node stops once Hornhoof has heard of its removal, not before. */
++  const removal = removalWatch(() => outbox.owes('removed'), () => stop());
+ 
+   const conn = connect({
+     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
+     key: state.key,
+     log,
+     onOpen(next, acks) {
+       send = next;
+       confirmed = acks;
+       host?.closeViews();
+       login?.closeViews();
+       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
+       const typed = host?.typedJobs() ?? [];
+-      const tests = [...testing.keys(), ...outbox.doneParts()];
+-      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: [...running.keys(), ...typed, ...outbox.doneJobs()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
++      const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
++      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+       for (const m of waiting.splice(0)) emit(m);
+-      sendPending(next);
++      sendPending(outbox, next, acks);
++      removal.settle();
+     },
+     /* One message that fails is logged; it never ends the node with all its runs. */
+     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
+-    onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
++    onRefused: () => {
++      log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
++      removal.refused();
++    },
+   });
+   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+ 
+-  /* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included. A server that
+-     confirms nothing gets it once. */
+-  function sendPending(next: (m: NodeMessage) => boolean) {
+-    for (const id of outbox.held()) outbox.number(id);
+-    const pending = outbox.pending();
+-    for (const entry of pending) next(entry.msg);
+-    if (!confirmed && pending.length) outbox.dropSent(pending[pending.length - 1]!.n);
+-  }
+-
+   async function handle(m: ServerMessage) {
+     if (m.type === 'remove') {
+       /* Only personal subscriptions are removed this way; the built-in node stays. */
+       if (builtin || stopped) return;
+       stopped = true;
+       /* The agents stop first, so nothing writes into the folders while they go. */
+       const jobs = [...running.values(), ...testing.values()];
+       for (const job of jobs) job.stop.abort();
+       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
+       await host?.stop();
+       await login?.shutdown();
+       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
+       markRemoved(dir);
+       emit({ type: 'removed' });
+       log('This node was removed in Hornhoof.');
+-      stop();
++      removal.start();
+       return;
+     }
+-    if (acknowledged(m, outbox)) return;
++    if (acknowledged(m, outbox)) return removal.settle();
+     if (m.type === 'programs.update') return programs.update(tellStatus);
+     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
+     if (m.type === 'tests.run') {
+       if (stopped || testing.has(m.partId) || outbox.doneParts().includes(m.partId)) return;
+       const controller = new AbortController();
+       const done = testOne(m, controller.signal);
+       testing.set(m.partId, { stop: controller, done });
+       return done;
+@@ -424,23 +427,23 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+   }
+ 
+   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
+   async function testOne(m: TestRun, signal: AbortSignal) {
+     if (!testUser) {
+       const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
+       outbox.hold(refused);
+       testing.delete(m.partId);
+-      return emit(refused);
++      return sendHeld(m.partId);
+     }
+     emit({ type: 'tests.started', partId: m.partId });
+     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
+     outbox.hold(done);
+     testing.delete(m.partId);
+-    emit(done);
++    sendHeld(m.partId);
+   }
+ 
+   async function runOne(m: JobRun, signal: AbortSignal) {
+     emit({ type: 'job.started', jobId: m.jobId });
+     let done: Awaited<ReturnType<typeof runJob>>;
+     try {
+       await programs.ready(signal);
+       const chosen = pick(m);
+@@ -470,17 +473,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+     } catch (err) {
+       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
+     }
+     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
+     outbox.hold(done);
+     running.delete(m.jobId);
+     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
+     await status();
+-    emit(done);
++    sendHeld(m.jobId);
+     await renewedCodex().catch(() => {});
+     if (done.error === 'not_logged_in') {
+       loggedIn = false;
+       const held = credKind ? heldCredential(credHome, credKind) : null;
+       if (held) refused = digestOf(held);
+       void status();
+     }
+   }
+@@ -613,26 +616,33 @@ function withInstall(adapter: ProviderAdapter, tools: string, provider: Provider
+         const output = `Could not install ${programFor(provider).name}: ${message(err)}`;
+         return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
+       }
+       return adapter.run(input);
+     },
+   };
+ }
+ 
++/* The node these words set up is still the one that was here, so what waits in its outbox is still its own to say. */
++const sameNode = (was: NodeState | null, server: string | undefined, subscriptionId: string | undefined): boolean => was?.server === server && was?.subscriptionId === subscriptionId;
++
+ async function setKey(dir: string, io: Io): Promise<number> {
+   const [server, subscriptionId, provider, key, ...rest] = (await firstLine(io.stdin)).split(/\s+/);
++  const was = readState(dir);
+   try {
+     if (rest.length) throw new Error('extra words');
+     mkdirSync(dir, { recursive: true });
+     writeState(dir, { server, subscriptionId, provider: provider === MACHINE ? null : provider, key } as NodeState);
+   } catch {
+     io.stderr.write(`${SET_KEY_LINE}.\n`);
+     return 1;
+   }
++  /* An old removed waiting in the outbox would revoke the new key. The file named removed goes last, so a crash before
++     it leaves a node that is cleared the next time. */
++  if (isRemoved(dir) || !sameNode(was, server, subscriptionId)) clearOutbox(dir);
+   /* A new key means Hornhoof took this machine back after a removal. */
+   rmSync(join(dir, 'removed'), { force: true });
+   return 0;
+ }
+ 
+ async function status(dir: string, io: Io): Promise<number> {
+   const state = readState(dir);
+   /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
+diff --git a/apps/node/src/outbox.ts b/apps/node/src/outbox.ts
+index 0e3d020b..7720b8ff 100644
+--- a/apps/node/src/outbox.ts
++++ b/apps/node/src/outbox.ts
+@@ -1,12 +1,12 @@
+ import { randomUUID } from 'node:crypto';
+-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, truncateSync, writeFileSync } from 'node:fs';
++import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+-import { parseNodeMessage, type NodeMessage } from '@hornhoof/protocol';
++import { HELLO_IDS_BEFORE_ACKS, HELLO_IDS_MAX, parseNodeMessage, type NodeMessage } from '@hornhoof/protocol';
+ import { z } from 'zod';
+ 
+ export const OUTBOX_FILE = 'outbox.jsonl';
+ export const OUTBOX_MAX = 20_000;
+ const FLUSH_MS = 1000;
+ 
+ export type End = Extract<NodeMessage, { type: 'job.done' | 'tests.done' }>;
+ export type Entry = { n: number; msg: NodeMessage };
+@@ -101,16 +101,21 @@ export class Outbox {
+   held(): string[] {
+     return [...this.held_.keys()];
+   }
+ 
+   pending(): Entry[] {
+     return [...this.entries];
+   }
+ 
++  /* Whether a numbered message of this type still waits to be confirmed. */
++  owes(type: NodeMessage['type']): boolean {
++    return this.entries.some(e => e.msg.type === type);
++  }
++
+   ack(upto: number): void {
+     this.entries = this.entries.filter(e => e.n > upto);
+     this.dirty();
+   }
+ 
+   ackJob(jobId: string): void {
+     this.dropEnd('job.done', jobId);
+   }
+@@ -208,29 +213,59 @@ export class Outbox {
+     this.timer = null;
+     this.rewrite();
+   }
+ 
+   private append(line: Line): void {
+     try {
+       appendFileSync(this.path, `${JSON.stringify(line)}\n`, { mode: 0o600 });
+     } catch (err) {
+-      this.onError(err);
++      this.failed(err);
+     }
+   }
+ 
+   /* To a temporary file, then a rename, so a crash leaves the old file or the new one whole. */
+   private rewrite(): void {
+     const lines: Line[] = [
+       { k: 'stream', stream: this.stream, next: this.next },
+       ...[...this.held_.values()].map((msg): Line => ({ k: 'hold', msg })),
+       ...this.entries.map((e): Line => ({ k: 'add', n: e.n, msg: e.msg })),
+     ];
+     const temp = `${this.path}.tmp`;
+     try {
+       writeFileSync(temp, lines.map(l => `${JSON.stringify(l)}\n`).join(''), { mode: 0o600 });
+       renameSync(temp, this.path);
+       this.stale = 0;
+     } catch (err) {
+-      this.onError(err);
++      this.failed(err);
+     }
+   }
++
++  /* Memory still has it all, and a write that failed may have left a line cut short or no stream line: the next rewrite
++     puts the file right, whole. */
++  private failed(err: unknown): void {
++    this.onError(err);
++    this.dirty();
++  }
++}
++
++/* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included, for as long as the
++   socket takes them. A server that confirms nothing gets each once, so what really went is dropped and no more. */
++export function sendPending(outbox: Outbox, next: (m: NodeMessage) => boolean, confirmed: boolean): void {
++  for (const id of outbox.held()) outbox.number(id);
++  let last = 0;
++  for (const entry of outbox.pending()) {
++    if (!next(entry.msg)) break;
++    last = entry.n;
++  }
++  if (!confirmed && last) outbox.dropSent(last);
++}
++
++/* The ids of a hello: the runs still going, then those whose ends wait. A server drops a hello past its bound, and the
++   node would get no more work, so the list stops there, with the runs still going kept. */
++export function helloIds(active: string[], ended: string[], confirming: boolean): string[] {
++  return [...new Set([...active, ...ended])].slice(0, confirming ? HELLO_IDS_MAX : HELLO_IDS_BEFORE_ACKS);
++}
++
++/* What waited was for the node as it was. Sent by the node it is now, an old removed would revoke its new key. */
++export function clearOutbox(dir: string): void {
++  for (const file of [OUTBOX_FILE, `${OUTBOX_FILE}.tmp`]) rmSync(join(dir, file), { force: true });
+ }
+diff --git a/apps/node/src/removal.ts b/apps/node/src/removal.ts
+new file mode 100644
+index 00000000..155ee2a6
+--- /dev/null
++++ b/apps/node/src/removal.ts
+@@ -0,0 +1,22 @@
++/* A node told to go stays connected until Hornhoof has heard it, or Hornhoof keeps the key of a node that is gone. It has
++   heard once removed left the outbox, confirmed or sent to a server that confirms nothing, or once it refuses the key,
++   which is how a server that took removed and closed the socket answers the next connection. */
++export function removalWatch(owed: () => boolean, over: () => void): { start(): void; settle(): void; refused(): void } {
++  let waiting = false;
++  const end = () => {
++    if (!waiting) return;
++    waiting = false;
++    over();
++  };
++  const settle = () => {
++    if (waiting && !owed()) end();
++  };
++  return {
++    start() {
++      waiting = true;
++      settle();
++    },
++    settle,
++    refused: end,
++  };
++}
+diff --git a/apps/node/test/commands.test.ts b/apps/node/test/commands.test.ts
+index 1a080fa7..5d23b078 100644
+--- a/apps/node/test/commands.test.ts
++++ b/apps/node/test/commands.test.ts
+@@ -2,16 +2,17 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
+ import type { AddressInfo } from 'node:net';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { PassThrough } from 'node:stream';
+ import { fileURLToPath } from 'node:url';
+ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { WebSocketServer, type WebSocket } from 'ws';
+ import { command } from '../src/main.js';
++import { Outbox } from '../src/outbox.js';
+ import { markRemoved, readState } from '../src/state.js';
+ 
+ const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
+ const SERVER = 'https://hornhoof.example.test';
+ const KEY = 'node-key-0123456789abcdef';
+ const NODE_KEY = 'built-in-node-key-0123456789abcdef0123';
+ 
+ let data: string;
+@@ -121,16 +122,60 @@ describe('set-key', () => {
+     expect(existsSync(join(data, 'node.json'))).toBe(false);
+   });
+ 
+   it('brings a removed node back with its new key', async () => {
+     markRemoved(data);
+     await run(['set-key'], `${SERVER} sub-2 claude ${KEY}\n`);
+     expect((await run(['status'])).out.trim()).not.toBe('removed');
+   });
++
++  describe('and what waits in the outbox', () => {
++    const NEW_KEY = 'node-key-new-0123456789abcdef';
++    const kept = () => new Outbox(data).pending().map(entry => entry.msg.type);
++    /* A node set up on this server and plan, with a removed it could not get confirmed. */
++    const owingRemoved = async () => {
++      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
++      new Outbox(data).add({ type: 'removed' });
++    };
++
++    it('forgets it when a removed node comes back, so an old removed cannot revoke the new key', async () => {
++      await owingRemoved();
++      markRemoved(data);
++      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
++      expect(kept()).toEqual([]);
++    });
++
++    it.each([
++      ['another server', `https://other.example.test sub-1 claude ${NEW_KEY}\n`],
++      ['another subscription', `${SERVER} sub-2 claude ${NEW_KEY}\n`],
++    ])('forgets it when the node moves to %s', async (_, line) => {
++      await owingRemoved();
++      await run(['set-key'], line);
++      expect(kept()).toEqual([]);
++    });
++
++    it('forgets it when nothing says whose it was', async () => {
++      new Outbox(data).add({ type: 'removed' });
++      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
++      expect(kept()).toEqual([]);
++    });
++
++    it('keeps it when only the key changes', async () => {
++      await owingRemoved();
++      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
++      expect(kept()).toEqual(['removed']);
++    });
++
++    it('keeps it when the line is refused', async () => {
++      await owingRemoved();
++      expect((await run(['set-key'], `${SERVER} sub-2 claude ${NEW_KEY} extra\n`)).code).toBe(1);
++      expect(kept()).toEqual(['removed']);
++    });
++  });
+ });
+ 
+ describe('status', () => {
+   it('tells no_key, needs_login, ready and removed apart', async () => {
+     expect((await run(['status'])).out).toBe('no_key\n');
+ 
+     await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+     installFake('claude');
+diff --git a/apps/node/test/main.test.ts b/apps/node/test/main.test.ts
+index 3c9a42ab..c75086bf 100644
+--- a/apps/node/test/main.test.ts
++++ b/apps/node/test/main.test.ts
+@@ -1,18 +1,20 @@
+ import { execFileSync, spawn } from 'node:child_process';
+ import { once } from 'node:events';
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+ import type { AddressInfo } from 'node:net';
+ import { hostname, tmpdir, uptime } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { WebSocketServer, type WebSocket } from 'ws';
++import { HELLO_IDS_BEFORE_ACKS, parseNodeMessage } from '@hornhoof/protocol';
+ import { buildOf, runNode } from '../src/main.js';
+ import { prepareNodeStop } from '../src/lifecycle.js';
++import { Outbox } from '../src/outbox.js';
+ import { ProgramUpdates } from '../src/program-updates.js';
+ import { TerminalHost } from '../src/terminal/host.js';
+ import { claudeProgram } from '../src/terminal/programs.js';
+ import { Tmux } from '../src/terminal/tmux.js';
+ import type { ProviderAdapter, RunInput } from '../src/runner.js';
+ import { isRemoved, writeState } from '../src/state.js';
+ import type { runTests } from '../src/tests.js';
+ 
+@@ -38,16 +40,19 @@ async function fakeServer({ acks = false, port = 0 }: { acks?: boolean; port?: n
+     s.on('message', data => received.push(JSON.parse(String(data))));
+   });
+   const wait = async (check: () => boolean, ms = 3000) => {
+     const end = Date.now() + ms;
+     while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
+     expect(check()).toBe(true);
+   };
+   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait,
++    /* The server closes the socket with a code, and how many sockets it has open. */
++    close: (code: number) => socket!.close(code),
++    open: () => server.clients.size,
+     port: (server.address() as AddressInfo).port,
+     /* The server goes away, as an app that is restarting does. */
+     stop: () => {
+       for (const client of server.clients) client.terminate();
+       return new Promise<void>(done => server.close(() => done()));
+     },
+   };
+ }
+@@ -904,16 +909,191 @@ describe('runNode', () => {
+       const part = { type: 'tests.run', partId: 'p1', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 };
+       server.send(part);
+       await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+       server.send(part);
+       await new Promise(r => setTimeout(r, 150));
+       expect(ran).toEqual(['p1']);
+       expect(server.received.filter(m => m.type === 'tests.started')).toHaveLength(1);
+     });
++
++    it("does not send a job's end again that a new connection sent and Hornhoof confirmed while the limits were read", async () => {
++      const server = await fakeServer({ acks: true });
++      let finish!: () => void;
++      const reading = new Promise<void>(r => (finish = r));
++      /* The first read is the node's start; the next is the one after the job, which the test holds. */
++      let reads = 0;
++      const models = async () => {
++        if (++reads > 1) await reading;
++        return [{ id: 'm', name: 'M' }];
++      };
++      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: () => {} });
++      onTestFinished(() => node.stop());
++      await server.wait(() => helloCount(server) === 1);
++      server.send(run);
++      await server.wait(() => reads === 2);
++      expect(server.received.some(m => m.type === 'job.done')).toBe(false);
++
++      server.drop();
++      await server.wait(() => server.received.some(m => m.type === 'job.done'), 5000);
++      const end = server.received.find(m => m.type === 'job.done')!;
++      server.send({ type: 'ack', upto: end.n });
++      await new Promise(r => setTimeout(r, 50));
++
++      finish();
++      await server.wait(() => server.received.some(m => m.type === 'status'));
++      await new Promise(r => setTimeout(r, 100));
++      expect(server.received.filter(m => m.type === 'job.done')).toEqual([end]);
++    });
++
++    describe('a hello with many ends waiting', () => {
++      const ends = (dir: string) => {
++        const box = new Outbox(dir);
++        for (let i = 0; i < 150; i++) box.hold({ type: 'job.done', jobId: `end-${i}`, ok: true, sessionId: null, result: '', tail: '', error: null });
++        for (let i = 0; i < 120; i++) box.hold({ type: 'tests.done', partId: `part-${i}`, ok: true, exitCode: 0, error: null, commit: null, log: '' });
++      };
++      const lastHello = (server: Awaited<ReturnType<typeof fakeServer>>) => {
++        const hello = server.received.findLast(m => m.type === 'hello')!;
++        return { ...hello, running: hello.running as string[], tests: hello.tests as string[] };
++      };
++
++      it('lists them all to a server that confirms, and that server can read it', async () => {
++        const server = await fakeServer({ acks: true });
++        const dir = nodeDir(server.url);
++        ends(dir);
++        const node = await runNode({ dir, adapter, log: () => {} });
++        onTestFinished(() => node.stop());
++        await server.wait(() => helloCount(server) === 1);
++        const hello = lastHello(server);
++        expect(hello.running).toHaveLength(150);
++        expect(hello.tests).toHaveLength(120);
++        expect(parseNodeMessage(JSON.stringify(hello))).not.toBeNull();
++      });
++
++      it('stays within what an older server takes, the runs still going first', async () => {
++        const server = await fakeServer();
++        const dir = nodeDir(server.url);
++        ends(dir);
++        const talking = gated();
++        const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
++        onTestFinished(() => {
++          talking.open();
++          node.stop();
++        });
++        await server.wait(() => helloCount(server) === 1);
++        expect(lastHello(server).running).toHaveLength(HELLO_IDS_BEFORE_ACKS);
++        expect(lastHello(server).tests).toHaveLength(HELLO_IDS_BEFORE_ACKS);
++
++        server.send(run);
++        await server.wait(() => server.received.some(m => m.type === 'job.started'));
++        server.drop();
++        await server.wait(() => helloCount(server) === 2, 5000);
++        expect(lastHello(server).running).toHaveLength(HELLO_IDS_BEFORE_ACKS);
++        expect(lastHello(server).running[0]).toBe('j1');
++      });
++    });
++  });
++
++  describe('being removed', () => {
++    const removals = (server: Awaited<ReturnType<typeof fakeServer>>) => server.received.filter(m => m.type === 'removed');
++    const stopped = (lines: string[]) => lines.some(line => line.startsWith('Node stopping'));
++    /* Longer than the moment a stopping node gives its last message before it closes its socket. */
++    const pastLastMessage = () => new Promise(r => setTimeout(r, 150));
++
++    async function connected(server: Awaited<ReturnType<typeof fakeServer>>, nodeAdapter = adapter) {
++      const lines: string[] = [];
++      const dir = nodeDir(server.url);
++      const node = await runNode({ dir, adapter: nodeAdapter, log: line => lines.push(line) });
++      onTestFinished(() => node.stop());
++      await server.wait(() => server.received.some(m => m.type === 'hello'));
++      return { dir, lines };
++    }
++
++    it('stays connected until Hornhoof confirms removed, and says it again on a new connection', async () => {
++      const server = await fakeServer({ acks: true });
++      const { dir, lines } = await connected(server);
++      server.send({ type: 'remove' });
++      await server.wait(() => removals(server).length === 1);
++      await pastLastMessage();
++      expect(server.open()).toBe(1);
++      expect(stopped(lines)).toBe(false);
++
++      server.drop();
++      await server.wait(() => removals(server).length === 2, 5000);
++      expect(removals(server)[1]).toEqual(removals(server)[0]);
++
++      server.send({ type: 'ack', upto: removals(server)[0]!.n });
++      await server.wait(() => server.open() === 0);
++      expect(stopped(lines)).toBe(true);
++      expect(new Outbox(dir).pending()).toEqual([]);
++    });
++
++    /* The socket drops while the node's job stops, and the node goes on to say removed with no socket. */
++    async function removedWhileAway(server: Awaited<ReturnType<typeof fakeServer>>) {
++      let letGo!: () => void;
++      const stopping = new Promise<void>(r => (letGo = r));
++      const slow: ProviderAdapter = {
++        ...adapter,
++        run: input =>
++          new Promise(done => {
++            input.signal?.addEventListener('abort', () => void stopping.then(() => done({ ok: false, sessionId: null, result: '', output: 'stopped', error: 'agent_failed', limits: null })));
++          }),
++      };
++      const { lines } = await connected(server, slow);
++      server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
++      await server.wait(() => server.received.some(m => m.type === 'job.started'));
++      server.send({ type: 'remove' });
++      server.drop();
++      await server.wait(() => lines.some(line => line.startsWith('Connection closed')));
++      letGo();
++      await server.wait(() => removals(server).length === 1, 5000);
++      expect(server.received.filter(m => m.type === 'hello')).toHaveLength(2);
++      return lines;
++    }
++
++    it('says removed on the next connection when the socket drops while its jobs stop', async () => {
++      const server = await fakeServer({ acks: true });
++      const lines = await removedWhileAway(server);
++      await pastLastMessage();
++      expect(stopped(lines)).toBe(false);
++    });
++
++    it('is over once it said removed on the next connection to an older server', async () => {
++      const server = await fakeServer();
++      const lines = await removedWhileAway(server);
++      await server.wait(() => stopped(lines));
++    });
++
++    it('is over once removed went to an older server, which confirms nothing', async () => {
++      const server = await fakeServer();
++      const { dir, lines } = await connected(server);
++      server.send({ type: 'remove' });
++      await server.wait(() => server.open() === 0);
++      expect(removals(server)).toHaveLength(1);
++      expect(stopped(lines)).toBe(true);
++      expect(new Outbox(dir).owes('removed')).toBe(false);
++    });
++
++    it('is over when Hornhoof refuses its key, which it does once it has heard', async () => {
++      const server = await fakeServer({ acks: true });
++      const { lines } = await connected(server);
++      server.send({ type: 'remove' });
++      await server.wait(() => removals(server).length === 1);
++      server.close(4001);
++      await server.wait(() => stopped(lines));
++    });
++
++    it('keeps going when Hornhoof refuses its key and nothing removed it', async () => {
++      const server = await fakeServer({ acks: true });
++      const { lines } = await connected(server);
++      server.close(4001);
++      await server.wait(() => lines.some(line => line.startsWith('Hornhoof does not know this machine')));
++      await pastLastMessage();
++      expect(stopped(lines)).toBe(false);
++    });
+   });
+ 
+   it('stays idle once removed', async () => {
+     const lines: string[] = [];
+     const dir = nodeDir('http://127.0.0.1:9');
+     writeFileSync(join(dir, 'removed'), '');
+     const node = await runNode({ dir, adapter, log: l => lines.push(l) });
+     node.stop();
+diff --git a/apps/node/test/outbox.test.ts b/apps/node/test/outbox.test.ts
+index 00b4ad10..e95f1ce2 100644
+--- a/apps/node/test/outbox.test.ts
++++ b/apps/node/test/outbox.test.ts
+@@ -1,14 +1,27 @@
+-import { appendFileSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
++import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, statSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+-import type { NodeMessage } from '@hornhoof/protocol';
+-import { describe, expect, it } from 'vitest';
+-import { endId, isEnd, Outbox, OUTBOX_FILE, parseLine, type End } from '../src/outbox.js';
++import { HELLO_IDS_BEFORE_ACKS, HELLO_IDS_MAX, type NodeMessage } from '@hornhoof/protocol';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
++import { clearOutbox, endId, helloIds, isEnd, Outbox, OUTBOX_FILE, parseLine, sendPending, type End } from '../src/outbox.js';
++
++/* A disk that fills up in the middle of a line: the next append writes part of its line, then fails. */
++const disk = vi.hoisted(() => ({ tearNext: false }));
++vi.mock('node:fs', async original => {
++  const fs = await original<typeof import('node:fs')>();
++  const tearing: typeof fs.appendFileSync = (path, data, options) => {
++    if (!disk.tearNext) return fs.appendFileSync(path, data, options);
++    disk.tearNext = false;
++    fs.appendFileSync(path, String(data).slice(0, 12), options);
++    throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
++  };
++  return { ...fs, appendFileSync: tearing };
++});
+ 
+ const folder = () => mkdtempSync(join(tmpdir(), 'hh-outbox-'));
+ const event = (seq: number): NodeMessage => ({ type: 'job.event', jobId: 'job-1', seq, event: { kind: 'text', text: `line ${seq}` } });
+ const jobEnd = (jobId: string): End => ({ type: 'job.done', jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+ const testEnd = (partId: string): End => ({ type: 'tests.done', partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
+ const numbers = (box: Outbox) => box.pending().map(e => e.n);
+ 
+ describe('Outbox', () => {
+@@ -183,16 +196,201 @@ describe('Outbox', () => {
+     box.add(event(0));
+     appendFileSync(join(dir, OUTBOX_FILE), 'not json\n');
+     expect(numbers(new Outbox(dir))).toEqual([1]);
+     box.add(event(1));
+     expect(numbers(new Outbox(dir))).toEqual([1, 2]);
+   });
+ });
+ 
++describe('Outbox on its own timer', () => {
++  const FLUSH_MS = 1000;
++  const manualTimers = () => {
++    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
++    onTestFinished(() => void vi.useRealTimers());
++  };
++  const lines = (dir: string) => readFileSync(join(dir, OUTBOX_FILE), 'utf8').trim().split('\n').length;
++
++  it('shrinks the file after each drop with no close, so a long-running node replays nothing it had confirmed', () => {
++    manualTimers();
++    const dir = folder();
++    const box = new Outbox(dir, { flushMs: FLUSH_MS });
++    for (let seq = 0; seq < 3; seq++) box.add(event(seq));
++    box.ack(2);
++    expect(lines(dir)).toBe(4);
++    vi.advanceTimersByTime(FLUSH_MS);
++    expect(lines(dir)).toBe(2);
++    expect(numbers(new Outbox(dir))).toEqual([3]);
++
++    box.add(event(3));
++    box.add(event(4));
++    box.ack(4);
++    expect(lines(dir)).toBe(4);
++    vi.advanceTimersByTime(FLUSH_MS);
++    expect(lines(dir)).toBe(2);
++    expect(numbers(new Outbox(dir))).toEqual([5]);
++  });
++
++  it('writes the file whole once a first write that failed can go through, so a restart keeps its stream and messages', () => {
++    manualTimers();
++    const dir = folder();
++    const temp = join(dir, `${OUTBOX_FILE}.tmp`);
++    /* A folder where the temporary file goes fails every rewrite until it is gone, as a full disk does until there is room. */
++    mkdirSync(temp);
++    const errors: unknown[] = [];
++    const box = new Outbox(dir, { flushMs: FLUSH_MS, onError: err => errors.push(err) });
++    box.add(event(0));
++    expect(errors).toHaveLength(1);
++    vi.advanceTimersByTime(FLUSH_MS);
++    expect(errors).toHaveLength(2);
++    rmdirSync(temp);
++    vi.advanceTimersByTime(FLUSH_MS);
++    expect(errors).toHaveLength(2);
++    const again = new Outbox(dir);
++    expect(again.stream).toBe(box.stream);
++    expect(numbers(again)).toEqual([1]);
++  });
++
++  it('writes the file whole after a line cut short by a full disk, so neither that line nor the next is lost', () => {
++    manualTimers();
++    const dir = folder();
++    const errors: unknown[] = [];
++    const box = new Outbox(dir, { flushMs: FLUSH_MS, onError: err => errors.push(err) });
++    box.add(event(0));
++    disk.tearNext = true;
++    box.add(event(1));
++    box.add(event(2));
++    expect(errors).toHaveLength(1);
++    vi.advanceTimersByTime(FLUSH_MS);
++    expect(numbers(new Outbox(dir))).toEqual([1, 2, 3]);
++  });
++
++  it('writes a line cut short whole on close too', () => {
++    manualTimers();
++    const dir = folder();
++    const box = new Outbox(dir, { flushMs: FLUSH_MS });
++    box.add(event(0));
++    disk.tearNext = true;
++    box.add(event(1));
++    box.close();
++    expect(numbers(new Outbox(dir))).toEqual([1, 2]);
++  });
++});
++
++describe('sendPending', () => {
++  const filled = (count: number) => {
++    const box = new Outbox(folder());
++    for (let seq = 0; seq < count; seq++) box.add(event(seq));
++    return box;
++  };
++  /* A socket that takes this many messages and then has closed. */
++  const socketFor = (takes: number) => {
++    const sent: (number | undefined)[] = [];
++    const next = (m: NodeMessage) => {
++      if (sent.length >= takes) return false;
++      sent.push((m as { n?: number }).n);
++      return true;
++    };
++    return { sent, next };
++  };
++
++  it('drops only what really went when an older server closes partway through', () => {
++    const box = filled(5);
++    const socket = socketFor(2);
++    sendPending(box, socket.next, false);
++    expect(socket.sent).toEqual([1, 2]);
++    expect(numbers(box)).toEqual([3, 4, 5]);
++  });
++
++  it('drops nothing when the socket took nothing', () => {
++    const box = filled(2);
++    sendPending(box, socketFor(0).next, false);
++    expect(numbers(box)).toEqual([1, 2]);
++  });
++
++  it('keeps what a confirming server was sent until it says so', () => {
++    const box = filled(3);
++    const socket = socketFor(3);
++    sendPending(box, socket.next, true);
++    expect(socket.sent).toEqual([1, 2, 3]);
++    expect(numbers(box)).toEqual([1, 2, 3]);
++  });
++
++  it('numbers the ends still held and sends them after the rest', () => {
++    const box = filled(1);
++    box.hold(jobEnd('job-1'));
++    const socket = socketFor(5);
++    sendPending(box, socket.next, true);
++    expect(socket.sent).toEqual([1, 2]);
++    expect(box.held()).toEqual([]);
++  });
++
++  it('keeps an end for its own ack when an older server was sent it', () => {
++    const box = filled(1);
++    box.hold(jobEnd('job-1'));
++    sendPending(box, socketFor(5).next, false);
++    expect(box.doneJobs()).toEqual(['job-1']);
++    expect(numbers(box)).toEqual([2]);
++  });
++});
++
++describe('helloIds', () => {
++  const ids = (name: string, count: number) => Array.from({ length: count }, (_, i) => `${name}-${i}`);
++
++  it('lists all a confirming server can take', () => {
++    expect(helloIds(ids('run', 3), ids('end', 150), true)).toEqual([...ids('run', 3), ...ids('end', 150)]);
++  });
++
++  it('stops at the bound of the protocol', () => {
++    expect(helloIds(ids('run', 3), ids('end', HELLO_IDS_MAX), true)).toHaveLength(HELLO_IDS_MAX);
++  });
++
++  it('caps at what an older server takes, the runs still going first', () => {
++    const listed = helloIds(ids('run', 3), ids('end', 150), false);
++    expect(listed).toEqual([...ids('run', 3), ...ids('end', HELLO_IDS_BEFORE_ACKS - 3)]);
++  });
++
++  it('counts an id once', () => {
++    expect(helloIds(['a', 'b', 'a'], ['b', 'c'], true)).toEqual(['a', 'b', 'c']);
++  });
++});
++
++describe('clearOutbox', () => {
++  it('forgets what waited, and a new outbox starts a new stream', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    box.add(event(0));
++    mkdirSync(join(dir, 'other'));
++    appendFileSync(join(dir, `${OUTBOX_FILE}.tmp`), 'half a rewrite');
++    clearOutbox(dir);
++    expect(existsSync(join(dir, OUTBOX_FILE))).toBe(false);
++    expect(existsSync(join(dir, `${OUTBOX_FILE}.tmp`))).toBe(false);
++    const again = new Outbox(dir);
++    expect(again.stream).not.toBe(box.stream);
++    expect(again.pending()).toEqual([]);
++    expect(existsSync(join(dir, 'other'))).toBe(true);
++  });
++
++  it('is fine with a folder that has no outbox', () => {
++    expect(() => clearOutbox(folder())).not.toThrow();
++  });
++});
++
++describe('owes', () => {
++  it('tells whether a message of that type still waits', () => {
++    const box = new Outbox(folder());
++    expect(box.owes('removed')).toBe(false);
++    const entry = box.add({ type: 'removed' });
++    box.add(event(0));
++    expect(box.owes('removed')).toBe(true);
++    box.ack(entry.n);
++    expect(box.owes('removed')).toBe(false);
++  });
++});
++
+ describe('parseLine', () => {
+   it('reads each kind of line and refuses the rest', () => {
+     const stream = '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11';
+     expect(parseLine(JSON.stringify({ k: 'stream', stream, next: 4 }))).toEqual({ k: 'stream', stream, next: 4 });
+     expect(parseLine(JSON.stringify({ k: 'hold', msg: jobEnd('j') }))).toMatchObject({ k: 'hold' });
+     expect(parseLine(JSON.stringify({ k: 'add', n: 2, msg: event(0) }))).toMatchObject({ k: 'add', n: 2 });
+     expect(parseLine('{"k":"add"')).toBeNull();
+     expect(parseLine(JSON.stringify({ k: 'add', n: 0, msg: event(0) }))).toBeNull();
+diff --git a/apps/node/test/removal.test.ts b/apps/node/test/removal.test.ts
+new file mode 100644
+index 00000000..6915a295
+--- /dev/null
++++ b/apps/node/test/removal.test.ts
+@@ -0,0 +1,47 @@
++import { describe, expect, it } from 'vitest';
++import { removalWatch } from '../src/removal.js';
++
++function watched(owed: boolean) {
++  const state = { owed, over: 0 };
++  return { state, watch: removalWatch(() => state.owed, () => void state.over++) };
++}
++
++describe('removalWatch', () => {
++  it('waits while removed is owed, and is over once it is not', () => {
++    const { state, watch } = watched(true);
++    watch.start();
++    watch.settle();
++    expect(state.over).toBe(0);
++    state.owed = false;
++    watch.settle();
++    expect(state.over).toBe(1);
++  });
++
++  it('is over at once when nothing was owed by the time it starts', () => {
++    const { state, watch } = watched(false);
++    watch.start();
++    expect(state.over).toBe(1);
++  });
++
++  it('is over when Hornhoof refuses the key, owed or not', () => {
++    const { state, watch } = watched(true);
++    watch.start();
++    watch.refused();
++    expect(state.over).toBe(1);
++  });
++
++  it('means nothing before a removal starts', () => {
++    const { state, watch } = watched(false);
++    watch.settle();
++    watch.refused();
++    expect(state.over).toBe(0);
++  });
++
++  it('is over only once', () => {
++    const { state, watch } = watched(false);
++    watch.start();
++    watch.settle();
++    watch.refused();
++    expect(state.over).toBe(1);
++  });
++});
+diff --git a/packages/protocol/src/index.ts b/packages/protocol/src/index.ts
+index eb41b9f5..89b5aae6 100644
+--- a/packages/protocol/src/index.ts
++++ b/packages/protocol/src/index.ts
+@@ -349,35 +349,40 @@ export type ProgramExit = z.infer<typeof ProgramExit>;
+    server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
+    answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
+    agent.restarted and node.stopping. */
+ export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+ /* Optional, so a build that does not number still talks to one that does. */
+ const MessageNumber = z.number().int().min(1).optional();
+ /* The header of the upgrade answer of a server that sends ack. */
+ export const ACKS_HEADER = 'hornhoof-acks';
++/* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
++   the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
++export const HELLO_IDS_MAX = 20_000;
++/* A server that sends no ack drops a hello that lists more than this. */
++export const HELLO_IDS_BEFORE_ACKS = 100;
+ 
+ const NodeMessage = z.discriminatedUnion('type', [
+   /* terminals: the node runs agents in sessions people can watch and type into. */
+   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
+   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
+      the instructions. */
+   z.object({
+     type: z.literal('hello'),
+     version: z.string().max(40),
+     loggedIn: z.boolean(),
+-    running: z.array(z.string()).max(100),
++    running: z.array(z.string()).max(HELLO_IDS_MAX),
+     models: Models.optional(),
+     terminals: z.boolean().optional(),
+     /* The node runs parts of other work too, not only of test runs. */
+     work: z.boolean().optional(),
+     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
+     noRuns: z.string().max(300).optional(),
+     load: Load.optional(),
+-    tests: z.array(z.string()).max(100).optional(),
++    tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
+     skillFiles: z.boolean().optional(),
+     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
+     publicKey: AgeRecipient.optional(),
+     account: Account.nullable().optional(),
+     boot: Boot.optional(),
+     programs: Programs.optional(),
+     /* The node build CI wrote into the node's image, the last commit that changed its files; none from a node built by
+        hand or from before. One that is not a commit is left out rather than the hello refused. */
+diff --git a/packages/protocol/test/protocol.test.ts b/packages/protocol/test/protocol.test.ts
+index b67267b1..0c8093e6 100644
+--- a/packages/protocol/test/protocol.test.ts
++++ b/packages/protocol/test/protocol.test.ts
+@@ -640,16 +640,32 @@ describe('numbered node messages', () => {
+     expect(nodeMessage({ type: 'hello', version: '1', loggedIn: true, running: [], stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' })).toMatchObject({ stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' });
+     expect(parseServerMessage('{"type":"ack","upto":4}')).toEqual({ type: 'ack', upto: 4 });
+     expect(parseServerMessage('{"type":"ack","upto":0}')).toEqual({ type: 'ack', upto: 0 });
+     expect(nodeMessage({ ...event, n: 0 })).toBeNull();
+     expect(nodeMessage({ ...event, n: 1.5 })).toBeNull();
+     expect(nodeMessage({ ...event, n: 3, extra: 'x' })).not.toHaveProperty('extra');
+   });
+ 
++  it('takes a hello with as many runs and ends as a node can owe, and no more', () => {
++    const hello = (running: string[], tests: string[]) => nodeMessage({ type: 'hello', version: '1', loggedIn: true, running, tests });
++    const ids = (count: number) => Array.from({ length: count }, (_, i) => `id-${i}`);
++    expect(protocol.HELLO_IDS_BEFORE_ACKS).toBe(100);
++    expect(protocol.HELLO_IDS_MAX).toBeGreaterThan(protocol.HELLO_IDS_BEFORE_ACKS);
++    expect(hello(ids(protocol.HELLO_IDS_MAX), ids(protocol.HELLO_IDS_MAX))).not.toBeNull();
++    expect(hello(ids(protocol.HELLO_IDS_MAX + 1), [])).toBeNull();
++    expect(hello([], ids(protocol.HELLO_IDS_MAX + 1))).toBeNull();
++  });
++
++  it('leaves half of the 4 MiB a socket of the server takes for the rest of the longest hello', () => {
++    const uuid = '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11';
++    const hello = { type: 'hello', version: '1', loggedIn: true, running: Array(protocol.HELLO_IDS_MAX).fill(uuid), tests: Array(protocol.HELLO_IDS_MAX).fill(uuid) };
++    expect(JSON.stringify(hello).length).toBeLessThan(2 * 1024 * 1024);
++  });
++
+   it('refuses an ack that is negative or not whole', () => {
+     expect(parseServerMessage('{"type":"ack","upto":-1}')).toBeNull();
+     expect(parseServerMessage('{"type":"ack","upto":2.5}')).toBeNull();
+   });
+ 
+   it('lets every message in NUMBERED carry n, and no other', () => {
+     const samples: Record<string, object> = {
+       'job.started': { type: 'job.started', jobId: 'j' },
+

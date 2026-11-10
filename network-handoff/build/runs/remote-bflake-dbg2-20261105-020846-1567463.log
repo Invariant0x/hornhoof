@@ -1,0 +1,79 @@
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Start at [22m 02:15:12
+[2m   Duration [22m 506.44s[2m (tests 99%, transform 1%)[22m
+
+ROUND 11 LOST stale=true contexts=[0.25]
+  1812 hook start session=384b7d aSession=null turn=? ending=false busy=true took=false
+  1829 wire metadata aSession=384b7d turn=? ending=false busy=true took=false
+  1876 hook prompt session=384b7d aSession=384b7d turn=? ending=false busy=true took=false
+  1890 wire turn.prompt aSession=384b7d turn=? ending=false busy=true took=true
+  1890 wire context.append_loop_event aSession=384b7d turn=? ending=false busy=true took=true
+  1890 wire token_counting.measured aSession=384b7d turn=? ending=false busy=true took=true
+  1890 wire turn.ended aSession=384b7d turn=? ending=false busy=true took=true
+  1890 endTurn done message="echo: hello" aSession=384b7d turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  1891 first answered ok=true result="echo: hello" session=384b7d
+  1912 hook stop session=384b7d aSession=null turn=? ending=false busy=false took=true
+  1913 wire metadata aSession=384b7d turn=? ending=false busy=false took=true
+  1913 wire turn.prompt aSession=384b7d turn=? ending=false busy=false took=true
+  1913 wire context.append_loop_event aSession=384b7d turn=? ending=false busy=true took=true
+  1913 wire token_counting.measured aSession=384b7d turn=? ending=false busy=true took=true
+  1913 wire turn.ended aSession=384b7d turn=? ending=false busy=true took=true
+  1913 endTurn done message="echo: hello" aSession=384b7d turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  3553 second answered ok=true result="echo: hello" error=null session=384b7d
+ROUND 39 LOST stale=true contexts=[0.25]
+  1693 hook start session=9e8991 aSession=null turn=? ending=false busy=true took=false
+  1784 hook prompt session=9e8991 aSession=9e8991 turn=? ending=false busy=true took=false
+  1793 wire metadata aSession=9e8991 turn=? ending=false busy=true took=true
+  1793 wire turn.prompt aSession=9e8991 turn=? ending=false busy=true took=true
+  1802 wire context.append_loop_event aSession=9e8991 turn=? ending=false busy=true took=true
+  1802 wire token_counting.measured aSession=9e8991 turn=? ending=false busy=true took=true
+  1802 wire turn.ended aSession=9e8991 turn=? ending=false busy=true took=true
+  1802 endTurn done message="echo: hello" aSession=9e8991 turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  1803 first answered ok=true result="echo: hello" session=9e8991
+  1824 hook stop session=9e8991 aSession=null turn=? ending=false busy=false took=true
+  1824 wire metadata aSession=9e8991 turn=? ending=false busy=false took=true
+  1824 wire turn.prompt aSession=9e8991 turn=? ending=false busy=false took=true
+  1824 wire context.append_loop_event aSession=9e8991 turn=? ending=false busy=true took=true
+  1824 wire token_counting.measured aSession=9e8991 turn=? ending=false busy=true took=true
+  1824 wire turn.ended aSession=9e8991 turn=? ending=false busy=true took=true
+  1833 endTurn done message="echo: hello" aSession=9e8991 turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  3498 second answered ok=true result="echo: hello" error=null session=9e8991
+ROUND 79 LOST stale=true contexts=[0.25]
+  1785 hook start session=267f12 aSession=null turn=? ending=false busy=true took=false
+  1832 wire metadata aSession=267f12 turn=? ending=false busy=true took=false
+  1879 hook prompt session=267f12 aSession=267f12 turn=? ending=false busy=true took=false
+  1891 wire turn.prompt aSession=267f12 turn=? ending=false busy=true took=true
+  1891 wire context.append_loop_event aSession=267f12 turn=? ending=false busy=true took=true
+  1891 wire token_counting.measured aSession=267f12 turn=? ending=false busy=true took=true
+  1891 wire turn.ended aSession=267f12 turn=? ending=false busy=true took=true
+  1891 endTurn done message="echo: hello" aSession=267f12 turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  1892 first answered ok=true result="echo: hello" session=267f12
+  1905 hook stop session=267f12 aSession=null turn=? ending=false busy=false took=true
+  1906 wire metadata aSession=267f12 turn=? ending=false busy=false took=true
+  1906 wire turn.prompt aSession=267f12 turn=? ending=false busy=false took=true
+  1906 wire context.append_loop_event aSession=267f12 turn=? ending=false busy=true took=true
+  1906 wire token_counting.measured aSession=267f12 turn=? ending=false busy=true took=true
+  1906 wire turn.ended aSession=267f12 turn=? ending=false busy=true took=true
+  1906 endTurn done message="echo: hello" aSession=267f12 turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  3543 second answered ok=true result="echo: hello" error=null session=267f12
+ROUND 86 LOST stale=true contexts=[0.25]
+  1815 hook start session=1b4bcb aSession=null turn=? ending=false busy=true took=false
+  1865 hook prompt session=1b4bcb aSession=1b4bcb turn=? ending=false busy=true took=false
+  1877 wire metadata aSession=1b4bcb turn=? ending=false busy=true took=true
+  1877 wire turn.prompt aSession=1b4bcb turn=? ending=false busy=true took=true
+  1877 wire context.append_loop_event aSession=1b4bcb turn=? ending=false busy=true took=true
+  1877 wire token_counting.measured aSession=1b4bcb turn=? ending=false busy=true took=true
+  1877 wire turn.ended aSession=1b4bcb turn=? ending=false busy=true took=true
+  1878 endTurn done message="echo: hello" aSession=1b4bcb turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  1878 first answered ok=true result="echo: hello" session=1b4bcb
+  1891 hook stop session=1b4bcb aSession=null turn=? ending=false busy=false took=true
+  1891 wire metadata aSession=1b4bcb turn=? ending=false busy=false took=true
+  1891 wire turn.prompt aSession=1b4bcb turn=? ending=false busy=false took=true
+  1891 wire context.append_loop_event aSession=1b4bcb turn=? ending=false busy=true took=true
+  1891 wire token_counting.measured aSession=1b4bcb turn=? ending=false busy=true took=true
+  1891 wire turn.ended aSession=1b4bcb turn=? ending=false busy=true took=true
+  1899 endTurn done message="echo: hello" aSession=1b4bcb turn=? ending=false busy=true took=true from TerminalHost.endTurn < TerminalHost.kimiNews < TerminalHost.<anonymous> < TerminalHost.kimiNews
+  3482 second answered ok=true result="echo: hello" error=null session=1b4bcb
+SUMMARY rounds=127 lost=4 staleStops=4 wireFirst=9 seconds=502

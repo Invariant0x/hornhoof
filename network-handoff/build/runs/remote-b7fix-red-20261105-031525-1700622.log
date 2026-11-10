@@ -1,0 +1,16 @@
+/home/altera/hornhoof-network/hornhoof-edge/relay/test/.bin/download.nZ0dyt/caddy.tgz: OK
+F
+======================================================================
+FAIL: test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel (relay.test.test_block_by_name.BlockByNameTests.test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_block_by_name.py", line 123, in test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel
+    self.assert_refused_at_once('acme.hornhoof.org')
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_block_by_name.py", line 59, in assert_refused_at_once
+    self.assertIsNone(refused.status, refused)
+AssertionError: 200 is not None : Answer(status=200, headers={'Server': 'BaseHTTP/0.6 Python/3.12.14', 'Date': 'Thu, 05 Nov 2026 03:22:51 GMT', 'Content-Type': 'application/json', 'Content-Length': '69'}, body=b'{"host": "acme.hornhoof.org", "path": "/", "from": "127.0.0.1:50054"}', cert_names=['acme.hornhoof.org'], local_port=50054, error=None)
+
+----------------------------------------------------------------------
+Ran 1 test in 4.030s
+
+FAILED (failures=1)

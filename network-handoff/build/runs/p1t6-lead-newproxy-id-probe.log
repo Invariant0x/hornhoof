@@ -1,0 +1,6 @@
+HTTP: 200 rejected: False generation: 1 empty run id stored: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-newproxy-id-probe.py", line 25, in <module>
+    assert answer.get('reject') is True and row is None, 'malformed identity was accepted and changed a route'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: malformed identity was accepted and changed a route

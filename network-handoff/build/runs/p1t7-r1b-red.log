@@ -1,0 +1,263 @@
+new link key for acme
+Fnew visitor key for acme
+Fnew link key for acme
+Fnew link key for acme
+Fnew link key for acme
+Fnew link key for acme
+Fnew link key for acme
+Fnew visitor key for acme
+Fnew visitor key for acme
+Fnew visitor key for acme
+Fnew visitor key for acme
+Fnew visitor key for acme
+Fbound c54r7qeb9uiww5nr22rx1n30 for 198.51.100.99
+F
+======================================================================
+FAIL: test_a_new_link_key_comes_with_its_body_read (relay.test.test_keys.ConnectionTests.test_a_new_link_key_comes_with_its_body_read)
+The answer is the only copy of a committed key; closing over unread bytes can reset it away.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 771, in test_a_new_link_key_comes_with_its_body_read
+    new = self.key_from_a_kept_connection(KEY_PATH, 'key')
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 763, in key_from_a_kept_connection
+    self.assertEqual(exchange.statuses, [200, 200], 'the body must be read, so that the next request is whole')
+AssertionError: Lists differ: [200] != [200, 200]
+
+Second list contains 1 additional elements.
+First extra element 1:
+200
+
+- [200]
++ [200, 200] : the body must be read, so that the next request is whole
+
+======================================================================
+FAIL: test_a_new_visitor_key_comes_with_its_body_read (relay.test.test_keys.ConnectionTests.test_a_new_visitor_key_comes_with_its_body_read)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 775, in test_a_new_visitor_key_comes_with_its_body_read
+    new = self.key_from_a_kept_connection(VISITOR_KEY_PATH, 'visitorKey')
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 763, in key_from_a_kept_connection
+    self.assertEqual(exchange.statuses, [200, 200], 'the body must be read, so that the next request is whole')
+AssertionError: Lists differ: [200] != [200, 200]
+
+Second list contains 1 additional elements.
+First extra element 1:
+200
+
+- [200]
++ [200, 200] : the body must be read, so that the next request is whole
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/key', label='one byte over the limit')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/key', label='not JSON')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/key', label='not text')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/key', label='chunked')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/key', label='a length that cannot be trusted')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/visitor-key', label='one byte over the limit')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/visitor-key', label='not JSON')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/visitor-key', label='not text')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/visitor-key', label='chunked')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_it_cannot_read (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_it_cannot_read) (path='/api/v1/links/acme/visitor-key', label='a length that cannot be trusted')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 797, in test_a_key_is_not_changed_by_a_body_it_cannot_read
+    self.assertEqual(exchange.statuses, [400], 'refused before anything changes')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : refused before anything changes
+
+======================================================================
+FAIL: test_a_chunked_binding_makes_nothing (relay.test.test_keys.ConnectionTests.test_a_chunked_binding_makes_nothing)
+Its key would be the only copy too, on an answer that closes over the unread chunks.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 806, in test_a_chunked_binding_makes_nothing
+    self.assert_answered_once_and_closed(self.exchange(request), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 691, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201] != [400]
+
+First differing element 0:
+201
+400
+
+- [201]
++ [400] : exactly one answer: the unread bytes must not run
+
+----------------------------------------------------------------------
+Ran 4 tests in 2.049s
+
+FAILED (failures=13)

@@ -1,0 +1,2 @@
+Waiting for our exact writer PID to finish its active child command.
+Sent SIGINT only to verified writer PID after child command finished.

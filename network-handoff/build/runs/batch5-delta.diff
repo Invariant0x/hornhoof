@@ -1,0 +1,1009 @@
+# Review package: batch 5, slice delta
+
+## bccf989 Keep the name edge for the edge, stop browsers reusing Caddy for a live company, and say what the relay can read
+
+Batch 5's one fix round on plan 1 Task 9, relay TLS routing.
+
+Critical. A legacy login with run id edge was registered by frps under client id edge, so anyone with a binding's key
+could keep the real edge from logging in again, and hornhoof.org, the API, the tunnels and every http-mode company went
+with it. A reserved_run_id rule now refuses that run id for every login that is not the edge. Seen red on the real frps
+wire with "client_id [edge] for user [] is already online".
+
+Critical. All names share one address and Caddy holds a certificate for every one of them, so a browser reused its
+HTTP/2 connection to Caddy for a company whose tunnel was up, and Caddy read that request and answered 404. Caddy now
+speaks HTTP/1.1 only, a Host other than the connection's name gets 421 with strict_sni_host, and a 404 or 410 under
+*.hornhoof.org ends its connection, so that a tab polling across a leader switch reaches the tunnel once it is back.
+
+Important. The README and two comments said hornhoof.org sees only encrypted bytes for an https company. That holds
+while its tunnel is up. With no tunnel the name falls back to Caddy, which reads that request to answer 404 or 410 and
+keeps nothing. They say so now. The design choice stays with Ivan and David AI, QUESTIONS.md item 13.
+
+Important. test_caddy_https_on_loopback_only proved the harness, because its global default_bind bound everything. Only
+the test Caddy's http site is bound to loopback now, so that https rests on the Caddyfile's own lines. Seen failing in a
+copy with each of the three binds removed, one at a time.
+
+Minor: the https port's probe no longer delays health and is skipped while frps does not answer; a token with a lone
+surrogate is refused; edge-frpc.service wants frps.service; the passthrough echo takes a picked port and close joins its
+thread; the trace says edge for the edge; render_caddyfile's error names the right file.
+
+Ruling: the https probe moved to a loop of its own, watch_passthrough, beyond the fix list's "stamp when frps answers" - why: a probe only moved behind the stamp still stands between two stamps, and the test stayed red with that reorder alone (0.6 s frps and a 1 s probe age the stamp to 2.1 s, past HEALTH_MAX_AGE_S) - cost if wrong: one more daemon thread, and health's passthrough can lag one loop behind while frps stays up
+Ruling: Connection: close goes by status on all of *.hornhoof.org, so it also covers a 404 or 410 from an http-mode company's own app and from a company on the SSH tunnel - why: to Caddy frps's 404 and a company's own look the same - cost if wrong: such a company pays a new TLS handshake after each of its own 404s until it moves to https
+Ruling: test_server_name_is_what_the_handshake_carries changes from 404 to 421, the one old test changed - why: the lead's ruling B says so - cost if wrong: none, the test follows the Caddyfile
+Ruling: the harness's anchor for hornhoof.org's test certificate no longer holds the bind line - why: removing that bind must fail on the socket test and not on rendering - cost if wrong: none, only the harness
+
+---
+ Caddyfile                     |  22 +++-
+ README.md                     |   8 +-
+ relay/edge-frpc.service       |   1 +
+ relay/frps.toml               |   9 +-
+ relay/relay.py                |  58 +++++++---
+ relay/test/harness.py         |  54 +++++----
+ relay/test/test_edge_today.py |  16 ++-
+ relay/test/test_sni.py        | 247 ++++++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 367 insertions(+), 48 deletions(-)
+
+diff --git a/Caddyfile b/Caddyfile
+index f141a57..9e958bb 100644
+--- a/Caddyfile
++++ b/Caddyfile
+@@ -1,10 +1,12 @@
+-# Hornhoof edge and relay. frps holds port 443 and routes each connection by its TLS server name. A name in https mode
+-# goes straight to its company, unread. Everything else comes here through frps's edge proxy, to 127.0.0.1:8443.
++# Hornhoof edge and relay. frps holds port 443 and routes each connection by its TLS server name. A name with a live
++# https tunnel goes straight to its company, unread. Everything else comes here through frps's edge proxy, to
++# 127.0.0.1:8443. That includes a name in https mode while its tunnel is down: Caddy answers under the wildcard
++# certificate, so it reads that request, cookies included, to give the 404 or 410 below, and keeps nothing of it.
+ # hornhoof.org and www show the stub; hornhoof.org/api/ is the relay's link API and hornhoof.org/~!frp takes the tunnels
+ # (frpc over wss) of Hornhoof servers. Each company is one subdomain, a name it picked (acme) or by default a long
+ # random one, served by frps through its server's own tunnel. Reserved and blocked names get the 404 and 410 pages of
+ # /var/www/hornhoof-pages; a name with no tunnel gets the same 404 page from frps.
+ # Names in http mode stay out of CT logs under the wildcard certificate; names in https mode hold their own
+ # certificates.
+ # Older companies on the Mac's SSH tunnel live in /etc/caddy/companies/*.caddy and come first.
+ # After an edit: caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+@@ -13,18 +15,22 @@
+ 	servers 127.0.0.1:8443 {
+ 		# The visitor's address comes in a PROXY v2 header from the edge proxy's frpc. Nothing else may name a visitor.
+ 		listener_wrappers {
+ 			proxy_protocol {
+ 				allow 127.0.0.1/32
+ 			}
+ 			tls
+ 		}
+-		# No HTTP/3: the firewall opens TCP only.
+-		protocols h1 h2
++		# No HTTP/3: the firewall opens TCP only. No HTTP/2: all names share one address and this server holds a certificate
++		# for every one of them, so a browser would reuse one connection for any name, a company's whose tunnel is up too,
++		# and that company's requests would be read here and answered 404.
++		protocols h1
++		# A request for a name other than its connection's gets 421, so that it goes no further than this.
++		strict_sni_host
+ 	}
+ }
+ 
+ # Port 80 on every address: a redirect to https. Caddy itself answers an HTTP-01 challenge here, ahead of any handler.
+ # Each https site below binds to loopback, so without this site its automatic redirect would be on loopback too.
+ http:// {
+ 	redir https://{host}{uri} 308
+ }
+@@ -70,16 +76,24 @@ www.hornhoof.org {
+ 
+ *.hornhoof.org {
+ 	bind 127.0.0.1
+ 	# Wildcard certificate, renewed on the Mac by DNS-01 and pushed here. A name in http mode never reaches CT logs.
+ 	tls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key
+ 	header -Server
+ 	# A company's link is its own business, not a search engine's.
+ 	header X-Robots-Tag "noindex, nofollow"
++	# A 404 or 410 ends its connection. A tab polling a name across a leader switch then asks again on a new one, which
++	# frps can route to the tunnel once it is back; on a kept connection it would stay here, on the 404.
++	header {
++		Connection close
++		match {
++			status 404 410
++		}
++	}
+ 
+ 	# Names that never go to a company, whatever the company files say. company.sh on the Mac reads this line.
+ 	@reserved host www.hornhoof.org api.hornhoof.org admin.hornhoof.org administrator.hornhoof.org root.hornhoof.org mail.hornhoof.org email.hornhoof.org smtp.hornhoof.org imap.hornhoof.org pop.hornhoof.org pop3.hornhoof.org mx.hornhoof.org webmail.hornhoof.org autodiscover.hornhoof.org autoconfig.hornhoof.org ns.hornhoof.org ns1.hornhoof.org ns2.hornhoof.org ns3.hornhoof.org ns4.hornhoof.org dns.hornhoof.org status.hornhoof.org health.hornhoof.org app.hornhoof.org apps.hornhoof.org dashboard.hornhoof.org console.hornhoof.org panel.hornhoof.org portal.hornhoof.org login.hornhoof.org signin.hornhoof.org signup.hornhoof.org auth.hornhoof.org sso.hornhoof.org oauth.hornhoof.org id.hornhoof.org account.hornhoof.org accounts.hornhoof.org billing.hornhoof.org pay.hornhoof.org payments.hornhoof.org support.hornhoof.org help.hornhoof.org docs.hornhoof.org doc.hornhoof.org blog.hornhoof.org news.hornhoof.org cdn.hornhoof.org static.hornhoof.org assets.hornhoof.org media.hornhoof.org files.hornhoof.org img.hornhoof.org images.hornhoof.org download.hornhoof.org downloads.hornhoof.org upload.hornhoof.org uploads.hornhoof.org dev.hornhoof.org staging.hornhoof.org stage.hornhoof.org test.hornhoof.org testing.hornhoof.org demo.hornhoof.org beta.hornhoof.org preview.hornhoof.org sandbox.hornhoof.org git.hornhoof.org ssh.hornhoof.org vpn.hornhoof.org ftp.hornhoof.org sftp.hornhoof.org proxy.hornhoof.org edge.hornhoof.org gateway.hornhoof.org internal.hornhoof.org intranet.hornhoof.org hostmaster.hornhoof.org postmaster.hornhoof.org webmaster.hornhoof.org abuse.hornhoof.org security.hornhoof.org noc.hornhoof.org localhost.hornhoof.org wildcard.hornhoof.org hornhoof.hornhoof.org
+ 	handle @reserved {
+ 		root * /var/www/hornhoof-pages
+ 		rewrite * /404.html
+ 		file_server {
+ 			status 404
+diff --git a/README.md b/README.md
+index bfe629b..ce8500b 100644
+--- a/README.md
++++ b/README.md
+@@ -7,17 +7,21 @@ The relay behind the public links of [Hornhoof](https://github.com/Invariant0x/h
+ It gives each company a link like `https://acme.hornhoof.org`. The company's own machine opens a tunnel to the relay, so nothing needs to open on the company's router. A visitor opens the link, and the relay passes the connection through that company's tunnel to its Hornhoof app.
+ 
+ The relay hands out names, checks each tunnel's key, and sends each connection to the company named in its TLS server name.
+ 
+ A company on several machines gives each one its own client id, so two companies can run side by side on one machine and no two machines log in as one. A company's machines also reach each other's services through the relay: a `-peer` machine offers two stcp services, `-data` and `-app`, and another machine of the same link visits them with the link's visitor key and the service's own secret. The relay lets those machines reach each other through it and passes their bytes on as they come; [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) says how the machines encrypt them.
+ 
+ ## What it sees
+ 
+-For a company whose link uses https, hornhoof.org sees only encrypted bytes, the name being reached and the visitor's address, which it does not keep. The browser's https connection ends at the company's own machine, with the company's own certificate. The relay holds no key for it and cannot read what passes.
++For a company whose link uses https and whose tunnel is up, hornhoof.org sees only encrypted bytes, the name being reached and the visitor's address, which it does not keep. The browser's https connection ends at the company's own machine, with the company's own certificate, and never reaches Caddy. The relay holds no key for that connection and cannot read what passes.
++
++While that company's tunnel is down, during an update, a restart or a network failure, or before it first connects, nothing claims its name, so a visitor's connection falls back to Caddy. Caddy answers under the relay's wildcard certificate, which a browser trusts for that name, with a 404 page, or a 410 page if the name is blocked. To answer, it reads that request, including any cookies the company's app set, and keeps nothing of it.
++
++Caddy speaks only HTTP/1.1, because a browser reuses an HTTP/2 connection for any name its certificate covers, which would bring the requests of a company whose tunnel is up to Caddy as well. A company in http mode does without HTTP/2 until it moves to https.
+ 
+ A company on an older Hornhoof is served the old way until it updates: its https ends at hornhoof.org, under the relay's wildcard certificate. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes. This is the behavior [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) describes today.
+ 
+ hornhoof.org itself, its API and the tunnels' way in also end at hornhoof.org, in Caddy.
+ 
+ ## What it never does
+ 
+ - Run a company's code.
+@@ -38,17 +42,17 @@ For each link, the relay keeps:
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+ - the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat. Nothing but a heartbeat can use them;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+-The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose link uses https never reaches Caddy.
++The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
+ 
+ ## Run the tests
+ 
+ You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
+ 
+ From this folder:
+ 
+ ```sh
+diff --git a/relay/edge-frpc.service b/relay/edge-frpc.service
+index 12a9a3f..73ff1f6 100644
+--- a/relay/edge-frpc.service
++++ b/relay/edge-frpc.service
+@@ -1,11 +1,12 @@
+ [Unit]
+ Description=The droplet's own frpc: carries what frps does not route by name on to Caddy
+ After=frps.service
++Wants=frps.service
+ 
+ [Service]
+ User=frps
+ Group=frps
+ EnvironmentFile=/etc/hornhoof-relay/edge.env
+ ExecStart=/usr/local/bin/frpc -c /etc/frp/edge-frpc.toml
+ Restart=always
+ RestartSec=1
+diff --git a/relay/frps.toml b/relay/frps.toml
+index 92cb17c..0961bb9 100644
+--- a/relay/frps.toml
++++ b/relay/frps.toml
+@@ -1,13 +1,14 @@
+-# frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's https
++# frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's live https
+ # proxy gets the encrypted stream as it came, and everything else goes through the droplet's own frpc (client edge) to
+-# Caddy on loopback. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and the traffic of companies
+-# in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because proxyBindAddr opens 443; both
+-# firewalls keep it closed.
++# Caddy on loopback. That includes a name in https mode while its tunnel is down: Caddy reads that request to answer it
++# with a 404 or 410, and keeps nothing of it. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and
++# the traffic of companies in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because
++# proxyBindAddr opens 443; both firewalls keep it closed.
+ # Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600); if it does not answer, frps refuses.
+ bindAddr = "127.0.0.1"
+ bindPort = 7000
+ proxyBindAddr = "0.0.0.0"
+ vhostHTTPPort = 8080
+ vhostHTTPSPort = 443
+ vhostHTTPTimeout = 60
+ subDomainHost = "hornhoof.org"
+diff --git a/relay/relay.py b/relay/relay.py
+index 5d4704c..4dae3ee 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -237,32 +237,48 @@ def frps_answers() -> bool:
+         return False
+     try:
+         status, _ = _dash_get('/healthz', cap=1.0)
+     except FrpsUnknown:
+         return False
+     return status == 200
+ 
+ 
++def frps_came_back() -> None:
++    """Probes before the good answer is published, and after frps answered, so that the first healthy answer already
++    says whether the https port, which frps opens before its dashboard, takes connections. No good answer is out yet,
++    so this wait cannot make one look old."""
++    _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
++    _frps['back_at'] = time.time()
++
++
++def watch_once(was_ok: bool) -> bool:
++    """One probe of frps: a good answer is stamped at once. Says whether frps answered."""
++    if not frps_answers():
++        return False
++    if not was_ok:
++        frps_came_back()
++    _frps['ok_at'] = time.time()
++    return True
++
++
+ def watch_frps() -> None:
+     """Probe frps forever; keep the last good answer and the recovery after a failure."""
+     was_ok = False
+     while True:
+-        answers = frps_answers()
+-        # Read before a good answer is published, and after frps answered, so that the first healthy answer already
+-        # says whether the https port, which frps opens before its dashboard, takes connections.
+-        _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
+-        if answers:
+-            t = time.time()
+-            if not was_ok:
+-                _frps['back_at'] = t
+-            _frps['ok_at'] = t
+-            was_ok = True
+-        else:
+-            was_ok = False
++        was_ok = watch_once(was_ok)
++        time.sleep(WATCH_INTERVAL_S)
++
++
++def watch_passthrough() -> None:
++    """Follow frps's https port while frps answers, on a loop of its own. Between two stamps of frps's answers a probe
++    that waits out its timeout would count against HEALTH_MAX_AGE_S, and health would read as the relay being down."""
++    while True:
++        if frps_ok():
++            _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
+         time.sleep(WATCH_INTERVAL_S)
+ 
+ 
+ def frps_ok() -> bool:
+     """R4.1: true while the watcher's last frps answer is under HEALTH_MAX_AGE_S old."""
+     return time.time() - _frps['ok_at'] < HEALTH_MAX_AGE_S
+ 
+ 
+@@ -917,16 +933,22 @@ def malformed_id_reason(name: str, content: dict, metas: dict) -> str | None:
+         return f'this client id is not for {name}'
+     if 'client' in metas and not isinstance(metas['client'], str):
+         return f'this client id is not for {name}'
+     if 'run_id' in content and not isinstance(content['run_id'], str):
+         return 'this run id belongs to another client'
+     return None
+ 
+ 
++def reserved_run_id(run_id: str, client_id: str) -> bool:
++    """A run id no binding's login may use. frps registers a legacy login under its run id, so the edge's name would cut
++    off the real edge (R7.5), and a network client's would take that client's id even while it is offline (C3)."""
++    return run_id == EDGE_CLIENT or (not client_id and CLIENT.fullmatch(run_id) is not None)
++
++
+ def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
+     """R1.3: the client id fits the session; a live run id is this client's own.
+ 
+     Every non-empty run id is checked, a legacy login too (C1): frps would let it replace
+     the live session with that run id. Legacy run ids cannot use the network client-id
+     namespace, even while its client is offline (C3).
+     """
+     reason = malformed_id_reason(name, content, metas)
+@@ -934,17 +956,17 @@ def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None
+         return reason
+     client_id = content.get('client_id') or ''
+     reason = client_id_reason(name, kind, client_id, metas.get('client'))
+     if reason is not None:
+         return reason
+     run_id = content.get('run_id')
+     if not isinstance(run_id, str) or not run_id:
+         return None
+-    if (not client_id and CLIENT.fullmatch(run_id)) or run_id_recorded_elsewhere(run_id, name):
++    if reserved_run_id(run_id, client_id) or run_id_recorded_elsewhere(run_id, name):
+         return 'this run id belongs to another client'
+     return run_id_conflict(run_id, client_id, name)
+ 
+ 
+ def malformed_user_reason(content: dict) -> str | None:
+     """I6: a present-but-malformed user object refuses before any route lookup,
+     straightening or upsert: no row, no generation may move on a bad shape."""
+     if 'user' not in content:
+@@ -1004,17 +1026,20 @@ def trace_run_id(op: str, content: dict) -> str:
+     run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
+     return run_id if isinstance(run_id, str) else ''
+ 
+ 
+ def trace_client(op: str, content: dict) -> str:
+     user = content.get('user')
+     user = user if isinstance(user, dict) else {}
+     metas = content.get('metas') if op == 'Login' else user.get('metas')
+-    client = metas.get('client') if isinstance(metas, dict) else None
++    metas = metas if isinstance(metas, dict) else {}
++    if 'edge' in metas:
++        return EDGE_CLIENT
++    client = metas.get('client')
+     return client if isinstance(client, str) and client else 'legacy'
+ 
+ 
+ def trace_plugin(op: str, content: dict, result: dict, started: float) -> None:
+     """With RELAY_TRACE=1, one JSON line per plugin call: no key, no metas beyond client."""
+     if not os.environ.get('RELAY_TRACE'):
+         return
+     line = {'op': op, 'proxy_name': content.get('proxy_name') or '', 'run_id': trace_run_id(op, content),
+@@ -1337,17 +1362,19 @@ def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str
+     name, kind, reason = authenticate(metas)
+     if op == 'Ping' and reason is not None and ping_key_matches(name, metas.get('key')):
+         return name, 'link', None
+     return name, kind, reason
+ 
+ 
+ def edge_token_matches(token: object) -> bool:
+     """R7.5: the edge's token, compared in constant time; with no token set, nothing matches."""
+-    return bool(EDGE_TOKEN) and isinstance(token, str) and hmac.compare_digest(token.encode(), EDGE_TOKEN.encode())
++    if not EDGE_TOKEN or not isinstance(token, str) or LONE_SURROGATE.search(token):
++        return False
++    return hmac.compare_digest(token.encode(), EDGE_TOKEN.encode())
+ 
+ 
+ def edge_proxy_reason(content: dict) -> str | None:
+     """R7.5: the edge offers one proxy, the catch-all behind hornhoof.org, shared with no one. It gets no routes row."""
+     if (content.get('proxy_name') != EDGE_CLIENT or content.get('proxy_type') != 'https'
+             or content.get('custom_domains') != EDGE_DOMAINS or content.get('subdomain')):
+         return 'the edge offers only its own proxy'
+     return shared_route_fields(content)
+@@ -1730,16 +1757,17 @@ def run_admin(args) -> int:
+         return 1
+ 
+ 
+ def main() -> int:
+     if sys.argv[1:2] == ['admin']:
+         return run_admin(sys.argv[2:])
+     init_db()
+     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
++    threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
+     server = ThreadingHTTPServer(LISTEN, Handler)
+     server.daemon_threads = True
+     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+     server.serve_forever()
+     return 0
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/relay/test/harness.py b/relay/test/harness.py
+index b1fc257..be9cc80 100644
+--- a/relay/test/harness.py
++++ b/relay/test/harness.py
+@@ -85,22 +85,22 @@ def _wait(predicate, within):
+         if predicate():
+             return True
+         remaining = deadline - time.monotonic()
+         if remaining <= 0:
+             return False
+         time.sleep(min(0.05, remaining))
+ 
+ 
+-def render_caddyfile(text: str, replacements: list[tuple[str, str]]) -> str:
++def render_caddyfile(text: str, replacements: list[tuple[str, str]], file: str = 'Caddyfile') -> str:
+     """Raises on a replacement that finds nothing, so that a change to the file cannot slip past the tests unseen.
+     The edge's frpc file goes through here too."""
+     for old, new in replacements:
+         if old not in text:
+-            raise ValueError(f'The Caddyfile no longer holds: {old!r}')
++            raise ValueError(f'The {file} no longer holds: {old!r}')
+         text = text.replace(old, new)
+     return text
+ 
+ 
+ class CertificateFiles(NamedTuple):
+     ca: Path
+     cert: Path
+     key: Path
+@@ -143,20 +143,22 @@ def _cached_dns_names(certificate: bytes) -> tuple[str, ...]:
+     text = _openssl('x509', '-inform', 'DER', '-noout', '-text', stdin=certificate).decode()
+     return tuple(re.findall(r'DNS:([^,\s]+)', text))
+ 
+ 
+ def _dns_names(certificate: bytes) -> list[str]:
+     return list(_cached_dns_names(certificate))
+ 
+ 
+-def _tls_socket(port: int, server_name: str | None) -> ssl.SSLSocket:
++def _tls_socket(port: int, server_name: str | None, alpn: tuple[str, ...] = ()) -> ssl.SSLSocket:
+     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+     context.check_hostname = False
+     context.verify_mode = ssl.CERT_NONE
++    if alpn:
++        context.set_alpn_protocols(alpn)
+     plain = socket.create_connection(('127.0.0.1', port), timeout=PUBLIC_TIMEOUT)
+     return context.wrap_socket(plain, server_hostname=server_name)
+ 
+ 
+ @dataclass(frozen=True)
+ class Answer:
+     status: int | None
+     headers: dict[str, str]
+@@ -261,20 +263,21 @@ def read_proxy_v2(sock: socket.socket) -> tuple[str, int] | None:
+     return socket.inet_ntoa(header[16:20]), int.from_bytes(header[24:26], 'big')
+ 
+ 
+ class _PassthroughEcho(ThreadingHTTPServer):
+     """A company's machine in https mode: its own TLS, behind a PROXY v2 header from its frpc."""
+ 
+     daemon_threads = True
+ 
+-    def __init__(self, cert: Path, key: Path):
+-        super().__init__(('127.0.0.1', 0), _PassthroughEchoRequest)
++    def __init__(self, port: int, cert: Path, key: Path):
++        super().__init__(('127.0.0.1', port), _PassthroughEchoRequest)
+         self.tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+         self.tls.load_cert_chain(cert, key)
++        self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+ 
+     def finish_request(self, request: socket.socket, client_address: tuple) -> None:
+         request.settimeout(PUBLIC_TIMEOUT)
+         visitor = read_proxy_v2(request)
+         with self.tls.wrap_socket(request, server_side=True) as connection:
+             # A kept connection stays as long as its client wants, as one to Caddy does.
+             connection.settimeout(None)
+             self.RequestHandlerClass(connection, visitor, self)
+@@ -444,34 +447,34 @@ class Stack:
+             raise
+ 
+     def __exit__(self, exc_type, exc, traceback):
+         self.close()
+ 
+     def close(self):
+         # ExitStack runs every cleanup even if one process fails to stop.
+         with ExitStack() as cleanup:
+-            self._stop_echo_on(cleanup)
++            self._stop_echo_on(cleanup, self.echo, self.echo_thread)
+             for echo in self.passthrough_echoes:
+-                cleanup.callback(echo.server_close)
+-                cleanup.callback(echo.shutdown)
++                self._stop_echo_on(cleanup, echo, echo.thread)
+             for process in (self.relay, self.frps, self.caddy, self.edge):
+                 if process is not None:
+                     cleanup.callback(process.stop)
+             for client in self.clients:
+                 cleanup.callback(client.stop)
+             for kept in self.kept_connections:
+                 cleanup.callback(kept.close)
+ 
+-    def _stop_echo_on(self, cleanup: ExitStack) -> None:
+-        if self.echo is not None:
+-            cleanup.callback(self.echo.server_close)
+-            if self.echo_thread is not None and self.echo_thread.ident is not None:
+-                cleanup.callback(self.echo_thread.join, timeout=5)
+-                cleanup.callback(self.echo.shutdown)
++    @staticmethod
++    def _stop_echo_on(cleanup: ExitStack, echo: ThreadingHTTPServer | None, thread: threading.Thread | None) -> None:
++        if echo is not None:
++            cleanup.callback(echo.server_close)
++            if thread is not None and thread.ident is not None:
++                cleanup.callback(thread.join, timeout=5)
++                cleanup.callback(echo.shutdown)
+ 
+     def _ready(self, process, port, path):
+         def answers():
+             try:
+                 status, _ = _request(port, 'GET', path)
+                 return status == 200
+             except (OSError, http.client.HTTPException):
+                 return False
+@@ -543,24 +546,26 @@ class Stack:
+         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+         with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+             output.write(text)
+ 
+     def _caddy_replacements(self) -> list[tuple[str, str]]:
+         folder = self.caddy_folder
+         test_tls = f'tls {self.certificates.cert} {self.certificates.key}'
+         return [
+-            # default_bind keeps a test server off this machine's network. auto_https disable_certs makes
+-            # a site this list missed fail its handshake, where it would otherwise ask for a real certificate.
++            # auto_https disable_certs makes a site this list missed fail its handshake, where it would otherwise ask
++            # for a real certificate.
+             ('{\n\thttps_port 8443\n',
+              f'{{\n\tadmin off\n\thttp_port {self.http_port}\n\thttps_port {self.caddy_https_port}\n'
+-             '\tdefault_bind 127.0.0.1\n\tauto_https disable_certs\n'),
++             '\tauto_https disable_certs\n'),
++            # Only the http site, which listens on every address on the droplet, is kept off this machine's network
++            # here. The https sites bind by the file's own lines, so that a test of their sockets proves the file.
++            ('http:// {\n', 'http:// {\n\tbind 127.0.0.1\n'),
+             ('servers 127.0.0.1:8443 {', f'servers 127.0.0.1:{self.caddy_https_port} {{'),
+-            ('hornhoof.org {\n\tbind 127.0.0.1\n\t# The relay',
+-             f'hornhoof.org {{\n\tbind 127.0.0.1\n\t{test_tls}\n\t# The relay'),
++            ("\t# The relay's API", f"\t{test_tls}\n\t# The relay's API"),
+             ('www.hornhoof.org {\n', f'www.hornhoof.org {{\n\t{test_tls}\n'),
+             ('\ttls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key\n', f'\t{test_tls}\n'),
+             ('root * /var/www/hornhoof\n', f'root * {folder}/www\n'),
+             ('root * /var/www/hornhoof-pages\n', f'root * {folder}/pages\n'),
+             ('import blocked.caddy\n', f'import {folder}/blocked.caddy\n'),
+             ('import companies/*.caddy\n', f'import {folder}/companies/*.caddy\n'),
+             ('reverse_proxy 127.0.0.1:7600\n', f'reverse_proxy 127.0.0.1:{self.relay_port}\n'),
+             ('reverse_proxy 127.0.0.1:7000 {', f'reverse_proxy 127.0.0.1:{self.bind_port} {{'),
+@@ -596,25 +601,29 @@ class Stack:
+         self.caddy = _Process(command, self.tmp / 'caddy.log', env=env, private=self.private)
+         self._start_edge()
+         self._wait_ready(self.caddy, lambda: self.https('hornhoof.org').status == 200)
+ 
+     def _start_edge(self) -> None:
+         rendered = render_caddyfile((ROOT / 'relay/edge-frpc.toml').read_text(), [
+             ('serverPort = 7000', f'serverPort = {self.bind_port}'),
+             ('localPort = 8443', f'localPort = {self.caddy_https_port}'),
+-        ])
++        ], file='relay/edge-frpc.toml')
+         config_path = self.tmp / 'edge-frpc.toml'
+         self._write_config(config_path, rendered)
+         # The token comes as on the droplet, in the environment, so that the file's own template is what is tested.
+         self.edge = Client([str(BIN / 'frpc'), '-c', str(config_path)], self.tmp / 'edge-frpc.log',
+                            env=dict(os.environ, EDGE_TOKEN=self.edge_token), private=self.private)
+         if not self.edge.started('edge'):
+             raise RuntimeError('The edge did not start its proxy:\n' + self.edge.log())
+ 
++    def restart_edge(self) -> None:
++        self.edge.stop()
++        self._start_edge()
++
+     def reload_caddy(self, within: float = PUBLIC_TIMEOUT) -> None:
+         self._write_blocked()
+         reloads = self.caddy.log().count(CADDY_RELOADED)
+         # admin off leaves no admin endpoint for caddy reload. Caddy rereads its file on this signal.
+         self.caddy.process.send_signal(signal.SIGUSR1)
+         if not _wait(lambda: self.caddy.log().count(CADDY_RELOADED) > reloads, within):
+             raise RuntimeError('Caddy did not reload:\n' + self.caddy.log())
+ 
+@@ -706,19 +715,20 @@ type = "https"
+ subdomain = {json.dumps(name)}
+ localIP = "127.0.0.1"
+ localPort = {self._start_passthrough_echo(name)}
+ transport.proxyProtocolVersion = "v2"
+ '''
+         raise ValueError('Unknown proxy type')
+ 
+     def _start_passthrough_echo(self, name: str) -> int:
+-        echo = _PassthroughEcho(*_make_self_signed_certificate(self.tmp, f'{name}.hornhoof.org'))
+-        threading.Thread(target=echo.serve_forever, daemon=True).start()
++        # A picked port, as the plain echo's: bind(0) may draw a port this stack has yet to start.
++        echo = _PassthroughEcho(self._free_port(), *_make_self_signed_certificate(self.tmp, f'{name}.hornhoof.org'))
+         self.passthrough_echoes.append(echo)
++        echo.thread.start()
+         return echo.server_port
+ 
+     def _way_in(self, via: str) -> list[str]:
+         if via == 'frps':
+             return [f'serverPort = {self.bind_port}', 'transport.protocol = "websocket"']
+         if via == 'caddy':
+             # As Hornhoof's frpc does (apps/server/src/modules/link/client.ts), trusting the test CA.
+             return [
+diff --git a/relay/test/test_edge_today.py b/relay/test/test_edge_today.py
+index 985875b..8ea40e0 100644
+--- a/relay/test/test_edge_today.py
++++ b/relay/test/test_edge_today.py
+@@ -135,16 +135,21 @@ class RenderTests(unittest.TestCase):
+         rendered = render_caddyfile('one\ntwo\n', [('one', 'uno'), ('two\n', 'dos\n'), ('uno', 'eins')])
+         self.assertEqual(rendered, 'eins\ndos\n')
+ 
+     def test_a_replacement_that_finds_nothing_raises(self) -> None:
+         with self.assertRaisesRegex(ValueError, 'gone from the file'):
+             render_caddyfile('one\n', [('one', 'uno'), ('gone from the file', 'x')])
+ 
+ 
++    def test_the_error_names_the_file_that_lost_its_line(self) -> None:
++        with self.assertRaisesRegex(ValueError, r'relay/edge-frpc\.toml no longer holds'):
++            render_caddyfile('one\n', [('gone from the file', 'x')], file='relay/edge-frpc.toml')
++
++
+ class EdgeCase(unittest.TestCase):
+     def setUp(self) -> None:
+         self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-edge-'))
+         self.stack = self.enterContext(Stack(self.tmp, caddy=True))
+ 
+     def company_online(self, name: str) -> Client:
+         binding = self.stack.bind(name)
+         client = self.stack.client(name, binding['key'], via='caddy')
+@@ -221,17 +226,18 @@ class StackRequestTests(EdgeCase):
+     """What the later tasks rely on from Stack.https and Stack.http."""
+ 
+     def test_server_name_is_what_the_handshake_carries(self) -> None:
+         for server_name in ('example.com', None):
+             with self.subTest(server_name=server_name):
+                 refused = self.stack.https('hornhoof.org', sni=server_name)
+                 self.assertIsNone(refused.status)
+                 self.assertTrue(refused.error, 'a failed handshake must say why')
+-        self.assertEqual(self.stack.https('nobody.hornhoof.org', sni='hornhoof.org').status, 404)
++        # Changed from 404 by batch 5's ruling: a Host that is not the handshake's name is misdirected, not served.
++        self.assertEqual(self.stack.https('nobody.hornhoof.org', sni='hornhoof.org').status, 421)
+ 
+     def test_method_and_body_reach_the_company(self) -> None:
+         recorder = ThreadingHTTPServer(('127.0.0.1', 0), _Recorder)
+         self.addCleanup(recorder.server_close)
+         recorder.daemon_threads = True
+         thread = threading.Thread(target=recorder.serve_forever, daemon=True)
+         thread.start()
+         self.addCleanup(thread.join)
+@@ -321,16 +327,24 @@ class StackCaddyTests(EdgeCase):
+ 
+     def test_rendered_file_points_at_nothing_of_the_droplet(self) -> None:
+         settings = [line for line in (self.stack.caddy_folder / 'Caddyfile').read_text().splitlines()
+                     if not line.lstrip().startswith('#')]
+         for droplet_value in ('/etc/caddy', '/var/www', ':7600', ':7000', ':8080'):
+             with self.subTest(droplet_value):
+                 self.assertEqual([line for line in settings if droplet_value in line], [])
+ 
++    def test_rendered_file_leaves_the_https_binds_to_the_repos_own_lines(self) -> None:
++        # A global bind would keep https on loopback here with every bind gone from the file, and no test would see the
++        # droplet's Caddy open to the internet. Only the http site's bind is the test's own.
++        rendered = (self.stack.caddy_folder / 'Caddyfile').read_text()
++        self.assertNotIn('default_bind', rendered)
++        self.assertEqual(rendered.count('\tbind 127.0.0.1\n'),
++                         (ROOT / 'Caddyfile').read_text().count('\tbind 127.0.0.1\n') + 1)
++
+     def test_every_site_shows_the_test_certificate(self) -> None:
+         for host in ('hornhoof.org', 'www.hornhoof.org', 'acme.hornhoof.org'):
+             with self.subTest(host):
+                 self.assertEqual(self.stack.https(host).cert_names,
+                                  ['hornhoof.org', 'www.hornhoof.org', '*.hornhoof.org'])
+ 
+     def test_caddy_asks_for_no_certificate(self) -> None:
+         self.stack.https('hornhoof.org')
+diff --git a/relay/test/test_sni.py b/relay/test/test_sni.py
+index e35fa6f..73ee523 100644
+--- a/relay/test/test_sni.py
++++ b/relay/test/test_sni.py
+@@ -11,19 +11,21 @@ import struct
+ import subprocess
+ import sys
+ import tempfile
+ import unittest
+ 
+ if __package__:
+     from .harness import (BIN, Client, KeptConnection, PROXY_V2_SIGNATURE, ROOT, Stack, _tls_socket, _wait,
+                           load_relay_module, read_proxy_v2)
++    from .test_peers import FrpsWireSession
+ else:
+     from harness import (BIN, Client, KeptConnection, PROXY_V2_SIGNATURE, ROOT, Stack, _tls_socket, _wait,
+                          load_relay_module, read_proxy_v2)
++    from test_peers import FrpsWireSession
+ 
+ 
+ # In two parts because this repo's own test allows only known hosts, and this one must stay unknown.
+ FOREIGN_DOMAIN = 'globex.' + 'example.com'
+ NOINDEX = 'noindex, nofollow'
+ # Documentation addresses: nothing real can be named by a forged header.
+ FORGED_VISITOR = '203.0.113.9'
+ TOKEN = 'the edge token of this test'
+@@ -219,16 +221,37 @@ localPort = {self.stack.echo_port}
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-no-token-'))
+         with Stack(tmp) as plain:
+             status, answer = plain.api('POST', '/frp/handler', {'op': 'Login', 'content': {
+                 'metas': {'edge': ''}, 'client_id': 'edge',
+             }})
+         self.assertEqual((status, answer), (200, EDGE_REFUSED))
+ 
+ 
++class EdgeNameTests(PassthroughCase):
++    """The name edge is the edge's alone. frps registers a legacy login under its run id, so a binding's key could take
++    that name, and the real edge could not log in again: hornhoof.org, the tunnels and every http-mode company gone."""
++
++    def squatter(self) -> FrpsWireSession:
++        key = self.stack.bind('acme')['key']
++        session = FrpsWireSession(self.stack, {'name': 'acme', 'key': key}, run_id='edge')
++        self.addCleanup(session.close)
++        return session
++
++    def test_a_binding_key_cannot_take_the_name_edge(self) -> None:
++        squatter = self.squatter()
++        self.assertFalse(squatter.accepted, squatter.resp)
++        self.assertIn('this run id belongs to another client', squatter.resp['error'])
++
++    def test_the_edge_comes_back_after_a_restart_with_a_squatter_on_the_wire(self) -> None:
++        self.squatter()
++        self.stack.restart_edge()
++        self.assertEqual(self.stack.https('hornhoof.org').status, 200)
++
++
+ class EdgeHealthAndPagesTests(PassthroughCase):
+     def test_r4_1_passthrough_in_health(self) -> None:
+         self.assertIs(wait_for_health(self.stack, 200)['passthrough'], True)
+         self.stack.stop_frps()
+         self.assertEqual(wait_for_health(self.stack, 503), {'ok': False, 'frps': False})
+         self.stack.start_frps()
+         self.assertIs(wait_for_health(self.stack, 200)['passthrough'], True)
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-no-https-'))
+@@ -248,16 +271,90 @@ class EdgeHealthAndPagesTests(PassthroughCase):
+         blocked = self.stack.https('nobody.hornhoof.org')
+         self.assertEqual(blocked.status, 410)
+         self.assertEqual(blocked.headers.get('X-Robots-Tag'), NOINDEX)
+         stub = self.stack.https('hornhoof.org')
+         self.assertEqual(stub.status, 200)
+         self.assertNotIn('X-Robots-Tag', stub.headers)
+ 
+ 
++def read_until_closed(stack: Stack, host: str) -> tuple[bytes, bool]:
++    """What one request to host gets, and whether the other side then ended the connection. A plain socket, because
++    http.client gives up on a connection the moment it reads Connection: close, whether or not it was closed."""
++    received = b''
++    with _tls_socket(stack.https_port, host) as sock:
++        sock.sendall(f'GET / HTTP/1.1\r\nHost: {host}\r\n\r\n'.encode())
++        try:
++            while chunk := sock.recv(65536):
++                received += chunk
++        except TimeoutError:
++            return received, False
++    return received, True
++
++
++class OneConnectionOneNameTests(PassthroughCase):
++    """All names share one address and Caddy holds a certificate for every one of them, so a connection to Caddy must
++    never carry a request for a company whose tunnel is up: Caddy would read it and answer 404."""
++
++    def test_no_browser_is_offered_http2(self) -> None:
++        # A browser reuses an HTTP/2 connection for any name its certificate covers (RFC 9113, 9.1.1).
++        for host in ('nobody.hornhoof.org', 'hornhoof.org'):
++            with self.subTest(host):
++                sock = _tls_socket(self.stack.https_port, host, alpn=('h2', 'http/1.1'))
++                self.addCleanup(sock.close)
++                self.assertEqual(sock.selected_alpn_protocol(), 'http/1.1')
++
++    def test_a_request_for_another_name_is_misdirected(self) -> None:
++        self.holder()
++        misdirected = self.stack.https('acme.hornhoof.org', sni='nobody.hornhoof.org')
++        self.assertEqual(misdirected.status, 421, misdirected.error)
++        self.assertEqual(self.stack.https('acme.hornhoof.org').cert_names, ['acme.hornhoof.org'])
++
++    def test_a_404_or_410_ends_its_connection(self) -> None:
++        self.stack.admin('ban', 'blocked')
++        self.stack.reload_caddy()
++        for host, status in (('nobody.hornhoof.org', 404), ('admin.hornhoof.org', 404), ('blocked.hornhoof.org', 410)):
++            with self.subTest(host):
++                received, closed = read_until_closed(self.stack, host)
++                self.assertTrue(received.startswith(f'HTTP/1.1 {status} '.encode()), received[:40])
++                self.assertTrue(closed, 'the connection stayed open after the answer')
++
++    def test_a_companys_own_answer_keeps_its_connection(self) -> None:
++        client = self.stack.client('initech', self.stack.bind('initech')['key'], via='caddy')
++        self.assertTrue(client.started('initech'), client.log())
++        first, kept = self.stack.https('initech.hornhoof.org', keep=True)
++        self.assertEqual(first.status, 200, first.error)
++        self.assertEqual(kept.again('/').status, 200)
++
++    def test_a_tab_polling_across_a_leader_switch_reaches_the_tunnel_again(self) -> None:
++        client, key = self.holder()
++        self.assertEqual(self.route('acme', key)['state'], 'held')
++        client.stop()
++        self.assertTrue(_wait(lambda: self.route('acme', key)['state'] == 'empty', 5))
++        polling, kept = self.stack.https('acme.hornhoof.org', keep=True)
++        self.assertEqual(polling.status, 404, polling.error)
++        self.assertIn('*.hornhoof.org', polling.cert_names, 'with no tunnel the name falls back to Caddy')
++        back = self.network_client('acme', key)
++        self.assertTrue(back.started('acme'), back.log())
++        self.assertIsNone(kept.again('/').status, 'the tab is stuck on its kept 404')
++        again = self.stack.https('acme.hornhoof.org')
++        self.assertEqual((again.status, again.cert_names), (200, ['acme.hornhoof.org']), again.error)
++
++    def test_a_misdirected_request_logs_no_visitor_address(self) -> None:
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-421-'))
++        stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
++        answer = stack.https('acme.hornhoof.org', sni='nobody.hornhoof.org')
++        self.assertEqual(answer.status, 421, answer.error)
++        # Caddy's JSON names the address and the port apart.
++        for name, process in (('frps', stack.frps), ('edge', stack.edge), ('caddy', stack.caddy)):
++            with self.subTest(name):
++                self.assertNotIn(f'127.0.0.1:{answer.local_port}', process.log())
++                self.assertNotIn(f'"remote_port":"{answer.local_port}"', process.log())
++
++
+ class VisitorAddressTests(unittest.TestCase):
+     def test_the_droplet_logs_no_visitor_address(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-logs-'))
+         stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
+         company = stack.client('acme', stack.bind('acme')['key'], settings='network', client='acme-aaaaaaaa-link',
+                                proxy_type='https')
+         self.assertTrue(company.started('acme'), company.log())
+         http_mode = stack.client('initech', stack.bind('initech')['key'], via='caddy')
+@@ -391,16 +488,34 @@ class ProxyHeaderTests(unittest.TestCase):
+         self.assertIsNone(read_proxy_v2(self.reader))
+ 
+     def test_another_family_raises(self) -> None:
+         self.writer.sendall(PROXY_V2_SIGNATURE + bytes((0x21, 0x21)) + struct.pack('!H', 36) + bytes(36))
+         with self.assertRaisesRegex(ValueError, 'IPv4'):
+             read_proxy_v2(self.reader)
+ 
+ 
++class PassthroughEchoServerTests(unittest.TestCase):
++    """The same lost-port failure as the plain echo's in batch 3: bind(0) may draw a port the stack has yet to start."""
++
++    def setUp(self) -> None:
++        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-echo-'))
++        self.stack = self.enterContext(Stack(self.tmp))
++        self.stack._start_passthrough_echo('acme')
++
++    def test_its_port_is_one_the_stack_picked(self) -> None:
++        self.assertIn(self.stack.passthrough_echoes[-1].server_port, self.stack._ports)
++
++    def test_close_ends_its_thread(self) -> None:
++        thread = self.stack.passthrough_echoes[-1].thread
++        self.assertTrue(thread.is_alive())
++        self.stack.close()
++        self.assertFalse(thread.is_alive())
++
++
+ class EdgeRuleTests(unittest.TestCase):
+     """R7.5's rule on relay.py itself, for what a real frpc would never send."""
+ 
+     def setUp(self) -> None:
+         self.relay = load_relay_module()
+         self.relay.EDGE_TOKEN = TOKEN
+ 
+     def new_proxy(self, **changed: object) -> dict:
+@@ -411,16 +526,27 @@ class EdgeRuleTests(unittest.TestCase):
+     def test_login_needs_the_token_and_the_edge_client_id(self) -> None:
+         self.assertEqual(self.relay.plugin_decide('Login', {'metas': {'edge': TOKEN}, 'client_id': 'edge'}), PASSED)
+         for token, client_id in ((TOKEN, 'edge2'), (TOKEN, ''), (TOKEN, None), ('wrong', 'edge'), ('', 'edge'),
+                                  (None, 'edge'), (7, 'edge'), ('café', 'edge')):
+             with self.subTest(client_id=client_id, token_is_a=type(token).__name__):
+                 answer = self.relay.plugin_decide('Login', {'metas': {'edge': token}, 'client_id': client_id})
+                 self.assertEqual(answer, EDGE_REFUSED)
+ 
++    def test_a_token_with_no_utf8_form_is_refused(self) -> None:
++        answer = self.relay.plugin_decide('Login', {'metas': {'edge': '\ud800'}, 'client_id': 'edge'})
++        self.assertEqual(answer, EDGE_REFUSED)
++
++    def test_the_trace_names_the_edge_on_every_op(self) -> None:
++        metas = {'edge': TOKEN}
++        for op, content in (('Login', {'metas': metas}), ('NewProxy', {'user': {'metas': metas}}),
++                            ('Ping', {'user': {'metas': metas}})):
++            with self.subTest(op):
++                self.assertEqual(self.relay.trace_client(op, content), 'edge')
++
+     def test_no_token_set_refuses_every_login(self) -> None:
+         self.relay.EDGE_TOKEN = ''
+         for token in ('', TOKEN):
+             with self.subTest(token_is_empty=not token):
+                 answer = self.relay.plugin_decide('Login', {'metas': {'edge': token}, 'client_id': 'edge'})
+                 self.assertEqual(answer, EDGE_REFUSED)
+ 
+     def test_the_edge_offers_its_one_proxy(self) -> None:
+@@ -447,23 +573,144 @@ class EdgeRuleTests(unittest.TestCase):
+                                     ({'subdomain': 'other'}, 'this key serves only acme.hornhoof.org'),
+                                     ({'custom_domains': [FOREIGN_DOMAIN]}, 'custom domains are not allowed'),
+                                     ({'custom_domains': ['hornhoof.org', '*']}, 'custom domains are not allowed'),
+                                     ({'group': 'g'}, 'group is not allowed')):
+                 with self.subTest(proxy_type=proxy_type, reason=reason):
+                     content = {'proxy_type': proxy_type, 'proxy_name': 'acme', 'subdomain': 'acme', **changed}
+                     self.assertEqual(self.relay.proxy_check('acme', content), reason)
+ 
++    def test_the_run_ids_no_login_but_the_edge_may_use(self) -> None:
++        for run_id, client_id in (('edge', ''), ('edge', 'acme-aaaaaaaa-link'), ('acme-aaaaaaaa-link', '')):
++            with self.subTest(run_id=run_id, client_id=client_id):
++                self.assertTrue(self.relay.reserved_run_id(run_id, client_id))
++        for run_id, client_id in (('0123456789abcdef', ''), ('acme-aaaaaaaa-link', 'acme-aaaaaaaa-link'),
++                                  ('edge2', ''), ('Edge', '')):
++            with self.subTest(run_id=run_id, client_id=client_id):
++                self.assertFalse(self.relay.reserved_run_id(run_id, client_id))
++
++    def test_a_binding_key_cannot_name_itself_the_edge_by_client_id(self) -> None:
++        self.assertEqual(self.relay.client_id_reason('acme', 'link', 'edge', 'edge'), 'this client id is not for acme')
++
+     def test_other_proxy_types_stay_refused(self) -> None:
+         for proxy_type in ('tcp', 'udp', 'stcp', 'HTTPS', None):
+             with self.subTest(proxy_type=proxy_type):
+                 content = {'proxy_type': proxy_type, 'proxy_name': 'acme', 'subdomain': 'acme'}
+                 self.assertEqual(self.relay.proxy_check('acme', content), 'only http proxies are allowed')
+ 
+ 
++class EdgeServiceTests(unittest.TestCase):
++    def test_starting_the_edge_alone_starts_frps(self) -> None:
++        unit = (ROOT / 'relay/edge-frpc.service').read_text().partition('[Service]')[0]
++        self.assertIn('\nWants=frps.service\n', unit)
++
++
++class WatcherStops(Exception):
++    """Ends a watcher's endless loop in a test."""
++
++
++class VirtualTime:
++    """Stands for the module time in relay.py: a slow probe costs no real second, and no run can be late. Each moment that
++    passes reads frps_ok, as /api/v1/health does."""
++
++    def __init__(self, relay: object, cycles: int) -> None:
++        self.relay = relay
++        self.cycles = cycles
++        self.now = 1000.0
++        self.health = []
++
++    def time(self) -> float:
++        return self.now
++
++    def pass_seconds(self, seconds: float) -> None:
++        self.now += seconds
++        self.health.append(self.relay.frps_ok())
++
++    def sleep(self, seconds: float) -> None:
++        self.pass_seconds(seconds)
++        self.cycles -= 1
++        if self.cycles == 0:
++            raise WatcherStops
++
++
++class WatcherTests(unittest.TestCase):
++    """The watcher's loops in virtual time, frps and its https port played by the test."""
++
++    def setUp(self) -> None:
++        self.relay = load_relay_module()
++        self.clock = VirtualTime(self.relay, cycles=4)
++        self.relay.time = self.clock
++        self.probes = []
++        self.relay.port_accepts = self.probe
++
++    def probe(self, _address: str, took: float = 0.0, answer: bool = True) -> bool:
++        self.probes.append(self.relay.frps_ok())
++        self.clock.pass_seconds(took)
++        return answer
++
++    def frps_answering(self, took: float, answer: bool = True) -> None:
++        def frps_answers() -> bool:
++            self.clock.pass_seconds(took)
++            return answer
++        self.relay.frps_answers = frps_answers
++
++    def run_watcher(self, watcher: object) -> None:
++        with self.assertRaises(WatcherStops):
++            watcher()
++
++    def test_a_slow_https_probe_cannot_flip_a_healthy_relay_to_503(self) -> None:
++        # frps a little slow and the https port at its 1 s timeout: with the probe between two stamps, that is past 2 s.
++        self.frps_answering(took=0.6)
++        self.relay.port_accepts = lambda address: self.probe(address, took=1.0)
++        self.run_watcher(self.relay.watch_frps)
++        first_good = self.clock.health.index(True)
++        self.assertNotIn(False, self.clock.health[first_good:], self.clock.health)
++
++    def test_no_probe_of_the_https_port_while_frps_does_not_answer(self) -> None:
++        self.frps_answering(took=0.1, answer=False)
++        self.run_watcher(self.relay.watch_frps)
++        self.assertEqual(self.probes, [])
++        self.assertNotIn(True, self.clock.health)
++
++    def test_the_first_good_answer_already_says_whether_the_port_takes_connections(self) -> None:
++        self.frps_answering(took=0.1)
++        self.clock.cycles = 1
++        self.run_watcher(self.relay.watch_frps)
++        self.assertEqual(self.probes, [False], 'the probe must come before the first good answer is published')
++        self.assertIs(self.relay._frps['passthrough'], True)
++        self.assertIs(self.relay.frps_ok(), True)
++
++    def test_the_port_is_followed_while_frps_answers_and_left_alone_when_it_does_not(self) -> None:
++        self.relay.port_accepts = lambda address: self.probe(address, answer=False)
++        self.relay._frps['passthrough'] = True
++        self.clock.cycles = 1
++        self.run_watcher(self.relay.watch_passthrough)
++        self.assertEqual(self.probes, [], 'frps does not answer, so nothing may be probed')
++        self.relay._frps['ok_at'] = self.clock.now
++        self.clock.cycles = 1
++        self.run_watcher(self.relay.watch_passthrough)
++        self.assertEqual(self.probes, [True])
++        self.assertIs(self.relay._frps['passthrough'], False)
++
++
++class HealthFollowsThePortTests(unittest.TestCase):
++    def test_health_says_when_the_port_stops_taking_connections(self) -> None:
++        # The relay starts this loop itself, and only a running relay can show that. frps stays up all along.
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-port-'))
++        stack = Stack(tmp)
++        with socket.socket() as listener:
++            listener.bind(('127.0.0.1', 0))
++            listener.listen()
++            stack.env['RELAY_FRPS_HTTPS'] = f'127.0.0.1:{listener.getsockname()[1]}'
++            with stack:
++                self.assertIs(wait_for_health(stack, 200)['passthrough'], True)
++                listener.close()
++                self.assertTrue(_wait(lambda: stack.api('GET', '/api/v1/health')[1].get('passthrough') is False, 10))
++
++
+ class PortProbeTests(unittest.TestCase):
+     """The watcher's probe of frps's https port, on a port of the test's own."""
+ 
+     def setUp(self) -> None:
+         self.relay = load_relay_module()
+ 
+     def test_a_listening_port_accepts(self) -> None:
+         with socket.socket() as listener:
+

@@ -1,0 +1,18 @@
+== changed files
+README.md
+relay/hornhoof-relay
+relay/relay.py
+relay/test/test_block_by_name.py
+relay/test/test_keys.py
+== tests under coverage
+.......
+----------------------------------------------------------------------
+Ran 337 tests in 693.420s
+
+OK
+== crapper
+worst changed CRAP: 8.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 1f2bdda

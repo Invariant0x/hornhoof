@@ -1,0 +1,33 @@
+== files: relay/relay.py relay/test/harness.py
+== coverage run (whole relay suite)
+    self.RequestHandlerClass(request, client_address, self)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 766, in __init__
+    self.handle()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 440, in handle
+    self.handle_one_request()
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/http/server.py", line 428, in handle_one_request
+    method()
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1001, in do_GET
+    self.wfile.write(body)
+  File "/home/altera/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+......................second login with one client id after the drop: 5.74 s
+................released acme for 127.0.0.1
+.new visitor key for acme
+........private-words: none here, skipped
+.....F.........................................................
+======================================================================
+FAIL: test_restart_burst (test_restart.RestartTests.test_restart_burst)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_restart.py", line 237, in test_restart_burst
+    self.assertFalse(rejected, f'plugin calls were rejected after the restart: {rejected}')
+AssertionError: [{'op': 'NewProxy', 'proxy_name': 'burst37', 'run_id': 'eb87ae2b6232d28e', 'client': 'burst37-aaaaaaaa-link', 'ms': 811.2, 'reject': True}] is not false : plugin calls were rejected after the restart: [{'op': 'NewProxy', 'proxy_name': 'burst37', 'run_id': 'eb87ae2b6232d28e', 'client': 'burst37-aaaaaaaa-link', 'ms': 811.2, 'reject': True}]
+
+----------------------------------------------------------------------
+Ran 171 tests in 556.563s
+
+FAILED (failures=1)
+== TESTS FAILED

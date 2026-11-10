@@ -1,0 +1,4 @@
+Plan 1b Task 3 WIP. Stopped at a green point; no run of mine is pending.
+Done: tests (test/sign-in-limit.test.ts), schema + migration 0054_sign_in_attempts, src/auth/sign-in-limit.ts, refuse() in limit.ts, login route, HIDDEN, orchestrator-control lists, migration-history/metadata bumps, report in runs/p1bt3-report.md.
+Next: nothing in the task; lead's whole suite and mutator remain. One old dryer pair in agent-sql.ts (grantsFor/readerGrantsFor), not mine.
+Last output: 7 files, 136 tests passed; tsc, typecheck:tests, eslint exit 0; crapper max 9.0.

@@ -1,0 +1,28 @@
+== changed files
+Dockerfile
+apps/server/test/compose.test.ts
+apps/server/test/pins.test.ts
+compose.yaml
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ FAIL  test/install-script.test.ts > install.sh > keeps an existing .env and adds a missing NODE_KEY
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m128 passed[39m[22m[90m (129)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m2492 passed[39m[22m[90m (2493)[39m
+[2m   Start at [22m 10:46:14
+[2m   Duration [22m 2057.98s[2m (tests 94%, import 5%)[22m
+
+[2m    Isolate [22m [33m129 workers spawned[39m[2m · ~338ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~14.20s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+AUTHOR CHECK RED at 788c2f74

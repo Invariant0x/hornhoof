@@ -1,0 +1,164 @@
+remote: snapshot batch2-final-20261104-232436-1136029 ready after 9 s, waiting for a slot
+remote: started after 1321 s, log /home/altera/hornhoof-network/network-build/runs/remote-batch2-final-20261104-232436-1136029.log
+npm notice
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+
+ [32m✓[39m test/before-sign-in.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 11415[2mms[22m[39m
+   [32m✓[39m before sign-in [2m(1)[22m
+     [33m[2m✓[22m[39m answers nothing that names the company before sign-in, locally and over the link[33m 4748[2mms[22m[39m
+   [32m✓[39m sockets before sign-in [2m(1)[22m
+     [33m[2m✓[22m[39m refuses every socket route without a session before anything is sent, locally and over the link[33m 1652[2mms[22m[39m
+   [32m✓[39m what the link tells a stranger [2m(3)[22m
+     [33m[2m✓[22m[39m gives only ok on /api/health over the link[33m 1970[2mms[22m[39m
+     [33m[2m✓[22m[39m asks for a session on /api/version over the link[33m 1642[2mms[22m[39m
+     [33m[2m✓[22m[39m asks search engines to stay away[33m 1380[2mms[22m[39m
+ [32m✓[39m test/pins.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m test/compose.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m test/install-script.test.ts [2m([22m[2m96 tests[22m[2m)[22m[33m 71482[2mms[22m[39m
+   [32m✓[39m install.sh [2m(96)[22m
+     [33m[2m✓[22m[39m installs Homebrew, Colima and Docker on a Mac that has none, in that order[33m 645[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a new Colima all of the Mac's processors and three quarters of its memory before it starts at login[33m 710[2mms[22m[39m
+     [33m[2m✓[22m[39m tells each node on a Mac the Mac's processor, cores and memory, as Docker there runs in a smaller system[33m 346[2mms[22m[39m
+     [33m[2m✓[22m[39m tells a node on Linux nothing of the machine, which it sees itself[33m 328[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the processors and memory of a Colima set up before as they are[33m 514[2mms[22m[39m
+     [33m[2m✓[22m[39m starts Docker Desktop on a Mac where it is installed but not running, and says how to have it start at login[33m 427[2mms[22m[39m
+     [33m[2m✓[22m[39m starts OrbStack when the Docker command line belongs to it[33m 457[2mms[22m[39m
+     [33m[2m✓[22m[39m uses a working Docker on Linux as it is, without sudo[33m 303[2mms[22m[39m
+     [33m[2m✓[22m[39m goes through sudo for every later Docker call when only sudo docker works[33m 429[2mms[22m[39m
+     [33m[2m✓[22m[39m installs Docker Engine on Linux when it is missing[33m 371[2mms[22m[39m
+     [33m[2m✓[22m[39m runs Docker's install script from a pinned commit, and not at all when it is not the one pinned[33m 573[2mms[22m[39m
+     [33m[2m✓[22m[39m runs Homebrew's install script from a pinned commit, and not at all when it is not the one pinned[33m 550[2mms[22m[39m
+     [33m[2m✓[22m[39m runs everything directly as root, without sudo[33m 543[2mms[22m[39m
+     [33m[2m✓[22m[39m starts one locked-down container per subscription and signs each in from the terminal[33m 1432[2mms[22m[39m
+     [33m[2m✓[22m[39m skips the terminal sign-in on a joined node that got its plan's sign-in from Hornhoof[33m 463[2mms[22m[39m
+     [33m[2m✓[22m[39m signs in nothing on a spare machine of a Codex plan, on the join and on an update[33m 532[2mms[22m[39m
+     [33m[2m✓[22m[39m waits a little for the sign-in from Hornhoof, then signs in here when it does not come[33m 2573[2mms[22m[39m
+     [33m[2m✓[22m[39m says how else to sign in when a node is left without its sign-in[33m 1358[2mms[22m[39m
+     [33m[2m✓[22m[39m sets up a node for a Google AI plan and signs in to Antigravity on it[33m 1345[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the same machine id on the next run[33m 702[2mms[22m[39m
+     [33m[2m✓[22m[39m opens the sign-in link in the browser[33m 4049[2mms[22m[39m
+     [33m[2m✓[22m[39m opens only https sign-in links[33m 7508[2mms[22m[39m
+     [33m[2m✓[22m[39m sets up the server with fresh secrets and its address on this computer, without a question[33m 441[2mms[22m[39m
+     [33m[2m✓[22m[39m tells the built-in node of a server on a Mac the Mac's processor, cores and memory, through .env[33m 559[2mms[22m[39m
+     [33m[2m✓[22m[39m tells the server which machine it runs on by a hash of the machine's key, which a later join on it sends[33m 491[2mms[22m[39m
+     [33m[2m✓[22m[39m tells the built-in node of a server on Linux nothing of the machine, which it sees itself[33m 486[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps an existing .env and adds a missing NODE_KEY[33m 488[2mms[22m[39m
+     [33m[2m✓[22m[39m replaces an existing .env whole and leaves it readable by its owner only[33m 484[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps an existing .env that has no PUBLIC_URL and opens localhost[33m 423[2mms[22m[39m
+     [33m[2m✓[22m[39m shows the setup link the new server gives, once it answers[33m 1842[2mms[22m[39m
+     [33m[2m✓[22m[39m installs a named server in its own folder, compose project and free port[33m 462[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the folder and port of a named server on the next run[33m 919[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the port of another Hornhoof on this computer to it, even while it is stopped[33m 861[2mms[22m[39m
+     [33m[2m✓[22m[39m pins the version and the project name for the updater[33m 1226[2mms[22m[39m
+     [33m[2m✓[22m[39m takes compose.yaml from the build it installs, not from GitHub[33m 488[2mms[22m[39m
+     [33m[2m✓[22m[39m updates without questions or downloads from the updater[33m 426[2mms[22m[39m
+     [33m[2m✓[22m[39m downloads the images itself for an updater that did not[33m 462[2mms[22m[39m
+     [33m[2m✓[22m[39m moves the nodes that joined through the public link to the new build too[33m 530[2mms[22m[39m
+     [33m[2m✓[22m[39m moves only the nodes it knows when the tunnel settings say nothing usable[33m 472[2mms[22m[39m
+     [33m[2m✓[22m[39m moves this server's nodes on this machine to the new build from the updater[33m 463[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the built-in node and this server's plan nodes running when the node image did not change[33m 363[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the built-in node and plan nodes running in server mode when the node image is unchanged[33m 1036[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the database, then the keeper and front, then the app, which migrates first[33m 648[2mms[22m[39m
+     [33m[2m✓[22m[39m says where to look when the database cannot be brought up to this build[33m 477[2mms[22m[39m
+     [33m[2m✓[22m[39m writes the machine id once: the host id by hand, a random one from the updater[33m 1889[2mms[22m[39m
+     [33m[2m✓[22m[39m hands an update to this build's updater when an older updater runs it[33m 1147[2mms[22m[39m
+     [33m[2m✓[22m[39m fails loudly when the helper exits at once and takes nothing over[33m 2235[2mms[22m[39m
+     [33m[2m✓[22m[39m gives the helper its two folders, and waits until it replaces the updater this runs under[33m 3190[2mms[22m[39m
+     [33m[2m✓[22m[39m takes an updater that does not say a revision of 2 or more for an older one[33m 470[2mms[22m[39m
+     [33m[2m✓[22m[39m goes on without a handover under an updater of revision 2[33m 503[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a host-wide list of ports, so four companies on one computer never share one[33m 2213[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the ports of a stopped and pruned company to it[33m 474[2mms[22m[39m
+     [33m[2m✓[22m[39m skips ports any container publishes, running or stopped[33m 435[2mms[22m[39m
+     [33m[2m✓[22m[39m gives an existing company a peer port and keeps its web port[33m 966[2mms[22m[39m
+     [33m[2m✓[22m[39m chooses a new company's ports by the free search though its .env is there by then[33m 1145[2mms[22m[39m
+     [33m[2m✓[22m[39m takes the lock and gives it back[33m 873[2mms[22m[39m
+     [33m[2m✓[22m[39m writes nothing when another install took its lock over[33m 332[2mms[22m[39m
+     [33m[2m✓[22m[39m takes over a lock older than two minutes by its id, and waits for a younger one[33m 1836[2mms[22m[39m
+     [33m[2m✓[22m[39m moves a new port that something outside Docker holds, and its address with it[33m 3245[2mms[22m[39m
+     [33m[2m✓[22m[39m takes the last port of a range, and says so when a range has none free[33m 1192[2mms[22m[39m
+     [33m[2m✓[22m[39m hands out no port when it cannot read the list[33m 329[2mms[22m[39m
+     [33m[2m✓[22m[39m asks no port on localhost from the updater, whose localhost is its own container[33m 515[2mms[22m[39m
+     [33m[2m✓[22m[39m counts a company whose first run stopped before it chose its ports as new[33m 1270[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a company whose folder is gone its ports and its address back[33m 566[2mms[22m[39m
+     [33m[2m✓[22m[39m reads a folder with a space in its name from the list[33m 509[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps to the ports in other companies' .env files when the list is gone[33m 545[2mms[22m[39m
+     [33m[2m✓[22m[39m says what did not start when a step fails for another reason[33m 1346[2mms[22m[39m
+ [32m✓[39m test/updater.test.ts [2m([22m[2m70 tests[22m[2m)[22m[33m 210590[2mms[22m[39m
+   [32m✓[39m updater [2m(29)[22m
+     [33m[2m✓[22m[39m downloads every image of the new build, then saves the database right before installing it[33m 3035[2mms[22m[39m
+     [33m[2m✓[22m[39m skips pulling the node image when the node container runs that exact digest already[33m 5432[2mms[22m[39m
+     [33m[2m✓[22m[39m rolls back when the new server never answers[33m 5204[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back to the images of the build from before by its tag when Docker keeps no digest of them[33m 4945[2mms[22m[39m
+     [33m[2m✓[22m[39m says what to do by hand when neither the new build nor the one before it answers[33m 5167[2mms[22m[39m
+     [33m[2m✓[22m[39m puts the database back before the build from before starts on it, when the new build changed it[33m 4252[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the public link's settings next to the saved database before putting the database back[33m 4755[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps no copy of the link's settings when the database stays as it is[33m 4647[2mms[22m[39m
+     [33m[2m✓[22m[39m lets a kept copy of the link's settings go with its database copy[33m 11508[2mms[22m[39m
+     [33m[2m✓[22m[39m removes the containers of services the compose file of the build it went back to does not name[33m 4378[2mms[22m[39m
+     [33m[2m✓[22m[39m removes nothing when that compose file names no updater[33m 4632[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the database as it is on the way back when the new build did not change it[33m 4661[2mms[22m[39m
+     [33m[2m✓[22m[39m does not start the build from before on a database it could not put back[33m 3469[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back to the build that ran when .env names none[33m 4694[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses a version that is not a version[33m 553[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses a request that does not name the exact build[33m 1255[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses a request whose node or updater image is not named by a digest[33m 828[2mms[22m[39m
+     [33m[2m✓[22m[39m installs the build Hornhoof read when its version points at another build by now[33m 2194[2mms[22m[39m
+     [33m[2m✓[22m[39m takes the node and updater images by their tag for a build that has none by digest[33m 2137[2mms[22m[39m
+     [33m[2m✓[22m[39m changes nothing when the new build cannot be downloaded[33m 600[2mms[22m[39m
+     [33m[2m✓[22m[39m changes nothing when the other images of the new build cannot be downloaded[33m 733[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps three backups[33m 8473[2mms[22m[39m
+     [33m[2m✓[22m[39m runs each request once[33m 2024[2mms[22m[39m
+     [33m[2m✓[22m[39m finishes an update it was stopped in while the new build was installing[33m 3745[2mms[22m[39m
+     [33m[2m✓[22m[39m starts an update it was stopped in over when nothing had changed yet[33m 2699[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back, with the saved database, from an update it was stopped in whose build does not answer[33m 5837[2mms[22m[39m
+     [33m[2m✓[22m[39m finishes going back when it was stopped on the way back[33m 5829[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses to update a Hornhoof that install.sh did not set up[33m 331[2mms[22m[39m
+   [32m✓[39m updater, revision 2 [2m(34)[22m
+     [33m[2m✓[22m[39m tells each build's installer that this updater is revision 2[33m 4025[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps its revision in the note of the update[33m 1702[2mms[22m[39m
+     [33m[2m✓[22m[39m stops the app before it saves the database, and starts it again when the copy fails[33m 2475[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the app it stopped again when it was stopped while saving the database[33m 1398[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves the app alone when it was stopped before the copy began[33m 2774[2mms[22m[39m
+     [33m[2m✓[22m[39m removes the containers of services the new build does not name, before its installer runs[33m 1895[2mms[22m[39m
+     [33m[2m✓[22m[39m looks for those containers in the compose project of this server[33m 5545[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves alone a container that has no service, and one of a service the build names[33m 1878[2mms[22m[39m
+     [33m[2m✓[22m[39m says so and goes on with the install when a container cannot be removed[33m 1809[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back to a build from before front even though front held the web port[33m 4003[2mms[22m[39m
+     [33m[2m✓[22m[39m removes nothing when the build's compose file names no updater[33m 1858[2mms[22m[39m
+     [33m[2m✓[22m[39m checks health at front for a build that has it, and at the app for one that does not[33m 4015[2mms[22m[39m
+     [33m[2m✓[22m[39m asks the address it was given, when it was given one[33m 1821[2mms[22m[39m
+     [33m[2m✓[22m[39m stops an installer that does not end, and goes back[33m 3839[2mms[22m[39m
+     [33m[2m✓[22m[39m stops what a hung installer started, too[33m 2866[2mms[22m[39m
+     [33m[2m✓[22m[39m says what to do by hand when the install on the way back hangs too[33m 2816[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back when the installer fails, without waiting out its time[33m 2876[2mms[22m[39m
+     [33m[2m✓[22m[39m moves in by handing over, and goes back to the old build when the new one fails[33m 4839[2mms[22m[39m
+     [33m[2m✓[22m[39m finishes the move-in under the new updater when the new build answers[33m 2836[2mms[22m[39m
+     [33m[2m✓[22m[39m says it goes on before it asks the database anything[33m 4880[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back when the second copy of the database fails, since the new installer wrote .env and compose.yaml already[33m 2820[2mms[22m[39m
+     [33m[2m✓[22m[39m goes on with the copy it has when the new build changed the database already[33m 4785[2mms[22m[39m
+     [33m[2m✓[22m[39m goes on from the hand-over when it was stopped during the second copy[33m 4856[2mms[22m[39m
+     [33m[2m✓[22m[39m starts over when an older updater was stopped before it saved its own copy[33m 2764[2mms[22m[39m
+     [33m[2m✓[22m[39m copies the database once when it was stopped during an install it began itself[33m 3610[2mms[22m[39m
+     [33m[2m✓[22m[39m stays on the old build, working, when the new installer cannot start the hand-over helper[33m 801[2mms[22m[39m
+     [33m[2m✓[22m[39m brings the older updater back to go back when this build's updater does not start[33m 2203[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back under this build's updater too, once the helper marked the way back[33m 3260[2mms[22m[39m
+     [33m[2m✓[22m[39m goes back the same way when this build's updater starts but never takes the update[33m 2464[2mms[22m[39m
+     [33m[2m✓[22m[39m says what to do by hand when no updater can start[33m 1329[2mms[22m[39m
+     [33m[2m✓[22m[39m changes nothing once the new updater has said it goes on[33m 1348[2mms[22m[39m
+     [33m[2m✓[22m[39m waits for the new updater to say it goes on[33m 2346[2mms[22m[39m
+     [33m[2m✓[22m[39m does nothing unless an update waits to be taken over[33m 1098[2mms[22m[39m
+   [32m✓[39m updater, the computer [2m(7)[22m
+     [33m[2m✓[22m[39m runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code[33m 1285[2mms[22m[39m
+     [33m[2m✓[22m[39m runs nothing while access is closed or over, and says so[33m 464[2mms[22m[39m
+     [33m[2m✓[22m[39m stops a command at its time[33m 3232[2mms[22m[39m
+     [33m[2m✓[22m[39m stops a running command when the CEO closes access[33m 3215[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m189 passed[39m[22m[90m (189)[39m
+[2m   Start at [22m 23:49:19
+[2m   Duration [22m 219.19s[2m (tests 97%, transform 2%, import 1%)[22m
+
+remote: command exited 0 after 1707 s
+exit 0

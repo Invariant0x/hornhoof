@@ -1,0 +1,35 @@
+== changed files
+apps/server/src/auth/tunnel.ts
+apps/server/src/main.ts
+apps/server/src/modules/tls/listener.ts
+apps/server/src/modules/tls/proxy-header.ts
+apps/server/test/link-listener.test.ts
+apps/server/test/proxy-header.test.ts
+apps/server/test/proxy-v2.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 13138[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 13128[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m87 passed[39m[22m[90m (87)[39m
+[2m   Affected [22m 87 of 119 test files [2m(related to 7 files)[22m
+[2m      Tests [22m [1m[32m1503 passed[39m[22m[2m | [22m[90m1 todo[39m[90m (1504)[39m
+[2m   Start at [22m 23:15:26
+[2m   Duration [22m 1860.82s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m87 workers spawned[39m[2m · ~369ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~10.32s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+worst changed CRAP: 8.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at bbac8336

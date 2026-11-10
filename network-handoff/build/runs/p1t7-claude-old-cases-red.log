@@ -1,0 +1,27 @@
+FF
+======================================================================
+FAIL: test_r2_3_errors_are_not_empty (relay.test.test_route.RouteTests.test_r2_3_errors_are_not_empty)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_route.py", line 183, in test_r2_3_errors_are_not_empty
+    binding = stack.bind('acme')
+              ^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 277, in bind
+    raise AssertionError(f'Binding failed with HTTP {status}')
+AssertionError: Binding failed with HTTP 503
+
+======================================================================
+FAIL: test_r2_4_unknown_frps (relay.test.test_sync.SyncTests.test_r2_4_unknown_frps)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_sync.py", line 171, in test_r2_4_unknown_frps
+    binding = stack.bind('acme')
+              ^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 277, in bind
+    raise AssertionError(f'Binding failed with HTTP {status}')
+AssertionError: Binding failed with HTTP 503
+
+----------------------------------------------------------------------
+Ran 2 tests in 2.015s
+
+FAILED (failures=2)

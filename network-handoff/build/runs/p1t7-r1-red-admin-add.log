@@ -1,0 +1,13 @@
+F
+======================================================================
+FAIL: test_admin_add_refuses_a_name_with_a_trailing_newline (relay.test.test_keys.BindingRequestTests.test_admin_add_refuses_a_name_with_a_trailing_newline)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 562, in test_admin_add_refuses_a_name_with_a_trailing_newline
+    self.assertEqual(self.relay.admin(['add', 'globex\n']), 1)
+AssertionError: 0 != 1
+
+----------------------------------------------------------------------
+Ran 1 test in 0.511s
+
+FAILED (failures=1)

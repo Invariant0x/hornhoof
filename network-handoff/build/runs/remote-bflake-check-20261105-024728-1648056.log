@@ -1,0 +1,32 @@
+== changed files
+apps/node/src/terminal/host.ts
+apps/node/src/terminal/turn-signals.ts
+apps/node/test/terminal-host-stop.test.ts
+apps/node/test/turn-signals.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/node tests
+
+ [32m✓[39m test/terminal-host-hook-delivery.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 35855[2mms[22m[39m
+   [32m✓[39m turns ended by a delayed hook [2m(2)[22m
+     [33m[2m✓[22m[39m closes claude's turn by its hook after a slow owner check, with the program alive[33m 24623[2mms[22m[39m
+     [33m[2m✓[22m[39m closes antigravity's turn by its hook after a slow owner check, with the program alive[33m 11217[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m39 passed[39m[22m[90m (39)[39m
+[2m   Affected [22m 39 of 89 test files [2m(related to 4 files)[22m
+[2m      Tests [22m [1m[32m533 passed[39m[22m[90m (533)[39m
+[2m   Start at [22m 03:04:56
+[2m   Duration [22m 252.61s[2m (tests 98%, import 2%)[22m
+
+== crapper
+worst changed CRAP: 7.7656
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 4eb1bbe9

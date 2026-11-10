@@ -1,0 +1,16 @@
+early-route-read: exit 0
+Source/test stable during probe: True
+Test failures: 1 errors: 0 premature route-read side effect detected: True
+
+extra-diagnostics: exit 0
+issuance status diagnostic failures: 1 errors: 0 credential leaked: False
+lifecycle hash diagnostic failures: 1 errors: 0 credential leaked: False
+Source/test stable during probe: True
+
+rotation-diagnostics: exit 0
+rotation-status failures: 1 errors: 0 credential leaked: False
+rotation-reuse failures: 1 errors: 0 credential leaked: False
+binding-reuse failures: 1 errors: 0 credential leaked: False
+issuance-auth-bypass failures: 1 errors: 0 credential leaked: False
+Source/test stable during probe: True
+

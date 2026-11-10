@@ -1,0 +1,11 @@
+apps/server/src/auth/sign-in-limit.ts(84,10): error TS18046: 'inserted' is of type 'unknown'.
+apps/server/src/auth/sign-in-limit.ts(89,11): error TS2339: Property 'rows' does not exist on type 'unknown'.
+apps/server/src/auth/sign-in-limit.ts(90,28): error TS7006: Parameter 'row' implicitly has an 'any' type.
+apps/server/src/auth/sign-in-limit.ts(90,58): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ readonly emailAddress: { readonly max: 10; readonly windowMs: number; }; readonly email: { readonly max: 50; readonly windowMs: number; }; readonly address: { readonly max: 30; readonly windowMs: number; }; }'.
+apps/server/src/auth/sign-in-limit.ts(90,92): error TS7006: Parameter 'row' implicitly has an 'any' type.
+apps/server/src/auth/sign-in-limit.ts(90,143): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ readonly emailAddress: { readonly max: 10; readonly windowMs: number; }; readonly email: { readonly max: 50; readonly windowMs: number; }; readonly address: { readonly max: 30; readonly windowMs: number; }; }'.
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

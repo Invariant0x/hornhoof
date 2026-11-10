@@ -1,0 +1,1379 @@
+# Review package: batch 4, slice acme
+
+## de80cc2c Get certificates through acme-client with renewal information on top, tested against Pebble in CI
+
+The company orders its own certificate through acme-client with renewal information on top, tested against a real Pebble by npm run test:real, in Docker on the test machine. It waits an hour after a failure, and never points at real Let's Encrypt from a test.
+
+Ruling: account() ignores a failed createAccount once a URL is held - why: acme-client follows the 200 with an update that Pebble refuses, with or without -strict - cost if wrong: a real failure to update the account goes unseen; the review judges it against onlyReturnExisting first.
+Ruling: with retries off, acme-client's TypeError about its internals reads `no answer` - why: a person cannot act on the raw text - cost if wrong: none.
+
+---
+ .github/workflows/images.yml              |  14 +-
+ CONTRIBUTING.md                           |   2 +
+ apps/server/package.json                  |   3 +-
+ apps/server/src/app.ts                    |   6 +-
+ apps/server/src/modules/tls/acme.ts       | 212 ++++++++++++++++
+ apps/server/src/modules/tls/ari.ts        |  80 ++++++
+ apps/server/src/modules/tls/challenges.ts |  31 +++
+ apps/server/test/acme-fake.test.ts        | 406 ++++++++++++++++++++++++++++++
+ apps/server/test/ari.test.ts              | 153 +++++++++++
+ apps/server/test/challenges.test.ts       |  34 +++
+ apps/server/test/real/acme.test.ts        | 121 +++++++++
+ apps/server/test/real/run.sh              |  44 ++++
+ apps/server/vitest.config.ts              |  10 +-
+ apps/server/vitest.real.config.ts         |  11 +
+ package.json                              |   1 +
+ 15 files changed, 1123 insertions(+), 5 deletions(-)
+
+diff --git a/.github/workflows/images.yml b/.github/workflows/images.yml
+index 00e4e070..3ee86ef7 100644
+--- a/.github/workflows/images.yml
++++ b/.github/workflows/images.yml
+@@ -66,18 +66,30 @@ jobs:
+         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+         working-directory: apps/node
+         run: npx vitest run --shard="$PART" --maxWorkers=2
+       - name: Web
+         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+         working-directory: apps/web
+         run: npx vitest run --shard="$PART" --maxWorkers=2
+ 
++  # The ACME tests run against Pebble, Let's Encrypt's test CA, in Docker, and stay out of the suite above.
++  test-real:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
++      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
++        with:
++          node-version: 22
++          cache: npm
++      - run: npm ci --prefer-offline --no-audit --no-fund
++      - run: npm run test:real
++
+   images:
+-    needs: test
++    needs: [test, test-real]
+     if: github.event_name != 'pull_request'
+     runs-on: ubuntu-latest
+     permissions:
+       contents: read
+       packages: write
+     strategy:
+       matrix:
+         include:
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 6ffac804..6dadec94 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -54,16 +54,18 @@ The repository has four parts:
+ npm test
+ npx tsc -p apps/server/tsconfig.json --noEmit
+ npx tsc -p apps/web/tsconfig.json --noEmit
+ npx tsc -p apps/node/tsconfig.json --noEmit
+ ```
+ 
+ Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
+ 
++`npm run test:real` needs Docker and runs the tests against Pebble.
++
+ Coverage for crapper is `npx vitest run --coverage` in the part's folder after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
+ 
+ What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
+ 
+ ```sh
+ npx playwright install --only-shell chromium
+ npm run test:browser -w apps/web
+ ```
+diff --git a/apps/server/package.json b/apps/server/package.json
+index f25e001a..f26c6cb2 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -2,17 +2,18 @@
+   "name": "@hornhoof/server",
+   "private": true,
+   "type": "module",
+   "scripts": {
+     "dev": "tsx src/migrate.ts && tsx watch src/main.ts",
+     "build": "tsc -p tsconfig.json",
+     "start": "node dist/migrate.js && node dist/main.js",
+     "pretest": "npm run build -w @hornhoof/protocol",
+-    "test": "vitest run"
++    "test": "vitest run",
++    "test:real": "sh test/real/run.sh"
+   },
+   "dependencies": {
+     "@fastify/cookie": "^11.1.5",
+     "@fastify/static": "^10.1.8",
+     "@fastify/websocket": "^11.3.4",
+     "@hornhoof/protocol": "*",
+     "@modelcontextprotocol/sdk": "^1.32.2",
+     "@peculiar/x509": "1.14.3",
+diff --git a/apps/server/src/app.ts b/apps/server/src/app.ts
+index 859a2deb..44d69384 100644
+--- a/apps/server/src/app.ts
++++ b/apps/server/src/app.ts
+@@ -34,16 +34,17 @@ import { computerRoutes } from './modules/computer/routes.js';
+ import { archOf, registry } from './modules/updates/registry.js';
+ import { updateRoutes } from './modules/updates/routes.js';
+ import { attachmentRoutes } from './modules/tasks/attachments.js';
+ import { partFileRoutes } from './modules/testruns/files.js';
+ import { poolRoutes } from './modules/testruns/pool.js';
+ import { taskRoutes } from './modules/tasks/routes.js';
+ import { TerminalRelay } from './modules/terminals/relay.js';
+ import { terminalRoutes } from './modules/terminals/routes.js';
++import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
+ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
+ 
+ export type { Db } from './db/client.js';
+ import { fromOwnPages } from './auth/origin.js';
+ import { handOverSession, requirePerson } from './auth/session.js';
+ import { overLink } from './auth/tunnel.js';
+ import type { AgentSql } from './db/agent-sql.js';
+ import type { Db } from './db/client.js';
+@@ -54,27 +55,28 @@ export type Deps = {
+   db: Db;
+   config: Config;
+   logger?: FastifyServerOptions['logger'];
+   agentSql?: AgentSql | null;
+   onRoute?: (route: { method: string | string[]; url: string }) => void;
+ };
+ 
+ /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
+-   check for newer builds, access to the computer the server runs on and the company's public link. */
++   check for newer builds, access to the computer the server runs on, the company's public link and its ACME answers. */
+ export type Ctx = Deps & {
+   log: FastifyBaseLogger;
+   hub: NodeHub;
+   bus: EventBus;
+   terminals: TerminalRelay;
+   updates: UpdateCheck;
+   updater: UpdaterControl;
+   computer: ComputerAccess;
+   templates: Templates;
+   links: PublicLinks;
++  challenges: Challenges;
+ };
+ 
+ declare module 'fastify' {
+   interface FastifyInstance {
+     /* For tests and the few places outside a route that need the same context. */
+     ctx: Ctx;
+   }
+   interface FastifyRequest {
+@@ -121,16 +123,17 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+     registry: registry({ image: config.image, arch: archOf(), base: config.registryUrl }),
+     everyMs: config.updateCheckMs,
+     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
+   });
+   ctx.updater = new UpdaterControl(config.controlDir);
+   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
+   ctx.templates = loadTemplates(config.templatesDir);
+   ctx.links = new PublicLinks(ctx);
++  ctx.challenges = new Challenges();
+   app.addHook('onReady', async () => ctx.updates.start());
+   app.addHook('onClose', async () => ctx.updates.stop());
+   app.addHook('onReady', async () => ctx.links.sync());
+   await app.register(cookie);
+   await app.register(websocket, SOCKET_OPTIONS);
+   /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+   app.addHook('onRequest', async (req, reply) => handOverSession(req, reply, deps.db, deps.config));
+   /* After the socket plugin, so a refused socket is closed by it. */
+@@ -157,10 +160,11 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+   departmentRoutes(app, ctx);
+   updateRoutes(app, ctx);
+   computerRoutes(app, ctx);
+   taskRoutes(app, ctx);
+   attachmentRoutes(app, ctx);
+   partFileRoutes(app, ctx);
+   poolRoutes(app, ctx);
+   linkRoutes(app, ctx);
++  challengeRoutes(app, ctx.challenges);
+   return app;
+ }
+diff --git a/apps/server/src/modules/tls/acme.ts b/apps/server/src/modules/tls/acme.ts
+new file mode 100644
+index 00000000..4c6a44fa
+--- /dev/null
++++ b/apps/server/src/modules/tls/acme.ts
+@@ -0,0 +1,212 @@
++import * as acme from 'acme-client';
++import { z } from 'zod';
++
++export const LETS_ENCRYPT: string = acme.directory.letsencrypt.production;
++
++const KEY_CURVE = 'P-256';
++const REQUEST_TIMEOUT_MS = 15000;
++const DETAIL_LIMIT = 200;
++const NO_ANSWER = 'no answer';
++const DEFAULT_BACKOFF: Backoff = { attempts: 10, min: 2000, max: 10000 };
++
++export type ChallengeHooks = { answer(token: string, keyAuthorization: string): void; forget(token: string): void };
++export type AcmeErrorKind = 'not_ready' | 'refused' | 'invalid' | 'unreachable';
++export type Backoff = { attempts: number; min: number; max: number };
++export type Problem = { status: number; type: string; detail: string | null; retryAfterS: number | null };
++
++type Issued = { certPem: string; keyPem: string };
++type Challenge = acme.Authorization['challenges'][number];
++// acme-client's type has no such field, and it sends what it is given as it is.
++type OrderRequest = Parameters<acme.Client['createOrder']>[0] & { replaces?: string };
++
++const ProblemBody = z.object({ type: z.string(), detail: z.string().nullish().catch(null) });
++const ChallengeFailure = z.object({ type: z.string().optional(), detail: z.string().optional() });
++
++export class AcmeError extends Error {
++  readonly kind: AcmeErrorKind;
++  readonly type: string | null;
++  readonly retryAfterS: number | null;
++
++  constructor(kind: AcmeErrorKind, opts: { type?: string | null; retryAfterS?: number | null; detail?: string } = {}) {
++    const detail = opts.detail?.slice(0, DETAIL_LIMIT);
++    super(detail ? `acme ${kind}: ${detail}` : `acme ${kind}`);
++    this.name = 'AcmeError';
++    this.kind = kind;
++    this.type = opts.type ?? null;
++    this.retryAfterS = opts.retryAfterS ?? null;
++  }
++}
++
++// A Retry-After is either seconds or an HTTP date, and anything else says nothing.
++export function retryAfterSeconds(header: unknown, nowMs: number = Date.now()): number | null {
++  if (typeof header !== 'string') return null;
++  if (/^\d+$/.test(header.trim())) return Number(header);
++  const at = Date.parse(header);
++  return Number.isNaN(at) ? null : Math.max(0, Math.ceil((at - nowMs) / 1000));
++}
++
++// The ACME problem document in an answer, or null when the answer is not one.
++export function problemOf(status: number, contentType: unknown, body: unknown, retryAfter: unknown): Problem | null {
++  if (typeof contentType !== 'string' || !contentType.startsWith('application/problem+json')) return null;
++  const parsed = ProblemBody.safeParse(body);
++  if (!parsed.success) return null;
++  return { status, type: parsed.data.type, detail: parsed.data.detail ?? null, retryAfterS: retryAfterSeconds(retryAfter) };
++}
++
++// acme-client's errors carry only the problem's text, so the type and the Retry-After are read here. Only one ACME flow
++// runs at a time in the app, so the last answer's problem is the failed step's.
++let lastProblem: Problem | null = null;
++
++// With its retry off, acme-client's handler trips over a request that got no answer and throws a TypeError about its own
++// internals. A self-check's non-2xx is a real axios error and keeps its words.
++function plainFailure(error: unknown): unknown {
++  return (error as { isAxiosError?: boolean }).isAxiosError ? error : new Error(NO_ANSWER);
++}
++
++// Its own retry would sleep a rate limit's whole Retry-After inside the call; the manager's backoff does that waiting.
++(acme.axios.defaults as unknown as { acmeSettings: { retryMaxAttempts: number } }).acmeSettings.retryMaxAttempts = 0;
++acme.axios.defaults.timeout = REQUEST_TIMEOUT_MS;
++acme.axios.interceptors.response.use(
++  (response) => {
++    const { headers } = response;
++    lastProblem = problemOf(response.status, headers['content-type'], response.data, headers['retry-after']);
++    return response;
++  },
++  (error: unknown) => {
++    lastProblem = null;
++    throw plainFailure(error);
++  },
++);
++
++export const textOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
++
++// What a failed step means, from the CA's last answer. A step that already said what it means keeps its word.
++function meaningOf(err: unknown): AcmeError {
++  if (err instanceof AcmeError) return err;
++  const problem = lastProblem;
++  const opts = { type: problem?.type, retryAfterS: problem?.retryAfterS, detail: problem?.detail ?? textOf(err) };
++  return new AcmeError(problem && problem.status < 500 ? 'refused' : 'unreachable', opts);
++}
++
++async function saying<T>(step: () => Promise<T>): Promise<T> {
++  try {
++    return await step();
++  } catch (err) {
++    throw meaningOf(err);
++  }
++}
++
++const http01Of = (authz: acme.Authorization): Challenge | undefined => authz.challenges.find((challenge) => challenge.type === 'http-01');
++
++function invalidBecause(authz: acme.Authorization): AcmeError {
++  const failure = ChallengeFailure.safeParse(http01Of(authz)?.error);
++  return new AcmeError('invalid', failure.success ? failure.data : {});
++}
++
++function orderRequest(host: string, replaces?: string): OrderRequest {
++  const request: OrderRequest = { identifiers: [{ type: 'dns', value: host }] };
++  return replaces ? { ...request, replaces } : request;
++}
++
++const newKey = async (): Promise<string> => (await acme.crypto.createPrivateEcdsaKey(KEY_CURVE)).toString();
++
++export const newAccountKey: () => Promise<string> = newKey;
++
++// One company's account at one CA. It drives acme-client's own steps, as its auto() has no way to pass replaces.
++export class AcmeAccount {
++  private readonly client: acme.Client;
++
++  constructor(directoryUrl: string, accountKeyPem: string, accountUrl?: string | null, opts: { backoff?: Backoff } = {}) {
++    const backoff = opts.backoff ?? DEFAULT_BACKOFF;
++    this.client = new acme.Client({
++      directoryUrl,
++      accountKey: accountKeyPem,
++      accountUrl: accountUrl ?? undefined,
++      backoffAttempts: backoff.attempts,
++      backoffMin: backoff.min,
++      backoffMax: backoff.max,
++    });
++  }
++
++  account(): Promise<string> {
++    return saying(async () => {
++      await this.makeOrFind();
++      return this.client.getAccountUrl();
++    });
++  }
++
++  issue(host: string, hooks: ChallengeHooks, opts: { replaces?: string; selfCheck?: boolean } = {}): Promise<Issued> {
++    return saying(async () => {
++      if (!this.holdsAccountUrl()) await this.account();
++      const order = await this.client.createOrder(orderRequest(host, opts.replaces));
++      for (const authz of await this.client.getAuthorizations(order)) {
++        if (authz.status !== 'valid') await this.prove(authz, order, hooks, opts.selfCheck ?? true);
++      }
++      return this.finish(order, host);
++    });
++  }
++
++  // No contact is sent, by decision: the first order accepts the CA's terms and gives no one's address. For a key the CA
++  // knows, acme-client follows the first answer with an update that says nothing new, and a CA may refuse that update, as
++  // Pebble does. The account's URL came with the first answer, so such a refusal changes nothing.
++  private async makeOrFind(): Promise<void> {
++    try {
++      await this.client.createAccount({ termsOfServiceAgreed: true });
++    } catch (err) {
++      if (!this.holdsAccountUrl()) throw err;
++    }
++  }
++
++  private holdsAccountUrl(): boolean {
++    try {
++      this.client.getAccountUrl();
++      return true;
++    } catch {
++      return false;
++    }
++  }
++
++  private async prove(authz: acme.Authorization, order: acme.Order, hooks: ChallengeHooks, selfCheck: boolean): Promise<void> {
++    const challenge = http01Of(authz);
++    if (!challenge) throw new AcmeError('refused', { detail: 'the CA offers no http-01 challenge' });
++    hooks.answer(challenge.token, await this.client.getChallengeKeyAuthorization(challenge));
++    try {
++      if (selfCheck) await this.checkOwnAnswer(authz, challenge);
++      await this.client.completeChallenge(challenge);
++      await this.awaitValid(authz, order);
++    } finally {
++      hooks.forget(challenge.token);
++    }
++  }
++
++  // A failed self-check costs nothing at the CA, where a failed validation counts against the name's limit.
++  private async checkOwnAnswer(authz: acme.Authorization, challenge: Challenge): Promise<void> {
++    try {
++      await this.client.verifyChallenge(authz, challenge);
++    } catch (err) {
++      throw new AcmeError('not_ready', { detail: textOf(err) });
++    }
++  }
++
++  private async awaitValid(authz: acme.Authorization, order: acme.Order): Promise<void> {
++    try {
++      await this.client.waitForValidStatus(authz);
++    } catch (err) {
++      throw lastProblem ? err : await this.whyNotValid(order, err);
++    }
++  }
++
++  // An authorization that went invalid answers 200, so its reason is in the authorization and not in a problem document.
++  private async whyNotValid(order: acme.Order, err: unknown): Promise<unknown> {
++    const invalid = (await this.client.getAuthorizations(order)).find((authz) => authz.status === 'invalid');
++    return invalid ? invalidBecause(invalid) : err;
++  }
++
++  // finalizeOrder answers a new object, and an order ready from the start has its certificate URL only there.
++  private async finish(order: acme.Order, host: string): Promise<Issued> {
++    const keyPem = await newKey();
++    const [, csr] = await acme.crypto.createCsr({ altNames: [host] }, keyPem);
++    const finalized = await this.client.finalizeOrder(order, csr);
++    return { certPem: await this.client.getCertificate(finalized), keyPem };
++  }
++}
+diff --git a/apps/server/src/modules/tls/ari.ts b/apps/server/src/modules/tls/ari.ts
+new file mode 100644
+index 00000000..9bf690ad
+--- /dev/null
++++ b/apps/server/src/modules/tls/ari.ts
+@@ -0,0 +1,80 @@
++import * as x509 from '@peculiar/x509';
++import { z } from 'zod';
++import { AcmeError, problemOf, retryAfterSeconds, textOf } from './acme.js';
++
++const REQUEST_TIMEOUT_MS = 15000;
++const DEFAULT_RETRY_AFTER_S = 21600;
++const FIRST_BYTE_WITH_SIGN_BIT = 0x80;
++
++export type RenewalWindow = { start: Date; end: Date; retryAfterS: number };
++
++type Reply = { status: number; headers: Headers; body: unknown };
++
++const Directory = z.object({ renewalInfo: z.string() });
++const WindowAnswer = z.object({ suggestedWindow: z.object({ start: z.string(), end: z.string() }) });
++
++const base64url = (hex: string): string => Buffer.from(hex, 'hex').toString('base64url');
++
++// RFC 9773 4.1.
++export function certIdFrom(keyIdentifierHex: string, serialHex: string): string {
++  return `${base64url(keyIdentifierHex)}.${base64url(serialHex)}`;
++}
++
++// The library drops the zero that keeps a serial positive, and RFC 9773 wants the octets as they are encoded.
++function serialAsEncoded(serialHex: string): string {
++  return Number.parseInt(serialHex.slice(0, 2), 16) >= FIRST_BYTE_WITH_SIGN_BIT ? `00${serialHex}` : serialHex;
++}
++
++export function certId(certPem: string): string | null {
++  const cert = new x509.X509Certificate(x509.PemConverter.decodeFirst(certPem));
++  const keyId = cert.getExtension(x509.AuthorityKeyIdentifierExtension)?.keyId;
++  return keyId ? certIdFrom(keyId, serialAsEncoded(cert.serialNumber)) : null;
++}
++
++function jsonOf(text: string): unknown {
++  try {
++    return JSON.parse(text);
++  } catch {
++    return null;
++  }
++}
++
++async function get(url: string): Promise<Reply> {
++  try {
++    const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'error' });
++    return { status: res.status, headers: res.headers, body: jsonOf(await res.text()) };
++  } catch (err) {
++    throw new AcmeError('unreachable', { detail: textOf(err) });
++  }
++}
++
++function refused({ status, headers, body }: Reply): AcmeError {
++  const problem = problemOf(status, headers.get('content-type'), body, headers.get('retry-after'));
++  return new AcmeError('refused', { type: problem?.type, retryAfterS: problem?.retryAfterS, detail: problem?.detail ?? `answered ${status}` });
++}
++
++function suggestedWindow(body: unknown): { start: Date; end: Date } | null {
++  const answer = WindowAnswer.safeParse(body);
++  if (!answer.success) return null;
++  const start = new Date(answer.data.suggestedWindow.start);
++  const end = new Date(answer.data.suggestedWindow.end);
++  return start < end ? { start, end } : null;
++}
++
++async function renewalInfoUrl(directoryUrl: string): Promise<string | null> {
++  const reply = await get(directoryUrl);
++  if (reply.status !== 200) throw refused(reply);
++  const directory = Directory.safeParse(reply.body);
++  return directory.success ? directory.data.renewalInfo : null;
++}
++
++// One unauthenticated GET: acme-client has no renewal information, and this needs no signing and no account.
++export async function renewalInfo(directoryUrl: string, certPem: string): Promise<RenewalWindow | null> {
++  const url = await renewalInfoUrl(directoryUrl);
++  const id = certId(certPem);
++  if (!url || !id) return null;
++  const reply = await get(`${url.replace(/\/+$/, '')}/${id}`);
++  const window = reply.status === 200 ? suggestedWindow(reply.body) : null;
++  if (!window) throw refused(reply);
++  return { ...window, retryAfterS: retryAfterSeconds(reply.headers.get('retry-after')) ?? DEFAULT_RETRY_AFTER_S };
++}
+diff --git a/apps/server/src/modules/tls/challenges.ts b/apps/server/src/modules/tls/challenges.ts
+new file mode 100644
+index 00000000..926f15ca
+--- /dev/null
++++ b/apps/server/src/modules/tls/challenges.ts
+@@ -0,0 +1,31 @@
++import type { FastifyInstance } from 'fastify';
++import { ApiError } from '../../errors.js';
++
++const TOKEN = /^[A-Za-z0-9_-]{1,128}$/;
++
++// The answers to HTTP-01 challenges live in memory: an order is short, and one app holds one company's link.
++export class Challenges {
++  private readonly answers = new Map<string, string>();
++
++  answer(token: string, keyAuthorization: string): void {
++    this.answers.set(token, keyAuthorization);
++  }
++
++  forget(token: string): void {
++    this.answers.delete(token);
++  }
++
++  get(token: string): string | undefined {
++    return this.answers.get(token);
++  }
++}
++
++// The CA asks with no session and over any port, so this route needs neither and says nothing but the answer.
++export function challengeRoutes(app: FastifyInstance, challenges: Challenges): void {
++  app.get<{ Params: { token: string } }>('/.well-known/acme-challenge/:token', async (req, reply) => {
++    const { token } = req.params;
++    const keyAuthorization = TOKEN.test(token) ? challenges.get(token) : undefined;
++    if (keyAuthorization === undefined) throw new ApiError(404, 'not_found', 'Not found.');
++    return reply.type('text/plain').send(keyAuthorization);
++  });
++}
+diff --git a/apps/server/test/acme-fake.test.ts b/apps/server/test/acme-fake.test.ts
+new file mode 100644
+index 00000000..c08a5376
+--- /dev/null
++++ b/apps/server/test/acme-fake.test.ts
+@@ -0,0 +1,406 @@
++import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
++import type { AddressInfo } from 'node:net';
++import * as acme from 'acme-client';
++import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
++import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, retryAfterSeconds } from '../src/modules/tls/acme.js';
++import { selfSigned } from '../src/modules/tls/x509.js';
++
++const RATE_LIMITED = 'urn:ietf:params:acme:error:rateLimited';
++const BAD_NONCE = 'urn:ietf:params:acme:error:badNonce';
++const CONNECTION = 'urn:ietf:params:acme:error:connection';
++const SERVER_INTERNAL = 'urn:ietf:params:acme:error:serverInternal';
++const QUICK = { backoff: { attempts: 3, min: 50, max: 50 } };
++const HOST = 'acme.test';
++const TOKEN = 'tok-1';
++const PKCS8_PEM = '-----BEGIN PRIVATE KEY-----';
++const CHALLENGE_ANSWER = `/.well-known/acme-challenge/${TOKEN}`;
++
++type Reply = { status?: number; headers?: Record<string, string>; body?: unknown; text?: string };
++type Handler = (base: string) => Reply;
++
++// A JWS body's payload, read without checking its signature, which is all this fake needs of a request.
++function payloadOf(raw: string): Record<string, unknown> {
++  if (!raw) return {};
++  const { payload } = JSON.parse(raw) as { payload?: string };
++  return payload ? (JSON.parse(Buffer.from(payload, 'base64url').toString()) as Record<string, unknown>) : {};
++}
++
++function send(res: ServerResponse, reply: Reply): void {
++  const type = reply.text === undefined ? 'application/json' : 'text/plain';
++  res.writeHead(reply.status ?? 200, { 'content-type': type, 'replay-nonce': 'fake-nonce', ...reply.headers });
++  if (reply.text !== undefined) res.end(reply.text);
++  else res.end(reply.body === undefined ? undefined : JSON.stringify(reply.body));
++}
++
++function readBody(req: IncomingMessage): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const chunks: Buffer[] = [];
++    req.on('data', (chunk: Buffer) => chunks.push(chunk));
++    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
++    req.on('error', reject);
++  });
++}
++
++// An ACME server on a local port: a directory, nonces, and whatever else the test gives it. It checks no signature.
++async function fakeAcme(routes: Record<string, Handler>) {
++  const seen: { path: string; payload: Record<string, unknown> }[] = [];
++  const server = createServer((req, res) => {
++    void readBody(req).then((raw) => {
++      const path = req.url ?? '';
++      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
++      if (path === '/dir') return send(res, { body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account`, newOrder: `${base}/new-order` } });
++      if (path === '/nonce') return send(res, {});
++      seen.push({ path, payload: payloadOf(raw) });
++      return send(res, routes[path]?.(base) ?? { status: 404, text: 'not here' });
++    });
++  });
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  onTestFinished(async () => {
++    server.closeAllConnections();
++    await new Promise<void>((resolve) => server.close(() => resolve()));
++  });
++  const { port } = server.address() as AddressInfo;
++  const requests = (path: string) => seen.filter((request) => request.path === path);
++  return {
++    directoryUrl: `http://127.0.0.1:${port}/dir`,
++    accountUrl: `http://127.0.0.1:${port}/account/1`,
++    port,
++    paths: () => seen.map((request) => request.path),
++    hits: (path: string) => requests(path).length,
++    payloads: (path: string) => requests(path).map((request) => request.payload),
++  };
++}
++
++const problem = (status: number, type: string, detail: string, headers: Record<string, string> = {}): Reply => ({
++  status,
++  headers: { 'content-type': 'application/problem+json', ...headers },
++  body: { type, detail },
++});
++
++const accountMade: Handler = (base) => ({ status: 201, headers: { location: `${base}/account/1` }, body: { status: 'valid' } });
++
++const orderBody = (base: string, status: string, more: Record<string, unknown> = {}) => ({
++  status,
++  identifiers: [{ type: 'dns', value: HOST }],
++  finalize: `${base}/finalize`,
++  ...more,
++});
++
++const orderAt = (base: string, status: string, more: Record<string, unknown> = {}): Reply => ({
++  status: 201,
++  headers: { location: `${base}/order/1` },
++  body: orderBody(base, status, more),
++});
++
++const chainAnswer = (chain: string): Handler => () => ({ headers: { 'content-type': 'application/pem-certificate-chain' }, text: chain });
++
++// An order that needs no proof and is valid as soon as it is finalized.
++const readyOrder = (chain: string): Record<string, Handler> => ({
++  '/new-account': accountMade,
++  '/new-order': (base) => orderAt(base, 'ready'),
++  '/finalize': (base) => ({ body: orderBody(base, 'valid', { certificate: `${base}/cert` }) }),
++  '/cert': chainAnswer(chain),
++});
++
++// An authorization whose http-01 challenge stands as the test says; the self-check asks the host it names.
++function authorization(base: string, status: string, failure?: unknown): Reply {
++  const challenge = { type: 'http-01', url: `${base}/challenge/1`, token: TOKEN, status, error: failure };
++  return { body: { status, identifier: { type: 'dns', value: '127.0.0.1' }, challenges: [challenge] } };
++}
++
++// An order with one authorization to prove, and the certificate at the end of it.
++function orderToProve(chain: string, authz: Handler, more: Record<string, Handler> = {}): Record<string, Handler> {
++  const authorizations = (base: string) => ({ authorizations: [`${base}/authz/1`] });
++  return {
++    '/new-account': accountMade,
++    '/new-order': (base) => orderAt(base, 'pending', authorizations(base)),
++    '/authz/1': authz,
++    '/challenge/1': () => ({ body: { status: 'processing' } }),
++    '/finalize': (base) => ({ body: orderBody(base, 'processing', authorizations(base)) }),
++    '/order/1': (base) => ({ body: orderBody(base, 'valid', { ...authorizations(base), certificate: `${base}/cert` }) }),
++    '/cert': chainAnswer(chain),
++    ...more,
++  };
++}
++
++async function closedPort(): Promise<number> {
++  const server = createServer();
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  const { port } = server.address() as AddressInfo;
++  await new Promise<void>((resolve) => server.close(() => resolve()));
++  return port;
++}
++
++function recordingHooks() {
++  const calls: string[] = [];
++  const answers = new Map<string, string>();
++  const hooks: ChallengeHooks = {
++    answer: (token, keyAuthorization) => {
++      calls.push(`answer ${token}`);
++      answers.set(token, keyAuthorization);
++    },
++    forget: (token) => {
++      calls.push(`forget ${token}`);
++      answers.delete(token);
++    },
++  };
++  return { hooks, calls, answers };
++}
++
++const ANSWERED_AND_FORGOTTEN = [`answer ${TOKEN}`, `forget ${TOKEN}`];
++
++async function newAccountOn(fake: { directoryUrl: string }, opts: { backoff?: { attempts: number; min: number; max: number } } = QUICK): Promise<AcmeAccount> {
++  return new AcmeAccount(fake.directoryUrl, await newAccountKey(), null, opts);
++}
++
++describe('the settings it runs on', () => {
++  it("names Let's Encrypt's production directory", () => {
++    expect(LETS_ENCRYPT).toBe('https://acme-v02.api.letsencrypt.org/directory');
++  });
++
++  it('does not wait forever for an answer', () => {
++    expect(acme.axios.defaults.timeout).toBe(15000);
++  });
++
++  it('makes account keys of P-256 in PKCS#8', async () => {
++    const key = await newAccountKey();
++    expect(key.startsWith(PKCS8_PEM)).toBe(true);
++    expect(acme.crypto.getJwk(key)).toMatchObject({ kty: 'EC', crv: 'P-256' });
++  });
++});
++
++describe('AcmeAccount, on a fake ACME server', () => {
++  it('tells a rate limit and its Retry-After, without waiting it out', async () => {
++    const fake = await fakeAcme({ '/new-account': () => problem(429, RATE_LIMITED, 'too many', { 'retry-after': '7200' }) });
++    const started = Date.now();
++    await expect((await newAccountOn(fake)).account()).rejects.toMatchObject({
++      kind: 'refused',
++      type: RATE_LIMITED,
++      retryAfterS: 7200,
++      message: expect.stringContaining('too many'),
++    });
++    expect(Date.now() - started).toBeLessThan(2000);
++    expect(fake.hits('/new-account')).toBe(1);
++  });
++
++  it('says unreachable for a server error, at once', async () => {
++    const fake = await fakeAcme({ '/new-account': () => ({ status: 500 }) });
++    const started = Date.now();
++    await expect((await newAccountOn(fake)).account()).rejects.toMatchObject({ kind: 'unreachable', type: null });
++    expect(Date.now() - started).toBeLessThan(2000);
++    expect(fake.hits('/new-account')).toBe(1);
++  });
++
++  it('keeps the type and the wait of a server error that has a problem document', async () => {
++    const fake = await fakeAcme({ '/new-account': () => problem(503, SERVER_INTERNAL, 'down', { 'retry-after': '60' }) });
++    await expect((await newAccountOn(fake)).account()).rejects.toMatchObject({ kind: 'unreachable', type: SERVER_INTERNAL, retryAfterS: 60 });
++  });
++
++  it('says unreachable when nothing answers', async () => {
++    const closed = { directoryUrl: `http://127.0.0.1:${await closedPort()}/dir` };
++    await expect((await newAccountOn(closed)).account()).rejects.toMatchObject({
++      kind: 'unreachable',
++      message: 'acme unreachable: no answer',
++    });
++  });
++
++  it('never puts a key in an error', async () => {
++    const key = await newAccountKey();
++    const keyBody = key.split('\n').slice(1, -2).join('');
++    const limited = await fakeAcme({ '/new-account': () => problem(429, RATE_LIMITED, 'too many') });
++    const failed = await fakeAcme({ '/new-account': () => ({ status: 500 }) });
++    const directories = [limited.directoryUrl, failed.directoryUrl, `http://127.0.0.1:${await closedPort()}/dir`];
++    for (const directory of directories) {
++      const error = await new AcmeAccount(directory, key).account().catch((reason: unknown) => reason as AcmeError);
++      expect(error).toBeInstanceOf(AcmeError);
++      const { message } = error as AcmeError;
++      expect(message.includes('PRIVATE KEY')).toBe(false);
++      expect(message.includes(keyBody)).toBe(false);
++    }
++  });
++
++  it('cuts a long detail to 200 characters', () => {
++    const { message } = new AcmeError('refused', { detail: 'x'.repeat(500) });
++    expect(message).toMatch(/^acme refused/);
++    expect(message.match(/x+/)?.[0]).toHaveLength(200);
++  });
++
++  it('sends again after a refused nonce', async () => {
++    let tries = 0;
++    const fake = await fakeAcme({
++      '/new-account': (base) => {
++        tries += 1;
++        return tries === 1 ? problem(400, BAD_NONCE, 'stale') : accountMade(base);
++      },
++    });
++    expect(await (await newAccountOn(fake)).account()).toBe(fake.accountUrl);
++    expect(fake.hits('/new-account')).toBe(2);
++  });
++
++  // For a key it knows, acme-client follows the 200 with an update that says nothing new, and Pebble refuses that update.
++  it('finds the account by its key even when the CA refuses the update that follows', async () => {
++    const fake = await fakeAcme({
++      '/new-account': (base) => ({ ...accountMade(base), status: 200 }),
++      '/account/1': () => problem(400, 'urn:ietf:params:acme:error:malformed', 'Use POST-as-GET'),
++    });
++    expect(await (await newAccountOn(fake)).account()).toBe(fake.accountUrl);
++    expect(fake.hits('/account/1')).toBe(1);
++  });
++
++  it('accepts the terms and gives no contact', async () => {
++    const fake = await fakeAcme({ '/new-account': accountMade });
++    await (await newAccountOn(fake)).account();
++    expect(fake.payloads('/new-account')).toEqual([{ termsOfServiceAgreed: true }]);
++  });
++
++  it('downloads the certificate of an order that was ready from the start', async () => {
++    const { certPem: chain } = await selfSigned(HOST);
++    const fake = await fakeAcme({
++      ...readyOrder(chain),
++      '/finalize': (base) => ({ body: orderBody(base, 'processing') }),
++      '/order/1': (base) => ({ body: orderBody(base, 'valid', { certificate: `${base}/cert` }) }),
++    });
++    const { hooks, calls } = recordingHooks();
++    const issued = await (await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false });
++    expect(issued.certPem).toBe(chain);
++    expect(issued.keyPem.startsWith(PKCS8_PEM)).toBe(true);
++    expect(calls).toEqual([]);
++  });
++
++  it('asks for the order with replaces when it renews, and makes the account once', async () => {
++    const fake = await fakeAcme(readyOrder((await selfSigned(HOST)).certPem));
++    const { hooks } = recordingHooks();
++    const account = await newAccountOn(fake);
++    await account.issue(HOST, hooks, { selfCheck: false });
++    await account.issue(HOST, hooks, { replaces: 'aa.bb', selfCheck: false });
++    const identifiers = [{ type: 'dns', value: HOST }];
++    expect(fake.payloads('/new-order')).toEqual([{ identifiers }, { identifiers, replaces: 'aa.bb' }]);
++    expect(fake.hits('/new-account')).toBe(1);
++  });
++
++  it('uses the account it was given without making one', async () => {
++    const fake = await fakeAcme(readyOrder((await selfSigned(HOST)).certPem));
++    const { hooks } = recordingHooks();
++    await new AcmeAccount(fake.directoryUrl, await newAccountKey(), fake.accountUrl, QUICK).issue(HOST, hooks, { selfCheck: false });
++    expect(fake.hits('/new-account')).toBe(0);
++  });
++
++  it('gives every certificate a new key', async () => {
++    const fake = await fakeAcme(readyOrder((await selfSigned(HOST)).certPem));
++    const { hooks } = recordingHooks();
++    const account = await newAccountOn(fake);
++    const first = await account.issue(HOST, hooks, { selfCheck: false });
++    const second = await account.issue(HOST, hooks, { selfCheck: false });
++    expect(first.keyPem === second.keyPem).toBe(false);
++  });
++});
++
++describe('proving a name, on a fake ACME server', () => {
++  const settings = (acme.axios.defaults as unknown as { acmeSettings: { httpChallengePort: number } }).acmeSettings;
++  const defaultPort = settings.httpChallengePort;
++  afterEach(() => {
++    settings.httpChallengePort = defaultPort;
++  });
++
++  it('answers, checks its own answer, then asks the CA, and forgets the token', async () => {
++    const { certPem: chain } = await selfSigned(HOST);
++    let completed = false;
++    const { hooks, calls, answers } = recordingHooks();
++    const fake = await fakeAcme(orderToProve(chain, (base) => authorization(base, completed ? 'valid' : 'pending'), {
++      '/challenge/1': () => {
++        completed = true;
++        return { body: { status: 'processing' } };
++      },
++      [CHALLENGE_ANSWER]: () => ({ text: answers.get(TOKEN) ?? '' }),
++    }));
++    settings.httpChallengePort = fake.port;
++    const issued = await (await newAccountOn(fake)).issue(HOST, hooks);
++    expect(issued.certPem).toBe(chain);
++    expect(calls).toEqual(ANSWERED_AND_FORGOTTEN);
++    const asked = fake.paths().indexOf(CHALLENGE_ANSWER);
++    expect(asked).toBeGreaterThanOrEqual(0);
++    expect(asked).toBeLessThan(fake.paths().indexOf('/challenge/1'));
++  });
++
++  it('does not ask the CA while its own check fails, and forgets the token', async () => {
++    const { hooks, calls } = recordingHooks();
++    const fake = await fakeAcme(orderToProve('', (base) => authorization(base, 'pending')));
++    settings.httpChallengePort = fake.port;
++    const account = await newAccountOn(fake, { backoff: { attempts: 2, min: 20, max: 20 } });
++    await expect(account.issue(HOST, hooks)).rejects.toMatchObject({ kind: 'not_ready' });
++    expect(fake.hits(CHALLENGE_ANSWER)).toBe(2);
++    expect(fake.hits('/challenge/1')).toBe(0);
++    expect(calls).toEqual(ANSWERED_AND_FORGOTTEN);
++  });
++
++  it('says invalid, with the type of the challenge error, when the CA could not validate', async () => {
++    const { hooks, calls } = recordingHooks();
++    const failure = { type: CONNECTION, detail: 'could not connect' };
++    const fake = await fakeAcme(orderToProve('', (base) => authorization(base, 'invalid', failure)));
++    await expect((await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false })).rejects.toMatchObject({
++      kind: 'invalid',
++      type: CONNECTION,
++      message: expect.stringContaining('could not connect'),
++    });
++    expect(calls).toEqual(ANSWERED_AND_FORGOTTEN);
++  });
++
++  it('says unreachable when the authorization stays pending past the backoff', async () => {
++    const { hooks, calls } = recordingHooks();
++    const fake = await fakeAcme(orderToProve('', (base) => authorization(base, 'pending')));
++    await expect((await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false })).rejects.toMatchObject({ kind: 'unreachable', type: null });
++    expect(calls).toEqual(ANSWERED_AND_FORGOTTEN);
++  });
++
++  it('says refused when the CA turns down the challenge itself', async () => {
++    const { hooks, calls } = recordingHooks();
++    const fake = await fakeAcme(orderToProve('', (base) => authorization(base, 'pending'), {
++      '/challenge/1': () => problem(403, 'urn:ietf:params:acme:error:unauthorized', 'not yours'),
++    }));
++    await expect((await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false })).rejects.toMatchObject({
++      kind: 'refused',
++      type: 'urn:ietf:params:acme:error:unauthorized',
++    });
++    expect(calls).toEqual(ANSWERED_AND_FORGOTTEN);
++  });
++
++  it('says refused when the order offers no http-01 challenge', async () => {
++    const { hooks, calls } = recordingHooks();
++    const dnsOnly: Handler = () => ({
++      body: { status: 'pending', identifier: { type: 'dns', value: HOST }, challenges: [{ type: 'dns-01', url: 'x', token: 't', status: 'pending' }] },
++    });
++    const fake = await fakeAcme(orderToProve('', dnsOnly));
++    await expect((await newAccountOn(fake)).issue(HOST, hooks)).rejects.toMatchObject({ kind: 'refused', type: null });
++    expect(calls).toEqual([]);
++  });
++
++  it('skips an authorization that is already valid', async () => {
++    const { certPem: chain } = await selfSigned(HOST);
++    const { hooks, calls } = recordingHooks();
++    const fake = await fakeAcme(orderToProve(chain, (base) => authorization(base, 'valid')));
++    const issued = await (await newAccountOn(fake)).issue(HOST, hooks);
++    expect(issued.certPem).toBe(chain);
++    expect(calls).toEqual([]);
++  });
++});
++
++describe('Retry-After', () => {
++  const NOW = Date.parse('2026-11-04T12:00:00Z');
++
++  it('reads seconds', () => {
++    expect(retryAfterSeconds('120', NOW)).toBe(120);
++  });
++
++  it('reads an HTTP date, as the seconds until it', () => {
++    expect(retryAfterSeconds('Wed, 04 Nov 2026 12:10:00 GMT', NOW)).toBe(600);
++  });
++
++  it('reads a date that has passed as no wait', () => {
++    expect(retryAfterSeconds('Wed, 04 Nov 2026 11:00:00 GMT', NOW)).toBe(0);
++  });
++
++  it('has nothing to say for no header or for nonsense', () => {
++    expect(retryAfterSeconds(undefined, NOW)).toBeNull();
++    expect(retryAfterSeconds('soon', NOW)).toBeNull();
++  });
++});
+diff --git a/apps/server/test/ari.test.ts b/apps/server/test/ari.test.ts
+new file mode 100644
+index 00000000..508e43ef
+--- /dev/null
++++ b/apps/server/test/ari.test.ts
+@@ -0,0 +1,153 @@
++import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
++import type { AddressInfo } from 'node:net';
++import * as peculiar from '@peculiar/x509';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { certId, certIdFrom, renewalInfo } from '../src/modules/tls/ari.js';
++import { selfSigned } from '../src/modules/tls/x509.js';
++
++const HOST = 'acme.hornhoof.org';
++const WINDOW = { start: '2026-12-01T00:00:00Z', end: '2026-12-02T00:00:00Z' };
++const MALFORMED = 'urn:ietf:params:acme:error:malformed';
++
++type Answer = (res: ServerResponse) => void;
++
++function jsonAnswer(status: number, body: unknown, headers: Record<string, string> = {}): Answer {
++  return (res) => {
++    res.writeHead(status, { 'content-type': 'application/json', ...headers });
++    res.end(JSON.stringify(body));
++  };
++}
++
++const windowAnswer = (headers: Record<string, string> = {}) => jsonAnswer(200, { suggestedWindow: WINDOW }, headers);
++
++// A directory on a local port that says where renewal information lives, and records every path asked for.
++async function ariServer(answer: Answer, renewalInfoPath: string | null = '/renewal-info/') {
++  const paths: string[] = [];
++  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
++    paths.push(req.url ?? '');
++    if (req.url !== '/dir') return answer(res);
++    const { port } = server.address() as AddressInfo;
++    const renewal = renewalInfoPath ? { renewalInfo: `http://127.0.0.1:${port}${renewalInfoPath}` } : {};
++    return jsonAnswer(200, renewal)(res);
++  });
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
++  return { directory: `http://127.0.0.1:${(server.address() as AddressInfo).port}/dir`, paths };
++}
++
++async function closedPort(): Promise<number> {
++  const server = createServer();
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  const { port } = server.address() as AddressInfo;
++  await new Promise<void>((resolve) => server.close(() => resolve()));
++  return port;
++}
++
++describe('the certificate id', () => {
++  it('builds the certificate id as RFC 9773 shows it', () => {
++    expect(certIdFrom('69885b6b87464041e1b37b847ba0ae2cde01c8d4', '0087654321')).toBe('aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE');
++  });
++
++  it("keeps the serial's leading zero", async () => {
++    const { certPem } = await selfSigned(HOST, { serial: '0089abcdef' });
++    const id = certId(certPem)!;
++    expect(id.endsWith('.AImrze8')).toBe(true);
++    expect(id).not.toContain('=');
++    const authority = new peculiar.X509Certificate(certPem).getExtension(peculiar.AuthorityKeyIdentifierExtension)!;
++    const firstPart = Buffer.from(id.split('.')[0]!, 'base64url');
++    expect(firstPart).toHaveLength(20);
++    expect(firstPart.toString('hex')).toBe(authority.keyId);
++  });
++
++  it('adds no zero to a serial that needs none', async () => {
++    const { certPem } = await selfSigned(HOST, { serial: '7fabcdef' });
++    expect(certId(certPem)!.split('.')[1]).toBe(Buffer.from('7fabcdef', 'hex').toString('base64url'));
++  });
++
++  it('reads the first certificate of a chain', async () => {
++    const first = await selfSigned(HOST, { serial: '11' });
++    const second = await selfSigned(HOST, { serial: '22' });
++    expect(certId(first.certPem + second.certPem)).toBe(certId(first.certPem));
++  });
++
++  it('has none for a certificate with no authority key identifier', async () => {
++    const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
++    const bare = await peculiar.X509CertificateGenerator.createSelfSigned({
++      name: 'CN=test',
++      keys,
++      signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' },
++    });
++    expect(certId(bare.toString('pem'))).toBeNull();
++  });
++});
++
++describe('renewal information', () => {
++  it('asks the renewal information of the certificate', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const withRetry = await ariServer(windowAnswer({ 'retry-after': '3600' }));
++    expect(await renewalInfo(withRetry.directory, certPem)).toEqual({
++      start: new Date(WINDOW.start),
++      end: new Date(WINDOW.end),
++      retryAfterS: 3600,
++    });
++    expect(withRetry.paths).toEqual(['/dir', `/renewal-info/${certId(certPem)}`]);
++
++    const withoutRetry = await ariServer(windowAnswer());
++    expect((await renewalInfo(withoutRetry.directory, certPem))?.retryAfterS).toBe(21600);
++
++    const noTrailingSlash = await ariServer(windowAnswer(), '/renewal-info');
++    await renewalInfo(noTrailingSlash.directory, certPem);
++    expect(noTrailingSlash.paths[1]).toBe(`/renewal-info/${certId(certPem)}`);
++  });
++
++  it('says refused, with the type, when the CA turns the question down', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const { directory } = await ariServer((res) => {
++      res.writeHead(404, { 'content-type': 'application/problem+json' });
++      res.end(JSON.stringify({ type: MALFORMED, detail: 'no such certificate' }));
++    });
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'refused', type: MALFORMED });
++  });
++
++  it('says refused for a window that ends before it starts', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const backwards = { start: WINDOW.end, end: WINDOW.start };
++    const { directory } = await ariServer(jsonAnswer(200, { suggestedWindow: backwards }));
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'refused', type: null });
++  });
++
++  it('says refused for a window that is not made of dates', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const { directory } = await ariServer(jsonAnswer(200, { suggestedWindow: { start: 'soon', end: 'later' } }));
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'refused' });
++  });
++
++  it('says refused for an answer that is not JSON at all', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const { directory } = await ariServer((res) => res.end('<html>a proxy speaks</html>'));
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'refused' });
++  });
++
++  it('does not follow a redirect', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const { directory, paths } = await ariServer((res) => {
++      res.writeHead(302, { location: '/elsewhere' });
++      res.end();
++    });
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'unreachable' });
++    expect(paths).not.toContain('/elsewhere');
++  });
++
++  it('has none to give without ARI', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const { directory, paths } = await ariServer(windowAnswer(), null);
++    expect(await renewalInfo(directory, certPem)).toBeNull();
++    expect(paths).toEqual(['/dir']);
++  });
++
++  it('says unreachable when nothing answers', async () => {
++    const { certPem } = await selfSigned(HOST);
++    const directory = `http://127.0.0.1:${await closedPort()}/dir`;
++    await expect(renewalInfo(directory, certPem)).rejects.toMatchObject({ kind: 'unreachable' });
++  });
++});
+diff --git a/apps/server/test/challenges.test.ts b/apps/server/test/challenges.test.ts
+new file mode 100644
+index 00000000..bd547143
+--- /dev/null
++++ b/apps/server/test/challenges.test.ts
+@@ -0,0 +1,34 @@
++import { describe, expect, it } from 'vitest';
++import { TUNNEL, testApp, viaLink } from './helpers.js';
++
++const TOKEN = 'abc_-1';
++const KEY_AUTHORIZATION = `${TOKEN}.thumbprint`;
++const path = (token: string) => `/.well-known/acme-challenge/${token}`;
++
++describe('ACME challenge answers', () => {
++  it('answers a token it holds as text, and nothing else', async () => {
++    const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
++    const get = (token: string) => app.inject({ method: 'GET', url: path(token) });
++    expect((await get(TOKEN)).statusCode).toBe(404);
++
++    app.ctx.challenges.answer(TOKEN, KEY_AUTHORIZATION);
++
++    const answer = await get(TOKEN);
++    expect(answer.statusCode).toBe(200);
++    expect(answer.headers['content-type']).toMatch(/^text\/plain/);
++    expect(answer.body).toBe(KEY_AUTHORIZATION);
++    const overLink = await app.inject({ method: 'GET', url: path(TOKEN), ...viaLink() });
++    expect(overLink.statusCode).toBe(200);
++    expect(overLink.body).toBe(KEY_AUTHORIZATION);
++    expect((await get('other')).statusCode).toBe(404);
++
++    app.ctx.challenges.forget(TOKEN);
++    expect((await get(TOKEN)).statusCode).toBe(404);
++  });
++
++  it('does not answer a token outside the shape of one, even when it holds it', async () => {
++    const { app } = await testApp();
++    app.ctx.challenges.answer('a.b', KEY_AUTHORIZATION);
++    expect((await app.inject({ method: 'GET', url: path('a.b') })).statusCode).toBe(404);
++  });
++});
+diff --git a/apps/server/test/real/acme.test.ts b/apps/server/test/real/acme.test.ts
+new file mode 100644
+index 00000000..ca20e6d5
+--- /dev/null
++++ b/apps/server/test/real/acme.test.ts
+@@ -0,0 +1,121 @@
++import { createPrivateKey, X509Certificate } from 'node:crypto';
++import type { FastifyInstance } from 'fastify';
++import { describe, expect, it, vi } from 'vitest';
++import { AcmeAccount, AcmeError, type ChallengeHooks, newAccountKey } from '../../src/modules/tls/acme.js';
++import { certId, renewalInfo } from '../../src/modules/tls/ari.js';
++import { certInfo } from '../../src/modules/tls/x509.js';
++import { testApp } from '../helpers.js';
++
++function fromRunScript(name: string): string {
++  const value = process.env[name];
++  if (!value) throw new Error('run with npm run test:real');
++  return value;
++}
++
++const DIRECTORY = fromRunScript('PEBBLE_DIRECTORY');
++const MANAGEMENT = fromRunScript('PEBBLE_MANAGEMENT');
++
++const HOST = 'acme.test';
++// The port Pebble's default config validates HTTP-01 on, shared by every test here.
++const VALIDATION_PORT = 5002;
++const HOUR_MS = 3600 * 1000;
++const NOT_ANSWERING: ChallengeHooks = { answer: () => {}, forget: () => {} };
++
++async function appAnswering(): Promise<FastifyInstance> {
++  const { app } = await testApp();
++  await app.listen({ port: VALIDATION_PORT, host: '0.0.0.0' });
++  return app;
++}
++
++function answeringHooks(app: FastifyInstance): { hooks: ChallengeHooks; tokens: string[] } {
++  const tokens: string[] = [];
++  const hooks: ChallengeHooks = {
++    answer: (token, keyAuthorization) => {
++      tokens.push(token);
++      app.ctx.challenges.answer(token, keyAuthorization);
++    },
++    forget: (token) => app.ctx.challenges.forget(token),
++  };
++  return { hooks, tokens };
++}
++
++// Pebble reuses an account's valid authorization half the time, so a test that must see a validation gets its own account.
++async function newAccount(opts?: ConstructorParameters<typeof AcmeAccount>[3]): Promise<AcmeAccount> {
++  return new AcmeAccount(DIRECTORY, await newAccountKey(), null, opts);
++}
++
++async function acmeErrorFrom(work: Promise<unknown>): Promise<AcmeError> {
++  const error = await work.then(() => null, (reason: unknown) => reason);
++  expect(error).toBeInstanceOf(AcmeError);
++  return error as AcmeError;
++}
++
++async function setRenewalWindow(certPem: string, start: Date, end: Date): Promise<void> {
++  const res = await fetch(`${MANAGEMENT}/set-renewal-info/`, {
++    method: 'POST',
++    body: JSON.stringify({ Certificate: certPem, ARIResponse: JSON.stringify({ suggestedWindow: { start, end } }) }),
++  });
++  expect(res.ok).toBe(true);
++}
++
++describe('ACME against Pebble', () => {
++  it('makes an account and finds the same one again by its key', async () => {
++    const key = await newAccountKey();
++    const made = await new AcmeAccount(DIRECTORY, key).account();
++    expect(made).toMatch(/^https:/);
++    expect(await new AcmeAccount(DIRECTORY, key).account()).toBe(made);
++  });
++
++  it("orders a certificate over HTTP-01, answered by the app's own route", async () => {
++    const app = await appAnswering();
++    const { hooks, tokens } = answeringHooks(app);
++    const { certPem, keyPem } = await (await newAccount()).issue(HOST, hooks, { selfCheck: false });
++    expect(certInfo(certPem).names).toEqual([HOST]);
++    expect(certId(certPem)).not.toBeNull();
++    expect(new X509Certificate(certPem).checkPrivateKey(createPrivateKey(keyPem))).toBe(true);
++    expect(tokens.length).toBeGreaterThan(0);
++    expect(tokens.map((token) => app.ctx.challenges.get(token))).toEqual(tokens.map(() => undefined));
++  });
++
++  it('asks when to renew, and renews once with replaces', async () => {
++    const app = await appAnswering();
++    const { hooks } = answeringHooks(app);
++    const account = await newAccount();
++    const first = await account.issue(HOST, hooks, { selfCheck: false });
++    const a = certInfo(first.certPem);
++
++    const window = (await renewalInfo(DIRECTORY, first.certPem))!;
++    expect(window.start.getTime()).toBeLessThan(window.end.getTime());
++    expect(window.start.getTime()).toBeGreaterThanOrEqual(a.notBefore.getTime());
++    expect(window.end.getTime()).toBeLessThanOrEqual(a.notAfter.getTime());
++
++    await setRenewalWindow(first.certPem, new Date(Date.now() - HOUR_MS), new Date(Date.now() - 60_000));
++    expect((await renewalInfo(DIRECTORY, first.certPem))!.end.getTime()).toBeLessThan(Date.now());
++
++    const replaces = certId(first.certPem)!;
++    const second = await account.issue(HOST, hooks, { replaces, selfCheck: false });
++    expect(certId(second.certPem)).not.toBe(replaces);
++    expect(certInfo(second.certPem).fingerprint256).not.toBe(a.fingerprint256);
++
++    const error = await acmeErrorFrom(account.issue(HOST, hooks, { replaces, selfCheck: false }));
++    expect(error.kind).toBe('refused');
++    expect(error.type).toBe('urn:ietf:params:acme:error:alreadyReplaced');
++  });
++
++  it('says invalid when the app does not answer the challenge', async () => {
++    await appAnswering();
++    const error = await acmeErrorFrom((await newAccount()).issue(HOST, NOT_ANSWERING, { selfCheck: false }));
++    expect(error.kind).toBe('invalid');
++    expect(error.type).toMatch(/^urn:ietf:params:acme:error:/);
++  });
++
++  it('does not ask the CA to validate while its own check fails', async () => {
++    const app = await appAnswering();
++    const asked = vi.spyOn(app.ctx.challenges, 'get');
++    const account = await newAccount({ backoff: { attempts: 2, min: 100, max: 100 } });
++    const error = await acmeErrorFrom(account.issue(HOST, NOT_ANSWERING));
++    expect(error.kind).toBe('not_ready');
++    await new Promise((resolve) => setTimeout(resolve, 1000));
++    expect(asked).not.toHaveBeenCalled();
++  });
++});
+diff --git a/apps/server/test/real/run.sh b/apps/server/test/real/run.sh
+new file mode 100644
+index 00000000..6e8ce899
+--- /dev/null
++++ b/apps/server/test/real/run.sh
+@@ -0,0 +1,44 @@
++#!/bin/sh
++# Runs the tests that need a real ACME server against Pebble, Let's Encrypt's test CA, in a container of its own.
++set -eu
++
++PEBBLE=ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
++NAME="hornhoof-pebble-$$"
++WAIT_SECONDS=30
++
++if ! docker info > /dev/null 2>&1; then
++  echo 'test:real needs Docker' >&2
++  exit 1
++fi
++
++TEMP=$(mktemp -d)
++cleanup() {
++  docker rm -f "$NAME" > /dev/null 2>&1 || true
++  rm -rf "$TEMP"
++}
++trap cleanup EXIT
++trap 'exit 130' INT
++trap 'exit 143' TERM
++
++# PEBBLE_VA_NOSLEEP drops the delay Pebble adds before each validation, which only slows these tests down.
++docker run --detach --name "$NAME" -e PEBBLE_VA_NOSLEEP=1 -p 14000:14000 -p 15000:15000 \
++  --add-host acme.test:host-gateway "$PEBBLE" -config test/config/pebble-config.json -strict > /dev/null
++
++waited=0
++until curl -ksf https://localhost:14000/dir > /dev/null 2>&1; do
++  waited=$((waited + 1))
++  if [ "$waited" -ge "$WAIT_SECONDS" ]; then
++    echo "Pebble did not answer within $WAIT_SECONDS seconds" >&2
++    docker logs "$NAME" >&2
++    exit 1
++  fi
++  sleep 1
++done
++
++# Pebble's test CA stays in its image and is copied out at run time, so no certificate is ever committed.
++docker cp "$NAME:/test/certs/pebble.minica.pem" "$TEMP/ca.pem" > /dev/null
++
++NODE_EXTRA_CA_CERTS="$TEMP/ca.pem" \
++PEBBLE_DIRECTORY=https://localhost:14000/dir \
++PEBBLE_MANAGEMENT=https://localhost:15000 \
++  npx vitest run -c vitest.real.config.ts
+diff --git a/apps/server/vitest.config.ts b/apps/server/vitest.config.ts
+index d09b18e8..6d3ecb5b 100644
+--- a/apps/server/vitest.config.ts
++++ b/apps/server/vitest.config.ts
+@@ -1,5 +1,11 @@
+-import { defineConfig } from 'vitest/config';
++import { configDefaults, defineConfig } from 'vitest/config';
+ 
+ export default defineConfig({
+-  test: { include: ['test/**/*.test.ts'], globalSetup: ['test/global-setup.ts'], testTimeout: 20000 },
++  test: {
++    include: ['test/**/*.test.ts'],
++    // These need Docker: npm run test:real runs them against Pebble.
++    exclude: [...configDefaults.exclude, 'test/real/**'],
++    globalSetup: ['test/global-setup.ts'],
++    testTimeout: 20000,
++  },
+ });
+diff --git a/apps/server/vitest.real.config.ts b/apps/server/vitest.real.config.ts
+new file mode 100644
+index 00000000..e60e1564
+--- /dev/null
++++ b/apps/server/vitest.real.config.ts
+@@ -0,0 +1,11 @@
++import { defineConfig } from 'vitest/config';
++
++// Port 5002, where Pebble validates, is shared, so the files never run side by side.
++export default defineConfig({
++  test: {
++    include: ['test/real/**/*.test.ts'],
++    globalSetup: ['test/global-setup.ts'],
++    testTimeout: 120000,
++    fileParallelism: false,
++  },
++});
+diff --git a/package.json b/package.json
+index c676bcc0..70f90f60 100644
+--- a/package.json
++++ b/package.json
+@@ -14,16 +14,17 @@
+   },
+   "scripts": {
+     "prepare": "node -e \"const fs=require('node:fs');if(fs.existsSync('node_modules/@vitest/coverage-v8'))for(const w of['packages/protocol','apps/node','apps/server','apps/web']){fs.mkdirSync(w+'/node_modules/@vitest',{recursive:true});fs.rmSync(w+'/node_modules/@vitest/coverage-v8',{recursive:true,force:true});fs.symlinkSync('../../../../node_modules/@vitest/coverage-v8',w+'/node_modules/@vitest/coverage-v8')}\"",
+     "lint": "npm run build -w @hornhoof/protocol && eslint",
+     "release:version": "node scripts/release-version.mjs",
+     "test:release": "node --test scripts/test/*.test.mjs",
+     "typecheck:tests": "npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit",
+     "test": "node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present",
++    "test:real": "npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server",
+     "build": "npm run build --workspaces --if-present",
+     "dev": "npm run dev -w apps/server"
+   },
+   "devDependencies": {
+     "eslint": "^10.14.0",
+     "typescript-eslint": "^8.72.1"
+   }
+ }
+

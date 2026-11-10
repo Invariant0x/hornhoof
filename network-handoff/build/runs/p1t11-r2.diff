@@ -1,0 +1,518 @@
+# Review package: working tree against 73d086ba
+
+## Commits since base
+
+## Files changed
+ apps/server/test/fake-relay.ts | 168 ++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 157 insertions(+), 11 deletions(-)
+new: apps/server/test/fake-relay.test.ts
+
+## Diff
+diff --git a/apps/server/test/fake-relay.ts b/apps/server/test/fake-relay.ts
+index 08827e5d..1951930a 100644
+--- a/apps/server/test/fake-relay.ts
++++ b/apps/server/test/fake-relay.ts
+@@ -1,67 +1,213 @@
+ import type { AddressInfo } from 'node:net';
+ import { randomBytes } from 'node:crypto';
+-import Fastify from 'fastify';
++import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+ import { onTestFinished } from 'vitest';
++import { z } from 'zod';
++
++/* Who holds a name's route, and since when. Unix seconds. The generation counts the registrations let through. */
++export type FakeRoute = { state: 'held' | 'empty'; client: string | null; since: number; generation: number };
++export type FakeSync = { state: 'on' | 'off'; copy: string | null; epoch: number; generation: number; at: number | null };
++type Registered = { ok: true; generation: number } | { ok: false; reason: 'router config conflict' | 'already online' };
+ 
+ export type FakeRelay = {
+   /* The address to give Hornhoof as RELAY_URL. */
+   url: string;
+   /* The links it handed out, by name, with the key that removes each. */
+   bindings: Map<string, { key: string }>;
+   reserved: Set<string>;
+   /* Every request it got, as "METHOD /path". */
+   calls: string[];
+   /* While set, it answers 502 to everything, as its proxy does when the service is down. */
+   down: boolean;
+   /* The address it gives a new link. */
+   urlFor: (name: string) => string;
++  routes: Map<string, FakeRoute>;
++  syncs: Map<string, FakeSync>;
++  visitorKeys: Map<string, string>;
++  /* While set, route, sync and health answer 503, and so do the check and the binding of a requested name. */
++  frpsDown: boolean;
++  relayStarted: number;
++  /* True: health says the relay routes by TLS server name (R4.1). */
++  passthrough: boolean;
++  evictionBound: number;
++  /* How the route answer is spoiled: not JSON, one extra field, the state "gone", no answer at all. */
++  routeAnswer: 'contract' | 'garbage' | 'extra' | 'badstate' | 'hang';
++  /* A registration of a name by a client, as the plugin lets it through or refuses it. */
++  register: (name: string, client: string) => Registered;
++  /* The holder of a name was evicted or stopped. */
++  drop: (name: string) => void;
++  /* Every route empty, generations and syncs kept, relayStarted now. */
++  restartFrps: () => void;
+ };
+ 
+ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+ 
++const nowSeconds = () => Math.floor(Date.now() / 1000);
++const newKey = () => randomBytes(24).toString('base64url');
++const NO_SYNC: FakeSync = { state: 'off', copy: null, epoch: 0, generation: 0, at: null };
++const UNKNOWN = { error: 'unknown', message: 'The relay cannot tell whether the route is live.' };
++
++/* The sync record R2.4 takes: exactly these fields, a copy only when the sync is on. */
++const text = z.string().min(1).max(100);
++const SyncRecord = z
++  .strictObject({ client: text, generation: z.int().min(1), state: z.enum(['on', 'off']), copy: text.nullable(), epoch: z.int().min(1) })
++  .refine(record => record.copy !== null || record.state === 'off');
++type SyncRecord = z.infer<typeof SyncRecord>;
++
++const holds = (routes: Map<string, FakeRoute>, name: string) => routes.get(name)?.state === 'held';
++
++function register(routes: Map<string, FakeRoute>, name: string, client: string): Registered {
++  /* frps meets a live client id at Login, before any registration of a name meets a held route. */
++  if ([...routes.values()].some(route => route.state === 'held' && route.client === client)) return { ok: false, reason: 'already online' };
++  if (holds(routes, name)) return { ok: false, reason: 'router config conflict' };
++  const generation = (routes.get(name)?.generation ?? 0) + 1;
++  routes.set(name, { state: 'held', client, since: nowSeconds(), generation });
++  return { ok: true, generation };
++}
++
++function drop(routes: Map<string, FakeRoute>, name: string): void {
++  const route = routes.get(name);
++  if (route && holds(routes, name)) routes.set(name, { ...route, state: 'empty', client: null, since: nowSeconds() });
++}
++
++/* The record the holder's post sets, or why the relay refuses it. */
++function acceptSync(relay: FakeRelay, name: string, record: SyncRecord): FakeSync | 'not_holder' | 'stale_epoch' {
++  const route = relay.routes.get(name);
++  if (route?.state !== 'held' || route.client !== record.client || route.generation !== record.generation) return 'not_holder';
++  if (record.epoch <= (relay.syncs.get(name) ?? NO_SYNC).epoch) return 'stale_epoch';
++  const stored: FakeSync = { state: record.state, copy: record.copy, epoch: record.epoch, generation: route.generation, at: nowSeconds() };
++  relay.syncs.set(name, stored);
++  return stored;
++}
++
++/* A binding nobody registered has no route yet. The relay dates it from the binding, which a binding set by a test
++   does not record, so its since is 0. */
++const NO_ROUTE = { state: 'empty', client: null, since: 0, generation: 0 } as const;
++
++const routeBody = (relay: FakeRelay, name: string) => ({
++  ...(relay.routes.get(name) ?? NO_ROUTE),
++  relayStarted: relay.relayStarted,
++  evictionBound: relay.evictionBound,
++  sync: relay.syncs.get(name) ?? NO_SYNC,
++});
++
++const spoiled = (mode: FakeRelay['routeAnswer'], body: object): unknown =>
++  mode === 'garbage' ? '{not json' : mode === 'extra' ? { ...body, surprise: true } : mode === 'badstate' ? { ...body, state: 'gone' } : body;
++
+ /* What the relay gives the tunnel client, as relay.py builds it: the frpc image and config, and its parts. */
+ const tunnelFor = (name: string, key: string) => ({
+   image: 'fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e',
+   configPath: '/etc/frp/frpc.toml',
+   args: ['-c', '/etc/frp/frpc.toml'],
+   config: `serverAddr = "hornhoof.test"\nmetadatas.name = "${name}"\nmetadatas.key = "${key}"\n`,
+   serverAddr: 'hornhoof.test',
+   serverPort: 443,
+   protocol: 'wss',
+   proxyName: name,
+   subdomain: name,
+   target: 'app:8080',
+ });
+ 
++function newRelay(): FakeRelay {
++  const relay: FakeRelay = {
++    url: '',
++    bindings: new Map(),
++    reserved: new Set(['www', 'api']),
++    calls: [],
++    down: false,
++    urlFor: name => `https://${name}.hornhoof.test`,
++    routes: new Map(),
++    syncs: new Map(),
++    visitorKeys: new Map(),
++    frpsDown: false,
++    relayStarted: nowSeconds(),
++    passthrough: true,
++    evictionBound: 30,
++    routeAnswer: 'contract',
++    register: (name, client) => register(relay.routes, name, client),
++    drop: name => drop(relay.routes, name),
++    restartFrps: () => {
++      [...relay.routes.keys()].forEach(name => drop(relay.routes, name));
++      relay.relayStarted = nowSeconds();
++    },
++  };
++  return relay;
++}
++
++/* What the relay says about a name. */
++function nameRules(relay: FakeRelay) {
++  /* A reason the relay knows without asking frps. */
++  const knownReason = (name: string) =>
++    !NAME.test(name) || name.slice(2, 4) === '--' ? 'invalid' : relay.reserved.has(name) ? 'reserved' : relay.bindings.has(name) ? 'taken' : undefined;
++  return {
++    /* A name with no binding is free only when frps shows no route for it (R1.5). */
++    check: (name: string) => {
++      const reason = knownReason(name) ?? (holds(relay.routes, name) ? 'taken' : undefined);
++      return reason ? { name, free: false, reason } : { name, free: true };
++    },
++    cannotTell: (name: string) => relay.frpsDown && !knownReason(name),
++  };
++}
++
+ /* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
+ export async function fakeRelay(): Promise<FakeRelay> {
+-  const app = Fastify();
+-  const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false, urlFor: name => `https://${name}.hornhoof.test` };
+-  const check = (name: string) =>
+-    !NAME.test(name) || name.slice(2, 4) === '--' ? { name, free: false, reason: 'invalid' } : relay.reserved.has(name) ? { name, free: false, reason: 'reserved' } : relay.bindings.has(name) ? { name, free: false, reason: 'taken' } : { name, free: true };
++  const app = Fastify({ forceCloseConnections: true });
++  const relay = newRelay();
++  const { check, cannotTell } = nameRules(relay);
++  /* A link call needs its binding and its key: 404 for an unknown name, 401 for a wrong key. */
++  const authorize = async (req: FastifyRequest<{ Params: { name: string } }>, reply: FastifyReply) => {
++    const binding = relay.bindings.get(req.params.name);
++    if (!binding) return reply.code(404).send({ error: 'not_found', message: `There is no binding ${req.params.name}.` });
++    if (req.headers.authorization !== `Bearer ${binding.key}`) return reply.code(401).send({ error: 'unauthorized', message: 'Send the binding key as Authorization: Bearer <key>.' });
++  };
+ 
+   app.addHook('onRequest', async (req, reply) => {
+     relay.calls.push(`${req.method} ${req.url}`);
+     if (relay.down) return reply.code(502).send('Bad Gateway');
+   });
+-  app.get<{ Params: { name: string } }>('/api/v1/names/:name', async req => check(req.params.name));
++  app.get<{ Params: { name: string } }>('/api/v1/names/:name', async (req, reply) => (cannotTell(req.params.name) ? reply.code(503).send(UNKNOWN) : check(req.params.name)));
+   app.post<{ Body: { name?: string } | undefined }>('/api/v1/bindings', async (req, reply) => {
++    if (req.body?.name !== undefined && cannotTell(req.body.name)) return reply.code(503).send(UNKNOWN);
+     const name = req.body?.name ?? randomBytes(12).toString('hex');
+     const found = check(name);
+     if (!found.free) return reply.code(found.reason === 'invalid' ? 400 : 409).send({ error: found.reason, message: `${name} is ${found.reason}.` });
+-    const key = randomBytes(24).toString('base64url');
++    const key = newKey();
+     relay.bindings.set(name, { key });
++    if (!relay.routes.has(name)) relay.routes.set(name, { state: 'empty', client: null, since: nowSeconds(), generation: 0 });
+     return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: tunnelFor(name, key) });
+   });
+-  app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', async (req, reply) => {
+-    const binding = relay.bindings.get(req.params.name);
+-    if (!binding) return reply.code(404).send({ error: 'unknown' });
+-    if (req.headers.authorization !== `Bearer ${binding.key}`) return reply.code(401).send({ error: 'unauthorized' });
++  app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', { preHandler: authorize }, async (req, reply) => {
+     relay.bindings.delete(req.params.name);
++    relay.visitorKeys.delete(req.params.name);
+     return reply.code(204).send();
+   });
++  app.get<{ Params: { name: string } }>('/api/v1/links/:name/route', { preHandler: authorize }, async (req, reply) => {
++    if (relay.frpsDown) return reply.code(503).send(UNKNOWN);
++    if (relay.routeAnswer === 'hang') return reply.hijack();
++    return reply.type('application/json').send(spoiled(relay.routeAnswer, routeBody(relay, req.params.name)));
++  });
++  app.post<{ Params: { name: string }; Body: unknown }>('/api/v1/links/:name/sync', { preHandler: authorize }, async (req, reply) => {
++    const record = SyncRecord.safeParse(req.body);
++    if (!record.success) return reply.code(400).send({ error: 'invalid' });
++    if (relay.frpsDown) return reply.code(503).send(UNKNOWN);
++    const stored = acceptSync(relay, req.params.name, record.data);
++    return typeof stored === 'string' ? reply.code(409).send({ error: stored }) : { sync: stored };
++  });
++  app.post<{ Params: { name: string } }>('/api/v1/links/:name/key', { preHandler: authorize }, async req => {
++    const key = newKey();
++    relay.bindings.set(req.params.name, { key });
++    return { key };
++  });
++  app.post<{ Params: { name: string } }>('/api/v1/links/:name/visitor-key', { preHandler: authorize }, async req => {
++    const visitorKey = newKey();
++    relay.visitorKeys.set(req.params.name, visitorKey);
++    return { visitorKey };
++  });
++  app.get('/api/v1/health', async (_req, reply) =>
++    relay.frpsDown ? reply.code(503).send({ ok: false, frps: false }) : { ok: true, frps: true, relayStarted: relay.relayStarted, passthrough: relay.passthrough },
++  );
+   await app.listen({ host: '127.0.0.1', port: 0 });
+   relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+   onTestFinished(() => app.close());
+   return relay;
+ }
+diff --git a/apps/server/test/fake-relay.test.ts b/apps/server/test/fake-relay.test.ts
+new file mode 100644
+index 00000000..445aa279
+--- /dev/null
++++ b/apps/server/test/fake-relay.test.ts
+@@ -0,0 +1,273 @@
++import { describe, expect, it } from 'vitest';
++import { fakeRelay, type FakeRelay } from './fake-relay.js';
++
++/* The tests of the fake relay itself: each one is named by its row in the relay contract table (plan 1), and asserts
++   the table's exact bodies, so a drift between the fake and the real relay shows here first. */
++
++const NOT_FOUND = (name: string) => ({ error: 'not_found', message: `There is no binding ${name}.` });
++const UNAUTHORIZED = { error: 'unauthorized', message: 'Send the binding key as Authorization: Bearer <key>.' };
++const UNKNOWN = { error: 'unknown', message: 'The relay cannot tell whether the route is live.' };
++const NO_SYNC = { state: 'off', copy: null, epoch: 0, generation: 0, at: null };
++
++type Options = { key?: string; body?: unknown };
++
++async function call(relay: FakeRelay, method: string, path: string, { key, body }: Options = {}): Promise<{ status: number; body: any }> {
++  const headers: Record<string, string> = {};
++  if (key) headers.authorization = `Bearer ${key}`;
++  if (body !== undefined) headers['content-type'] = 'application/json';
++  const res = await fetch(`${relay.url}/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
++  return { status: res.status, body: await res.json().catch(() => null) };
++}
++
++const route = (relay: FakeRelay, name: string, key = 'k') => call(relay, 'GET', `/links/${name}/route`, { key });
++const sync = (relay: FakeRelay, name: string, body: unknown, key = 'k') => call(relay, 'POST', `/links/${name}/sync`, { key, body });
++
++async function relayWithBinding(name = 'acme', key = 'k'): Promise<FakeRelay> {
++  const relay = await fakeRelay();
++  relay.bindings.set(name, { key });
++  return relay;
++}
++
++describe('the fake relay keeps the contract', () => {
++  it('R1.1 refuses a second registration of a held name', async () => {
++    const relay = await relayWithBinding();
++    expect(relay.register('acme', 'acme-aaaaaaaa-link')).toEqual({ ok: true, generation: 1 });
++    expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: false, reason: 'router config conflict' });
++    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'held', client: 'acme-aaaaaaaa-link', generation: 1 });
++  });
++
++  it('R1.3 refuses a second live login with one client id', async () => {
++    const relay = await fakeRelay();
++    expect(relay.register('acme', 'acme-aaaaaaaa-link').ok).toBe(true);
++    expect(relay.register('globex', 'acme-aaaaaaaa-link')).toEqual({ ok: false, reason: 'already online' });
++    relay.drop('acme');
++    expect(relay.register('globex', 'acme-aaaaaaaa-link')).toEqual({ ok: true, generation: 1 });
++  });
++
++  it('R1.3 meets a busy client id at login, before the name is looked at', async () => {
++    const relay = await fakeRelay();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    expect(relay.register('acme', 'acme-aaaaaaaa-link')).toEqual({ ok: false, reason: 'already online' });
++  });
++
++  it('R1.4 lets two companies of one machine in side by side', async () => {
++    const relay = await fakeRelay();
++    expect(relay.register('acme', 'acme-aaaaaaaa-link').ok).toBe(true);
++    expect(relay.register('globex', 'globex-aaaaaaaa-link').ok).toBe(true);
++    expect([relay.routes.get('acme')?.state, relay.routes.get('globex')?.state]).toEqual(['held', 'held']);
++  });
++
++  it('R2.1 tells the holder, since and generation', async () => {
++    const relay = await relayWithBinding();
++    relay.relayStarted = 1_700_000_000;
++    const before = Math.floor(Date.now() / 1000);
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    const { status, body } = await route(relay, 'acme');
++    expect(status).toBe(200);
++    expect(Object.keys(body).sort()).toEqual(['client', 'evictionBound', 'generation', 'relayStarted', 'since', 'state', 'sync']);
++    expect(body).toMatchObject({ state: 'held', client: 'acme-aaaaaaaa-link', generation: 1, relayStarted: 1_700_000_000, evictionBound: 30, sync: NO_SYNC });
++    expect(body.since).toBeGreaterThanOrEqual(before);
++  });
++
++  it('R2.1 says empty at generation 0 for a binding nobody registered', async () => {
++    const relay = await relayWithBinding();
++    const { body } = await route(relay, 'acme');
++    expect(body).toMatchObject({ state: 'empty', client: null, since: 0, generation: 0 });
++  });
++
++  it('R2.1 gives a name bound through the API the time it was bound', async () => {
++    const relay = await fakeRelay();
++    const before = Math.floor(Date.now() / 1000);
++    const bound = await call(relay, 'POST', '/bindings', { body: { name: 'acme' } });
++    const { body } = await route(relay, 'acme', bound.body.key);
++    expect(body.since).toBeGreaterThanOrEqual(before);
++    expect(body.since).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
++    expect(body.generation).toBe(0);
++    expect(relay.register('acme', 'acme-aaaaaaaa-link')).toEqual({ ok: true, generation: 1 });
++  });
++
++  it('R2.2 grows the generation with every registration and keeps it across an frps restart', async () => {
++    const relay = await relayWithBinding();
++    relay.relayStarted = 1;
++    expect(relay.register('acme', 'acme-aaaaaaaa-link')).toEqual({ ok: true, generation: 1 });
++    relay.drop('acme');
++    expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 2 });
++    relay.restartFrps();
++    expect(relay.relayStarted).toBeGreaterThan(1);
++    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: null, generation: 2 });
++    expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 3 });
++  });
++
++  it('R2.3 answers 401, 404 and 503, never an empty it is not sure of', async () => {
++    const relay = await relayWithBinding();
++    expect(await route(relay, 'acme', 'wrong')).toEqual({ status: 401, body: UNAUTHORIZED });
++    expect(await call(relay, 'GET', '/links/acme/route')).toEqual({ status: 401, body: UNAUTHORIZED });
++    expect(await route(relay, 'nobody')).toEqual({ status: 404, body: NOT_FOUND('nobody') });
++    relay.frpsDown = true;
++    expect(await route(relay, 'acme')).toEqual({ status: 503, body: UNKNOWN });
++    expect((await route(relay, 'acme', 'wrong')).status).toBe(401);
++  });
++
++  it('R2.3 can answer the route badly, for the client that must fail closed', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    relay.routeAnswer = 'garbage';
++    const garbage = await fetch(`${relay.url}/api/v1/links/acme/route`, { headers: { authorization: 'Bearer k' } });
++    expect(garbage.status).toBe(200);
++    await expect(garbage.json()).rejects.toThrow();
++    relay.routeAnswer = 'extra';
++    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'held', surprise: true });
++    relay.routeAnswer = 'badstate';
++    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'gone' });
++    relay.routeAnswer = 'hang';
++    await expect(fetch(`${relay.url}/api/v1/links/acme/route`, { headers: { authorization: 'Bearer k' }, signal: AbortSignal.timeout(150) })).rejects.toThrow();
++    relay.routeAnswer = 'contract';
++    expect((await route(relay, 'acme')).body.state).toBe('held');
++  });
++
++  it('R2.4 takes the sync record only from the holder at its generation with a higher epoch, and reads a missing one as off', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    const record = { client: 'acme-aaaaaaaa-link', generation: 1, state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 5 };
++    expect((await route(relay, 'acme')).body.sync).toEqual(NO_SYNC);
++
++    expect(await sync(relay, 'acme', { ...record, client: 'acme-bbbbbbbb-link' })).toEqual({ status: 409, body: { error: 'not_holder' } });
++    expect(await sync(relay, 'acme', { ...record, generation: 2 })).toEqual({ status: 409, body: { error: 'not_holder' } });
++    expect(await sync(relay, 'acme', record, 'wrong')).toEqual({ status: 401, body: UNAUTHORIZED });
++    expect(relay.syncs.has('acme')).toBe(false);
++
++    const taken = await sync(relay, 'acme', record);
++    expect(taken.status).toBe(200);
++    expect(taken.body).toEqual({ sync: { state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 5, generation: 1, at: expect.any(Number) } });
++    expect((await route(relay, 'acme')).body.sync).toEqual(taken.body.sync);
++
++    const stale = await sync(relay, 'acme', { ...record, state: 'off', copy: null, epoch: 5 });
++    expect([stale.status, stale.body]).toEqual([409, { error: 'stale_epoch' }]);
++    expect((await sync(relay, 'acme', { ...record, state: 'off', copy: null, epoch: 6 })).body.sync).toMatchObject({ state: 'off', copy: null, epoch: 6 });
++  });
++
++  it('R2.4 refuses a malformed record, a sync with no holder, and a sync while frps is down', async () => {
++    const relay = await relayWithBinding();
++    const record = { client: 'acme-aaaaaaaa-link', generation: 1, state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 1 };
++    expect(await sync(relay, 'acme', { ...record, extra: 1 })).toEqual({ status: 400, body: { error: 'invalid' } });
++    expect((await sync(relay, 'acme', { ...record, epoch: 0 })).status).toBe(400);
++    expect((await sync(relay, 'acme', { ...record, state: 'maybe' })).status).toBe(400);
++    expect((await sync(relay, 'acme', { ...record, copy: null })).status).toBe(400);
++    expect(await sync(relay, 'nobody', record)).toEqual({ status: 404, body: NOT_FOUND('nobody') });
++    expect(await sync(relay, 'acme', record)).toEqual({ status: 409, body: { error: 'not_holder' } });
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    relay.frpsDown = true;
++    expect(await sync(relay, 'acme', record)).toEqual({ status: 503, body: UNKNOWN });
++    expect(relay.syncs.has('acme')).toBe(false);
++  });
++
++  it('R2.4 keeps the sync record across an frps restart, and its epoch still guards the next holder', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    const record = { client: 'acme-aaaaaaaa-link', generation: 1, state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 5 };
++    await sync(relay, 'acme', record);
++    relay.restartFrps();
++    const emptied = await route(relay, 'acme');
++    expect(emptied.body).toMatchObject({ state: 'empty', client: null, generation: 1, sync: { state: 'on', epoch: 5, generation: 1 } });
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    const next = { ...record, generation: 2 };
++    expect(await sync(relay, 'acme', { ...next, epoch: 5 })).toEqual({ status: 409, body: { error: 'stale_epoch' } });
++    expect((await sync(relay, 'acme', { ...next, epoch: 6 })).status).toBe(200);
++  });
++
++  it('R3.1 empties the route when the holder is dropped', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    relay.drop('acme');
++    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: null, generation: 1 });
++    expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 2 });
++  });
++
++  it('R3.1 leaves an empty or unknown name as it was when it is dropped again', async () => {
++    const relay = await relayWithBinding();
++    relay.routes.set('acme', { state: 'empty', client: null, since: 7, generation: 3 });
++    relay.drop('acme');
++    relay.drop('nobody');
++    expect(relay.routes.get('acme')).toEqual({ state: 'empty', client: null, since: 7, generation: 3 });
++    expect(relay.routes.has('nobody')).toBe(false);
++  });
++
++  it('R4.1 answers health only while frps is up, with passthrough', async () => {
++    const relay = await fakeRelay();
++    relay.relayStarted = 1_700_000_000;
++    expect(await call(relay, 'GET', '/health')).toEqual({ status: 200, body: { ok: true, frps: true, relayStarted: 1_700_000_000, passthrough: true } });
++    relay.passthrough = false;
++    expect((await call(relay, 'GET', '/health')).body.passthrough).toBe(false);
++    relay.frpsDown = true;
++    expect(await call(relay, 'GET', '/health')).toEqual({ status: 503, body: { ok: false, frps: false } });
++  });
++
++  it('R6.1 changes the key and refuses the old one', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    expect(await call(relay, 'POST', '/links/acme/key', { key: 'wrong' })).toEqual({ status: 401, body: UNAUTHORIZED });
++    expect(await call(relay, 'POST', '/links/nobody/key', { key: 'k' })).toEqual({ status: 404, body: NOT_FOUND('nobody') });
++    const changed = await call(relay, 'POST', '/links/acme/key', { key: 'k' });
++    expect(changed.status).toBe(200);
++    expect(Object.keys(changed.body)).toEqual(['key']);
++    const fresh: string = changed.body.key;
++    expect(fresh.length >= 16 && fresh !== 'k').toBe(true);
++    expect((await route(relay, 'acme', 'k')).status).toBe(401);
++    expect((await call(relay, 'DELETE', '/bindings/acme', { key: 'k' })).status).toBe(401);
++    expect((await route(relay, 'acme', fresh)).body.state).toBe('held');
++    expect((await call(relay, 'DELETE', '/bindings/acme', { key: fresh })).status).toBe(204);
++  });
++
++  it('R6.2 hands out a visitor key and replaces it', async () => {
++    const relay = await relayWithBinding();
++    expect(await call(relay, 'POST', '/links/acme/visitor-key', { key: 'wrong' })).toEqual({ status: 401, body: UNAUTHORIZED });
++    expect(await call(relay, 'POST', '/links/nobody/visitor-key', { key: 'k' })).toEqual({ status: 404, body: NOT_FOUND('nobody') });
++    const first = await call(relay, 'POST', '/links/acme/visitor-key', { key: 'k' });
++    expect([first.status, Object.keys(first.body)]).toEqual([200, ['visitorKey']]);
++    expect(typeof first.body.visitorKey === 'string' && first.body.visitorKey.length >= 16).toBe(true);
++    expect(relay.visitorKeys.get('acme') === first.body.visitorKey).toBe(true);
++    const second = await call(relay, 'POST', '/links/acme/visitor-key', { key: 'k' });
++    expect(second.body.visitorKey !== first.body.visitorKey).toBe(true);
++    expect(relay.visitorKeys.get('acme') === second.body.visitorKey).toBe(true);
++    expect((await route(relay, 'acme')).status).toBe(200);
++  });
++
++  it('R6.2 drops the visitor key with the binding', async () => {
++    const relay = await relayWithBinding();
++    await call(relay, 'POST', '/links/acme/visitor-key', { key: 'k' });
++    await call(relay, 'DELETE', '/bindings/acme', { key: 'k' });
++    expect(relay.visitorKeys.has('acme')).toBe(false);
++  });
++
++  it('R1.5 keeps a freed name until its old tunnel is gone', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    expect((await call(relay, 'DELETE', '/bindings/acme', { key: 'k' })).status).toBe(204);
++    expect((await call(relay, 'GET', '/names/acme')).body).toEqual({ name: 'acme', free: false, reason: 'taken' });
++    const refused = await call(relay, 'POST', '/bindings', { body: { name: 'acme' } });
++    expect([refused.status, refused.body.error]).toEqual([409, 'taken']);
++    relay.drop('acme');
++    expect((await call(relay, 'GET', '/names/acme')).body).toEqual({ name: 'acme', free: true });
++    expect((await call(relay, 'POST', '/bindings', { body: { name: 'acme' } })).status).toBe(201);
++  });
++
++  it('R1.5 binds a random name when the post has no body at all, even while frps is down', async () => {
++    const relay = await fakeRelay();
++    relay.frpsDown = true;
++    const bound = await call(relay, 'POST', '/bindings');
++    expect([bound.status, relay.bindings.has(bound.body.name)]).toEqual([201, true]);
++  });
++
++  it('R1.5 answers 503 for a requested name while frps is down, and never makes a random name wait', async () => {
++    const relay = await relayWithBinding();
++    relay.frpsDown = true;
++    expect((await call(relay, 'GET', '/names/globex')).status).toBe(503);
++    expect((await call(relay, 'POST', '/bindings', { body: { name: 'globex' } })).status).toBe(503);
++    expect((await call(relay, 'GET', '/names/acme')).body.reason).toBe('taken');
++    expect((await call(relay, 'GET', '/names/www')).body.reason).toBe('reserved');
++    expect((await call(relay, 'GET', '/names/-bad')).body.reason).toBe('invalid');
++    expect((await call(relay, 'POST', '/bindings', { body: {} })).status).toBe(201);
++    relay.frpsDown = false;
++    expect((await call(relay, 'GET', '/names/globex')).body.free).toBe(true);
++  });
++});

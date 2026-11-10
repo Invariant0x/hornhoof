@@ -1,0 +1,5 @@
+#!/bin/sh
+# The build never uses Docker: a live company runs in it on this machine. Test runs find this first on their PATH.
+echo "$(date -u +%FT%TZ) docker $*" >> /home/altera/hornhoof-network/network-build/tmp/docker-calls.log
+echo "docker is not available in this build" >&2
+exit 127

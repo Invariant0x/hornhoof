@@ -1,0 +1,7 @@
+     × upgrades an existing main installation with all retained rows and one record per migration 9214ms
+     × upgrades an existing turn-5 installation with all retained rows and one record per migration 6770ms
+ FAIL  test/migration-history.test.ts > migration histories merged in turn 5 > upgrades an existing main installation with all retained rows and one record per migration
+ FAIL  test/migration-history.test.ts > migration histories merged in turn 5 > upgrades an existing turn-5 installation with all retained rows and one record per migration
+AssertionError: expected [ { id: 1, …(2) }, …(54) ] to have a length of 54 but got 55
+ Test Files  1 failed | 122 passed (123)
+      Tests  2 failed | 2192 passed | 1 todo (2195)

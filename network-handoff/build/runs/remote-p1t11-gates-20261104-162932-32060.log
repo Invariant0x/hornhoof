@@ -1,0 +1,121 @@
+== files: apps/server/test/fake-relay.ts
+[2m   Start at [22m 16:39:40
+[2m   Duration [22m 136.45s[2m (tests 94%, import 3%, transform 2%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                             Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------------
+POST /api/v1/bindings                apps.server.test.fake-relay            9  91.7%      9.0
+nameRules                            apps.server.test.fake-relay            9 100.0%      9.0
+acceptSync                           apps.server.test.fake-relay            7 100.0%      7.0
+register                             apps.server.test.fake-relay            6 100.0%      6.0
+fakeRelay                            apps.server.test.fake-relay            4  96.9%      4.0
+POST /api/v1/links/:name/sync        apps.server.test.fake-relay            4 100.0%      4.0
+spoiled                              apps.server.test.fake-relay            4 100.0%      4.0
+GET /api/v1/links/:name/route        apps.server.test.fake-relay            3 100.0%      3.0
+drop                                 apps.server.test.fake-relay            3 100.0%      3.0
+routeBody                            apps.server.test.fake-relay            3 100.0%      3.0
+GET /api/v1/health                   apps.server.test.fake-relay            2 100.0%      2.0
+GET /api/v1/names/:name              apps.server.test.fake-relay            2 100.0%      2.0
+holds                                apps.server.test.fake-relay            2 100.0%      2.0
+DELETE /api/v1/bindings/:name        apps.server.test.fake-relay            1 100.0%      1.0
+POST /api/v1/links/:name/key         apps.server.test.fake-relay            1 100.0%      1.0
+POST /api/v1/links/:name/visitor-key apps.server.test.fake-relay            1 100.0%      1.0
+newKey                               apps.server.test.fake-relay            1 100.0%      1.0
+newRelay                             apps.server.test.fake-relay            1 100.0%      1.0
+nowSeconds                           apps.server.test.fake-relay            1 100.0%      1.0
+tunnelFor                            apps.server.test.fake-relay            1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+WARNING: 55 covered mutations selected in apps/server/test/fake-relay.ts.
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/apps.server.test.fake-relay.edn
+KILLED    apps/server/test/fake-relay.ts:45 / -> *
+KILLED    apps/server/test/fake-relay.ts:57 ?. -> .
+KILLED    apps/server/test/fake-relay.ts:57 === -> !==
+KILLED    apps/server/test/fake-relay.ts:60 false -> true
+KILLED    apps/server/test/fake-relay.ts:61 === -> !==
+KILLED    apps/server/test/fake-relay.ts:61 && -> ||
+KILLED    apps/server/test/fake-relay.ts:61 === -> !==
+KILLED    apps/server/test/fake-relay.ts:61 false -> true
+KILLED    apps/server/test/fake-relay.ts:62 ?. -> .
+SURVIVED  apps/server/test/fake-relay.ts:62 ?? -> ||
+KILLED    apps/server/test/fake-relay.ts:62 0 -> 1
+KILLED    apps/server/test/fake-relay.ts:62 + -> -
+KILLED    apps/server/test/fake-relay.ts:62 1 -> 0
+KILLED    apps/server/test/fake-relay.ts:64 true -> false
+KILLED    apps/server/test/fake-relay.ts:69 && -> ||
+KILLED    apps/server/test/fake-relay.ts:75 ?. -> .
+KILLED    apps/server/test/fake-relay.ts:75 !== -> ===
+KILLED    apps/server/test/fake-relay.ts:75 || -> &&
+KILLED    apps/server/test/fake-relay.ts:75 !== -> ===
+KILLED    apps/server/test/fake-relay.ts:75 || -> &&
+KILLED    apps/server/test/fake-relay.ts:75 !== -> ===
+KILLED    apps/server/test/fake-relay.ts:76 <= -> <
+SURVIVED  apps/server/test/fake-relay.ts:76 ?? -> ||
+SURVIVED  apps/server/test/fake-relay.ts:87 ?? -> ||
+SURVIVED  apps/server/test/fake-relay.ts:90 ?? -> ||
+KILLED    apps/server/test/fake-relay.ts:94 === -> !==
+KILLED    apps/server/test/fake-relay.ts:94 === -> !==
+KILLED    apps/server/test/fake-relay.ts:94 true -> false
+KILLED    apps/server/test/fake-relay.ts:94 === -> !==
+KILLED    apps/server/test/fake-relay.ts:116 false -> true
+KILLED    apps/server/test/fake-relay.ts:121 false -> true
+KILLED    apps/server/test/fake-relay.ts:123 false -> true
+KILLED    apps/server/test/fake-relay.ts:140 delete !
+KILLED    apps/server/test/fake-relay.ts:140 || -> &&
+KILLED    apps/server/test/fake-relay.ts:140 === -> !==
+SURVIVED  apps/server/test/fake-relay.ts:144 ?? -> ||
+KILLED    apps/server/test/fake-relay.ts:145 false -> true
+KILLED    apps/server/test/fake-relay.ts:145 true -> false
+KILLED    apps/server/test/fake-relay.ts:147 && -> ||
+KILLED    apps/server/test/fake-relay.ts:147 delete !
+KILLED    apps/server/test/fake-relay.ts:153 true -> false
+KILLED    apps/server/test/fake-relay.ts:159 delete !
+KILLED    apps/server/test/fake-relay.ts:160 !== -> ===
+KILLED    apps/server/test/fake-relay.ts:169 ?. -> .
+KILLED    apps/server/test/fake-relay.ts:169 !== -> ===
+KILLED    apps/server/test/fake-relay.ts:169 && -> ||
+KILLED    apps/server/test/fake-relay.ts:175 delete !
+KILLED    apps/server/test/fake-relay.ts:175 0 -> 1
+KILLED    apps/server/test/fake-relay.ts:185 === -> !==
+KILLED    apps/server/test/fake-relay.ts:190 delete !
+KILLED    apps/server/test/fake-relay.ts:193 === -> !==
+KILLED    apps/server/test/fake-relay.ts:206 false -> true
+KILLED    apps/server/test/fake-relay.ts:206 false -> true
+KILLED    apps/server/test/fake-relay.ts:206 true -> false
+KILLED    apps/server/test/fake-relay.ts:206 true -> false
+Function                             Namespace                    Killed  Survived  Uncovered  Sites   Score
+------------------------------------------------------------------------------------------------------------
+DELETE /api/v1/bindings/:name        apps.server.test.fake-relay       0         0          0      0    n/a
+GET /api/v1/names/:name              apps.server.test.fake-relay       0         0          0      0    n/a
+POST /api/v1/links/:name/key         apps.server.test.fake-relay       0         0          0      0    n/a
+POST /api/v1/links/:name/visitor-key apps.server.test.fake-relay       0         0          0      0    n/a
+newKey                               apps.server.test.fake-relay       0         0          0      0    n/a
+tunnelFor                            apps.server.test.fake-relay       0         0          0      0    n/a
+routeBody                            apps.server.test.fake-relay       0         2          0      2   0.0%
+acceptSync                           apps.server.test.fake-relay       7         1          0      8  87.5%
+nameRules                            apps.server.test.fake-relay       7         1          0      8  87.5%
+register                             apps.server.test.fake-relay      10         1          0     11  90.9%
+GET /api/v1/health                   apps.server.test.fake-relay       4         0          0      4 100.0%
+GET /api/v1/links/:name/route        apps.server.test.fake-relay       1         0          0      1 100.0%
+POST /api/v1/bindings                apps.server.test.fake-relay       5         0          0      9 100.0%
+POST /api/v1/links/:name/sync        apps.server.test.fake-relay       2         0          0      2 100.0%
+drop                                 apps.server.test.fake-relay       1         0          0      1 100.0%
+fakeRelay                            apps.server.test.fake-relay       3         0          0      4 100.0%
+holds                                apps.server.test.fake-relay       2         0          0      2 100.0%
+newRelay                             apps.server.test.fake-relay       3         0          0      3 100.0%
+nowSeconds                           apps.server.test.fake-relay       1         0          0      1 100.0%
+spoiled                              apps.server.test.fake-relay       4         0          0      4 100.0%
+------------------------------------------------------------------------------------------------------------
+Total                                                                 50         5          0     60   90.9%

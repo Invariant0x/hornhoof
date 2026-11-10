@@ -1,0 +1,11 @@
+# Task 6 fix2 supplement: stale DELETE authorization
+
+The lead independently reproduced another Critical C2 lifetime race on the unchanged fix1 source. Local HTTP probe L/runs/p1t6-lead-delete-lifetime-probe.py (log alongside it) pauses the first DELETE after auth and before release_binding, issues a second DELETE and rebind, resumes the first DELETE, then fails: old request returns 204 and new owner binding disappears. It prints no credentials.
+
+Fix within this SAME fix2 pass before final review3. The HTTP DELETE must carry its authorizing binding key hash into the atomic release and recheck that hash within the transaction before either delete. If ownership changed, refuse the old request (404 is the lead's choice), leave both new owner binding and visitor credential untouched. Admin release remains explicitly unguarded as authorized operator work. Preserve banned binding refusal, 401 counting, 503 busy and no leaked transaction. Add a synchronized real HTTP regression, run first failing, then fix and rerun the lead probe. Do not weaken or skip any of the combined fix2 brief.
+
+# Additional confirmed C2 DELETE race: concurrent ban must survive
+
+Lead local HTTP probe L/runs/p1t6-lead-delete-ban-probe.py/.log failed on source 0d9ecf8103e3 (same hash before/after): DELETE authorized while unblocked pauses before release; operator marks the binding banned; DELETE resumes, returns 204 and removes the blocked binding. This permits a request in flight to erase the operator's ban. The new expected-hash guard alone does not prevent it.
+
+Fix within this SAME fix2 pass, before review3. For HTTP release, the atomic transaction must require both matching authorizing key hash AND currently unblocked binding before deleting either visitor credential or binding. On a changed/banned authorization, fail closed (404 is acceptable for the guarded stale request) and preserve binding, ban and visitor credential. A request that sees the ban at initial auth still answers existing 403; admin release stays explicitly authorized/unguarded. Add a synchronized HTTP regression that pauses after auth, bans, resumes, and requires the blocked row and original visitor hash to survive. Run it failing first and the lead probe before/after. This is a concrete safety defect in the touched release path, not a request to redesign bans.

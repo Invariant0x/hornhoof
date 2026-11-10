@@ -1,0 +1,130 @@
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.20 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.25 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 19.99 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 6.28 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.04 s
+ok
+test_login_run_id_read_is_filtered_and_fast_good_answer_passes (test_peers.LoginReadBudgetTests.test_login_run_id_read_is_filtered_and_fast_good_answer_passes) ... ok
+test_login_run_id_read_refuses_a_hang_within_the_budget (test_peers.LoginReadBudgetTests.test_login_run_id_read_refuses_a_hang_within_the_budget) ... ok
+test_login_run_id_read_refuses_a_slow_answer_within_the_budget (test_peers.LoginReadBudgetTests.test_login_run_id_read_refuses_a_slow_answer_within_the_budget) ... ok
+test_login_run_id_read_with_a_spent_budget_never_reaches_the_dashboard (test_peers.LoginReadBudgetTests.test_login_run_id_read_with_a_spent_budget_never_reaches_the_dashboard) ... ok
+test_wire_foreign_takeover_of_recorded_legacy_refused (test_peers.NativeLoginTakeoverTests.test_wire_foreign_takeover_of_recorded_legacy_refused) ... ok
+test_wire_foreign_takeover_of_unrecorded_legacy_refused (test_peers.NativeLoginTakeoverTests.test_wire_foreign_takeover_of_unrecorded_legacy_refused) ... ok
+test_wire_legacy_login_matching_peer_run_id_refused (test_peers.NativeLoginTakeoverTests.test_wire_legacy_login_matching_peer_run_id_refused) ... ok
+test_wire_legacy_reconnect_with_proven_route_kept (test_peers.NativeLoginTakeoverTests.test_wire_legacy_reconnect_with_proven_route_kept) ... ok
+test_wire_login_positive_control (test_peers.NativeLoginTakeoverTests.test_wire_login_positive_control) ... ok
+test_wire_peer_run_id_equal_client_id_kept (test_peers.NativeLoginTakeoverTests.test_wire_peer_run_id_equal_client_id_kept) ... ok
+test_dash_client_records_shape_pinned_fail_closed (test_peers.PeerTests.test_dash_client_records_shape_pinned_fail_closed) ... ok
+test_dash_clients_run_id_filter_against_real_frps (test_peers.PeerTests.test_dash_clients_run_id_filter_against_real_frps) ... ok
+test_newproxy_empty_run_id_registers (test_peers.PeerTests.test_newproxy_empty_run_id_registers) ... ok
+test_newproxy_malformed_run_id_keeps_existing_route (test_peers.PeerTests.test_newproxy_malformed_run_id_keeps_existing_route) ... ok
+test_newproxy_malformed_run_id_refused (test_peers.PeerTests.test_newproxy_malformed_run_id_refused) ... ok
+test_r1_3_blocked_binding_refused (test_peers.PeerTests.test_r1_3_blocked_binding_refused) ... ok
+test_r1_3_foreign_client_id_refused (test_peers.PeerTests.test_r1_3_foreign_client_id_refused) ... ok
+test_r1_3_legacy_login_with_foreign_run_id_refused (test_peers.PeerTests.test_r1_3_legacy_login_with_foreign_run_id_refused) ... ok
+test_r1_3_legacy_reconnection_kept (test_peers.PeerTests.test_r1_3_legacy_reconnection_kept) ... ok
+test_r1_3_legacy_run_id_of_another_binding_refused (test_peers.PeerTests.test_r1_3_legacy_run_id_of_another_binding_refused) ... ok
+test_r1_3_malformed_client_ids_refused (test_peers.PeerTests.test_r1_3_malformed_client_ids_refused) ... ok
+test_r1_3_non_string_ids_refused (test_peers.PeerTests.test_r1_3_non_string_ids_refused) ... ok
+test_r1_3_run_id_check_fails_closed_when_frps_cannot_tell (test_peers.PeerTests.test_r1_3_run_id_check_fails_closed_when_frps_cannot_tell) ... ok
+test_r1_3_run_id_of_another_client (test_peers.PeerTests.test_r1_3_run_id_of_another_client) ... ok
+test_r1_3_second_login_same_id_refused (test_peers.PeerTests.test_r1_3_second_login_same_id_refused) ... second login with one client id after the drop: 5.74 s
+ok
+test_r1_4_two_companies_one_machine (test_peers.PeerTests.test_r1_4_two_companies_one_machine) ... ok
+test_r5_1_peer_limits (test_peers.PeerTests.test_r5_1_peer_limits) ... ok
+test_r5_1_peer_services (test_peers.PeerTests.test_r5_1_peer_services) ... ok
+test_r5_1_stcp_registration_keeps_the_link_route (test_peers.PeerTests.test_r5_1_stcp_registration_keeps_the_link_route) ... ok
+test_r6_2_visitor_key (test_peers.PeerTests.test_r6_2_visitor_key) ... ok
+test_r6_2_visitor_key_busy_keeps_the_old_hash (test_peers.PeerTests.test_r6_2_visitor_key_busy_keeps_the_old_hash) ... ok
+test_r6_2_visitor_key_dies_with_the_binding_admin (test_peers.PeerTests.test_r6_2_visitor_key_dies_with_the_binding_admin) ... ok
+test_r6_2_visitor_key_dies_with_the_binding_api (test_peers.PeerTests.test_r6_2_visitor_key_dies_with_the_binding_api) ... ok
+test_r6_2_visitor_key_needs_the_link_key (test_peers.PeerTests.test_r6_2_visitor_key_needs_the_link_key) ... ok
+test_admin_unban_placeholder_removes_credential_and_old_visitor_access (test_peers.VisitorKeyLifecycleTests.test_admin_unban_placeholder_removes_credential_and_old_visitor_access) ... ok
+test_admin_unban_real_binding_keeps_binding_and_credential (test_peers.VisitorKeyLifecycleTests.test_admin_unban_real_binding_keeps_binding_and_credential) ... ok
+test_concurrent_issuer_cannot_plant_credential_during_release (test_peers.VisitorKeyLifecycleTests.test_concurrent_issuer_cannot_plant_credential_during_release) ... ok
+test_http_delete_authorized_before_ban_preserves_blocked_binding (test_peers.VisitorKeyLifecycleTests.test_http_delete_authorized_before_ban_preserves_blocked_binding) ... ok
+test_http_delete_authorized_before_release_cannot_drop_new_owner (test_peers.VisitorKeyLifecycleTests.test_http_delete_authorized_before_release_cannot_drop_new_owner) ... released acme for 127.0.0.1
+ok
+test_http_visitor_key_authorized_before_release_answers_404 (test_peers.VisitorKeyLifecycleTests.test_http_visitor_key_authorized_before_release_answers_404) ... new visitor key for acme
+ok
+test_release_rolls_back_when_binding_delete_fails (test_peers.VisitorKeyLifecycleTests.test_release_rolls_back_when_binding_delete_fails) ... ok
+test_stale_authorization_cannot_store_after_release_and_rebind (test_peers.VisitorKeyStoreTests.test_stale_authorization_cannot_store_after_release_and_rebind) ... ok
+test_store_and_release_are_atomic_with_the_binding (test_peers.VisitorKeyStoreTests.test_store_and_release_are_atomic_with_the_binding) ... ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_wait_health_rejects_an_answer_after_the_deadline (test_restart.RestartTests.test_wait_health_rejects_an_answer_after_the_deadline) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_call_does_not_clobber_caller_variables (test_setup.WritePrivateTests.test_call_does_not_clobber_caller_variables) ... ok
+test_changed_content_replaces_the_destination (test_setup.WritePrivateTests.test_changed_content_replaces_the_destination) ... ok
+test_failed_rename_reports_failure (test_setup.WritePrivateTests.test_failed_rename_reports_failure) ... ok
+test_failing_producer_keeps_the_destination (test_setup.WritePrivateTests.test_failing_producer_keeps_the_destination) ... ok
+test_setup_feeds_write_private_only_checked_content (test_setup.WritePrivateTests.test_setup_feeds_write_private_only_checked_content) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_fixes_mode_and_group_in_place (test_setup.WritePrivateTests.test_unchanged_content_fixes_mode_and_group_in_place) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_r2_4_authentication (test_sync.SyncTests.test_r2_4_authentication) ... ok
+test_r2_4_bad_bodies (test_sync.SyncTests.test_r2_4_bad_bodies) ... ok
+test_r2_4_busy_write (test_sync.SyncTests.test_r2_4_busy_write) ... ok
+test_r2_4_epoch_integer_range (test_sync.SyncTests.test_r2_4_epoch_integer_range) ... ok
+test_r2_4_generation_integer_range (test_sync.SyncTests.test_r2_4_generation_integer_range) ... ok
+test_r2_4_holder_sets_it (test_sync.SyncTests.test_r2_4_holder_sets_it) ... ok
+test_r2_4_json_boundary (test_sync.SyncTests.test_r2_4_json_boundary) ... ok
+test_r2_4_missing_reads_off (test_sync.SyncTests.test_r2_4_missing_reads_off) ... ok
+test_r2_4_on_disk_before_answer (test_sync.SyncTests.test_r2_4_on_disk_before_answer) ... ok
+test_r2_4_others_refused (test_sync.SyncTests.test_r2_4_others_refused) ... ok
+test_r2_4_pending_is_not_held (test_sync.SyncTests.test_r2_4_pending_is_not_held) ... ok
+test_r2_4_simultaneous_epochs (test_sync.SyncTests.test_r2_4_simultaneous_epochs) ... ok
+test_r2_4_unknown_frps (test_sync.SyncTests.test_r2_4_unknown_frps) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 117 tests in 379.528s
+
+OK

@@ -1,0 +1,11 @@
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.tunnel.edn
+UNCOVERED apps/server/src/auth/tunnel.ts:15 false -> true
+Function      Namespace    Killed  Survived  Uncovered  Sites   Score
+---------------------------------------------------------------------
+cameOverHttps auth.tunnel       0         0          0      4    n/a
+clientAddress auth.tunnel       0         0          0      3    n/a
+fromTunnel    auth.tunnel       0         0          1      5    n/a
+overLink      auth.tunnel       0         0          0      0    n/a
+socketAddress auth.tunnel       0         0          0      1    n/a
+---------------------------------------------------------------------
+Total                           0         0          1     13     n/a

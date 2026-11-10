@@ -1,0 +1,21 @@
+client 29.7.1 server 29.7.1
+1000
+Unable to find image 'alpine:3.24.3' locally
+3.24.3: Pulling from library/alpine
+7b229517ed22: Pulling fs layer
+3da1513d2124: Download complete
+3ec36f3670df: Download complete
+7b229517ed22: Download complete
+7b229517ed22: Pull complete
+Digest: sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+Status: Downloaded newer image for alpine:3.24.3
+ok
+hello-from-inner
+{
+  "name": "hornhoof",
+hi-from-inner
+-rw-r--r--    1 0        0                0 Nov  4 18:24 file
+Docker Compose version v5.4.0
+github.com/docker/buildx v0.36.0 df28b0a0b6a44453a87bd53c438432f4120962c9
+through heavy.sh: server 29.7.1
+done

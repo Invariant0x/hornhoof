@@ -1,0 +1,48 @@
+== changed files
+apps/server/drizzle/0056_sources.sql
+apps/server/drizzle/0057_net.sql
+apps/server/drizzle/meta/0056_snapshot.json
+apps/server/drizzle/meta/0057_snapshot.json
+apps/server/drizzle/meta/_journal.json
+apps/server/src/db/agent-sql.ts
+apps/server/src/db/client.ts
+apps/server/src/db/errors.ts
+apps/server/src/db/net.ts
+apps/server/src/db/schema.ts
+apps/server/src/modules/tools/database.ts
+apps/server/test/global-setup.ts
+apps/server/test/helpers.ts
+apps/server/test/journal.test.ts
+apps/server/test/migration-history.test.ts
+apps/server/test/migrations.test.ts
+apps/server/test/orchestrator-control.test.ts
+apps/server/test/real/journal.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ FAIL  test/migration-metadata.test.ts > merged migration metadata > describes the columns and regular indexes of a freshly migrated database
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m125 passed[39m[22m[90m (126)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m2371 passed[39m[22m[90m (2372)[39m
+[2m   Start at [22m 03:12:26
+[2m   Duration [22m 2097.51s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m126 workers spawned[39m[2m · ~323ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~13.23s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+OVER 10: apps/server/src/db/errors.ts:2 hasCode CRAP 20.0
+worst changed CRAP: 20.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at f028a2cd

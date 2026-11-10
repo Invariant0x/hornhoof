@@ -1,0 +1,8 @@
+pending reservation: route held: True name available: True
+changed lifetime: new owner retained: True stale registration refused: False route row created: True
+Production source unchanged: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t7-lead-reservation-check.py", line 72, in <module>
+    assert all(results), 'reservation or binding-lifetime invariant failed'
+           ^^^^^^^^^^^^
+AssertionError: reservation or binding-lifetime invariant failed

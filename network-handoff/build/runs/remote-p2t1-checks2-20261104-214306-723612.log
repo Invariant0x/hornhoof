@@ -1,0 +1,43 @@
+== bash -n
+exit 0
+== shellcheck
+exit 0
+== tsc
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+exit 0
+== typecheck:tests
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+exit 0
+== lint
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+exit 0
+== gates
+== files: 
+== no source files of apps/server in this task
+exit 0
+== updater tests
+     [33m[2m✓[22m[39m does nothing unless an update waits to be taken over[33m 1022[2mms[22m[39m
+   [32m✓[39m updater, the computer [2m(7)[22m
+     [33m[2m✓[22m[39m runs a command as root on the computer, with its files at /host and its Docker, and answers with the output and exit code[33m 1239[2mms[22m[39m
+     [33m[2m✓[22m[39m runs nothing while access is closed or over, and says so[33m 410[2mms[22m[39m
+     [33m[2m✓[22m[39m stops a command at its time[33m 3285[2mms[22m[39m
+     [33m[2m✓[22m[39m stops a running command when the CEO closes access[33m 3261[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m69 passed[39m[22m[90m (69)[39m
+[2m   Start at [22m 21:46:40
+[2m   Duration [22m 194.70s[2m (tests 100%)[22m
+
+exit 0

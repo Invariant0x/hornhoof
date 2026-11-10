@@ -1,0 +1,129 @@
+== gates
+== files: apps/server/src/app.ts apps/server/src/modules/tls/acme.ts apps/server/src/modules/tls/ari.ts apps/server/src/modules/tls/challenges.ts apps/server/vitest.config.ts apps/server/vitest.real.config.ts
+[2m   Start at [22m 22:40:20
+[2m   Duration [22m 16.67s[2m (tests 51%, import 28%, transform 20%, worker 1%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                               Namespace                             CC    Cov%     CRAP
+------------------------------------------------------------------------------------------------
+meaningOf                              modules.tls.acme                       8 100.0%      8.0
+renewalInfo                            modules.tls.ari                        6 100.0%      6.0
+buildApp                               app                                    5  66.7%      5.9
+problemOf                              modules.tls.acme                       5  75.0%      5.4
+issue                                  modules.tls.acme.AcmeAccount           5 100.0%      5.0
+constructor                            modules.tls.acme.AcmeError             5 100.0%      5.0
+refused                                modules.tls.ari                        5 100.0%      5.0
+invalidBecause                         modules.tls.acme                       3  50.0%      4.1
+awaitValid                             modules.tls.acme.AcmeAccount           3  50.0%      4.1
+retryAfterSeconds                      modules.tls.acme                       4 100.0%      4.0
+renewalInfoUrl                         modules.tls.ari                        3  75.0%      3.1
+constructor                            modules.tls.acme.AcmeAccount           3 100.0%      3.0
+makeOrFind                             modules.tls.acme.AcmeAccount           3 100.0%      3.0
+prove                                  modules.tls.acme.AcmeAccount           3 100.0%      3.0
+certId                                 modules.tls.ari                        3 100.0%      3.0
+suggestedWindow                        modules.tls.ari                        3 100.0%      3.0
+GET /.well-known/acme-challenge/:token modules.tls.challenges                 3 100.0%      3.0
+textOf                                 modules.tls.acme                       2  50.0%      2.5
+orderRequest                           modules.tls.acme                       2 100.0%      2.0
+plainFailure                           modules.tls.acme                       2 100.0%      2.0
+saying                                 modules.tls.acme                       2 100.0%      2.0
+checkOwnAnswer                         modules.tls.acme.AcmeAccount           2 100.0%      2.0
+holdsAccountUrl                        modules.tls.acme.AcmeAccount           2 100.0%      2.0
+whyNotValid                            modules.tls.acme.AcmeAccount           2 100.0%      2.0
+get                                    modules.tls.ari                        2 100.0%      2.0
+jsonOf                                 modules.tls.ari                        2 100.0%      2.0
+serialAsEncoded                        modules.tls.ari                        2 100.0%      2.0
+GET /api/health                        app                                    1 100.0%      1.0
+GET /api/version                       app                                    1 100.0%      1.0
+USE                                    modules.tls.acme                       1 100.0%      1.0
+USE#2                                  modules.tls.acme                       1 100.0%      1.0
+http01Of                               modules.tls.acme                       1 100.0%      1.0
+newKey                                 modules.tls.acme                       1 100.0%      1.0
+account                                modules.tls.acme.AcmeAccount           1 100.0%      1.0
+finish                                 modules.tls.acme.AcmeAccount           1 100.0%      1.0
+base64url                              modules.tls.ari                        1 100.0%      1.0
+certIdFrom                             modules.tls.ari                        1 100.0%      1.0
+challengeRoutes                        modules.tls.challenges                 1 100.0%      1.0
+answer                                 modules.tls.challenges.Challenges      1 100.0%      1.0
+forget                                 modules.tls.challenges.Challenges      1 100.0%      1.0
+get                                    modules.tls.challenges.Challenges      1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+gates exit 0
+== typecheck:tests
+
+> hornhoof@0.6.0 typecheck:tests
+> npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+apps/server/test/real/acme.test.ts(39,26): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+typecheck exit 2
+== lint
+
+> hornhoof@0.6.0 lint
+> npm run build -w @hornhoof/protocol && eslint
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+lint exit 0
+== tsc
+tsc exit 0
+== shellcheck
+shellcheck exit 0
+== test:real
+
+> hornhoof@0.6.0 test:real
+> npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/server@0.6.0 test:real
+> sh test/real/run.sh
+
+Unable to find image 'ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199' locally
+ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199: Pulling from letsencrypt/pebble
+b69492b104cf: Pulling fs layer
+17c4a357bd49: Pulling fs layer
+b69492b104cf: Download complete
+ab2e5a20523c: Download complete
+17c4a357bd49: Download complete
+17c4a357bd49: Pull complete
+b69492b104cf: Pull complete
+Digest: sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+Status: Downloaded newer image for ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+
+ [32m✓[39m test/real/acme.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 6323[2mms[22m[39m
+   [32m✓[39m ACME against Pebble [2m(5)[22m
+     [33m[2m✓[22m[39m orders a certificate over HTTP-01, answered by the app's own route[33m 1502[2mms[22m[39m
+     [33m[2m✓[22m[39m asks when to renew, and renews once with replaces[33m 1040[2mms[22m[39m
+     [33m[2m✓[22m[39m says invalid when the app does not answer the challenge[33m 769[2mms[22m[39m
+     [33m[2m✓[22m[39m does not ask the CA to validate while its own check fails[33m 2913[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 22:43:21
+[2m   Duration [22m 15.04s[2m (tests 67%, transform 17%, import 16%)[22m
+
+test:real exit 0

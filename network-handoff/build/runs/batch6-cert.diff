@@ -1,0 +1,1145 @@
+# Review package: batch 6, slice cert
+
+## a98a7fe0 Keep the link's certificate in the database and run the tunnel in https mode when it may
+
+The https of a company's link is to end on the company's own machine. This adds what that needs to be kept and to be
+acted on: the link_tls row (migration 0055_link_tls), with both private keys only as encryptSecret gives them and hidden
+from the agents' database roles; ACME_DIRECTORY, which picks the CA or turns certificates off; and the tunnel's mode,
+which tunnel.json carries and frpc follows. The file never holds a certificate or a key.
+
+linkMode decides the mode from the database alone, so a restart writes the same tunnel settings at once. It says https
+only for a certificate of the link's own name and host with more than 24 hours left and its own key. Anything else, a
+throw too, means http, which still works through the relay's TLS, so ACME_DIRECTORY=off and a restart are the way back.
+http mode's frpc config stays byte for byte what it was, and a tunnel.json from before this reads as http.
+
+Proved by the plan's Done when, from apps/server: 136 tests pass in client, tunnel, link, orchestrator-control,
+migrations, migration-metadata, compose and config, and tsc prints nothing. Each new test was seen to fail first; the
+test of settings with no mode passed once Settings was exported, so it was seen to fail with the default taken out.
+
+Ruling: link.test.ts's second tunnel.json equality, in the take-over test, also gains mode: 'http' - why: the plan names only the one at line 67, but `hornhoof link` writes through writeTunnelSettings as well - cost if wrong: none, one expected value in a test.
+Ruling: tunnel.ts exports the Settings schema - why: the plan's test of settings with no mode has to read a file the way the keeper does, and the keeper's parse is private - cost if wrong: one more exported name, and plan 2 Task 6 touches this file anyway.
+Ruling: updateTls throws 'The link has no certificate row to change.' when the row is missing - why: the plan says the row must exist, and a change that finds none would silently lose what the manager decided - cost if wrong: Task 8 meets a throw on a path it expected to do nothing, inside the pass that already logs and retries.
+Ruling: store.ts also exports mayRunHttps, the pure part of linkMode, with its boundary test in link.test.ts - why: exactly 24 hours left needs a fixed clock, and linkMode's signature is the plan's - cost if wrong: one more exported name.
+Ruling: tests beyond the plan's list, in the plan's files: a certificate of another host, no key, a key that is no key, a row in http mode, tests' default of off, a chain's first certificate, and the row's save and update - why: each is a branch of the plan's rule that nothing else would show - cost if wrong: a few more lines of test.
+
+---
+ apps/server/drizzle/0055_link_tls.sql         |  21 +++++
+ apps/server/drizzle/meta/_journal.json        |   7 ++
+ apps/server/src/config.ts                     |  10 ++
+ apps/server/src/db/agent-sql.ts               |   5 +-
+ apps/server/src/db/schema.ts                  |  33 +++++++
+ apps/server/src/modules/link/client.ts        |  15 ++-
+ apps/server/src/modules/link/link.ts          |   3 +-
+ apps/server/src/modules/link/tunnel.ts        |  12 ++-
+ apps/server/src/modules/tls/store.ts          |  59 ++++++++++++
+ apps/server/test/client.test.ts               |  28 +++++-
+ apps/server/test/compose.test.ts              |   6 ++
+ apps/server/test/config.test.ts               |  11 +++
+ apps/server/test/helpers.ts                   |   4 +-
+ apps/server/test/link.test.ts                 | 131 +++++++++++++++++++++++++-
+ apps/server/test/migration-metadata.test.ts   |   4 +-
+ apps/server/test/orchestrator-control.test.ts |   4 +-
+ compose.yaml                                  |   2 +
+ 17 files changed, 336 insertions(+), 19 deletions(-)
+
+diff --git a/apps/server/drizzle/0055_link_tls.sql b/apps/server/drizzle/0055_link_tls.sql
+new file mode 100644
+index 00000000..c5bdb01b
+--- /dev/null
++++ b/apps/server/drizzle/0055_link_tls.sql
+@@ -0,0 +1,21 @@
++CREATE TABLE "link_tls" (
++	"company_id" uuid PRIMARY KEY NOT NULL,
++	"directory" text NOT NULL,
++	"account_key_enc" text NOT NULL,
++	"account_url" text,
++	"name" text,
++	"cert_pem" text,
++	"cert_directory" text,
++	"cert_key_enc" text,
++	"not_after" timestamp with time zone,
++	"renew_at" timestamp with time zone,
++	"ask_at" timestamp with time zone,
++	"next_try_at" timestamp with time zone,
++	"failure" text,
++	"failed_at" timestamp with time zone,
++	"mode" text DEFAULT 'http' NOT NULL,
++	"https_blocked_until" timestamp with time zone,
++	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
++);
++--> statement-breakpoint
++ALTER TABLE "link_tls" ADD CONSTRAINT "link_tls_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;
+\ No newline at end of file
+diff --git a/apps/server/drizzle/meta/_journal.json b/apps/server/drizzle/meta/_journal.json
+index 94fdf6f2..a344fcb7 100644
+--- a/apps/server/drizzle/meta/_journal.json
++++ b/apps/server/drizzle/meta/_journal.json
+@@ -374,11 +374,18 @@
+       "breakpoints": true
+     },
+     {
+       "idx": 54,
+       "version": "7",
+       "when": 1793830928774,
+       "tag": "0054_sign_in_attempts",
+       "breakpoints": true
++    },
++    {
++      "idx": 55,
++      "version": "7",
++      "when": 1793836754489,
++      "tag": "0055_link_tls",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index a95dd8ee..5656b69c 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -1,12 +1,13 @@
+ import { readdirSync, readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { NodeBuild } from '@hornhoof/protocol';
+ import { z } from 'zod';
++import { LETS_ENCRYPT } from './modules/tls/acme.js';
+ 
+ export type Config = {
+   databaseUrl?: string;
+   secret: Buffer;
+   publicUrl: string;
+   port: number;
+   secureCookies: boolean;
+   webDist: string;
+@@ -33,16 +34,18 @@ export type Config = {
+   /* Role and skill templates, loaded once at start. */
+   templatesDir: string;
+   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+   relayUrl: string;
+   /* The tunnel container's host name: only requests from it may say they came in over https. */
+   tunnelHost?: string;
+   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
+   keeper: boolean;
++  /* The ACME directory the link's certificate comes from; null with certificates off. */
++  acmeDirectory: string | null;
+   /* How much all the files on the company's tasks may take together. */
+   taskFilesBytes: number;
+   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
+   hostId: string | null;
+ };
+ 
+ /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
+ const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+@@ -55,39 +58,45 @@ const MIGRATIONS = new URL('../drizzle', import.meta.url);
+ const unset = (value: unknown) => (value === '' ? undefined : value);
+ /* Node runs a timer whose wait is not a number, or longer than this, every millisecond. */
+ const MAX_TIMER_MS = 2_147_483_647;
+ const wholeNumber = (min: number, max: number, message: string) =>
+   z.preprocess(unset, z.string().regex(/^\d+$/, message).transform(Number).refine(n => n >= min && n <= max, message).optional());
+ const milliseconds = (name: string, min: number, example: string) =>
+   wholeNumber(min, MAX_TIMER_MS, `${name} must be a whole number of milliseconds${min === 0 ? ', or 0' : ''}, like ${example}.`);
+ const webAddress = (message: string) => z.preprocess(unset, z.url({ protocol: /^https?$/, error: message }).optional());
++const CERTIFICATES_OFF = 'off';
+ 
+ /* The settings read from the environment, checked once at start so a typo stops the server with a clear message
+    instead of running with a broken address or a timer that fires every millisecond. */
+ const Env = z.object({
+   PUBLIC_URL: webAddress('PUBLIC_URL must be the address people open Hornhoof at, starting with http:// or https://, like https://hornhoof.example.com.'),
+   PORT: wholeNumber(1, 65535, 'PORT must be a number between 1 and 65535.'),
+   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
+   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
+   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
+   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
+   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
++  ACME_DIRECTORY: z.preprocess(
++    unset,
++    z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
++  ),
+   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+   HORNHOOF_HOST_ID: z.preprocess(
+     unset,
+     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+   ),
+ });
+ 
+ /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+ const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
++const acmeDirectoryOf = (set: string | undefined): string | null => (set === CERTIFICATES_OFF ? null : (set ?? LETS_ENCRYPT));
+ const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
+ const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
+ 
+ function secretOf(env: NodeJS.ProcessEnv): Buffer {
+   const raw = env.HORNHOOF_SECRET;
+   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
+   const secret = Buffer.from(raw, 'base64');
+   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
+@@ -151,11 +160,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
+     databaseUrl: env.DATABASE_URL || undefined,
+     secret,
+     publicUrl,
+     secureCookies: publicUrl.startsWith('https://'),
+     nodeKey: nodeKeyOf(env),
+     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+     tunnelHost: set.TUNNEL_HOST,
+     keeper: set.HORNHOOF_KEEPER === 'on',
++    acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
+     hostId: set.HORNHOOF_HOST_ID ?? null,
+   };
+ }
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index 7f47b496..ef61fe27 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -6,18 +6,19 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
+ 
+ /* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
+ export type SqlMode = 'write' | 'read';
+ 
+ /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
+ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+ 
+ /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
+-   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. */
+-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'sign_in_attempts'];
++   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. The link's
++   certificate too: it holds the sealed keys, and its mode decides how the link runs. */
++export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'sign_in_attempts', 'link_tls'];
+ /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
+    every join from it, so it is one too. The account a node is signed in to names a person's email. */
+ export const SECRET: Record<string, string[]> = {
+   people: ['password_hash'],
+   jobs: ['tool_token_hash'],
+   subscriptions: ['secret_enc'],
+   nodes: ['key_hash', 'account'],
+   machines: ['machine_key'],
+diff --git a/apps/server/src/db/schema.ts b/apps/server/src/db/schema.ts
+index edac6ed1..2475fd0a 100644
+--- a/apps/server/src/db/schema.ts
++++ b/apps/server/src/db/schema.ts
+@@ -797,8 +797,41 @@ export const publicLinks = pgTable('public_links', {
+     .primaryKey()
+     .references(() => companies.id),
+   name: text('name').notNull(),
+   url: text('url').notNull(),
+   keyEnc: text('key_enc').notNull(),
+   tunnelEnc: text('tunnel_enc').notNull(),
+   createdAt: createdAt(),
+ });
++
++/* The certificate of the company's public link, which ends TLS on this machine, and the ACME account it comes from. The
++   private keys are kept only as encryptSecret gives them, like the link's own key. The mode is kept here so a restart
++   writes the same tunnel settings and the link does not blink. */
++export const linkTls = pgTable('link_tls', {
++  companyId: uuid('company_id')
++    .primaryKey()
++    .references(() => companies.id),
++  /* The CA the account is at. */
++  directory: text('directory').notNull(),
++  accountKeyEnc: text('account_key_enc').notNull(),
++  accountUrl: text('account_url'),
++  /* The link name the certificate is for. */
++  name: text('name'),
++  /* The chain. */
++  certPem: text('cert_pem'),
++  /* The CA the certificate came from. */
++  certDirectory: text('cert_directory'),
++  certKeyEnc: text('cert_key_enc'),
++  notAfter: timestamp('not_after', { withTimezone: true }),
++  renewAt: timestamp('renew_at', { withTimezone: true }),
++  /* When to ask the CA's renewal information again. */
++  askAt: timestamp('ask_at', { withTimezone: true }),
++  /* No order before this, after a failure. */
++  nextTryAt: timestamp('next_try_at', { withTimezone: true }),
++  /* The last failure's AcmeError type, else its kind; null after a success. */
++  failure: text('failure'),
++  failedAt: timestamp('failed_at', { withTimezone: true }),
++  mode: text('mode', { enum: ['http', 'https'] }).notNull().default('http'),
++  /* No switch to https before this. */
++  httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
++  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
++});
+diff --git a/apps/server/src/modules/link/client.ts b/apps/server/src/modules/link/client.ts
+index 3a102439..968e058d 100644
+--- a/apps/server/src/modules/link/client.ts
++++ b/apps/server/src/modules/link/client.ts
+@@ -1,51 +1,60 @@
+ import { writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { isLinkName } from '@hornhoof/protocol/link';
+ import { z } from 'zod';
++import { LINK_TLS_PORT } from '../tls/listener.js';
+ import type { Client, TunnelSettings } from './tunnel.js';
+ 
+ /* The parts of the relay's tunnel Hornhoof takes: the frps server and how to reach it. */
+ const Server = z.object({
+   serverAddr: z.string().regex(/^[A-Za-z0-9.-]{1,253}$/),
+   serverPort: z.number().int().min(1).max(65535),
+   protocol: z.literal('wss'),
+ });
+ 
++/* What differs by where the link's TLS ends. At the relay, the app hears from the tunnel that a request came over https.
++   At the app, the relay passes TLS on unread, so the tunnel's PROXY header is all that says who the visitor is. */
++const PROXY: Record<TunnelSettings['mode'], { localPort: number; lastLine: string }> = {
++  http: { localPort: 8080, lastLine: 'requestHeaders.set.x-forwarded-proto = "https"' },
++  https: { localPort: LINK_TLS_PORT, lastLine: 'transport.proxyProtocolVersion = "v2"' },
++};
++
+ /* A TOML string: JSON escapes quotes, backslashes and line breaks the way TOML reads them. */
+ const quoted = (text: string) => JSON.stringify(text);
+ 
+ /* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
+    link's traffic to the app and to nothing else on the company's network, whatever the relay says. */
+ function configFor(settings: TunnelSettings): string {
+   const server = Server.parse(settings.tunnel);
+   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
+   if (!settings.key) throw new Error('the link has no key');
++  const proxy = PROXY[settings.mode];
+   return `serverAddr = ${quoted(server.serverAddr)}
+ serverPort = ${server.serverPort}
+ loginFailExit = false
+ log.to = "console"
+ log.level = "info"
+ log.disablePrintColor = true
+ transport.protocol = "wss"
+ transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+ transport.heartbeatInterval = 30
+ transport.heartbeatTimeout = 90
+ metadatas.name = ${quoted(settings.name)}
+ metadatas.key = ${quoted(settings.key)}
+ 
+ [[proxies]]
+ name = ${quoted(settings.name)}
+-type = "http"
++type = ${quoted(settings.mode)}
+ subdomain = ${quoted(settings.name)}
+ localIP = "app"
+-localPort = 8080
+-requestHeaders.set.x-forwarded-proto = "https"
++localPort = ${proxy.localPort}
++${proxy.lastLine}
+ `;
+ }
+ 
+ /* frpc with the link's config, written where only this container's user reads it. */
+ export function clientFor(settings: TunnelSettings, dir = tmpdir()): Client {
+   const path = join(dir, 'frpc.toml');
+   writeFileSync(path, configFor(settings), { mode: 0o600 });
+   return { program: 'frpc', args: ['-c', path] };
+diff --git a/apps/server/src/modules/link/link.ts b/apps/server/src/modules/link/link.ts
+index 1bc2aef7..04a2a29d 100644
+--- a/apps/server/src/modules/link/link.ts
++++ b/apps/server/src/modules/link/link.ts
+@@ -2,16 +2,17 @@ import { renameSync, rmSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { eq } from 'drizzle-orm';
+ import type { FastifyBaseLogger } from 'fastify';
+ import type { Config } from '../../config.js';
+ import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
+ import type { Db } from '../../db/client.js';
+ import { publicLinks } from '../../db/schema.js';
+ import { loggable } from '../../errors.js';
++import { linkMode } from '../tls/store.js';
+ import { Relay, type Bound, type NameCheck } from './relay.js';
+ 
+ export type LinkView = { name: string; url: string };
+ 
+ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+ 
+ /* The tunnel container reads its settings from this file in the control folder and idles while there is none. */
+ export const TUNNEL_FILE = 'tunnel.json';
+@@ -33,17 +34,17 @@ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, b
+ }
+ 
+ /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
+    the tunnel never reads half a file. The link's key in them is for the tunnel container alone. */
+ export async function writeTunnelSettings(db: Db, config: Config): Promise<void> {
+   const file = join(config.controlDir, TUNNEL_FILE);
+   const [row] = await db.select().from(publicLinks).limit(1);
+   if (!row) return rmSync(file, { force: true });
+-  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown };
++  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config) };
+   rmSync(`${file}.new`, { force: true });
+   writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
+   renameSync(`${file}.new`, file);
+ }
+ 
+ /* The company's link at hornhoof.org: asking the relay for it, changing and removing it, and the tunnel settings that
+    follow it. Changes go one at a time, so two people renaming at once do not leave a link nobody keeps. */
+ export class PublicLinks {
+diff --git a/apps/server/src/modules/link/tunnel.ts b/apps/server/src/modules/link/tunnel.ts
+index d37ac613..e4d99c43 100644
+--- a/apps/server/src/modules/link/tunnel.ts
++++ b/apps/server/src/modules/link/tunnel.ts
+@@ -1,15 +1,21 @@
+ import { spawn, type ChildProcess } from 'node:child_process';
+ import { readFileSync } from 'node:fs';
+ import { z } from 'zod';
+ 
+-/* What the app writes into the control folder for the public link: its address, name and key, and what the relay gave
+-   the tunnel. */
+-const Settings = z.object({ url: z.string(), name: z.string(), key: z.string(), tunnel: z.record(z.string(), z.unknown()) });
++/* What the app writes into the control folder for the public link: its address, name and key, what the relay gave the
++   tunnel, and where the link's TLS ends. A file from before there was a mode still means the relay ends it. */
++export const Settings = z.object({
++  url: z.string(),
++  name: z.string(),
++  key: z.string(),
++  tunnel: z.record(z.string(), z.unknown()),
++  mode: z.enum(['http', 'https']).default('http'),
++});
+ export type TunnelSettings = z.infer<typeof Settings>;
+ 
+ /* The program that carries the link's traffic, as it is started. */
+ export type Client = { program: string; args: string[]; env?: Record<string, string> };
+ 
+ type Options = {
+   file: string;
+   /* How often the settings file is read. */
+diff --git a/apps/server/src/modules/tls/store.ts b/apps/server/src/modules/tls/store.ts
+new file mode 100644
+index 00000000..c18bb34a
+--- /dev/null
++++ b/apps/server/src/modules/tls/store.ts
+@@ -0,0 +1,59 @@
++import { createPrivateKey, X509Certificate } from 'node:crypto';
++import { eq } from 'drizzle-orm';
++import type { Config } from '../../config.js';
++import { decryptSecret } from '../../crypto/secrets.js';
++import type { Db } from '../../db/client.js';
++import { linkTls, publicLinks } from '../../db/schema.js';
++import type { LinkView } from '../link/link.js';
++import { certInfo } from './x509.js';
++
++export type TlsRow = typeof linkTls.$inferSelect;
++type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
++
++/* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
++const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
++
++export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
++  const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
++  return row ?? null;
++}
++
++/* Makes the row, or changes the fields named in one made before. */
++export async function saveTls(db: Db, companyId: string, set: TlsFields & Pick<TlsRow, 'directory' | 'accountKeyEnc'>): Promise<void> {
++  const fields = { ...set, updatedAt: new Date() };
++  await db.insert(linkTls).values({ companyId, ...fields }).onConflictDoUpdate({ target: linkTls.companyId, set: fields });
++}
++
++/* Changes a row that exists. A change that finds none would lose what the manager just decided, so it throws. */
++export async function updateTls(db: Db, companyId: string, set: TlsFields): Promise<void> {
++  const changed = await db.update(linkTls).set({ ...set, updatedAt: new Date() }).where(eq(linkTls.companyId, companyId)).returning({ companyId: linkTls.companyId });
++  if (changed.length === 0) throw new Error('The link has no certificate row to change.');
++}
++
++const isKeyOf = (certPem: string, keyPem: string) => new X509Certificate(certPem).checkPrivateKey(createPrivateKey(keyPem));
++
++/* Whether this row may carry this link over https now: the manager chose https, for this very name, and what the
++   listener would serve is a certificate of the link's host with time left and its own key. A certificate or a key that
++   cannot be read throws, which linkMode takes as no. */
++export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'certKeyEnc'>, link: LinkView, secret: Buffer, now: Date): boolean {
++  if (row.mode !== 'https' || row.name !== link.name || !row.certPem || !row.certKeyEnc) return false;
++  const info = certInfo(row.certPem);
++  if (!info.names.includes(new URL(link.url).hostname)) return false;
++  if (info.notAfter.getTime() - now.getTime() <= LEAST_LEFT_MS) return false;
++  return isKeyOf(row.certPem, decryptSecret(row.certKeyEnc, secret));
++}
++
++/* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
++   relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
++   app are the way back whatever the row says. */
++export async function linkMode(db: Db, config: Config): Promise<'http' | 'https'> {
++  if (config.acmeDirectory === null) return 'http';
++  try {
++    const [link] = await db.select().from(publicLinks).limit(1);
++    if (!link) return 'http';
++    const row = await tlsOf(db, link.companyId);
++    return row && mayRunHttps(row, link, config.secret, new Date()) ? 'https' : 'http';
++  } catch {
++    return 'http';
++  }
++}
+diff --git a/apps/server/test/client.test.ts b/apps/server/test/client.test.ts
+index 9f90d51a..c37b675f 100644
+--- a/apps/server/test/client.test.ts
++++ b/apps/server/test/client.test.ts
+@@ -1,23 +1,24 @@
+ import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ import { clientFor } from '../src/modules/link/client.js';
+-import type { TunnelSettings } from '../src/modules/link/tunnel.js';
++import { Settings, type TunnelSettings } from '../src/modules/link/tunnel.js';
+ 
+ const KEY = 'Zm9vYmFyLWtleS1vZi10aGUtYmluZGluZy0wMTIzNDU2';
+ 
+ /* What the app writes for a link, with the tunnel as the relay hands it out, including its own config text. */
+ const settings = (tunnel: Record<string, unknown> = {}, more: Partial<TunnelSettings> = {}): TunnelSettings => ({
+   url: 'https://acme.hornhoof.org',
+   name: 'acme',
+   key: KEY,
+   tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss', config: 'localIP = "db"\nlocalPort = 5432\n', ...tunnel },
++  mode: 'http',
+   ...more,
+ });
+ 
+ const CONFIG = `serverAddr = "hornhoof.org"
+ serverPort = 443
+ loginFailExit = false
+ log.to = "console"
+ log.level = "info"
+@@ -33,27 +34,52 @@ metadatas.key = "${KEY}"
+ name = "acme"
+ type = "http"
+ subdomain = "acme"
+ localIP = "app"
+ localPort = 8080
+ requestHeaders.set.x-forwarded-proto = "https"
+ `;
+ 
++const ABOVE_THE_PROXY = CONFIG.slice(0, CONFIG.indexOf('[[proxies]]'));
++
++const HTTPS_PROXY = `[[proxies]]
++name = "acme"
++type = "https"
++subdomain = "acme"
++localIP = "app"
++localPort = 8443
++transport.proxyProtocolVersion = "v2"
++`;
++
+ describe('the tunnel client', () => {
+   it('runs frpc with a config that carries the link to the app and nothing else', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     const path = join(dir, 'frpc.toml');
+     expect(clientFor(settings(), dir)).toEqual({ program: 'frpc', args: ['-c', path] });
+     /* The relay's own config text is not run: whatever it says, only the app is reachable through the tunnel. */
+     expect(readFileSync(path, 'utf8')).toBe(CONFIG);
+     /* It holds the key of the link. */
+     expect(statSync(path).mode & 0o077).toBe(0);
+   });
+ 
++  it("runs an https proxy to the app's TLS port in https mode, with the visitor's address in a PROXY v2 header", () => {
++    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
++    clientFor(settings({}, { mode: 'https' }), dir);
++    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(`${ABOVE_THE_PROXY}${HTTPS_PROXY}`);
++  });
++
++  it('reads settings with no mode as http', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
++    /* What an app from before this mode wrote: the file stays as it is until the app writes it again. */
++    const today = { url: 'https://acme.hornhoof.org', name: 'acme', key: KEY, tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss' } };
++    clientFor(Settings.parse(JSON.parse(JSON.stringify(today))), dir);
++    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(CONFIG);
++  });
++
+   it('writes the key so that no character of it can break out of its line', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     clientFor(settings({}, { key: 'abc"\nlocalIP = "db' }), dir);
+     expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toContain('metadatas.key = "abc\\"\\nlocalIP = \\"db"\n');
+   });
+ 
+   it('refuses tunnel settings it cannot use', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+diff --git a/apps/server/test/compose.test.ts b/apps/server/test/compose.test.ts
+index a7d93ac6..0df96e5d 100644
+--- a/apps/server/test/compose.test.ts
++++ b/apps/server/test/compose.test.ts
+@@ -15,16 +15,22 @@ describe('the tunnel service', () => {
+     expect(JSON.stringify(tunnel)).not.toContain('docker.sock');
+   });
+ 
+   it('is the one container the app believes about https', () => {
+     expect(compose.services.app!.environment!.TUNNEL_HOST).toBe('tunnel');
+   });
+ });
+ 
++describe("the link's certificate", () => {
++  it('comes from the directory .env names, and from nothing else when that is empty', () => {
++    expect(compose.services.app!.environment!.ACME_DIRECTORY).toBe('${ACME_DIRECTORY:-}');
++  });
++});
++
+ describe('the computer the server runs on', () => {
+   it('is known to the app by the hash install.sh writes, not by the key a machine joins with', () => {
+     expect(compose.services.app!.environment!.HORNHOOF_HOST_ID).toBe('${HORNHOOF_HOST_ID:-}');
+   });
+ });
+ 
+ describe('the built-in node', () => {
+   it("hears what the computer has from .env, as Docker on a Mac runs in a smaller system", () => {
+diff --git a/apps/server/test/config.test.ts b/apps/server/test/config.test.ts
+index 4c428ed2..e6f724b4 100644
+--- a/apps/server/test/config.test.ts
++++ b/apps/server/test/config.test.ts
+@@ -1,10 +1,11 @@
+ import { describe, expect, it } from 'vitest';
+ import { loadConfig } from '../src/config.js';
++import { LETS_ENCRYPT } from '../src/modules/tls/acme.js';
+ import { TEST_SECRET } from './helpers.js';
+ 
+ describe('loadConfig', () => {
+   it('limits simultaneous parts on one host to a positive whole number, one by default', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).runsPerHost).toBe(1);
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST: '' }).runsPerHost).toBe(1);
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, MAX_RUNS_PER_HOST: '2' }).runsPerHost).toBe(2);
+     for (const MAX_RUNS_PER_HOST of ['0', '-1', '1.5', 'two', '1001']) {
+@@ -34,16 +35,26 @@ describe('loadConfig', () => {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, [name]: value })).toThrow(`${name} must be a whole number of milliseconds`);
+     }
+     const set = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_PING_MS: '500', STREAM_PING_MS: '100', UPDATE_CHECK_MS: '0' });
+     expect([set.nodePingMs, set.streamPingMs, set.updateCheckMs]).toEqual([500, 100, 0]);
+     const defaults = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_PING_MS: '' });
+     expect([defaults.nodePingMs, defaults.streamPingMs, defaults.updateCheckMs]).toEqual([20000, 25000, 1800000]);
+   });
+ 
++  it("gets the link's certificate from Let's Encrypt unless ACME_DIRECTORY names another CA or says off", () => {
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).acmeDirectory).toBe(LETS_ENCRYPT);
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: '' }).acmeDirectory).toBe(LETS_ENCRYPT);
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: 'off' }).acmeDirectory).toBeNull();
++    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: 'https://ca.test/dir' }).acmeDirectory).toBe('https://ca.test/dir');
++    for (const ACME_DIRECTORY of ['http://x', 'ca.test/dir', 'https://', 'OFF']) {
++      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY })).toThrow('ACME_DIRECTORY must be off or an https:// ACME directory address.');
++    }
++  });
++
+   it('asks hornhoof.org for public links unless RELAY_URL names another relay', () => {
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).relayUrl).toBe('https://hornhoof.org');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL: '' }).relayUrl).toBe('https://hornhoof.org');
+     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL: 'http://127.0.0.1:9000/' }).relayUrl).toBe('http://127.0.0.1:9000');
+     for (const RELAY_URL of ['hornhoof.org', 'ftp://hornhoof.org', 'https://']) {
+       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, RELAY_URL })).toThrow('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.');
+     }
+   });
+diff --git a/apps/server/test/helpers.ts b/apps/server/test/helpers.ts
+index 1df4ea7a..dca7c5dc 100644
+--- a/apps/server/test/helpers.ts
++++ b/apps/server/test/helpers.ts
+@@ -86,18 +86,18 @@ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
+   onTestFinished(() => client.close());
+   return appOn(client, env, logger);
+ }
+ 
+ /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
+    still write to it. */
+ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
+   const db = drizzle(client, { schema }) as unknown as Db;
+-  /* Tests never reach the real registry unless they ask. */
+-  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
++  /* Tests never reach the real registry or a real CA unless they ask. */
++  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
+   const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
+   onTestFinished(() => app.close());
+   return { app, db, config };
+ }
+ 
+ const isSessionCookie = (cookie: { name: string }) => cookie.name === 'hh_session' || cookie.name === LINK_SESSION_COOKIE;
+ 
+ export function sessionFrom(res: LightMyRequestResponse): string {
+diff --git a/apps/server/test/link.test.ts b/apps/server/test/link.test.ts
+index c0a553f1..ea75d45b 100644
+--- a/apps/server/test/link.test.ts
++++ b/apps/server/test/link.test.ts
+@@ -1,15 +1,19 @@
+ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ import { runCli } from '../src/cli.js';
+-import { decryptSecret } from '../src/crypto/secrets.js';
+-import { companies, departments, publicLinks } from '../src/db/schema.js';
++import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
++import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
++import { writeTunnelSettings } from '../src/modules/link/link.js';
++import { newAccountKey } from '../src/modules/tls/acme.js';
++import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
++import { selfSigned } from '../src/modules/tls/x509.js';
+ import { fakeRelay } from './fake-relay.js';
+ import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+ 
+ /* A company with its own control folder, asking the fake relay for links. */
+ async function company(env: NodeJS.ProcessEnv = {}) {
+   const relay = await fakeRelay();
+   const control = mkdtempSync(join(tmpdir(), 'hh-link-'));
+   const { app, db, config } = await testApp({ RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: control, ...env });
+@@ -42,16 +46,136 @@ describe('checking a name for the public link', () => {
+     const { app, relay, ceo } = await company();
+     relay.down = true;
+     const res = await app.inject({ url: '/api/link/names/acme', ...as(ceo) });
+     expect(res.statusCode).toBe(503);
+     expect(res.json().error.reason).toBe('relay_unreachable');
+   });
+ });
+ 
++const LINK_HOST = 'acme.hornhoof.test';
++const CERTIFICATES_ON = { ACME_DIRECTORY: 'https://acme.invalid/directory' };
++
++/* A company with the link acme, and a certificate row that may run https. The tests change one thing of it at a time. */
++async function companyWithCertificate(env: NodeJS.ProcessEnv) {
++  const made = await company(env);
++  await made.put({ name: 'acme' });
++  const [acme] = await made.db.select().from(companies);
++  const pair = await selfSigned(LINK_HOST);
++  const accountKey = await newAccountKey();
++  const secret = made.config.secret;
++  const good = {
++    directory: CERTIFICATES_ON.ACME_DIRECTORY,
++    accountKeyEnc: encryptSecret(accountKey, secret),
++    name: 'acme',
++    mode: 'https' as const,
++    certPem: pair.certPem,
++    certKeyEnc: encryptSecret(pair.keyPem, secret),
++  };
++  const written = () => readFileSync(made.tunnelFile, 'utf8');
++  const modeWith = async (row: Parameters<typeof saveTls>[2]) => {
++    await saveTls(made.db, acme!.id, row);
++    await writeTunnelSettings(made.db, made.config);
++    return (JSON.parse(written()) as { mode: unknown }).mode;
++  };
++  return { ...made, companyId: acme!.id, pair, accountKey, good, written, modeWith };
++}
++
++describe("the tunnel's mode", () => {
++  it("writes the tunnel's mode: https only for a certificate of the link's own name", async () => {
++    const { config, pair, good, written, modeWith } = await companyWithCertificate(CERTIFICATES_ON);
++    expect((JSON.parse(written()) as { mode: unknown }).mode).toBe('http');
++    expect(await modeWith(good)).toBe('https');
++
++    const sealed = (keyPem: string) => encryptSecret(keyPem, config.secret);
++    const another = await selfSigned(LINK_HOST);
++    const shortLived = await selfSigned(LINK_HOST, { days: 23 / 24 });
++    const otherHost = await selfSigned('other.hornhoof.test');
++    const cases: [string, Partial<Parameters<typeof saveTls>[2]>][] = [
++      ['the row of another name', { name: 'old' }],
++      ['no certificate', { certPem: null }],
++      ['no key', { certKeyEnc: null }],
++      ['a certificate with 23 h left', { certPem: shortLived.certPem, certKeyEnc: sealed(shortLived.keyPem) }],
++      ['a certificate of another host', { certPem: otherHost.certPem, certKeyEnc: sealed(otherHost.keyPem) }],
++      ["another certificate's key", { certKeyEnc: sealed(another.keyPem) }],
++      ['a key that does not decrypt', { certKeyEnc: encryptSecret(pair.keyPem, Buffer.alloc(32, 9)) }],
++      ['a key that is no key', { certKeyEnc: sealed('no key') }],
++      ['text that is no certificate', { certPem: 'not a certificate' }],
++      ['a row in http mode', { mode: 'http' }],
++    ];
++    for (const [what, change] of cases) {
++      expect(await modeWith({ ...good, ...change }), what).toBe('http');
++    }
++  });
++
++  it('keeps every private key out of the tunnel settings', async () => {
++    const { pair, accountKey, good, written, modeWith } = await companyWithCertificate(CERTIFICATES_ON);
++    expect(await modeWith(good)).toBe('https');
++    const text = written();
++    /* Booleans only: a failure here must not print a key. */
++    expect(text.includes('certKeyEnc')).toBe(false);
++    expect(text.includes('PRIVATE KEY')).toBe(false);
++    expect(text.includes(accountKey)).toBe(false);
++    expect(text.includes(pair.keyPem)).toBe(false);
++    expect(text.includes(good.accountKeyEnc)).toBe(false);
++    expect(text.includes(good.certKeyEnc)).toBe(false);
++  });
++
++  it('puts the link on http when certificates are off, which is how tests run unless they ask', async () => {
++    for (const env of [{ ACME_DIRECTORY: 'off' }, {}]) {
++      const { good, modeWith } = await companyWithCertificate(env);
++      expect(await modeWith(good), JSON.stringify(env)).toBe('http');
++    }
++  });
++
++  it('asks for more than a day left on the certificate, read from the first of a chain', async () => {
++    const secret = Buffer.alloc(32, 3);
++    const notBefore = new Date('2026-11-04T12:00:00.000Z');
++    const pair = await selfSigned(LINK_HOST, { days: 3, now: notBefore });
++    const other = await selfSigned('intermediate.hornhoof.test');
++    const row = { mode: 'https' as const, name: 'acme', certPem: `${pair.certPem}${other.certPem}`, certKeyEnc: encryptSecret(pair.keyPem, secret) };
++    const link = { name: 'acme', url: `https://${LINK_HOST}` };
++    const DAY_MS = 24 * 60 * 60 * 1000;
++    const leaving = (leftMs: number) => new Date(notBefore.getTime() + 3 * DAY_MS - leftMs);
++    expect(mayRunHttps(row, link, secret, leaving(DAY_MS + 1000))).toBe(true);
++    expect(mayRunHttps(row, link, secret, leaving(DAY_MS))).toBe(false);
++  });
++});
++
++describe("the certificate's row", () => {
++  it('is made once, keeps what a later save does not name, and may not be changed before it exists', async () => {
++    const { db } = await company();
++    const [acme] = await db.select().from(companies);
++    expect(await tlsOf(db, acme!.id)).toBeNull();
++    await expect(updateTls(db, acme!.id, { mode: 'https' })).rejects.toThrow('The link has no certificate row to change.');
++    expect(await tlsOf(db, acme!.id)).toBeNull();
++
++    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed one' });
++    expect(await tlsOf(db, acme!.id)).toMatchObject({ directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed one', mode: 'http', certPem: null });
++    await updateTls(db, acme!.id, { failure: 'refused' });
++    await saveTls(db, acme!.id, { directory: 'https://two.invalid/directory', accountKeyEnc: 'sealed two' });
++    expect(await tlsOf(db, acme!.id)).toMatchObject({ directory: 'https://two.invalid/directory', accountKeyEnc: 'sealed two', failure: 'refused' });
++    expect(await db.select().from(linkTls)).toHaveLength(1);
++  });
++
++  it('notes the time of every change', async () => {
++    const { db } = await company();
++    const [acme] = await db.select().from(companies);
++    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed' });
++    const longAgo = new Date('2020-01-01T00:00:00.000Z');
++    const updatedAt = async () => (await tlsOf(db, acme!.id))!.updatedAt.getTime();
++    await db.update(linkTls).set({ updatedAt: longAgo });
++    await updateTls(db, acme!.id, { failure: 'refused' });
++    expect(await updatedAt()).toBeGreaterThan(longAgo.getTime());
++    await db.update(linkTls).set({ updatedAt: longAgo });
++    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed' });
++    expect(await updatedAt()).toBeGreaterThan(longAgo.getTime());
++  });
++});
++
+ describe('binding the company to a public link', () => {
+   it('takes the name at the relay, keeps the key encrypted and writes the tunnel settings', async () => {
+     const { app, db, config, relay, ceo, put, tunnelFile } = await company();
+     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: null, domain: '127.0.0.1' });
+     const res = await put({ name: 'acme' });
+     expect(res.statusCode).toBe(200);
+     expect(res.json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
+     const { key } = relay.bindings.get('acme')!;
+@@ -64,16 +188,17 @@ describe('binding the company to a public link', () => {
+     expect(decryptSecret(row!.keyEnc, config.secret)).toBe(key);
+     expect(row!.tunnelEnc).not.toContain(key);
+ 
+     expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({
+       url: 'https://acme.hornhoof.test',
+       name: 'acme',
+       key,
+       tunnel: expect.objectContaining({ serverAddr: 'hornhoof.test', serverPort: 443, protocol: 'wss' }),
++      mode: 'http',
+     });
+     /* The link's key is for the tunnel container alone. */
+     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
+     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' }, domain: '127.0.0.1' });
+   });
+ 
+   it('gets a long random name when none is asked for', async () => {
+     const { relay, put } = await company();
+@@ -246,17 +371,17 @@ describe('taking over a link made before', () => {
+     relay.bindings.set(NAME, { key: KEY });
+     const lines: string[] = [];
+     expect(await runCli(['link', NAME], { db, config, print: line => lines.push(line), read: async () => `${KEY}\n` })).toBe(0);
+     expect(relay.calls).toEqual([`GET /api/v1/names/${NAME}`]);
+     const { hostname, port } = new URL(relay.url);
+     const url = `https://${NAME}.${hostname}`;
+     expect(lines.join('\n')).toContain(url);
+     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json().link).toEqual({ name: NAME, url });
+-    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' } });
++    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' }, mode: 'http' });
+     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
+ 
+     /* The key it keeps is the one that frees the link. */
+     expect((await app.inject({ method: 'DELETE', url: '/api/link', ...as(ceo) })).statusCode).toBe(204);
+     expect(relay.bindings.has(NAME)).toBe(false);
+   });
+ 
+   it('refuses a link hornhoof.org does not hold, a missing key, and a second link', async () => {
+diff --git a/apps/server/test/migration-metadata.test.ts b/apps/server/test/migration-metadata.test.ts
+index 246817d9..82164709 100644
+--- a/apps/server/test/migration-metadata.test.ts
++++ b/apps/server/test/migration-metadata.test.ts
+@@ -15,17 +15,17 @@ async function journal(): Promise<{ entries: JournalEntry[] }> {
+ }
+ 
+ async function snapshot(tag: string): Promise<Snapshot> {
+   return JSON.parse(await readFile(join(folder, 'meta', `${tag.slice(0, 4)}_snapshot.json`), 'utf8')) as Snapshot;
+ }
+ 
+ describe('merged migration metadata', () => {
+   it('carries both histories into the latest snapshot used to generate the next migration', async () => {
+-    const latest = await snapshot('0054_sign_in_attempts');
++    const latest = await snapshot('0055_link_tls');
+     expect(Object.keys(latest.tables['public.jobs']!.columns)).toEqual(expect.arrayContaining([
+       'failure', 'not_before', 'restarted_at', 'requested_prompt',
+     ]));
+     expect(Object.keys(latest.tables['public.agent_events']!.indexes)).toEqual(expect.arrayContaining([
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+     ]));
+     expect(Object.keys(latest.tables['public.node_codes']!.columns)).toContain('dismissed_subscription_ids');
+     expect(Object.keys(latest.tables['public.node_codes']!.indexes)).toContain('node_codes_active_owner');
+@@ -54,17 +54,17 @@ describe('merged migration metadata', () => {
+       previous = current.id;
+     }
+   });
+ 
+   it('describes the columns and regular indexes of a freshly migrated database', async () => {
+     const client = new PGlite();
+     onTestFinished(() => client.close());
+     await migrate(drizzle(client), { migrationsFolder: folder });
+-    const latest = await snapshot('0054_sign_in_attempts');
++    const latest = await snapshot('0055_link_tls');
+     for (const [table, definition] of Object.entries(latest.tables)) {
+       const name = table.slice('public.'.length);
+       const columns = await client.query<{ column_name: string }>('select column_name from information_schema.columns where table_schema = $1 and table_name = $2', ['public', name]);
+       expect(columns.rows.map(column => column.column_name).sort(), table).toEqual(Object.keys(definition.columns).sort());
+       const indexes = await client.query<{ indexname: string }>(`select indexname from pg_indexes i
+         where schemaname = $1 and tablename = $2
+           and not exists (select 1 from pg_constraint c where c.conindid = (quote_ident(i.schemaname) || '.' || quote_ident(i.indexname))::regclass)`, ['public', name]);
+       expect(indexes.rows.map(index => index.indexname).sort(), table).toEqual(Object.keys(definition.indexes).sort());
+diff --git a/apps/server/test/orchestrator-control.test.ts b/apps/server/test/orchestrator-control.test.ts
+index 8c4d10fc..5026f9d7 100644
+--- a/apps/server/test/orchestrator-control.test.ts
++++ b/apps/server/test/orchestrator-control.test.ts
+@@ -418,17 +418,17 @@ describe('the orchestrator reads and changes the database itself', () => {
+     expect(JSON.parse(text(write))).toEqual([{ rows: [], changed: 1 }]);
+     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno Diaz');
+     expect(heard).toEqual(['org']);
+   });
+ 
+   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
+     const { app } = await company();
+     const client = await mcp(app, TOKEN);
+-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
++    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toMatch(/permission denied|must be owner/);
+     }
+     expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.');
+     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+   });
+ 
+@@ -575,17 +575,17 @@ describe('the orchestrator reads and changes the database itself', () => {
+       `SET TRANSACTION READ WRITE; UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'`,
+       'CREATE TABLE notes (id int)',
+     ];
+     for (const sql of writes) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toContain('Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.');
+     }
+-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT account FROM nodes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM plan_credentials', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
++    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT account FROM nodes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toMatch(/closed to this tool/);
+       expect(text(res), sql).not.toContain('Operations reads the database');
+     }
+     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
+     expect((await db.select().from(tasks).where(eq(tasks.id, task.id))).length).toBe(1);
+     const read = await call(client, 'database', { sql: `SELECT status, error FROM jobs WHERE agent_id = '${wanda.id}'` });
+diff --git a/compose.yaml b/compose.yaml
+index 93c76c8e..b25326e1 100644
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -13,16 +13,18 @@ services:
+       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
+       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
+       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+       # Where the company's public link comes from, and the one container whose word that a request came over https
+       # the app believes.
+       RELAY_URL: ${RELAY_URL:-}
+       TUNNEL_HOST: tunnel
++      # Where the link's certificate comes from: Let's Encrypt when empty, off for none.
++      ACME_DIRECTORY: ${ACME_DIRECTORY:-}
+       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
+       TASK_FILES_MB: ${TASK_FILES_MB:-}
+       # Parts of runs allowed on one physical computer at once; 1 when empty.
+       MAX_RUNS_PER_HOST: ${MAX_RUNS_PER_HOST:-}
+       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
+       # writes, so the pool counts that computer once when it joined as a machine too.
+       HORNHOOF_HOST_ID: ${HORNHOOF_HOST_ID:-}
+     volumes:
+
+## c9a67dd2 Split loadConfig and the grant texts where the certificate's change reached them, and count the new migration
+
+The author check on the first commit was red for three reasons, each found before this fix. migration-history.test.ts
+pins the number of migrations, so it now says 55, as Task 3's change said 54. loadConfig scores CRAP 23 whatever its
+coverage, and adding acmeDirectory makes it a changed function, so it is split by what it reads. Adding link_tls to
+HIDDEN brings agent-sql.ts under dryer, which finds grantsFor and readerGrantsFor to be one shape with one repeated line.
+
+The structure changed and the behaviour did not: the config and health tests stay as they were and pass, and grantsFor
+and readerGrantsFor give texts with the same SHA-256 before and after, checked by a script outside the repository.
+Proved from apps/server: 138 tests pass in migration-history, client, tunnel, link, orchestrator-control, migrations,
+migration-metadata, compose and config; tsc prints nothing; eslint on the changed files prints nothing; dryer finds no
+pair in the changed files.
+
+Ruling: loadConfig is split with the same functions as plan 2 Task 3's 3fbe15c9 (secretOf, nodeKeyOf, checkedEnv, buildOf, placesOf, limitsOf), word for word, and acmeDirectory sits apart from where that task adds keeper - why: both tasks hit the same gate on the same function, and one split lands more easily than two - cost if wrong: whoever lands the second resolves about one line in loadConfig's return.
+Ruling: role in agent-sql.ts now takes the rights as a function and readVisible holds the repeated GRANT line - why: the file is one Task 7 must change, and dryer scored the old pair 1.00 - cost if wrong: plans 3 and 4, which change this file, meet a little more moved text; the SQL is the same.
+
+---
+ apps/server/src/config.ts                  |  6 +++---
+ apps/server/src/db/agent-sql.ts            | 27 +++++++++++++--------------
+ apps/server/test/migration-history.test.ts |  4 ++--
+ 3 files changed, 18 insertions(+), 19 deletions(-)
+
+diff --git a/apps/server/src/config.ts b/apps/server/src/config.ts
+index 5656b69c..02dc3398 100644
+--- a/apps/server/src/config.ts
++++ b/apps/server/src/config.ts
+@@ -34,20 +34,20 @@ export type Config = {
+   /* Role and skill templates, loaded once at start. */
+   templatesDir: string;
+   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+   relayUrl: string;
+   /* The tunnel container's host name: only requests from it may say they came in over https. */
+   tunnelHost?: string;
+   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
+   keeper: boolean;
+-  /* The ACME directory the link's certificate comes from; null with certificates off. */
+-  acmeDirectory: string | null;
+   /* How much all the files on the company's tasks may take together. */
+   taskFilesBytes: number;
++  /* The ACME directory the link's certificate comes from; null with certificates off. */
++  acmeDirectory: string | null;
+   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
+   hostId: string | null;
+ };
+ 
+ /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
+ const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+ const DEFAULT_INSTALL_SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
+ const ROOT_PACKAGE = new URL('../../../package.json', import.meta.url);
+@@ -73,21 +73,21 @@ const Env = z.object({
+   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
+   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
+   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
+   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
+   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
++  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+   ACME_DIRECTORY: z.preprocess(
+     unset,
+     z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
+   ),
+-  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+   HORNHOOF_HOST_ID: z.preprocess(
+     unset,
+     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+   ),
+ });
+ 
+ /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+ const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index ef61fe27..bcf82bd2 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -45,76 +45,75 @@ const roleOf = (database: string, suffix: string) => `${database.toLowerCase().r
+ export const agentRole = (database: string) => roleOf(database, '_agent');
+ export const readerRole = (database: string) => roleOf(database, '_reader');
+ 
+ const quoted = (names: string[]) => `ARRAY[${names.map(n => `'${n}'`).join(', ')}]::text[]`;
+ /* A table's columns but some, as SQL that lists them for a column grant. */
+ const columns = (table: string, but: string[] = []) =>
+   `(SELECT string_agg(quote_ident(column_name), ', ') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' AND column_name <> ALL (${quoted(but)}))`;
+ const visible = (table: string) => columns(table, SECRET[table] ?? []);
++/* A right to read these tables, column by column, without the secret columns. */
++const readVisible = (tables: string[], name: string) =>
++  tables.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n');
+ 
+ /* Makes the role or brings its rights up to date, for tables later updates added too, starting from none. It owns
+    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
+    A call may take 15 seconds and may not sit in an open transaction. */
+-const role = (name: string, rights: string) => `DO $grants$
++const role = (rights: (name: string) => string) => (name: string) => `DO $grants$
+ DECLARE t text;
+ BEGIN
+   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
+   ALTER ROLE "${name}" SET statement_timeout = '15s';
+   ALTER ROLE "${name}" SET idle_in_transaction_session_timeout = '30s';
+   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${name}";
+   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${name}";
+   GRANT USAGE ON SCHEMA public TO "${name}";
+-${rights}
++${rights(name)}
+ END $grants$`;
+ 
+ /* Every table but the hidden ones and those named, one by one. */
+ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> ALL (${quoted([...HIDDEN, ...but])}) LOOP
+     EXECUTE format('${grant}', t);
+   END LOOP;`;
+ 
+ /* The orchestrator's role reads and changes the rows of every table but the hidden ones and the secrets, with these
+    exceptions. People, their access, subscriptions, machines and repositories only change through the tools the CEO alone
+    may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
+    subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
+    forged or swapped. */
+-export const grantsFor = (name: string) =>
+-  role(
+-    name,
++export const grantsFor = role(
++  name =>
+     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+-${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
++${readVisible(READ_ONLY, name)}
+   EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...REPOSITORY])});
+   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
+   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
+   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
+   EXECUTE $trigger$
+     CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
+     BEGIN
+       RAISE EXCEPTION 'permission denied for table agents: a head stays in its department' USING ERRCODE = 'insufficient_privilege';
+     END $body$
+   $trigger$;
+   DROP TRIGGER IF EXISTS "${name}_head_stays" ON agents;
+   EXECUTE $trigger$
+     CREATE TRIGGER "${name}_head_stays" BEFORE UPDATE OF department_id ON agents FOR EACH ROW
+       WHEN (OLD.kind = 'head' AND OLD.department_id IS DISTINCT FROM NEW.department_id AND current_user = '${name}')
+       EXECUTE FUNCTION hornhoof_head_stays()
+   $trigger$;`,
+-  );
++);
+ 
+ /* The head of Operations' role reads the rows of every table but the hidden ones and the secrets, and changes nothing:
+    it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. */
+-export const readerGrantsFor = (name: string) =>
+-  role(
+-    name,
++export const readerGrantsFor = role(
++  name =>
+     `  ALTER ROLE "${name}" SET default_transaction_read_only = on;
+ ${eachTable(Object.keys(SECRET), `GRANT SELECT ON %I TO "${name}"`)}
+-${Object.keys(SECRET)
+-  .map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`)
+-  .join('\n')}`,
+-  );
++${readVisible(Object.keys(SECRET), name)}`,
++);
+ 
+ /* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. Null, with a
+    warning, when the database does not let Hornhoof make roles. */
+ export async function openAgentSql(url: string): Promise<AgentSql | null> {
+   const admin = new pg.Client({ connectionString: url });
+   const pools: pg.Pool[] = [];
+   const open = async (name: string, grants: string) => {
+     const password = randomBytes(24).toString('hex');
+diff --git a/apps/server/test/migration-history.test.ts b/apps/server/test/migration-history.test.ts
+index e65abda7..83676c0b 100644
+--- a/apps/server/test/migration-history.test.ts
++++ b/apps/server/test/migration-history.test.ts
+@@ -83,18 +83,18 @@ describe('migration histories merged in turn 5', () => {
+ 
+     for (const [index, table] of tables.entries()) {
+       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
+       const after = await copy.query(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
+       expect(after.rows, table).toEqual(before[index]!.rows);
+     }
+     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+     expect(recorded).toEqual(expect.arrayContaining(recordedBefore));
+-    expect(recorded).toHaveLength(54);
+-    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(54);
++    expect(recorded).toHaveLength(55);
++    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(55);
+     expect(recorded.map(row => Number(row.created_at))).toEqual(expect.arrayContaining([
+       1793700000000, 1793714531704, 1793714572653, 1793716912449, 1793727699000, 1793727700000, 1793739121203,
+     ]));
+     const indexes = await copy.query<{ indexname: string }>(`select indexname from pg_indexes where indexname in (
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+       'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner')`);
+     expect(indexes.rows).toHaveLength(8);
+ 
+

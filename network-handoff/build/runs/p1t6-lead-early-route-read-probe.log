@@ -1,0 +1,7 @@
+Source/test stable during probe: True
+Test failures: 0 errors: 0 premature route-read side effect detected: False
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-early-route-read-probe.py", line 29, in <module>
+    assert result.failures,'malformed-ID test missed a route read before validation'
+           ^^^^^^^^^^^^^^^
+AssertionError: malformed-ID test missed a route read before validation

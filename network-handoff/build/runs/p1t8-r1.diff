@@ -1,0 +1,946 @@
+# Review package: lane p1t8
+
+ .github/workflows/tests.yml   |    2 
+ README.md                     |    5 -
+ relay/test/caddy.sh           |   39 ++++
+ relay/test/harness.py         |  258 ++++++++++++++++++++++++++++-
+ relay/test/test_edge_today.py |  361 +++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 648 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index df0535c..b60d0a0 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -7,11 +7,11 @@ on:
+ permissions:
+   contents: read
+ 
+ jobs:
+   test:
+     runs-on: ubuntu-24.04
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - run: sh relay/test/frp.sh
+       - run: python3 -m unittest discover -s relay/test -v
+-      - run: shellcheck relay/setup-relay.sh relay/private-file.sh relay/hornhoof-relay relay/test/frp.sh
++      - run: shellcheck relay/setup-relay.sh relay/private-file.sh relay/hornhoof-relay relay/test/frp.sh relay/test/caddy.sh
+diff --git a/README.md b/README.md
+index 96a05f9..649fa66 100644
+--- a/README.md
++++ b/README.md
+@@ -35,30 +35,31 @@ For each link, the relay keeps:
+ - which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+ The relay logs each link made or freed with the address it came from. frps logs each tunnel's login. On the server, both logs go to the system journal.
+ 
+ ## Run the tests
+ 
+-You need Python 3.12 or newer, Git, curl and tar, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it.
++You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
+ 
+ From this folder:
+ 
+ ```sh
+ sh relay/test/frp.sh
++sh relay/test/caddy.sh
+ python3 -m unittest discover -s relay/test -v
+ ```
+ 
+-The tests start their own relay, frps, frpc and small web server on local ports, then stop them. They never connect to the public relay. The publication checks read tracked files and files Git would add, respecting `.gitignore`. If `EDGE_PRIVATE_WORDS` names a file, or `~/.hornhoof-edge/private-words` exists, they also check that none of its private values appears in those files.
++The tests start their own relay, frps, frpc, Caddy and small web server on local ports, then stop them. They never connect to the public relay. The publication checks read tracked files and files Git would add, respecting `.gitignore`. If `EDGE_PRIVATE_WORDS` names a file, or `~/.hornhoof-edge/private-words` exists, they also check that none of its private values appears in those files.
+ 
+ ## What is where
+ 
+ - `relay/relay.py`: the name API, tunnel checks and operator commands, in one Python file.
+ - `relay/frps.toml`: frps settings; the server password is a placeholder.
+ - `relay/setup-relay.sh`, `relay/hornhoof-relay` and the service files: server setup and operator commands.
+ - `Caddyfile`: the web server settings, the API and tunnel entry points, and company traffic.
+ - `pages/`: the page template, build script and fonts. `pages/build.py` builds `www/index.html` and the relay's 404 and 410 pages.
+ - `relay/test/`: tests and their local server harness. Downloaded binaries stay in the ignored `.bin/` folder.
+ - `deploy.env.example`: example deployment settings. Real settings, access keys and other private files stay outside this repository.
+diff --git a/relay/test/caddy.sh b/relay/test/caddy.sh
+new file mode 100644
+index 0000000..7c0fd13
+--- /dev/null
++++ b/relay/test/caddy.sh
+@@ -0,0 +1,39 @@
++#!/bin/sh
++# SHA-512 values from v2.11.8's caddy_2.11.8_checksums.txt release asset.
++set -eu
++cd "$(dirname "$0")"
++bin_dir="$(pwd)/.bin"
++if [ -x "$bin_dir/caddy" ]; then exit 0; fi
++
++case "$(uname -s)" in
++  Darwin) caddy_os=mac ;;
++  Linux) caddy_os=linux ;;
++  *) echo 'Caddy tests support macOS and Linux only' >&2; exit 1 ;;
++esac
++case "$(uname -m)" in
++  x86_64 | amd64) caddy_arch=amd64 ;;
++  arm64 | aarch64) caddy_arch=arm64 ;;
++  *) echo 'Caddy tests support amd64 and arm64 only' >&2; exit 1 ;;
++esac
++case "$caddy_os-$caddy_arch" in
++  mac-amd64) checksum=946399a20f1c10d82ab593680ab975879c49af6741d8be20a30199469a762c802a112183ee2c40ae78980bdbbbf3b335461ad0aa12d9780ff1634e9a41361872 ;;
++  mac-arm64) checksum=0c6992b1bb40629b6090d72cdc4a3f3722a7f6b667606db9fe67bfea0e42e9c40736d10925d406bf103628a5e906e59300d616a0709bc8855d9e85efbcfece81 ;;
++  linux-amd64) checksum=c863699eee84c6b410573de2ec67af81d07eb054f9020bb98f3c6cb256fea4be2fd1acfbd39110c649c3338282593bba3d3ed6424d91b7f5675e8b877a8999e9 ;;
++  linux-arm64) checksum=6a285426268c8f987e0c459f61dc5af3c25e663955c0e4dddc6e187722b7cdd15e4233ff0e570a4ee17b3c68d59e2a61ce96d2f6be55ea58eead6a334859557c ;;
++esac
++
++mkdir -p "$bin_dir"
++download_dir=$(mktemp -d "$bin_dir/download.XXXXXX")
++trap 'rm -rf "$download_dir"' 0
++trap 'exit 1' 1 2 15
++version=2.11.8
++curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
++  -o "$download_dir/caddy.tgz" \
++  "https://github.com/caddyserver/caddy/releases/download/v$version/caddy_${version}_${caddy_os}_${caddy_arch}.tar.gz"
++if command -v sha512sum > /dev/null 2>&1; then
++  printf '%s  %s\n' "$checksum" "$download_dir/caddy.tgz" | sha512sum -c -
++else
++  printf '%s  %s\n' "$checksum" "$download_dir/caddy.tgz" | shasum -a 512 -c -
++fi
++tar -xzf "$download_dir/caddy.tgz" -C "$download_dir" caddy
++install -m 755 "$download_dir/caddy" "$bin_dir/caddy"
+diff --git a/relay/test/harness.py b/relay/test/harness.py
+index 4da56c7..1df2979 100644
+--- a/relay/test/harness.py
++++ b/relay/test/harness.py
+@@ -1,37 +1,56 @@
+ """Local frp processes and an isolated relay, using only the standard library."""
+ 
+ import base64
++from collections.abc import Callable
+ from contextlib import ExitStack
++from dataclasses import dataclass
+ import functools
+ import http.client
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ import json
+ import os
+ from pathlib import Path
+ import re
+ import secrets
++import shutil
+ import signal
+ import socket
++import ssl
+ import subprocess
+ import sys
+ import threading
+ import time
++from typing import NamedTuple
+ 
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ BIN = Path(__file__).resolve().parent / '.bin'
+-
+-
+-@functools.lru_cache(maxsize=1)
+-def _ensure_frp():
+-    subprocess.run(['sh', str(BIN.parent / 'frp.sh')], cwd=ROOT, check=True, timeout=180)
++PUBLIC_TIMEOUT = 10
++CADDY_RELOADED = 'successfully reloaded config from file'
++SAME_AS_HOST = object()
++TEST_CERTIFICATE_CONFIG = """
++[req]
++distinguished_name = subject
++[subject]
++[ca]
++basicConstraints = critical, CA:TRUE
++keyUsage = critical, keyCertSign, cRLSign
++[leaf]
++basicConstraints = critical, CA:FALSE
++subjectAltName = DNS:hornhoof.org, DNS:www.hornhoof.org, DNS:*.hornhoof.org
++"""
++
++
++@functools.lru_cache(maxsize=None)
++def _ensure_binaries(script: str) -> None:
++    subprocess.run(['sh', str(BIN.parent / script)], cwd=ROOT, check=True, timeout=180)
+ 
+ 
+ def _request(port, method, path, body=None, headers=None):
+     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+     try:
+         connection.request(method, path, body=body, headers=headers or {})
+         response = connection.getresponse()
+         return response.status, response.read()
+     finally:
+         connection.close()
+@@ -41,23 +60,116 @@ def _wait(predicate, within):
+     deadline = time.monotonic() + within
+     while True:
+         if predicate():
+             return True
+         remaining = deadline - time.monotonic()
+         if remaining <= 0:
+             return False
+         time.sleep(min(0.05, remaining))
+ 
+ 
++def render_caddyfile(text: str, replacements: list[tuple[str, str]]) -> str:
++    """Raises on a replacement that finds nothing, so that a Caddyfile change cannot slip past the tests unseen."""
++    for old, new in replacements:
++        if old not in text:
++            raise ValueError(f'The Caddyfile no longer holds: {old!r}')
++        text = text.replace(old, new)
++    return text
++
++
++class CertificateFiles(NamedTuple):
++    ca: Path
++    cert: Path
++    key: Path
++
++
++def _openssl(*args: object, stdin: bytes | None = None) -> bytes:
++    return subprocess.run(['openssl', *map(str, args)], input=stdin, check=True, capture_output=True,
++                          timeout=30).stdout
++
++
++def _make_test_certificates(folder: Path) -> CertificateFiles:
++    config = folder / 'openssl.cnf'
++    config.write_text(TEST_CERTIFICATE_CONFIG)
++    ca, ca_key = folder / 'ca.crt', folder / 'ca.key'
++    cert, key, request = folder / 'test.crt', folder / 'test.key', folder / 'test.csr'
++    _openssl('ecparam', '-genkey', '-name', 'prime256v1', '-noout', '-out', ca_key)
++    _openssl('req', '-x509', '-new', '-key', ca_key, '-config', config, '-extensions', 'ca',
++             '-subj', '/CN=Hornhoof relay test CA', '-days', 2, '-out', ca)
++    _openssl('ecparam', '-genkey', '-name', 'prime256v1', '-noout', '-out', key)
++    _openssl('req', '-new', '-key', key, '-config', config, '-subj', '/CN=hornhoof.org', '-out', request)
++    _openssl('x509', '-req', '-in', request, '-CA', ca, '-CAkey', ca_key, '-CAcreateserial', '-days', 2,
++             '-extfile', config, '-extensions', 'leaf', '-out', cert)
++    return CertificateFiles(ca, cert, key)
++
++
++# A burst of connections shows one certificate over and over, and one process is enough to read it.
++@functools.lru_cache(maxsize=16)
++def _dns_names(certificate: bytes) -> list[str]:
++    """ssl parses a peer's certificate only after verifying it, and these connections do not verify."""
++    text = _openssl('x509', '-inform', 'DER', '-noout', '-text', stdin=certificate).decode()
++    return re.findall(r'DNS:([^,\s]+)', text)
++
++
++def _tls_socket(port: int, server_name: str | None) -> ssl.SSLSocket:
++    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
++    context.check_hostname = False
++    context.verify_mode = ssl.CERT_NONE
++    plain = socket.create_connection(('127.0.0.1', port), timeout=PUBLIC_TIMEOUT)
++    return context.wrap_socket(plain, server_hostname=server_name)
++
++
++@dataclass(frozen=True)
++class Answer:
++    status: int | None
++    headers: dict[str, str]
++    body: bytes
++    cert_names: list[str]
++    local_port: int
++    error: str | None
++
++
++def _failed(error: Exception, local_port: int = 0) -> Answer:
++    return Answer(None, {}, b'', [], local_port, repr(error))
++
++
++class KeptConnection:
++    def __init__(self, sock: socket.socket, host: str, cert_names: list[str]):
++        # The address is never dialed, the socket is open already. Without auto_open a closed connection
++        # fails instead of quietly dialing a new one, because again() promises the same socket.
++        self._connection = http.client.HTTPConnection('127.0.0.1')
++        self._connection.sock = sock
++        self._connection.auto_open = 0
++        self._host = host
++        self._cert_names = cert_names
++        self._local_port = sock.getsockname()[1]
++
++    def ask(self, path: str, method: str = 'GET', body: bytes = b'') -> Answer:
++        try:
++            self._connection.request(method, path, body=body or None, headers={'Host': self._host})
++            response = self._connection.getresponse()
++            return Answer(response.status, dict(response.getheaders()), response.read(), self._cert_names,
++                          self._local_port, None)
++        except (OSError, http.client.HTTPException) as error:
++            return _failed(error, self._local_port)
++
++    def again(self, path: str) -> Answer:
++        return self.ask(path)
++
++    def close(self) -> None:
++        self._connection.close()
++
++
+ class _Echo(BaseHTTPRequestHandler):
+     def do_GET(self):
+-        data = json.dumps({'host': self.headers.get('Host'), 'path': self.path}).encode()
++        data = json.dumps({'host': self.headers.get('Host'), 'path': self.path,
++                           'xff': self.headers.get('X-Forwarded-For')}).encode()
+         self.send_response(200)
+         self.send_header('Content-Type', 'application/json')
+         self.send_header('Content-Length', str(len(data)))
+         self.end_headers()
+         self.wfile.write(data)
+ 
+     do_POST = do_GET
+     do_PUT = do_GET
+     do_PATCH = do_GET
+     do_DELETE = do_GET
+@@ -127,37 +239,44 @@ class Client(_Process):
+         pattern = re.compile(r'\[' + re.escape(proxy) + r'\]\s+start proxy success\b')
+ 
+         def ready():
+             return pattern.search(self.log()) is not None or self.process.poll() is not None
+ 
+         _wait(ready, within)
+         return pattern.search(self.log()) is not None
+ 
+ 
+ class Stack:
+-    def __init__(self, tmp: str, dashboard: bool = True):
++    def __init__(self, tmp: str, dashboard: bool = True, caddy: bool = False):
+         self.tmp = Path(tmp)
+         self.tmp.mkdir(parents=True, exist_ok=True)
+         self.dashboard = dashboard
++        self.with_caddy = caddy
+         self.clients = []
++        self.kept_connections = []
+         self.relay = None
+         self.frps = None
++        self.caddy = None
++        self.caddy_folder = self.tmp / 'caddy'
++        self.certificates = None
+         self.echo = None
+         self.echo_thread = None
+         self.password = secrets.token_hex(24)
+         self.private = [self.password]
+         self._ports = set()
+         self.relay_port = self._free_port()
+         self.bind_port = self._free_port()
+         self.vhost_port = self._free_port()
+         self.dash_port = self._free_port()
+         self.api_port = self.dash_port if dashboard else self._free_port()
++        self.http_port = self._free_port()
++        self.https_port = self._free_port()
+         self.env = dict(os.environ, **{
+             'RELAY_DB': str(self.tmp / 'relay.db'),
+             'RELAY_PORT': str(self.relay_port),
+             'RELAY_CADDYFILE': str(self.tmp / 'Caddyfile'),
+             'RELAY_TRACE': '1',
+             'RELAY_FRPS_API': f'http://127.0.0.1:{self.api_port}',
+             'RELAY_FRPS_USER': 'admin',
+             'RELAY_FRPS_PASSWORD': self.password,
+             'RELAY_FRPS_BIND': f'127.0.0.1:{self.bind_port}',
+             'RELAY_FRPS_STARTED': str(self.tmp / 'frps-started'),
+@@ -167,62 +286,75 @@ class Stack:
+         while True:
+             with socket.socket() as listener:
+                 listener.bind(('127.0.0.1', 0))
+                 port = listener.getsockname()[1]
+             if port not in self._ports:
+                 self._ports.add(port)
+                 return port
+ 
+     def __enter__(self):
+         try:
+-            _ensure_frp()
++            _ensure_binaries('frp.sh')
+             (self.tmp / 'Caddyfile').write_text('@reserved host www.hornhoof.org\n')
+             self.echo = ThreadingHTTPServer(('127.0.0.1', 0), _Echo)
+             self.echo.daemon_threads = True
+             self.echo_port = self.echo.server_port
+             self.echo_thread = threading.Thread(target=self.echo.serve_forever, daemon=True)
+             self.echo_thread.start()
+             self._start_relay()
+             self.start_frps()
++            if self.with_caddy:
++                self._start_caddy()
+             return self
+         except BaseException:
+             self.close()
+             raise
+ 
+     def __exit__(self, exc_type, exc, traceback):
+         self.close()
+ 
+     def close(self):
+         # ExitStack runs every cleanup even if one process fails to stop.
+         with ExitStack() as cleanup:
+             if self.echo is not None:
+                 cleanup.callback(self.echo.server_close)
+                 if self.echo_thread is not None and self.echo_thread.ident is not None:
+                     cleanup.callback(self.echo_thread.join, timeout=5)
+                     cleanup.callback(self.echo.shutdown)
+             if self.relay is not None:
+                 cleanup.callback(self.relay.stop)
+             if self.frps is not None:
+                 cleanup.callback(self.frps.stop)
++            if self.caddy is not None:
++                cleanup.callback(self.caddy.stop)
+             for client in self.clients:
+                 cleanup.callback(client.stop)
++            for kept in self.kept_connections:
++                cleanup.callback(kept.close)
+ 
+     def _ready(self, process, port, path):
+-        def ready():
+-            if process.process.poll() is not None:
+-                raise RuntimeError('Local process exited during startup:\n' + process.log())
++        def answers():
+             try:
+                 status, _ = _request(port, 'GET', path)
+                 return status == 200
+             except (OSError, http.client.HTTPException):
+                 return False
+ 
++        self._wait_ready(process, answers)
++
++    @staticmethod
++    def _wait_ready(process: _Process, answers: Callable[[], bool]) -> None:
++        def ready():
++            if process.process.poll() is not None:
++                raise RuntimeError('Local process exited during startup:\n' + process.log())
++            return answers()
++
+         if not _wait(ready, 15):
+             raise RuntimeError('Local process did not become ready:\n' + process.log())
+ 
+     def _start_relay(self):
+         self.relay = _Process(
+             [sys.executable, '-u', str(ROOT / 'relay/relay.py')], self.tmp / 'relay.log',
+             env=self.env, private=self.private,
+         )
+         # Readiness must work before frps starts, including when health later returns 503.
+         self._ready(self.relay, self.relay_port, '/api/v1/names/www')
+@@ -264,36 +396,122 @@ class Stack:
+     def restart_frps(self):
+         self.stop_frps()
+         self.start_frps()
+ 
+     @staticmethod
+     def _write_config(path, text):
+         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+         with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+             output.write(text)
+ 
++    def _caddy_replacements(self) -> list[tuple[str, str]]:
++        folder = self.caddy_folder
++        test_tls = f'tls {self.certificates.cert} {self.certificates.key}'
++        return [
++            # default_bind keeps a test server off this machine's network. auto_https disable_certs makes
++            # a site this list missed fail its handshake, where it would otherwise ask for a real certificate.
++            ('{\n\tservers {',
++             f'{{\n\tadmin off\n\thttp_port {self.http_port}\n\thttps_port {self.https_port}\n'
++             '\tdefault_bind 127.0.0.1\n\tauto_https disable_certs\n\tservers {'),
++            ('hornhoof.org {\n\t# The relay', f'hornhoof.org {{\n\t{test_tls}\n\t# The relay'),
++            ('www.hornhoof.org {\n', f'www.hornhoof.org {{\n\t{test_tls}\n'),
++            ('\ttls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key\n', f'\t{test_tls}\n'),
++            ('root * /var/www/hornhoof\n', f'root * {folder}/www\n'),
++            ('root * /var/www/hornhoof-pages\n', f'root * {folder}/pages\n'),
++            ('import blocked.caddy\n', f'import {folder}/blocked.caddy\n'),
++            ('import companies/*.caddy\n', f'import {folder}/companies/*.caddy\n'),
++            ('reverse_proxy 127.0.0.1:7600\n', f'reverse_proxy 127.0.0.1:{self.relay_port}\n'),
++            ('reverse_proxy 127.0.0.1:7000 {', f'reverse_proxy 127.0.0.1:{self.bind_port} {{'),
++            ('reverse_proxy 127.0.0.1:8080 {', f'reverse_proxy 127.0.0.1:{self.vhost_port} {{'),
++            ('\theader -Server\n', '\theader -Server\n\theader X-Test-Peer {remote_host}:{remote_port}\n'),
++        ]
++
++    def _prepare_caddy_folder(self) -> None:
++        folder = self.caddy_folder
++        (folder / 'companies').mkdir(parents=True)
++        (folder / 'companies/none.caddy').write_text('# No company on an SSH tunnel in these tests.\n')
++        shutil.copytree(ROOT / 'www', folder / 'www')
++        (folder / 'pages').mkdir()
++        for page in ('404.html', '410.html'):
++            shutil.copy(ROOT / 'relay' / page, folder / 'pages' / page)
++        self.certificates = _make_test_certificates(folder)
++        rendered = render_caddyfile((ROOT / 'Caddyfile').read_text(), self._caddy_replacements())
++        (folder / 'Caddyfile').write_text(rendered)
++        self._write_blocked()
++
++    def _write_blocked(self) -> None:
++        # relay.py names the droplet's folder of pages, and here the pages live elsewhere.
++        blocked = self.admin('banned-caddy').replace('/var/www/hornhoof-pages', f'{self.caddy_folder}/pages')
++        (self.caddy_folder / 'blocked.caddy').write_text(blocked)
++
++    def _start_caddy(self) -> None:
++        _ensure_binaries('caddy.sh')
++        self._prepare_caddy_folder()
++        folder = str(self.caddy_folder)
++        command = [str(BIN / 'caddy'), 'run', '--config', f'{folder}/Caddyfile', '--adapter', 'caddyfile']
++        # Caddy's state stays in this test's folder, never in the home of whoever runs the tests.
++        env = dict(os.environ, HOME=folder, XDG_DATA_HOME=f'{folder}/data', XDG_CONFIG_HOME=f'{folder}/config')
++        self.caddy = _Process(command, self.tmp / 'caddy.log', env=env, private=self.private)
++        self._wait_ready(self.caddy, lambda: self.https('hornhoof.org').status == 200)
++
++    def reload_caddy(self, within: float = PUBLIC_TIMEOUT) -> None:
++        self._write_blocked()
++        reloads = self.caddy.log().count(CADDY_RELOADED)
++        # admin off leaves no admin endpoint for caddy reload. Caddy rereads its file on this signal.
++        self.caddy.process.send_signal(signal.SIGUSR1)
++        if not _wait(lambda: self.caddy.log().count(CADDY_RELOADED) > reloads, within):
++            raise RuntimeError('Caddy did not reload:\n' + self.caddy.log())
++
++    def admin(self, *args: str) -> str:
++        command = [sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args]
++        return subprocess.run(command, env=self.env, check=True, capture_output=True, text=True, timeout=30).stdout
++
++    def https(self, host: str, path: str = '/', *, sni: object = SAME_AS_HOST, keep: bool = False,
++              method: str = 'GET', body: bytes = b'') -> Answer | tuple[Answer, KeptConnection | None]:
++        try:
++            sock = _tls_socket(self.https_port, host if sni is SAME_AS_HOST else sni)
++        except OSError as error:
++            return (_failed(error), None) if keep else _failed(error)
++        kept = KeptConnection(sock, host, _dns_names(sock.getpeercert(binary_form=True)))
++        answer = kept.ask(path, method, body)
++        if keep:
++            self.kept_connections.append(kept)
++            return answer, kept
++        kept.close()
++        return answer
++
++    def http(self, host: str, path: str = '/') -> Answer:
++        try:
++            sock = socket.create_connection(('127.0.0.1', self.http_port), timeout=PUBLIC_TIMEOUT)
++        except OSError as error:
++            return _failed(error)
++        kept = KeptConnection(sock, host, [])
++        answer = kept.ask(path)
++        kept.close()
++        return answer
++
+     def bind(self, name: str | None = None) -> dict:
+         status, body = self.api('POST', '/api/v1/bindings', {} if name is None else {'name': name})
+         if status != 201 or not isinstance(body, dict):
+             raise AssertionError(f'Binding failed with HTTP {status}')
+         self.private.append(body['key'])
+         return body
+ 
+     def client(self, name: str, key: str | None, *, settings: str = 'today',
+                client: str | None = None, proxies: str | None = None,
+-               visitor_key: str | None = None) -> Client:
++               visitor_key: str | None = None, via: str = 'frps') -> Client:
+         if settings not in {'today', 'network'}:
+             raise ValueError('Unknown client settings')
+         config = [
+-            'serverAddr = "127.0.0.1"', f'serverPort = {self.bind_port}',
++            'serverAddr = "127.0.0.1"', *self._way_in(via),
+             'loginFailExit = false', 'log.to = "console"', 'log.level = "info"',
+-            'log.disablePrintColor = true', 'transport.protocol = "websocket"',
++            'log.disablePrintColor = true',
+         ]
+         if settings == 'today':
+             config.extend(['transport.heartbeatInterval = 30', 'transport.heartbeatTimeout = 90'])
+         else:
+             config.extend(['transport.heartbeatInterval = -1', 'transport.tcpMuxKeepaliveInterval = 10'])
+         if client is not None:
+             config.extend([f'clientID = {json.dumps(client)}', f'metadatas.client = {json.dumps(client)}'])
+         config.append(f'metadatas.name = {json.dumps(name)}')
+         if key is not None:
+             config.append(f'metadatas.key = {json.dumps(key)}')
+@@ -315,20 +533,32 @@ requestHeaders.set.x-forwarded-proto = "https"
+         number = len(self.clients)
+         config_path = self.tmp / f'frpc-{number}.toml'
+         self._write_config(config_path, '\n'.join(config) + '\n')
+         process = Client(
+             [str(BIN / 'frpc'), '-c', str(config_path)], self.tmp / f'frpc-{number}.log',
+             private=self.private,
+         )
+         self.clients.append(process)
+         return process
+ 
++    def _way_in(self, via: str) -> list[str]:
++        if via == 'frps':
++            return [f'serverPort = {self.bind_port}', 'transport.protocol = "websocket"']
++        if via == 'caddy':
++            # As Hornhoof's frpc does (apps/server/src/modules/link/client.ts), trusting the test CA.
++            return [
++                f'serverPort = {self.https_port}', 'transport.protocol = "wss"',
++                'transport.tls.serverName = "hornhoof.org"',
++                f'transport.tls.trustedCaFile = {json.dumps(str(self.certificates.ca))}',
++            ]
++        raise ValueError('Unknown way in')
++
+     def get(self, host: str, path: str = '/') -> int:
+         status, _ = _request(self.vhost_port, 'GET', path, headers={'Host': host})
+         return status
+ 
+     def api(self, method: str, path: str, body: dict | None = None,
+             key: str | None = None) -> tuple[int, dict | None]:
+         headers = {}
+         if key is not None:
+             headers['Authorization'] = f'Bearer {key}'
+         payload = None
+diff --git a/relay/test/test_edge_today.py b/relay/test/test_edge_today.py
+new file mode 100644
+index 0000000..f5720d5
+--- /dev/null
++++ b/relay/test/test_edge_today.py
+@@ -0,0 +1,361 @@
++"""Today's edge pinned: the repo's own Caddyfile on a real Caddy, in front of a real frps and relay."""
++
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++import json
++import os
++from pathlib import Path
++import shutil
++import socket
++import stat
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import unittest
++
++if __package__:
++    from .harness import BIN, Client, ROOT, Stack, _Process, _dns_names, _ensure_binaries, render_caddyfile
++else:
++    from harness import BIN, Client, ROOT, Stack, _Process, _dns_names, _ensure_binaries, render_caddyfile
++
++
++SCRIPT = BIN.parent / 'caddy.sh'
++FAKE_CURL = '''#!/bin/sh
++# Stands in for the download: it records the address asked for and hands back a file that is not the release.
++while [ "$#" -gt 0 ]; do
++  case "$1" in
++    -o) shift; output=$1 ;;
++    https://*) printf '%s\\n' "$1" >> "$ADDRESSES" ;;
++  esac
++  shift
++done
++printf 'not the release' > "$output"
++'''
++FAKE_UNAME = '''#!/bin/sh
++case "$1" in
++  -s) printf '%s\\n' "$FAKE_OS" ;;
++  -m) printf '%s\\n' "$FAKE_ARCH" ;;
++esac
++'''
++
++
++class _Recorder(BaseHTTPRequestHandler):
++    """Answers with the method and body it got, which the harness's echo server does not read."""
++
++    def do_PUT(self) -> None:
++        received = self.rfile.read(int(self.headers['Content-Length']))
++        data = json.dumps({'method': self.command, 'body': received.decode()}).encode()
++        self.send_response(200)
++        self.send_header('Content-Length', str(len(data)))
++        self.end_headers()
++        self.wfile.write(data)
++
++    def log_message(self, fmt: str, *args: object) -> None:
++        pass
++
++
++class CaddyDownloadTests(unittest.TestCase):
++    """caddy.sh in a folder of its own, with the network replaced, so that no test here reaches the release."""
++
++    def setUp(self) -> None:
++        self.folder = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-caddy-sh-')))
++        shutil.copy(SCRIPT, self.folder / 'caddy.sh')
++        self.addresses = self.folder / 'addresses'
++        fakes = self.folder / 'fakes'
++        fakes.mkdir()
++        self.write_executable(fakes / 'curl', FAKE_CURL)
++        self.write_executable(fakes / 'uname', FAKE_UNAME)
++        self.path = f'{fakes}{os.pathsep}{os.environ["PATH"]}'
++
++    @staticmethod
++    def write_executable(path: Path, text: str) -> None:
++        path.write_text(text)
++        path.chmod(path.stat().st_mode | stat.S_IXUSR)
++
++    def run_script(self, os_name: str, arch: str) -> subprocess.CompletedProcess:
++        return subprocess.run(
++            ['sh', str(self.folder / 'caddy.sh')], capture_output=True, text=True, timeout=30,
++            env=dict(os.environ, PATH=self.path, ADDRESSES=str(self.addresses),
++                     FAKE_OS=os_name, FAKE_ARCH=arch),
++        )
++
++    def asked_for(self) -> list[str]:
++        return self.addresses.read_text().splitlines() if self.addresses.exists() else []
++
++    def test_wrong_checksum_fails_and_installs_nothing(self) -> None:
++        for os_name, arch, platform in (
++            ('Linux', 'x86_64', 'linux_amd64'), ('Linux', 'amd64', 'linux_amd64'),
++            ('Linux', 'aarch64', 'linux_arm64'), ('Linux', 'arm64', 'linux_arm64'),
++            ('Darwin', 'x86_64', 'mac_amd64'), ('Darwin', 'arm64', 'mac_arm64'),
++        ):
++            with self.subTest(os=os_name, arch=arch):
++                self.addresses.unlink(missing_ok=True)
++                result = self.run_script(os_name, arch)
++                self.assertNotEqual(result.returncode, 0, result.stderr)
++                self.assertEqual(len(self.asked_for()), 1)
++                self.assertRegex(
++                    self.asked_for()[0],
++                    r'^https://github\.com/caddyserver/caddy/releases/download/'
++                    rf'v(2\.11\.\d+)/caddy_\1_{platform}\.tar\.gz$',
++                )
++                self.assertEqual(os.listdir(self.folder / '.bin'), [])
++
++    def test_unknown_platform_fails_before_any_download(self) -> None:
++        for os_name, arch in (('Plan9', 'x86_64'), ('Linux', 'mips')):
++            with self.subTest(os=os_name, arch=arch):
++                result = self.run_script(os_name, arch)
++                self.assertNotEqual(result.returncode, 0, result.stderr)
++                self.assertEqual(self.asked_for(), [])
++
++    def test_installed_caddy_is_kept_without_a_download(self) -> None:
++        (self.folder / '.bin').mkdir()
++        installed = self.folder / '.bin/caddy'
++        self.write_executable(installed, 'already here')
++        result = self.run_script('Linux', 'x86_64')
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(self.asked_for(), [])
++        self.assertEqual(installed.read_text(), 'already here')
++
++
++class RenderTests(unittest.TestCase):
++    def test_every_replacement_is_applied_in_order(self) -> None:
++        rendered = render_caddyfile('one\ntwo\n', [('one', 'uno'), ('two\n', 'dos\n'), ('uno', 'eins')])
++        self.assertEqual(rendered, 'eins\ndos\n')
++
++    def test_a_replacement_that_finds_nothing_raises(self) -> None:
++        with self.assertRaisesRegex(ValueError, 'gone from the file'):
++            render_caddyfile('one\n', [('one', 'uno'), ('gone from the file', 'x')])
++
++
++class EdgeCase(unittest.TestCase):
++    def setUp(self) -> None:
++        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-edge-'))
++        self.stack = self.enterContext(Stack(self.tmp, caddy=True))
++
++    def company_online(self, name: str) -> Client:
++        binding = self.stack.bind(name)
++        client = self.stack.client(name, binding['key'], via='caddy')
++        self.assertTrue(client.started(name), client.log())
++        return client
++
++
++class EdgeTodayTests(EdgeCase):
++    def test_stub(self) -> None:
++        stub = self.stack.https('hornhoof.org')
++        self.assertEqual(stub.status, 200)
++        self.assertIn(b'<title>Hornhoof</title>', stub.body)
++        www = self.stack.https('www.hornhoof.org')
++        # The Caddyfile's redir says permanent, which Caddy answers with 301. Its own http redirect below is 308.
++        self.assertEqual(www.status, 301)
++        self.assertEqual(www.headers['Location'], 'https://hornhoof.org/')
++        plain = self.stack.http('hornhoof.org', '/x')
++        self.assertEqual(plain.status, 308)
++        self.assertEqual(plain.headers['Location'], 'https://hornhoof.org/x')
++        challenge = self.stack.http('acme.hornhoof.org', '/.well-known/acme-challenge/t')
++        self.assertEqual(challenge.status, 308)
++        self.assertEqual(challenge.headers['Location'],
++                         'https://acme.hornhoof.org/.well-known/acme-challenge/t')
++
++    def test_api_through_caddy(self) -> None:
++        # The relay's watcher probes frps every 0.5 s and health honestly says 503 until its first good probe,
++        # which can come after Caddy is up, so this waits on the answer.
++        deadline = time.monotonic() + 10
++        health = self.stack.https('hornhoof.org', '/api/v1/health')
++        while health.status != 200 and time.monotonic() < deadline:
++            time.sleep(0.05)
++            health = self.stack.https('hornhoof.org', '/api/v1/health')
++        self.assertEqual(health.status, 200)
++        self.assertIs(json.loads(health.body)['ok'], True)
++
++    def test_reserved_and_unknown(self) -> None:
++        reserved = self.stack.https('admin.hornhoof.org')
++        self.assertEqual(reserved.status, 404)
++        self.assertTrue(reserved.body == (ROOT / 'relay/404.html').read_bytes(),
++                        'a reserved name must get the body of relay/404.html')
++        self.assertEqual(self.stack.https('nobody.hornhoof.org').status, 404)
++
++    def test_http_mode_company(self) -> None:
++        self.company_online('acme')
++        answer = self.stack.https('acme.hornhoof.org')
++        self.assertEqual(answer.status, 200, answer.error)
++        self.assertIn('*.hornhoof.org', answer.cert_names)
++        # Caddy names the visitor, and frps adds the address it got the request from, so the visitor stands
++        # first, where Hornhoof reads it (apps/server/src/auth/tunnel.ts).
++        self.assertEqual(json.loads(answer.body)['xff'], '127.0.0.1, 127.0.0.1')
++        self.assertTrue(answer.headers['X-Test-Peer'].endswith(f':{answer.local_port}'),
++                        answer.headers['X-Test-Peer'])
++
++    def test_blocked_410(self) -> None:
++        self.company_online('acme')
++        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
++        self.stack.admin('ban', 'acme')
++        self.stack.reload_caddy()
++        blocked = self.stack.https('acme.hornhoof.org')
++        self.assertEqual(blocked.status, 410)
++        self.assertTrue(blocked.body == (ROOT / 'relay/410.html').read_bytes(),
++                        'a blocked name must get the body of relay/410.html')
++
++    def test_reload_leaves_a_tunnel_alone(self) -> None:
++        client = self.company_online('acme')
++        self.stack.admin('ban', 'someone-else')
++        self.stack.reload_caddy()
++        self.assertEqual(self.stack.https('someone-else.hornhoof.org').status, 410)
++        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
++        self.assertEqual(client.log().count('login to server success'), 1, client.log())
++
++
++class StackRequestTests(EdgeCase):
++    """What the later tasks rely on from Stack.https and Stack.http."""
++
++    def test_server_name_is_what_the_handshake_carries(self) -> None:
++        for server_name in ('example.com', None):
++            with self.subTest(server_name=server_name):
++                refused = self.stack.https('hornhoof.org', sni=server_name)
++                self.assertIsNone(refused.status)
++                self.assertTrue(refused.error, 'a failed handshake must say why')
++        self.assertEqual(self.stack.https('nobody.hornhoof.org', sni='hornhoof.org').status, 404)
++
++    def test_method_and_body_reach_the_company(self) -> None:
++        recorder = ThreadingHTTPServer(('127.0.0.1', 0), _Recorder)
++        self.addCleanup(recorder.server_close)
++        threading.Thread(target=recorder.serve_forever, daemon=True).start()
++        self.addCleanup(recorder.shutdown)
++        binding = self.stack.bind('acme')
++        client = self.stack.client('acme', binding['key'], via='caddy', proxies=f'''
++[[proxies]]
++name = "acme"
++type = "http"
++subdomain = "acme"
++localIP = "127.0.0.1"
++localPort = {recorder.server_port}
++''')
++        self.assertTrue(client.started('acme'), client.log())
++        answer = self.stack.https('acme.hornhoof.org', method='PUT', body=b'the body')
++        self.assertEqual(answer.status, 200, answer.error)
++        self.assertEqual(json.loads(answer.body), {'method': 'PUT', 'body': 'the body'})
++
++    def test_kept_connection_carries_a_second_request_on_the_same_socket(self) -> None:
++        self.company_online('acme')
++        first, kept = self.stack.https('acme.hornhoof.org', '/one', keep=True)
++        second = kept.again('/two')
++        self.assertEqual(first.status, 200, first.error)
++        self.assertEqual(second.status, 200, second.error)
++        self.assertEqual(json.loads(first.body)['path'], '/one')
++        self.assertEqual(json.loads(second.body)['path'], '/two')
++        self.assertEqual(json.loads(second.body)['host'], 'acme.hornhoof.org')
++        self.assertEqual(second.local_port, first.local_port)
++        self.assertEqual(second.cert_names, first.cert_names)
++        self.assertEqual(second.headers['X-Test-Peer'], first.headers['X-Test-Peer'])
++
++    def test_kept_connection_never_dials_again_once_closed(self) -> None:
++        answer, kept = self.stack.https('hornhoof.org', keep=True)
++        self.assertEqual(answer.status, 200)
++        kept.close()
++        failed = kept.again('/')
++        self.assertIsNone(failed.status)
++        self.assertIn('NotConnected', failed.error)
++        self.assertEqual(failed.local_port, answer.local_port)
++
++    def test_close_ends_caddy_and_kept_connections(self) -> None:
++        _, kept = self.stack.https('hornhoof.org', keep=True)
++        self.stack.close()
++        self.assertIsNotNone(self.stack.caddy.process.poll())
++        self.assertIn('NotConnected', kept.again('/').error)
++
++    def test_refused_connections_read_as_failures(self) -> None:
++        self.stack.caddy.stop()
++        for name, answer in (('https', self.stack.https('hornhoof.org')), ('http', self.stack.http('hornhoof.org'))):
++            with self.subTest(name):
++                self.assertIsNone(answer.status)
++                self.assertIn('ConnectionRefusedError', answer.error)
++                self.assertEqual((answer.headers, answer.body, answer.cert_names, answer.local_port),
++                                 ({}, b'', [], 0))
++
++    def test_keep_on_a_refused_connection_gives_no_connection(self) -> None:
++        self.stack.caddy.stop()
++        answer, kept = self.stack.https('hornhoof.org', keep=True)
++        self.assertIsNone(answer.status)
++        self.assertIsNone(kept)
++
++    def test_http_answer_names_its_own_port(self) -> None:
++        answer = self.stack.http('hornhoof.org')
++        self.assertGreater(answer.local_port, 0)
++        self.assertNotEqual(answer.local_port, self.stack.http_port)
++        self.assertEqual(answer.cert_names, [])
++
++
++class StackCaddyTests(EdgeCase):
++    def test_caddy_listens_on_loopback_only(self) -> None:
++        # Built from bytes because this repo's own test allows no other literal loopback address. Linux answers
++        # on the whole 127 range, so a server bound to every interface would accept here.
++        other_loopback = socket.inet_ntoa(bytes((127, 0, 0, 2)))
++        for port in (self.stack.http_port, self.stack.https_port):
++            with self.subTest(port=port), self.assertRaises(OSError):
++                socket.create_connection((other_loopback, port), timeout=2).close()
++
++    def test_caddy_state_stays_in_the_test_folder(self) -> None:
++        self.assertTrue((self.stack.caddy_folder / 'data/caddy/instance.uuid').exists())
++
++    def test_rendered_file_points_at_nothing_of_the_droplet(self) -> None:
++        settings = [line for line in (self.stack.caddy_folder / 'Caddyfile').read_text().splitlines()
++                    if not line.lstrip().startswith('#')]
++        for droplet_value in ('/etc/caddy', '/var/www', ':7600', ':7000', ':8080'):
++            with self.subTest(droplet_value):
++                self.assertEqual([line for line in settings if droplet_value in line], [])
++
++    def test_every_site_shows_the_test_certificate(self) -> None:
++        for host in ('hornhoof.org', 'www.hornhoof.org', 'acme.hornhoof.org'):
++            with self.subTest(host):
++                self.assertEqual(self.stack.https(host).cert_names,
++                                 ['hornhoof.org', 'www.hornhoof.org', '*.hornhoof.org'])
++
++    def test_caddy_asks_for_no_certificate(self) -> None:
++        self.stack.https('hornhoof.org')
++        self.assertFalse('tls.obtain' in self.stack.caddy.log(), 'Caddy must never ask for a certificate here')
++
++    def test_reload_that_never_finishes_raises(self) -> None:
++        (self.stack.caddy_folder / 'companies/none.caddy').write_text('this is not { a Caddyfile\n')
++        with self.assertRaisesRegex(RuntimeError, 'Caddy did not reload'):
++            self.stack.reload_caddy(within=1)
++
++    def test_admin_command_that_fails_raises(self) -> None:
++        with self.assertRaises(subprocess.CalledProcessError):
++            self.stack.admin('no-such-command')
++
++    def test_unknown_way_in_is_refused(self) -> None:
++        with self.assertRaisesRegex(ValueError, 'Unknown way in'):
++            self.stack.client('acme', 'key', via='elsewhere')
++
++
++class StackFailureTests(unittest.TestCase):
++    """A broken step stops the run, loudly, instead of reading as a quiet success further on."""
++
++    def setUp(self) -> None:
++        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-edge-'))
++
++    def test_no_caddy_unless_asked(self) -> None:
++        with Stack(self.tmp) as stack:
++            self.assertIsNone(stack.caddy)
++            self.assertIsNone(stack.https('hornhoof.org').status)
++
++    def test_failed_download_script_stops_the_run(self) -> None:
++        script = Path(self.tmp) / 'fails.sh'
++        script.write_text('exit 3\n')
++        with self.assertRaises(subprocess.CalledProcessError):
++            _ensure_binaries(str(script))
++
++    def test_unreadable_certificate_raises_instead_of_naming_nothing(self) -> None:
++        with self.assertRaises(subprocess.CalledProcessError):
++            _dns_names(b'not a certificate')
++
++    def test_process_that_exits_during_startup_raises_with_its_log(self) -> None:
++        process = _Process([sys.executable, '-c', 'print("why it stopped")'], Path(self.tmp) / 'process.log')
++        self.addCleanup(process.stop)
++        process.process.wait()
++        with self.assertRaisesRegex(RuntimeError, 'why it stopped'):
++            Stack._wait_ready(process, lambda: False)
++
++
++if __name__ == '__main__':
++    unittest.main()

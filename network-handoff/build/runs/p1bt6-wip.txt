@@ -1,0 +1,33 @@
+Plan 1b Task 6 (ACME through acme-client, ARI on top, Pebble), lane /home/altera/hornhoof-network/wt/p1bt6. Nothing staged or committed by me.
+
+STEPS DONE
+Step 1 failing tests, Step 2 red runs (fast and Pebble), Step 3 implementation with run.sh, configs, scripts, CI job and CONTRIBUTING line, Step 4 Done when as far as a writer runs it. Step 5 (commit) is the lead's.
+Full report: /home/altera/hornhoof-network/network-build/runs/p1bt6-report.md
+
+WHERE I STOPPED
+At a green point: the task was finished and reported as DONE_WITH_CONCERNS before the stop. No run of mine is pending. No code changed since the last checks.
+
+WHAT COMES NEXT
+1. A ruling on the open point: the plan's account() cannot find an account by its key on Pebble, because acme-client follows the 200 with an update that Pebble 2.10.1 refuses (wfe/wfe.go:1084-1090, with or without -strict). The lane ignores a failed createAccount once an account URL is held (makeOrFind, holdsAccountUrl in acme.ts). The alternative is createAccount({ onlyReturnExisting: true }) first.
+2. Review of the lane, then the whole suite, which is the lead's run and has not been run. It should name no file under test/real/; npx vitest list --filesOnly already shows 0 there.
+3. At landing: before-sign-in.test.ts (1b T2) is not in this lane, so /.well-known/acme-challenge/:token still has to enter its PUBLIC list and parameter map.
+Not run anywhere: the CI job test-real. Not tested: the 15 s timeout firing, and the awaitValid branch for a problem kept during the wait.
+
+LAST TEST OUTPUT
+From remote-p1bt6-final-20261104-224359-1047950.log, on home-api in --dind, with colours removed:
+typecheck exit 0
+lint exit 0
+tsc exit 0
+ ✓ test/real/acme.test.ts (5 tests) 5255ms
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+test:real exit 0
+ ✓ test/pins.test.ts (9 tests) 28ms
+ ✓ test/ari.test.ts (13 tests) 376ms
+ ✓ test/acme-fake.test.ts (27 tests) 827ms
+ ✓ test/challenges.test.ts (2 tests) 2201ms
+ Test Files  4 passed (4)
+      Tests  51 passed (51)
+focused exit 0
+
+Later, in the lane through light.sh, on the same code: 3 files, 42 tests passed (challenges, ari, acme-fake); tsc exit 0.

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Stands in for ssh in the tests: it "reaches" home-api by running the command in a fake home on this machine, so that
+# real rsync can talk to it and host.sh runs for real. It drops one stream on request, as a broken connection would.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -O) exit 0 ;;
+    -F|-o) shift 2 ;;
+    -M|-N|-f|-n|-T) shift ;;
+    home-api) shift; break ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || exit 0
+if [ -e "$FAKE_STATE/drop-stream" ] && [[ "$*" == *" stream "* ]]; then
+  rm -f "$FAKE_STATE/drop-stream"
+  exit 255
+fi
+cd "$FAKE_REMOTE_HOME" || exit 255
+export HOME=$FAKE_REMOTE_HOME PATH=$FAKE_REMOTE_BIN:$PATH
+exec bash -c "$*"

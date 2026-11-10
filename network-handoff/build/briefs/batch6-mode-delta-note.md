@@ -1,0 +1,5 @@
+# A delta read
+
+You raised the findings in `network-build/runs/batch6-mode-r2-agy.md`. The list given to the writer is `network-build/runs/batch6-mode-merged.md`. The package is only the fix's commits. For each Important item and each Minor the fix claims, say ADDRESSED or NOT ADDRESSED, and whether its test fails without the fix. Then read the fix itself for new breakage: a hook that now never runs, an ordering a caller relied on (`whenLead` after `start`, `settled`), a timer left alive after `stop`, a read route that still writes, and a socket refused for a person who is on a leading app.
+
+The writer departed from the list in two places, judge them: a crossing socket is refused by a second `modeGate` in `preHandler`, not on the `connection` event; the waiting update moved to the new file `updates/wait.ts`. Two things the writer left, say if either is a harm now: a request already inside its handler at a step-down still finishes its writes (Plan 3's fence should catch it, unproved until Plan 3 Task 4), and a `links.sync` in flight may write `tunnel.json` once more after the step-down. Nothing here runs against a live service.

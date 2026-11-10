@@ -1,0 +1,47 @@
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 5.73 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.05 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 111.400s
+
+OK
+done-exit 0

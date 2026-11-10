@@ -1,0 +1,6 @@
+Both services wired to data target accepted by test: True failures: 0 errors: 0
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-service-identity-probe.py", line 22, in <module>
+    assert not accepted, 'peer test did not detect the wrong app service target'
+           ^^^^^^^^^^^^
+AssertionError: peer test did not detect the wrong app service target

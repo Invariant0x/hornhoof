@@ -1,0 +1,10 @@
+test_chunked_body_is_read_whole (relay.test.test_big_body.BigBodyTests.test_chunked_body_is_read_whole) ... ok
+test_long_upload_reaches_the_company (relay.test.test_big_body.BigBodyTests.test_long_upload_reaches_the_company) ... /home/altera/hornhoof-network/hornhoof-edge/relay/test/.bin/download.KGyAjZ/caddy.tgz: OK
+ok
+test_no_body_limit_is_set (relay.test.test_big_body.BigBodyTests.test_no_body_limit_is_set) ... ok
+test_pace_spreads_chunks_over_the_whole_time (relay.test.test_big_body.BigBodyTests.test_pace_spreads_chunks_over_the_whole_time) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 75.336s
+
+OK

@@ -1,0 +1,727 @@
+# Review package: batch 3, slice writes
+
+## 6f9da7d Commit a burst of relay writes together, so that a real disk refuses no registration
+
+After a frps restart with 40 links, about 118 writes each committed under synchronous=FULL, and the threads competed for
+SQLite's lock through its busy backoff. On a real disk write() ran out its 0.8 s budget and a NewProxy was refused, which
+frpc retries only after 30 s: Review Focus 3. Measured on ext4 with 40 threads of 3 writes under a plugin budget, 5 ms a
+commit: before, 24 of 40 refused and the worst 826 ms; after, none refused and the worst 18 ms.
+
+All writers are threads of one process, so there is now one writer in the structure. write() queues its statement; the
+first in the queue takes the writer and commits every statement queued by then in one transaction, so a burst costs a few
+fsyncs however large it is. transaction() queues for the same writer, in order. SQLite's backoff remains only against
+another process, relay.py admin. Every write stays under synchronous=FULL, and its owner answers only after its commit.
+
+test_writes.py reproduces it without a real disk or 40 processes: a connection class makes each commit cost 30 ms under the
+lock, so 40 commits cannot fit one budget however the threads run. It failed on the old code with relay error: busy.
+
+Ruling: one writer with group commit, not a plain lock and not a lower synchronous - why: a lock still costs one fsync per write, 120 x 5.5 ms is 660 ms on this disk with no real margin, and synchronous=NORMAL could lose a generation at a power failure - cost if wrong: WriterQueue and its helpers in relay.py are replaced.
+Ruling: write() returns the rows it changed, where the plan says None - why: a statement may run on another thread's connection, so SELECT changes() on its owner's connection no longer answers for it; store_sync and store_visitor_key read the return value, and transaction bodies keep SELECT changes() because they run on their own connection - cost if wrong: two callers change back.
+Ruling: the thread running a commit cannot leave a stalled fsync, so that one plugin call can pass its budget, as it could before; every other plugin call stops at its budget, and its statement may still land after the refusal - why: Python cannot interrupt an fsync, and what a plugin call writes can bear it: last_seen, a route's state, and a pending row that empties within PENDING_S - cost if wrong: on a disk stalled past a budget, a refused registration can move a generation by one.
+Ruling: an API write in a commit under way waits for the outcome, past its budget if the disk stalls - why: answering 503 for a record that landed would turn the client's retry into stale_epoch - cost if wrong: an API request hangs for as long as the disk does, as it did before.
+Ruling: init_db's no-op CREATE TABLE IF NOT EXISTS now opens a write transaction through write() - why: every write goes through the one writer, as Task 4 ruled for init_db - cost if wrong: relay.py admin list exits with WriteBusy under another process's lock held past 0.8 s, where it used to answer.
+
+---
+ relay/relay.py            | 238 +++++++++++++++++++++++++++-----
+ relay/test/test_writes.py | 343 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 544 insertions(+), 37 deletions(-)
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 7490da6..60d2e9a 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -11,16 +11,17 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+ Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
+ 
+ Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
+ """
+ import base64
++import collections
+ import contextlib
+ import hashlib
+ import hmac
+ import http.client
+ import json
+ import os
+ import re
+ import secrets
+@@ -415,42 +416,205 @@ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy
+                and client_id == (row[2] if row[1] == 'legacy' else row[1]))
+     if matches:
+         return
+     log_line(f'route of {name} is online outside the relay record')
+     raise FrpsUnknown(f'frps route of {name} does not match the relay record')
+ 
+ 
+ class WriteBusy(Exception):
+-    """A SQLite write could not take the lock within its budget: refuse the op, never guess."""
++    """A SQLite write could not get its turn within its budget: refuse the op, never guess."""
+ 
+ 
+-def write(sql: str, args: tuple) -> None:
+-    """The one SQLite write of the plugin and the API.
++# The most one write waits outside a plugin call; inside one, the call's time left may be less.
++WRITE_BUDGET_S = 0.8
+ 
+-    SQLite itself retries database is locked for the write's budget (0.8 s, or the plugin
+-    call's time left, whichever is less); past the budget the write raises WriteBusy and a
+-    plugin call refuses with 'relay error: busy' (Review Focus 3).
++
++class WriteTicket:
++    """A place in the writer's queue: a statement and, after its commit, its outcome. No statement: a transaction's."""
++
++    def __init__(self, sql: str | None = None, args: tuple = ()):
++        self.sql, self.args = sql, args
++        self.claimed = False
++        self.done = False
++        self.changes = 0
++        self.error: Exception | None = None
++
++    def run(self, conn: sqlite3.Connection) -> None:
++        """A failure SQLite backed out alone is this statement's own, and the batch goes on. One that ended the
++        transaction ends the batch."""
++        try:
++            self.changes = conn.execute(self.sql, self.args).rowcount
++        except sqlite3.Error as failure:
++            if not conn.in_transaction:
++                raise
++            self.error = failure
++
++    def outcome(self) -> int:
++        """The rows the statement changed, or what stopped it."""
++        if self.error is not None:
++            raise self.error
++        return self.changes
++
++
++class WriterQueue:
++    """The one writer of this process, and the writes waiting for it in the order they came (Review Focus 3).
++
++    All writers are threads of one process, so they do not compete for SQLite's lock: SQLite's backoff sleeps up to
++    100 ms between tries, and a burst of commits, each with its own fsync, costs more than a plugin call's budget on a
++    real disk. Here the first in the queue takes the writer and commits every statement queued by then in one
++    transaction, so a burst costs a few fsyncs however large it is, and each statement's owner still answers only after
++    its commit.
+     """
+-    conn = db()
++
++    def __init__(self) -> None:
++        self.changed = threading.Condition()
++        self.queue: collections.deque[WriteTicket] = collections.deque()
++        self.taken = False
++
++    def wait_for_turn(self, ticket: WriteTicket, deadline: float) -> bool:
++        """Queue the ticket. True: this thread now holds the writer. False: another thread's commit carried it."""
++        with self.changed:
++            self.queue.append(ticket)
++            while not ticket.done:
++                left = self.time_left(ticket, deadline)
++                if left == 0:
++                    self.give_up(ticket)
++                    raise WriteBusy('no outcome from the writer within the budget')
++                if not self.taken and self.queue[0] is ticket:
++                    self.taken = True
++                    return True
++                self.changed.wait(left)
++            return False
++
++    @staticmethod
++    def time_left(ticket: WriteTicket, deadline: float) -> float | None:
++        """The seconds its owner may still wait; None: until the outcome.
++
++        Queued, that is the write's budget. In a commit under way, a plugin call has until its own end, and the API's
++        answer has to be true, so it waits for the outcome.
++        """
++        return call_deadline() if ticket.claimed else max(0.0, deadline - time.monotonic())
++
++    def give_up(self, ticket: WriteTicket) -> None:
++        """A queued ticket leaves and can never land. A claimed one may still land, which a plugin call's writes can
++        bear: last_seen, a route's state, and a pending row that frps never shows, which empties within PENDING_S."""
++        if not ticket.claimed:
++            self.leave(ticket)
++
++    def leave(self, ticket: WriteTicket) -> None:
++        with self.changed:
++            self.queue.remove(ticket)
++            self.changed.notify_all()
++
++    def claim_statements(self) -> list[WriteTicket]:
++        """The holder's batch: the queue's head up to a transaction's place, so that a transaction keeps its turn."""
++        with self.changed:
++            batch = []
++            while self.queue and self.queue[0].sql is not None:
++                ticket = self.queue.popleft()
++                ticket.claimed = True
++                batch.append(ticket)
++            return batch
++
++    def hand_back(self, batch: list[WriteTicket]) -> None:
++        """The holder is finished: its batch has its outcomes, and the next in the queue may take the writer."""
++        with self.changed:
++            for ticket in batch:
++                ticket.done = True
++            self.taken = False
++            self.changed.notify_all()
++
++
++writer = WriterQueue()
++
++
++def write_deadline() -> float:
++    """When this write's budget ends; a plugin call whose budget is spent refuses before any SQL runs."""
+     left = call_deadline()
+     if left is not None and left <= 0:
+         raise WriteBusy('plugin call budget spent')
+-    budget = 0.8 if left is None else min(0.8, left)
+-    conn.execute(f'PRAGMA busy_timeout = {max(0, int(budget * 1000))}')
++    return time.monotonic() + (WRITE_BUDGET_S if left is None else min(WRITE_BUDGET_S, left))
++
++
++@contextlib.contextmanager
++def locked_is_busy():
++    """SQLite's database is locked reads as the relay's one busy refusal."""
+     try:
+-        conn.execute(sql, args)
++        yield
+     except sqlite3.OperationalError as e:
+         if 'locked' in str(e):
+-            raise WriteBusy(f'database is locked for {budget:.2f} s') from None
++            raise WriteBusy('database is locked') from None
+         raise
++
++
++def begin_writing(conn: sqlite3.Connection, deadline: float) -> None:
++    """Open the holder's transaction. Only another process can hold SQLite's lock now: `relay.py admin`, briefly."""
++    left = deadline - time.monotonic()
++    conn.execute(f'PRAGMA busy_timeout = {max(0, int(left * 1000))}')
++    try:
++        with locked_is_busy():
++            conn.execute('BEGIN IMMEDIATE')
+     finally:
+         conn.execute('PRAGMA busy_timeout = 10000')
+ 
+ 
++def roll_back(conn: sqlite3.Connection) -> None:
++    """End a transaction a failure left open; SQLite may have ended it already."""
++    if conn.in_transaction:
++        try:
++            conn.execute('ROLLBACK')
++        except sqlite3.Error:
++            pass
++
++
++def commit_batch(conn: sqlite3.Connection, batch: list[WriteTicket]) -> None:
++    """One transaction, so one fsync, for the whole batch. A failure lands none of it, so it reaches every owner."""
++    try:
++        for ticket in batch:
++            ticket.run(conn)
++        conn.execute('COMMIT')
++    except Exception as failure:
++        roll_back(conn)
++        for ticket in batch:
++            ticket.error = failure
++
++
++def write_the_queue(conn: sqlite3.Connection, ticket: WriteTicket, deadline: float) -> None:
++    """This thread holds the writer. Refused by another process's lock, only its own budget is spent: the rest stay."""
++    batch = []
++    try:
++        begin_writing(conn, deadline)
++        batch = writer.claim_statements()
++        commit_batch(conn, batch)
++    finally:
++        if not ticket.claimed:
++            writer.leave(ticket)
++        writer.hand_back(batch)
++
++
++def write(sql: str, args: tuple) -> int:
++    """The one SQLite write of the plugin and the API: the rows it changed, on disk before it returns.
++
++    It waits for its turn for the write's budget (WRITE_BUDGET_S, or the plugin call's time left, whichever is less);
++    past the budget it raises WriteBusy and a plugin call refuses with 'relay error: busy' (Review Focus 3). Inside this
++    thread's transaction it runs at once. A statement runs on the connection of whichever thread holds the writer, so
++    its owner reads the changed rows from here and not from SELECT changes().
++    """
++    conn = db()
++    deadline = write_deadline()
++    with locked_is_busy():
++        if conn.in_transaction:
++            return conn.execute(sql, args).rowcount
++        ticket = WriteTicket(sql, args)
++        if writer.wait_for_turn(ticket, deadline):
++            write_the_queue(conn, ticket, deadline)
++        return ticket.outcome()
++
++
+ def straighten_route(name: str, row, status: str, t: int) -> None:
+     """Move the row to what frps shows; each UPDATE is guarded by the generation as read, so a row
+     rewritten since we read frps keeps its newer registration. The per-name lock is held.
+ 
+     A pending row younger than PENDING_S is a registration frps has not shown yet: it reads held
+     even when frps still shows the previous registration's offline record, because frps keeps that
+     record until the new one shows. Only an online record turns it held, age or absence empties it.
+     """
+@@ -519,26 +683,25 @@ def sync_holder(name: str, body: dict) -> bool:
+     return (row == ('held',) and route['client'] == body['client']
+             and route['generation'] == body['generation'])
+ 
+ 
+ def store_sync(name: str, body: dict, link_hash: str) -> bool:
+     """Commit only while the checked registration still holds and the authorizing binding still
+     exists, so that a post in flight across a release cannot reach the name's next owner; never
+     overwrite a newer epoch."""
+-    write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
+-          'SELECT name, ?, ?, ?, generation, ? FROM routes '
+-          "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
+-          'AND EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+-          'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
+-          'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
+-          'WHERE excluded.epoch > sync.epoch',
+-          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client'],
+-           name, link_hash))
+-    return db().execute('SELECT changes()').fetchone()[0] == 1
++    return write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
++                 'SELECT name, ?, ?, ?, generation, ? FROM routes '
++                 "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
++                 'AND EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
++                 'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
++                 'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
++                 'WHERE excluded.epoch > sync.epoch',
++                 (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client'],
++                  name, link_hash)) == 1
+ 
+ 
+ def set_sync(name: str, body: dict, link_hash: str) -> tuple[str | None, dict | None]:
+     """Serialize the frps holder check and committed write against the name's registrations."""
+     with route_lock(name):
+         if not sync_holder(name, body):
+             return 'not_holder', None
+         if body['epoch'] <= sync_of(name)['epoch']:
+@@ -899,33 +1062,35 @@ def store_new_binding(name: str, ip: str, t: int) -> str:
+     write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+           (name, key_hash(key), t, ip))
+     write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+     return key
+ 
+ 
+ @contextlib.contextmanager
+ def transaction():
+-    """One BEGIN IMMEDIATE..COMMIT block; every statement, including BEGIN and
+-    COMMIT, runs through write(), so lock acquisition draws from the one write
+-    budget and raises the same WriteBusy as a single write (G1). Any failure
+-    rolls back; a spent budget refuses instead of waiting.
++    """One BEGIN IMMEDIATE..COMMIT block on this thread's connection, holding the one writer throughout.
++
++    It queues for the writer like any write, so its wait draws from the one write budget and raises the same WriteBusy
++    (G1). Its statements run through write(). Any failure rolls back; a spent budget refuses instead of waiting.
+     """
+     conn = db()
+-    write('BEGIN IMMEDIATE', ())
++    deadline = write_deadline()
++    ticket = WriteTicket()
++    writer.wait_for_turn(ticket, deadline)
++    writer.leave(ticket)
+     try:
++        begin_writing(conn, deadline)
+         yield
+         write('COMMIT', ())
+     except BaseException:
+-        if conn.in_transaction:
+-            try:
+-                conn.execute('ROLLBACK')
+-            except sqlite3.Error:
+-                pass
++        roll_back(conn)
+         raise
++    finally:
++        writer.hand_back([])
+ 
+ 
+ # What belongs to one binding's lifetime and goes with it. The routes row stays: the generation only grows across
+ # owners, so an old holder's generation can never match a new owner's.
+ BINDING_LIFETIME_TABLES = ('visitor_keys', 'ping_keys', 'sync')
+ 
+ 
+ def release_binding(name: str, expected_hash: str | None = None) -> bool:
+@@ -968,22 +1133,21 @@ def unban_binding(name: str) -> None:
+ 
+ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
+     """R6.2: store the hash only while the binding with the authorizing key still exists.
+ 
+     A request authorized before a release or rebind cannot plant a credential for the
+     name's next owner (C2): the write re-checks the binding's key hash in the same
+     statement, and a failed check changes nothing.
+     """
+-    write('INSERT INTO visitor_keys (name, key_hash, created_at) '
+-          'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+-          'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
+-          'created_at = excluded.created_at',
+-          (name, visitor_hash, now(), name, link_hash))
+-    return db().execute('SELECT changes()').fetchone()[0] == 1
++    return write('INSERT INTO visitor_keys (name, key_hash, created_at) '
++                 'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
++                 'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
++                 'created_at = excluded.created_at',
++                 (name, visitor_hash, now(), name, link_hash)) == 1
+ 
+ 
+ def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
+     """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
+ 
+     The hash comparison prevents an in-flight request from changing a later owner's
+     key or overwriting another rotation. Retired hashes authorize only Ping from
+     frps's already authenticated sessions, tied to this binding's current hash.
+diff --git a/relay/test/test_writes.py b/relay/test/test_writes.py
+new file mode 100644
+index 0000000..5290ddb
+--- /dev/null
++++ b/relay/test/test_writes.py
+@@ -0,0 +1,343 @@
++"""The relay's SQLite writes under a burst: plan 1's Review Focus 3, without a real disk or 40 processes."""
++
++import contextlib
++import importlib.util
++import sqlite3
++import tempfile
++import threading
++import time
++import unittest
++from collections.abc import Callable
++from pathlib import Path
++from unittest.mock import patch
++
++if __package__:
++    from .harness import ROOT
++else:
++    from harness import ROOT
++
++KEY = 'k'
++# 40 commits of 30 ms under one lock are 1.2 s, so at most 26 of them fit in a write's 0.8 s budget, however the
++# threads are scheduled. Commits shared by the whole burst need only a few of those 30 ms, which leaves most of it free.
++LINKS = 40
++COMMIT_S = 0.03
++
++
++class SlowDisk(sqlite3.Connection):
++    """A disk where each commit costs COMMIT_S with SQLite's write lock held, as fsync does under synchronous=FULL.
++
++    A write outside a transaction commits by itself, so it costs the same.
++    """
++
++    commit_s = COMMIT_S
++
++    def execute(self, sql: str, *args):
++        if sql.startswith(('INSERT', 'UPDATE', 'DELETE')) and not self.in_transaction:
++            super().execute('BEGIN IMMEDIATE')
++            cursor = super().execute(sql, *args)
++            self.execute('COMMIT')
++            return cursor
++        if sql == 'COMMIT':
++            time.sleep(self.commit_s)
++        return super().execute(sql, *args)
++
++
++class StallingDisk(SlowDisk):
++    """A disk whose commit outlives the whole budget of any write that waits for it."""
++
++    commit_s = 0.9
++
++
++class FailingDisk(sqlite3.Connection):
++    """A disk that fails the first commit made on it, across all of a test's connections."""
++
++    failures_left = 0
++
++    def execute(self, sql: str, *args):
++        if sql == 'COMMIT' and FailingDisk.failures_left > 0:
++            FailingDisk.failures_left -= 1
++            raise sqlite3.OperationalError('disk I/O error')
++        return super().execute(sql, *args)
++
++
++def until(predicate: Callable[[], bool], within: float) -> None:
++    """A moment in the writer's queue can be short, so poll tightly. What relies on the moment checks its own result."""
++    deadline = time.monotonic() + within
++    while not predicate() and time.monotonic() < deadline:
++        time.sleep(0.001)
++
++
++class FullDisk(sqlite3.Connection):
++    """A disk that fills up under one statement, where SQLite ends the whole transaction by itself (SQLITE_FULL)."""
++
++    def execute(self, sql: str, *args):
++        if args == (('fills the disk',),):
++            super().execute('ROLLBACK')
++            raise sqlite3.OperationalError('database or disk is full')
++        return super().execute(sql, *args)
++
++
++@contextlib.contextmanager
++def relay_connections_are(connection_class: type[sqlite3.Connection]):
++    """Connections opened meanwhile are of this class, which is how a test stands for the disk under the relay."""
++    real_connect = sqlite3.connect
++
++    def connect(*args, **kwargs):
++        return real_connect(*args, factory=connection_class, **kwargs)
++
++    with patch.object(sqlite3, 'connect', connect):
++        yield
++
++
++class RelayWrites(unittest.TestCase):
++
++    def setUp(self) -> None:
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-writes-'))
++        spec = importlib.util.spec_from_file_location('relay_writes_under_test', ROOT / 'relay/relay.py')
++        self.relay = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(self.relay)
++        self.relay.DB_PATH = str(Path(tmp) / 'relay.db')
++        self.relay.init_db()
++        self.addCleanup(self.relay.db().close)
++
++    def bind(self, name: str) -> None:
++        self.relay.write('INSERT INTO bindings (name, key_hash, created_at) VALUES (?, ?, ?)',
++                         (name, self.relay.key_hash(KEY), self.relay.now()))
++
++    def on_threads(self, calls: list[Callable]) -> list:
++        """Each call on its own thread, all at once, as the relay's server runs them: answers, or what they raised."""
++        start = threading.Barrier(len(calls))
++        answers = [None] * len(calls)
++
++        def run(index: int, call: Callable) -> None:
++            start.wait()
++            try:
++                answers[index] = call()
++            except (self.relay.WriteBusy, sqlite3.Error) as refused:
++                answers[index] = refused
++            finally:
++                self.relay.db().close()
++
++        threads = [threading.Thread(target=run, args=item, daemon=True) for item in enumerate(calls)]
++        for thread in threads:
++            thread.start()
++        for thread in threads:
++            thread.join(30)
++        self.assertFalse(any(thread.is_alive() for thread in threads), 'a write outlived every budget')
++        return answers
++
++    def within(self, seconds: float, call: Callable) -> Callable:
++        """The call, run with a plugin call's budget of these seconds."""
++        def budgeted():
++            self.relay.call_state.end = time.monotonic() + seconds
++            try:
++                return call()
++            finally:
++                self.relay.call_state.end = None
++        return budgeted
++
++    def queued(self, count: int) -> Callable[[], bool]:
++        return lambda: len(self.relay.writer.queue) >= count
++
++    def after_queued(self, count: int, call: Callable, within: float = 5) -> Callable:
++        """The call, run once so many writes wait for the writer, which fixes who heads the queue."""
++        def in_order():
++            until(self.queued(count), within)
++            return call()
++        return in_order
++
++    def creation(self, ip: str) -> Callable:
++        return lambda: self.relay.write('INSERT INTO creations (ip, at) VALUES (?, 0)', (ip,))
++
++    def creations(self) -> set[str]:
++        return {row[0] for row in self.relay.db().execute('SELECT ip FROM creations')}
++
++    def hold_writing_until(self, release: Callable[[], bool]) -> None:
++        """A thread keeps the relay's write transaction open until told, forming a queue; returns once it is open."""
++        opened = threading.Event()
++
++        def hold() -> None:
++            try:
++                with self.relay.transaction():
++                    opened.set()
++                    until(release, 5)
++            finally:
++                self.relay.db().close()
++
++        holder = threading.Thread(target=hold, daemon=True)
++        holder.start()
++        self.addCleanup(holder.join, 5)
++        self.assertTrue(opened.wait(5), 'the holder must get its transaction')
++
++    def hold_sqlite_from_another_process(self, seconds: float) -> None:
++        """What `relay.py admin` does: SQLite's write lock taken by a connection that knows nothing of the writer."""
++        taken = threading.Event()
++
++        def hold() -> None:
++            conn = sqlite3.connect(self.relay.DB_PATH, isolation_level=None)
++            conn.execute('BEGIN IMMEDIATE')
++            taken.set()
++            time.sleep(seconds)
++            conn.execute('ROLLBACK')
++            conn.close()
++
++        holder = threading.Thread(target=hold, daemon=True)
++        holder.start()
++        self.addCleanup(holder.join, 5)
++        self.assertTrue(taken.wait(5), 'the holder must get the lock')
++
++    def login(self, name: str) -> tuple:
++        """What frps and its client would see of one Login: the answer, whether it is on record, how long it took."""
++        started = time.monotonic()
++        answer = self.relay.plugin('Login', {'metas': {'name': name, 'key': KEY}})
++        elapsed = time.monotonic() - started
++        seen = self.relay.db().execute('SELECT last_seen FROM bindings WHERE name = ?', (name,)).fetchone()[0]
++        return answer, seen is not None, elapsed < self.relay.PLUGIN_CALL_S
++
++    def test_a_burst_of_logins_on_a_slow_disk_is_refused_nowhere(self) -> None:
++        names = [f'burst{i:02d}' for i in range(LINKS)]
++        for name in names:
++            self.bind(name)
++        with relay_connections_are(SlowDisk):
++            answers = self.on_threads([lambda name=name: self.login(name) for name in names])
++        let_through = ({'reject': False, 'unchange': True}, True, True)
++        self.assertEqual([answer for answer in answers if answer != let_through], [])
++
++    def test_writers_get_their_turn_while_another_keeps_taking_the_lock(self) -> None:
++        # The lock is free only for an instant between one holder's transactions, so a writer that polls for it misses
++        # that instant for its whole budget.
++        finished = threading.Event()
++
++        def keep_taking_the_lock() -> None:
++            try:
++                while not finished.is_set():
++                    with self.relay.transaction():
++                        time.sleep(0.05)
++            finally:
++                self.relay.db().close()
++
++        holder = threading.Thread(target=keep_taking_the_lock, daemon=True)
++        holder.start()
++        self.addCleanup(holder.join, 5)
++        wanted = {f'writer{i}' for i in range(12)}
++        answers = self.on_threads([self.creation(ip) for ip in sorted(wanted)])
++        finished.set()
++        self.assertEqual([answer for answer in answers if answer != 1], [])
++        self.assertEqual(self.creations(), wanted)
++
++    def test_a_write_out_of_budget_in_the_queue_is_refused_on_time_and_never_lands(self) -> None:
++        refused = threading.Event()
++        self.hold_writing_until(refused.is_set)
++        answers = self.on_threads([self.within(0.05, self.creation('out of budget'))])
++        refused.set()
++        self.assertIsInstance(answers[0], self.relay.WriteBusy)
++        self.relay.write('INSERT INTO creations (ip, at) VALUES (?, 0)', ('later',))
++        self.assertEqual(self.creations(), {'later'}, 'a refused write must never land')
++
++    def test_a_write_refused_behind_another_process_leaves_the_others_their_budgets(self) -> None:
++        # The head of the queue spends its budget on the other process's lock, with the others queued behind it. The
++        # next head does too, and only the last one's budget outlasts the lock. Their order only sharpens the test: in
++        # any order the first two budgets end before the lock does.
++        self.hold_sqlite_from_another_process(0.5)
++        first, second, last = self.on_threads([
++            self.within(0.1, self.creation('first')),
++            self.after_queued(1, self.within(0.2, self.creation('second')), within=0.05),
++            self.after_queued(2, self.within(self.relay.PLUGIN_CALL_S, self.creation('last')), within=0.05)])
++        self.assertIsInstance(first, self.relay.WriteBusy)
++        self.assertIsInstance(second, self.relay.WriteBusy)
++        self.assertEqual(last, 1)
++        self.assertEqual(self.creations(), {'last'})
++
++    def test_a_plugin_call_stops_waiting_for_a_commit_that_outlives_its_budget(self) -> None:
++        # The first in the queue runs the commit and the API's write behind it wants the truth: both wait for the disk.
++        self.hold_writing_until(self.queued(3))
++        waited = []
++
++        def plugin_write():
++            started = time.monotonic()
++            try:
++                return self.creation('plugin')()
++            finally:
++                waited.append(time.monotonic() - started)
++
++        with relay_connections_are(StallingDisk):
++            first, api, plugin = self.on_threads([
++                self.creation('first'),
++                self.after_queued(1, self.creation('api')),
++                self.after_queued(2, self.within(0.25, plugin_write))])
++        self.assertIsInstance(plugin, self.relay.WriteBusy)
++        self.assertLess(waited[0], StallingDisk.commit_s, 'the plugin call must not wait for the stalled commit')
++        self.assertEqual((first, api), (1, 1))
++        self.assertLessEqual({'first', 'api'}, self.creations())
++
++    def assert_fails_alone(self, bad: Callable, failure: type[sqlite3.Error]) -> None:
++        """The bad statement sits between two others in one commit: its owner hears of it, and the others land."""
++        self.hold_writing_until(self.queued(3))
++        first, answer, second = self.on_threads([self.creation('first'), self.after_queued(1, bad),
++                                                 self.after_queued(2, self.creation('second'))])
++        self.assertIsInstance(answer, failure)
++        self.assertEqual((first, second), (1, 1))
++        self.assertEqual(self.creations(), {'first', 'second'})
++
++    def test_a_statement_that_breaks_a_constraint_fails_alone(self) -> None:
++        self.bind('taken')
++        self.assert_fails_alone(lambda: self.relay.write(
++            'INSERT INTO bindings (name, key_hash, created_at) VALUES (?, ?, 0)', ('taken', '-')),
++            sqlite3.IntegrityError)
++
++    def test_a_value_sqlite_cannot_store_fails_alone(self) -> None:
++        # A plugin call's fields come from a client, so one client's odd value must not undo another's commit.
++        self.assert_fails_alone(self.creation({'not': 'storable'}), sqlite3.Error)
++
++    def test_a_failure_that_ends_the_transaction_reaches_every_owner(self) -> None:
++        self.hold_writing_until(self.queued(3))
++        with relay_connections_are(FullDisk):
++            answers = self.on_threads([self.creation('first'), self.after_queued(1, self.creation('fills the disk')),
++                                       self.after_queued(2, self.creation('second'))])
++        self.assertEqual([answer for answer in answers if not isinstance(answer, sqlite3.OperationalError)], [])
++        self.assertEqual(self.creations(), set(), 'nothing of the failed transaction may land')
++
++    def test_a_failed_commit_tells_its_owners_and_frees_the_writer(self) -> None:
++        self.hold_writing_until(self.queued(8))
++        FailingDisk.failures_left = 1
++        with relay_connections_are(FailingDisk):
++            answers = self.on_threads([self.creation(f'writer{i}') for i in range(8)])
++        self.assertEqual([answer for answer in answers if not isinstance(answer, sqlite3.OperationalError)], [])
++        self.assertEqual(self.creations(), set(), 'a write lands exactly when its owner is told so')
++        self.relay.write('INSERT INTO creations (ip, at) VALUES (?, 0)', ('after',))
++        self.assertIn('after', self.creations())
++
++    def test_a_visitor_key_stored_in_a_shared_commit_answers_for_itself(self) -> None:
++        names = ['one', 'two', 'three']
++        for name in names:
++            self.bind(name)
++        self.hold_writing_until(self.queued(4))
++        link_hash = self.relay.key_hash(KEY)
++        answers = self.on_threads([lambda name=name: self.relay.store_visitor_key(name, 'hash', link_hash)
++                                   for name in names]
++                                  + [lambda: self.relay.store_visitor_key('one', 'hash', 'not the link key')])
++        self.assertEqual(answers, [True, True, True, False])
++
++    def test_a_sync_record_stored_in_a_shared_commit_answers_for_itself(self) -> None:
++        names = ['one', 'two', 'three']
++        for name in names:
++            self.bind(name)
++            self.relay.write('INSERT INTO routes (name, generation, client, run_id, type, state, since) '
++                             "VALUES (?, 1, 'holder', '', 'http', 'held', 0)", (name,))
++        self.hold_writing_until(self.queued(4))
++        link_hash = self.relay.key_hash(KEY)
++        record = {'client': 'holder', 'generation': 1, 'state': 'on', 'copy': 'copy', 'epoch': 1}
++        answers = self.on_threads([lambda name=name: self.relay.store_sync(name, record, link_hash)
++                                   for name in names]
++                                  + [lambda: self.relay.store_sync('one', record | {'client': 'not the holder'},
++                                                                   link_hash)])
++        self.assertEqual(answers, [True, True, True, False])
++
++    def test_a_commit_waits_for_the_disk(self) -> None:
++        # R2.4 wants a sync record on disk before its answer: under WAL only FULL syncs at every commit.
++        full = 2
++        self.assertEqual(self.relay.db().execute('PRAGMA synchronous').fetchone()[0], full)
++
++
++if __name__ == '__main__':
++    unittest.main()
+

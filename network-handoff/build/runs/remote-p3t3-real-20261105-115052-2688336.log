@@ -1,0 +1,122 @@
+
+> hornhoof@0.6.0 test:real
+> npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/server@0.6.0 test:real
+> sh test/real/run.sh
+
+Unable to find image 'postgres:17.11@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1' locally
+docker.io/library/postgres@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1: Pulling from library/postgres
+7f0980702fb2: Pulling fs layer
+7f824adc2669: Pulling fs layer
+1f1fbc5e4aa5: Pulling fs layer
+6fc242d221a6: Pulling fs layer
+db07174d12aa: Pulling fs layer
+3cecd013db3b: Pulling fs layer
+455e5ed72fb1: Pulling fs layer
+55f036305357: Pulling fs layer
+03f2ecc50d4c: Pulling fs layer
+bad9dce990ef: Pulling fs layer
+e6095e4c4fdd: Pulling fs layer
+904defe665c0: Pulling fs layer
+ff7cbe54dfda: Pulling fs layer
+0a26f79bdef8: Pulling fs layer
+0d9e2ab8f401: Download complete
+7f824adc2669: Download complete
+7f0980702fb2: Download complete
+1f1fbc5e4aa5: Download complete
+b822753d2803: Download complete
+3cecd013db3b: Download complete
+db07174d12aa: Download complete
+55f036305357: Download complete
+03f2ecc50d4c: Download complete
+0a26f79bdef8: Download complete
+bad9dce990ef: Download complete
+e6095e4c4fdd: Download complete
+6fc242d221a6: Download complete
+904defe665c0: Download complete
+455e5ed72fb1: Download complete
+e6095e4c4fdd: Pull complete
+6fc242d221a6: Pull complete
+bad9dce990ef: Pull complete
+904defe665c0: Pull complete
+455e5ed72fb1: Pull complete
+db07174d12aa: Pull complete
+55f036305357: Pull complete
+03f2ecc50d4c: Pull complete
+ff7cbe54dfda: Download complete
+7f824adc2669: Pull complete
+1f1fbc5e4aa5: Pull complete
+0a26f79bdef8: Pull complete
+ff7cbe54dfda: Pull complete
+7f0980702fb2: Pull complete
+3cecd013db3b: Pull complete
+Digest: sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+Status: Downloaded newer image for postgres@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+Unable to find image 'ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199' locally
+ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199: Pulling from letsencrypt/pebble
+b69492b104cf: Pulling fs layer
+17c4a357bd49: Pulling fs layer
+ab2e5a20523c: Download complete
+b69492b104cf: Download complete
+17c4a357bd49: Download complete
+17c4a357bd49: Pull complete
+b69492b104cf: Pull complete
+Digest: sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+Status: Downloaded newer image for ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+
+ [32m✓[39m test/real/auth-locks.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 3721[2mms[22m[39m
+   [32m✓[39m moving a session from before the switch [2m(2)[22m
+     [33m[2m✓[22m[39m lets two hand-overs of one session at once through, each with a session of its own[33m 314[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves no session of a person disabled during a hand-over[33m 306[2mms[22m[39m
+   [32m✓[39m the sign-in limit [2m(1)[22m
+     [33m[2m✓[22m[39m counts 100 tries at once from one address to the limit and no further[33m 850[2mms[22m[39m
+ [32m✓[39m test/real/journal.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 9796[2mms[22m[39m
+   [32m✓[39m the fence on real Postgres [2m(2)[22m
+     [33m[2m✓[22m[39m fences the app's commits and lets older builds through[33m 1979[2mms[22m[39m
+     [33m[2m✓[22m[39m fences the agent role whatever it sets[33m 1392[2mms[22m[39m
+   [32m✓[39m migrating on real Postgres [2m(2)[22m
+     [33m[2m✓[22m[39m takes the journal off for the migrations and puts it back[33m 1997[2mms[22m[39m
+     [33m[2m✓[22m[39m puts the journal back after a migration that failed, and still answers with its failure[33m 1485[2mms[22m[39m
+   [32m✓[39m a large file on real Postgres [2m(1)[22m
+     [33m[2m✓[22m[39m commits a 50 MB file within the app's limit, and journals its hash[33m 2939[2mms[22m[39m
+ [32m✓[39m test/real/postgres.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 1136[2mms[22m[39m
+   [32m✓[39m Postgres for the real tests [2m(2)[22m
+     [33m[2m✓[22m[39m brings a fresh database up to this build[33m 876[2mms[22m[39m
+ [32m✓[39m test/real/acme.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 9102[2mms[22m[39m
+   [32m✓[39m ACME against Pebble [2m(5)[22m
+     [33m[2m✓[22m[39m orders a certificate over HTTP-01, answered by the app's own route[33m 2416[2mms[22m[39m
+     [33m[2m✓[22m[39m asks when to renew, and renews once with replaces[33m 1825[2mms[22m[39m
+     [33m[2m✓[22m[39m says invalid when the app does not answer the challenge[33m 1348[2mms[22m[39m
+     [33m[2m✓[22m[39m does not ask the CA to validate while its own check fails[33m 3364[2mms[22m[39m
+ [32m✓[39m test/real/agent-sql.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 25150[2mms[22m[39m
+   [32m✓[39m the agent roles [2m(5)[22m
+     [33m[2m✓[22m[39m refuses the agent roles what would undo a fence[33m 415[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps its own settings whatever the address says[33m 400[2mms[22m[39m
+     [33m[2m✓[22m[39m cannot cancel another session of its own role[33m 2381[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses before COMMIT a text that sleeps past the lease[33m 2469[2mms[22m[39m
+     [33m[2m✓[22m[39m ends a call that runs over 5 s[33m 5391[2mms[22m[39m
+   [32m✓[39m the app's transactions [2m(4)[22m
+     [33m[2m✓[22m[39m keeps the process up and names the route when the limit ends an idle transaction[33m 6326[2mms[22m[39m
+     [33m[2m✓[22m[39m ends a transaction of the app that runs over 5 s[33m 5031[2mms[22m[39m
+   [32m✓[39m a commit that waits for a copy [2m(4)[22m
+     [33m[2m✓[22m[39m does not end the wait at its own statement timeout, and reports the cancel as not confirmed[33m 741[2mms[22m[39m
+     [33m[2m✓[22m[39m reports a cancelled wait of the agent role's commit as not confirmed[33m 376[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m28 passed[39m[22m[90m (28)[39m
+[2m   Start at [22m 11:56:03
+[2m   Duration [22m 35.48s[2m (tests 78%, import 16%, transform 6%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.2
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice

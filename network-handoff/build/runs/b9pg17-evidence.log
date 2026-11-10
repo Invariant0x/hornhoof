@@ -1,0 +1,56 @@
+Unable to find image 'postgres:17.11@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1' locally
+docker.io/library/postgres@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1: Pulling from library/postgres
+6fc242d221a6: Pulling fs layer
+1f1fbc5e4aa5: Pulling fs layer
+e6095e4c4fdd: Pulling fs layer
+0a26f79bdef8: Pulling fs layer
+7f824adc2669: Pulling fs layer
+455e5ed72fb1: Pulling fs layer
+bad9dce990ef: Pulling fs layer
+ff7cbe54dfda: Pulling fs layer
+3cecd013db3b: Pulling fs layer
+55f036305357: Pulling fs layer
+904defe665c0: Pulling fs layer
+db07174d12aa: Pulling fs layer
+03f2ecc50d4c: Pulling fs layer
+7f0980702fb2: Pulling fs layer
+0d9e2ab8f401: Download complete
+1f1fbc5e4aa5: Download complete
+e6095e4c4fdd: Download complete
+b822753d2803: Download complete
+0a26f79bdef8: Download complete
+7f824adc2669: Download complete
+bad9dce990ef: Download complete
+455e5ed72fb1: Download complete
+55f036305357: Download complete
+3cecd013db3b: Download complete
+904defe665c0: Download complete
+db07174d12aa: Download complete
+7f0980702fb2: Download complete
+03f2ecc50d4c: Download complete
+6fc242d221a6: Download complete
+6fc242d221a6: Pull complete
+e6095e4c4fdd: Pull complete
+bad9dce990ef: Pull complete
+904defe665c0: Pull complete
+455e5ed72fb1: Pull complete
+55f036305357: Pull complete
+db07174d12aa: Pull complete
+03f2ecc50d4c: Pull complete
+ff7cbe54dfda: Download complete
+1f1fbc5e4aa5: Pull complete
+0a26f79bdef8: Pull complete
+ff7cbe54dfda: Pull complete
+7f824adc2669: Pull complete
+3cecd013db3b: Pull complete
+7f0980702fb2: Pull complete
+Digest: sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+Status: Downloaded newer image for postgres@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE OPERATOR
+qualified|{"temp": "called"}
+SET
+unqualified function|{"a": "b"}
+unqualified operator|{a,b}

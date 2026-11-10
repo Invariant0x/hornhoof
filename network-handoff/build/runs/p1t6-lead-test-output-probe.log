@@ -1,0 +1,6 @@
+Induced failures: 6 generated key present in captured output: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-test-output-probe.py", line 16, in <module>
+    assert not leaked, 'unittest diagnostics exposed the generated binding key'
+           ^^^^^^^^^^
+AssertionError: unittest diagnostics exposed the generated binding key

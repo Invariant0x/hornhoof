@@ -1,0 +1,73 @@
+fsync p50=3.0 max=6.8 ms
+mode=plain burners=0 rc=0 secs=9 load=16.48 throttled_ms=0 periods=0 np=40 p50=144 p90=436 max=783 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=117 write_p50=10 write_max=735 write_total=6894 busy_writes=[]
+fsync p50=2.9 max=6.5 ms
+mode=plain burners=0 rc=0 secs=10 load=16.68 throttled_ms=0 periods=0 np=40 p50=189 p90=447 max=675 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=8 write_max=548 write_total=7135 busy_writes=[]
+fsync p50=3.0 max=6.8 ms
+mode=plain burners=0 rc=0 secs=9 load=15.56 throttled_ms=0 periods=0 np=40 p50=117 p90=345 max=545 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=113 write_p50=7 write_max=534 write_total=5957 busy_writes=[]
+fsync p50=5.7 max=6.1 ms
+mode=plain burners=0 rc=0 secs=8 load=13.47 throttled_ms=0 periods=0 np=40 p50=147 p90=352 max=595 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=6 write_max=541 write_total=7439 busy_writes=[]
+fsync p50=2.8 max=3.6 ms
+mode=plain burners=0 rc=0 secs=8 load=11.55 throttled_ms=0 periods=0 np=40 p50=113 p90=273 max=543 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=6 write_max=536 write_total=5530 busy_writes=[]
+fsync p50=2.9 max=3.3 ms
+mode=plain burners=0 rc=0 secs=8 load=10.94 throttled_ms=0 periods=0 np=40 p50=138 p90=442 max=654 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=114 write_p50=6 write_max=634 write_total=7522 busy_writes=[]
+fsync p50=5.2 max=6.0 ms
+mode=plain burners=0 rc=0 secs=9 load=9.79 throttled_ms=0 periods=0 np=40 p50=102 p90=440 max=599 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=115 write_p50=6 write_max=536 write_total=6796 busy_writes=[]
+fsync p50=2.9 max=5.7 ms
+mode=plain burners=0 rc=0 secs=8 load=9.09 throttled_ms=0 periods=0 np=40 p50=93 p90=344 max=551 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=6 write_max=532 write_total=5862 busy_writes=[]
+fsync p50=2.9 max=5.7 ms
+mode=plainshm burners=0 rc=0 secs=7 load=8.23 throttled_ms=0 periods=0 np=40 p50=3 p90=9 max=14 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=119 write_p50=0 write_max=2 write_total=23 busy_writes=[]
+fsync p50=3.8 max=6.3 ms
+mode=plainshm burners=0 rc=0 secs=8 load=7.81 throttled_ms=0 periods=0 np=40 p50=2 p90=5 max=11 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=1 write_total=19 busy_writes=[]
+fsync p50=2.9 max=5.0 ms
+mode=plainshm burners=0 rc=0 secs=7 load=6.98 throttled_ms=0 periods=0 np=40 p50=4 p90=19 max=23 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=112 write_p50=0 write_max=8 write_total=40 busy_writes=[]
+fsync p50=2.9 max=8.3 ms
+mode=plainshm burners=0 rc=0 secs=8 load=6.66 throttled_ms=0 periods=0 np=40 p50=3 p90=12 max=22 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=119 write_p50=0 write_max=3 write_total=29 busy_writes=[]
+fsync p50=2.9 max=4.3 ms
+mode=plainshm burners=0 rc=0 secs=7 load=6.10 throttled_ms=0 periods=0 np=40 p50=2 p90=4 max=14 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=117 write_p50=0 write_max=8 write_total=39 busy_writes=[]
+fsync p50=2.9 max=4.2 ms
+mode=plainshm burners=0 rc=0 secs=7 load=5.69 throttled_ms=1 periods=1 np=40 p50=2 p90=9 max=21 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=2 write_total=21 busy_writes=[]
+fsync p50=5.6 max=12.0 ms
+mode=plainshm burners=0 rc=0 secs=8 load=5.37 throttled_ms=0 periods=0 np=40 p50=2 p90=4 max=6 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=4 write_total=19 busy_writes=[]
+fsync p50=2.8 max=6.0 ms
+mode=plainshm burners=0 rc=0 secs=7 load=5.26 throttled_ms=0 periods=0 np=40 p50=2 p90=8 max=12 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=1 write_total=22 busy_writes=[]
+fsync p50=2.9 max=3.3 ms
+mode=cov burners=0 rc=0 secs=9 load=4.99 throttled_ms=0 periods=0 np=40 p50=93 p90=351 max=743 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=117 write_p50=6 write_max=734 write_total=6475 busy_writes=[]
+fsync p50=3.0 max=5.6 ms
+mode=cov burners=0 rc=0 secs=9 load=4.61 throttled_ms=0 periods=0 np=40 p50=117 p90=446 max=747 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=116 write_p50=6 write_max=736 write_total=7179 busy_writes=[]
+fsync p50=3.2 max=9.0 ms
+mode=cov burners=0 rc=0 secs=9 load=4.29 throttled_ms=0 periods=0 np=40 p50=125 p90=345 max=443 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=119 write_p50=7 write_max=436 write_total=6455 busy_writes=[]
+fsync p50=2.9 max=4.9 ms
+mode=cov burners=0 rc=0 secs=9 load=4.11 throttled_ms=0 periods=0 np=40 p50=160 p90=448 max=668 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=7 write_max=633 write_total=7788 busy_writes=[]
+fsync p50=4.0 max=37.0 ms
+mode=covshm burners=0 rc=0 secs=8 load=3.86 throttled_ms=0 periods=0 np=40 p50=3 p90=15 max=20 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=10 write_total=40 busy_writes=[]
+fsync p50=2.9 max=17.1 ms
+mode=covshm burners=0 rc=0 secs=8 load=3.42 throttled_ms=0 periods=0 np=40 p50=46 p90=75 max=109 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=115 write_p50=0 write_max=9 write_total=167 busy_writes=[]
+fsync p50=2.9 max=3.5 ms
+mode=covshm burners=0 rc=0 secs=8 load=3.23 throttled_ms=0 periods=1 np=40 p50=25 p90=61 max=88 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=114 write_p50=0 write_max=12 write_total=138 busy_writes=[]
+fsync p50=2.8 max=3.2 ms
+mode=covshm burners=0 rc=0 secs=8 load=2.89 throttled_ms=3 periods=1 np=40 p50=8 p90=22 max=27 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=119 write_p50=0 write_max=3 write_total=40 busy_writes=[]
+fsync p50=2.9 max=34.5 ms
+mode=plainshm burners=6 rc=0 secs=11 load=4.23 throttled_ms=31748 periods=116 np=40 p50=176 p90=232 max=322 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=52 write_total=171 busy_writes=[]
+fsync p50=4.0 max=40.5 ms
+mode=plainshm burners=6 rc=0 secs=11 load=5.58 throttled_ms=33133 periods=117 np=40 p50=105 p90=203 max=269 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=58 write_total=257 busy_writes=[]
+fsync p50=2.9 max=51.6 ms
+mode=plainshm burners=6 rc=0 secs=13 load=6.35 throttled_ms=25151 periods=126 np=40 p50=126 p90=272 max=370 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=119 write_p50=0 write_max=21 write_total=111 busy_writes=[]
+fsync p50=2.9 max=8.3 ms
+mode=plainshm burners=12 rc=0 secs=14 load=10.40 throttled_ms=28976 periods=133 np=40 p50=114 p90=282 max=318 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=58 write_total=266 busy_writes=[]
+fsync p50=3.0 max=44.7 ms
+mode=plainshm burners=12 rc=0 secs=14 load=13.66 throttled_ms=14154 periods=118 np=40 p50=106 p90=312 max=409 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=1 maxdash=204 writes=118 write_p50=0 write_max=75 write_total=368 busy_writes=[]
+fsync p50=2.9 max=26.2 ms
+mode=plainshm burners=12 rc=0 secs=15 load=16.18 throttled_ms=9234 periods=124 np=40 p50=119 p90=242 max=285 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=0 write_max=52 write_total=221 busy_writes=[]
+fsync p50=2.9 max=4.4 ms
+mode=plain burners=6 rc=1 secs=44 load=16.94 throttled_ms=21974 periods=371 np=40 p50=290 p90=844 max=1042 over800=5 rejected=2 reasons={'relay error: busy': 2} rejected_ms=[1042.3, 862.3] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=9 write_max=857 write_total=11007 busy_writes=[821.8]
+FAIL: test_restart_burst (test_restart.RestartTests.test_restart_burst)
+AssertionError: [{'op': 'NewProxy', 'proxy_name': 'burst19', 'run_id': '6f92cbc300367983', 'client': 'burst19-aaaaaaaa-link', 'ms': 1042.3, 'reject': True, 'reason': 'relay error: busy'}, {'op': 'NewP
+FAILED (failures=1)
+fsync p50=2.9 max=27.6 ms
+mode=plain burners=6 rc=1 secs=44 load=18.24 throttled_ms=25764 periods=334 np=40 p50=320 p90=803 max=923 over800=6 rejected=3 reasons={'relay error: busy': 3} rejected_ms=[916.4, 906.0, 922.6] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=118 write_p50=10 write_max=740 write_total=11223 busy_writes=[808.5, 810.9, 808.8]
+FAIL: test_restart_burst (test_restart.RestartTests.test_restart_burst)
+AssertionError: [{'op': 'NewProxy', 'proxy_name': 'burst37', 'run_id': '425a4f91d5febee2', 'client': 'burst37-aaaaaaaa-link', 'ms': 916.4, 'reject': True, 'reason': 'relay error: busy'}, {'op': 'NewPr
+FAILED (failures=1)
+fsync p50=2.9 max=5.2 ms
+mode=plain burners=6 rc=0 secs=14 load=17.97 throttled_ms=11634 periods=126 np=40 p50=295 p90=714 max=994 over800=3 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0 writes=120 write_p50=7 write_max=797 write_total=10208 busy_writes=[]
+diag done

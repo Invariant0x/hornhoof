@@ -1,0 +1,387 @@
+# Review package: batch 9, slice harness
+
+## f76abd60 Run the real tests against the company's Postgres 17.11 too
+
+PGlite is Postgres 18 in WASM with one connection, so what the fences and the locks need, a real server and transactions
+that wait on each other, cannot show there. run.sh now starts the image compose's db runs, with a password made at run
+time and the port on 127.0.0.1, and hands HH_REAL_PG to vitest. pg.ts gives each test file a database of its own and drops
+it with the agents' roles, which belong to the server and would outlive it.
+
+compose.test.ts holds run.sh to compose's db: the image now, and each -c as soon as compose has a command.
+
+Two debts of plan 1b fall to this harness, in auth-locks.test.ts: moveOlderSession's lock on the person's row and the
+sign-in limit's one transaction were tested only by shape. Neither test rests on timing: a client of its own holds the lock
+open and the test goes on when pg_stat_activity says the others wait. All three pass, and each was seen red on a run with
+the lock taken away and the old row marked as moved: [200, 401], 1 session left, and 35 tries let through instead of 30
+(runs/remote-p3t1-bite-*.log, never committed).
+
+Ruling: compose's db has no command until Plan 2 Task 7, so the case reads the image and the command from compose and checks each -c when it is there - why: the lead's note; the case then bites by itself - cost if wrong: a setting of Task 7's that run.sh lacks turns this case red, which is what it is for.
+Ruling: with HH_REAL_PG set run.sh starts no Postgres but still starts Pebble - why: acme.test.ts needs Pebble whichever Postgres is used - cost if wrong: a Docker run a Postgres-only caller did not need.
+Ruling: a test beyond the one per debt the lead named, a disable during a hand-over - why: two hand-overs share the person's lock, so they pass with it gone; the disable is the race that lock is for - cost if wrong: one more real test of about a second.
+Ruling: pg.ts also exports poolOf, beyond the plan's two - why: openDb answers only the database and a test has to end its connections, in two files so far - cost if wrong: one line.
+
+---
+ CONTRIBUTING.md                          |   2 +-
+ apps/server/test/compose.test.ts         |  11 +++
+ apps/server/test/real/auth-locks.test.ts | 122 +++++++++++++++++++++++++++++++
+ apps/server/test/real/pg.ts              |  54 ++++++++++++++
+ apps/server/test/real/postgres.test.ts   |  36 +++++++++
+ apps/server/test/real/run.sh             |  32 +++++++-
+ 6 files changed, 254 insertions(+), 3 deletions(-)
+
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 6dadec94..0fa76b1c 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -54,17 +54,17 @@ The repository has four parts:
+ npm test
+ npx tsc -p apps/server/tsconfig.json --noEmit
+ npx tsc -p apps/web/tsconfig.json --noEmit
+ npx tsc -p apps/node/tsconfig.json --noEmit
+ ```
+ 
+ Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
+ 
+-`npm run test:real` needs Docker and runs the tests against Pebble.
++`npm run test:real` needs Docker and runs the tests against Pebble and against Postgres 17.11, the image compose's `db` runs.
+ 
+ Coverage for crapper is `npx vitest run --coverage` in the part's folder after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
+ 
+ What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
+ 
+ ```sh
+ npx playwright install --only-shell chromium
+ npm run test:browser -w apps/web
+diff --git a/apps/server/test/compose.test.ts b/apps/server/test/compose.test.ts
+index 0df96e5d..782a25f6 100644
+--- a/apps/server/test/compose.test.ts
++++ b/apps/server/test/compose.test.ts
+@@ -49,8 +49,19 @@ describe('the built-in node', () => {
+ 
+ describe('the updater', () => {
+   /* The orchestrator's commands on the computer run in a container of the updater's own image, which is on the computer already. */
+   it('runs commands on the computer in its own image', () => {
+     const { updater } = compose.services;
+     expect(updater!.environment!.HORNHOOF_COMPUTER_IMAGE).toBe(updater!.image);
+   });
+ });
++
++describe('the real tests', () => {
++  /* The two must not drift apart: what passes there has to hold on the database a company runs. Each -c of db's command
++     is held to run.sh from the moment compose has one. */
++  it("starts the real tests' Postgres as compose starts db", () => {
++    const runScript = readFileSync(fileURLToPath(new URL('./real/run.sh', import.meta.url)), 'utf8');
++    const { image, command = [] } = compose.services.db!;
++    expect(runScript).toContain(image);
++    for (const setting of command.join(' ').match(/-c \S+/g) ?? []) expect(runScript).toContain(setting);
++  });
++});
+diff --git a/apps/server/test/real/auth-locks.test.ts b/apps/server/test/real/auth-locks.test.ts
+new file mode 100644
+index 00000000..d7f8d7b5
+--- /dev/null
++++ b/apps/server/test/real/auth-locks.test.ts
+@@ -0,0 +1,122 @@
++import type { FastifyInstance } from 'fastify';
++import pg from 'pg';
++import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
++import { buildApp } from '../../src/app.js';
++import { LINK_SESSION_COOKIE } from '../../src/auth/session.js';
++import { SIGN_IN_LIMITS, SIGN_IN_LOCK, signInTry } from '../../src/auth/sign-in-limit.js';
++import { loadConfig } from '../../src/config.js';
++import { hashToken } from '../../src/crypto/tokens.js';
++import { APP_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
++import { as, invitePerson, setUpCompany, TEST_SECRET, TUNNEL, until, viaLink } from '../helpers.js';
++import { poolOf, realDatabase, type RealDatabase } from './pg.js';
++
++/* PGlite has one connection, so what these locks are for shows only here. Nothing rests on timing: a transaction on a
++   client of its own holds a lock open, and the test goes on when the database itself says the others wait behind it. */
++const LOCK_WAIT_LIMIT_MS = 30_000;
++const SESSION_ROW = 'SELECT 1 FROM sessions WHERE token_hash = $1 FOR UPDATE';
++
++let real: RealDatabase;
++let db: Db;
++let app: FastifyInstance;
++let ceo: string;
++
++beforeAll(async () => {
++  real = await realDatabase();
++  await migrateDb(real.url);
++  db = openDb(real.url, APP_NAME);
++  app = await buildApp({ db, config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', TUNNEL_HOST: TUNNEL }) });
++  ceo = await setUpCompany(app);
++});
++
++afterAll(async () => {
++  await app.close();
++  await poolOf(db).end();
++  await real.drop();
++});
++
++/* Ending the client when the test ends rolls back what a failed test left open, so the waiting requests get to finish. */
++async function holding(text: string, values: unknown[]): Promise<pg.Client> {
++  const client = new pg.Client({ connectionString: real.url });
++  await client.connect();
++  onTestFinished(() => client.end());
++  await client.query('BEGIN');
++  await client.query(text, values);
++  return client;
++}
++
++const appSessionsWaitingOnALock = async (): Promise<number> => {
++  const { rows } = await real.admin.query<{ n: number }>(
++    "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1 AND wait_event_type = 'Lock'",
++    [APP_NAME],
++  );
++  return rows[0]!.n;
++};
++
++const untilWaiting = (count: number): Promise<void> => until(async () => (await appSessionsWaitingOnALock()) >= count, LOCK_WAIT_LIMIT_MS);
++
++describe('moving a session from before the switch', () => {
++  /* A new person's session, marked as the migration marks the rows of an older install. */
++  async function olderSessionOf(name: string): Promise<{ token: string; personId: string }> {
++    const token = await invitePerson(app, ceo, { name, email: `${name}@hornhoof.test`, access: { whole: true } });
++    const { rows } = await real.admin.query<{ person_id: string }>('UPDATE sessions SET before_host_cookie = true WHERE token_hash = $1 RETURNING person_id', [hashToken(token)]);
++    return { token, personId: rows[0]!.person_id };
++  }
++
++  const meWithOldCookie = (token: string) => app.inject({ url: '/api/me', ...viaLink(), cookies: { hh_session: token } });
++  const movedTo = (res: { cookies: { name: string; value: string }[] }): string => res.cookies.find(c => c.name === LINK_SESSION_COOKIE)!.value;
++
++  it('lets two hand-overs of one session at once through, each with a session of its own', async () => {
++    const { token, personId } = await olderSessionOf('burst');
++    const holder = await holding(SESSION_ROW, [hashToken(token)]);
++    const moves = [meWithOldCookie(token), meWithOldCookie(token)];
++    await untilWaiting(2);
++    await holder.query('COMMIT');
++    const answers = await Promise.all(moves);
++    expect(answers.map(a => a.statusCode)).toEqual([200, 200]);
++    const fresh = answers.map(movedTo);
++    expect(new Set(fresh).size).toBe(2);
++    const signedIn = await Promise.all(fresh.map(t => app.inject({ url: '/api/me', ...viaLink(t) })));
++    expect(signedIn.map(a => a.statusCode)).toEqual([200, 200]);
++    const { rows } = await real.admin.query(
++      "SELECT before_host_cookie, expires_at <= now() + interval '60 seconds' AS ends_within_a_minute FROM sessions WHERE person_id = $1 ORDER BY before_host_cookie",
++      [personId],
++    );
++    expect(rows).toEqual([
++      { before_host_cookie: false, ends_within_a_minute: false },
++      { before_host_cookie: false, ends_within_a_minute: false },
++      { before_host_cookie: true, ends_within_a_minute: true },
++    ]);
++  });
++
++  /* The hand-over holds the person's row while it waits for the session's. A disable in that moment waits on the person's
++     row too, so its delete of the person's sessions runs after the commit and sees the new session. Without that lock it
++     would delete only the sessions it could see, and the new one would come back with the person. */
++  it('leaves no session of a person disabled during a hand-over', async () => {
++    const { token, personId } = await olderSessionOf('leaving');
++    const holder = await holding(SESSION_ROW, [hashToken(token)]);
++    const move = meWithOldCookie(token);
++    await untilWaiting(1);
++    const disable = app.inject({ method: 'PATCH', url: `/api/people/${personId}`, payload: { status: 'disabled' }, ...as(ceo) });
++    await untilWaiting(2);
++    await holder.query('COMMIT');
++    const [moved, disabled] = await Promise.all([move, disable]);
++    expect(disabled.statusCode).toBe(200);
++    expect((await app.inject({ url: '/api/me', ...viaLink(movedTo(moved)) })).statusCode).toBe(401);
++    const { rows } = await real.admin.query('SELECT count(*)::int AS n FROM sessions WHERE person_id = $1', [personId]);
++    expect(rows).toEqual([{ n: 0 }]);
++  });
++});
++
++describe('the sign-in limit', () => {
++  /* A try that fails stays written, as only one that worked is taken back, so this is what 100 failures at once leave. */
++  it('counts 100 tries at once from one address to the limit and no further', async () => {
++    const holder = await holding('SELECT pg_advisory_xact_lock($1::bigint)', [SIGN_IN_LOCK]);
++    const tries = Array.from({ length: 100 }, (_, i) => signInTry(db, `x${i}@hornhoof.test`, '203.0.113.7'));
++    await untilWaiting(2);
++    await holder.query('COMMIT');
++    const answers = await Promise.all(tries);
++    expect(answers.filter(a => a.allowed)).toHaveLength(SIGN_IN_LIMITS.address.max);
++    const { rows } = await real.admin.query('SELECT count(*)::int AS n FROM sign_in_attempts');
++    expect(rows).toEqual([{ n: SIGN_IN_LIMITS.address.max }]);
++  });
++});
+diff --git a/apps/server/test/real/pg.ts b/apps/server/test/real/pg.ts
+new file mode 100644
+index 00000000..42da1992
+--- /dev/null
++++ b/apps/server/test/real/pg.ts
+@@ -0,0 +1,54 @@
++import { randomBytes } from 'node:crypto';
++import pg from 'pg';
++import { agentRole, readerRole } from '../../src/db/agent-sql.js';
++import type { Db } from '../../src/db/client.js';
++
++export interface RealDatabase {
++  url: string;
++  admin: pg.Client;
++  drop(): Promise<void>;
++}
++
++export function realServer(): string {
++  const url = process.env.HH_REAL_PG;
++  if (!url) throw new Error('run with npm run test:real');
++  return url;
++}
++
++async function connected(url: string): Promise<pg.Client> {
++  const client = new pg.Client({ connectionString: url });
++  await client.connect();
++  return client;
++}
++
++async function onServer(statements: string[]): Promise<void> {
++  const server = await connected(realServer());
++  try {
++    for (const statement of statements) await server.query(statement);
++  } finally {
++    await server.end();
++  }
++}
++
++const urlOf = (database: string): string => {
++  const url = new URL(realServer());
++  url.pathname = `/${database}`;
++  return url.href;
++};
++
++/* Each test file gets a database of its own on the one container, so the files leave nothing behind for one another. The
++   roles of the agents belong to the server, not to the database, and would outlive it. */
++export async function realDatabase(): Promise<RealDatabase> {
++  const name = `hh_${randomBytes(6).toString('hex')}`;
++  await onServer([`CREATE DATABASE ${name}`]);
++  const url = urlOf(name);
++  const admin = await connected(url);
++  const drop = async (): Promise<void> => {
++    await admin.end();
++    await onServer([`DROP DATABASE ${name} WITH (FORCE)`, `DROP ROLE IF EXISTS ${agentRole(name)}`, `DROP ROLE IF EXISTS ${readerRole(name)}`]);
++  };
++  return { url, admin, drop };
++}
++
++/* openDb answers the database alone, and a test has to end the connections behind it. */
++export const poolOf = (db: Db): pg.Pool => (db as unknown as { $client: pg.Pool }).$client;
+diff --git a/apps/server/test/real/postgres.test.ts b/apps/server/test/real/postgres.test.ts
+new file mode 100644
+index 00000000..1ee833e9
+--- /dev/null
++++ b/apps/server/test/real/postgres.test.ts
+@@ -0,0 +1,36 @@
++import { readFileSync } from 'node:fs';
++import { afterAll, beforeAll, describe, expect, it } from 'vitest';
++import { APP_NAME, migrateDb, openDb } from '../../src/db/client.js';
++import { companies } from '../../src/db/schema.js';
++import { poolOf, realDatabase, type RealDatabase } from './pg.js';
++
++const migrationsInThisBuild = (): number =>
++  (JSON.parse(readFileSync(new URL('../../drizzle/meta/_journal.json', import.meta.url), 'utf8')) as { entries: unknown[] }).entries.length;
++
++describe('Postgres for the real tests', () => {
++  let real: RealDatabase;
++  beforeAll(async () => {
++    real = await realDatabase();
++  });
++  afterAll(() => real.drop());
++
++  const setting = async (name: string): Promise<string | undefined> => (await real.admin.query<Record<string, string>>(`SHOW ${name}`)).rows[0]![name];
++
++  it("runs Postgres 17.11 with the settings of the company's db", async () => {
++    expect(await setting('server_version')).toMatch(/^17\.11/);
++    expect(await setting('wal_level')).toBe('logical');
++    expect(await setting('max_prepared_transactions')).toBe('0');
++  });
++
++  it('brings a fresh database up to this build', async () => {
++    expect(await migrateDb(real.url)).toBe(migrationsInThisBuild());
++    const db = openDb(real.url, APP_NAME);
++    try {
++      expect(await db.select().from(companies)).toEqual([]);
++      const { rows } = await real.admin.query('SELECT application_name FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1', [APP_NAME]);
++      expect(rows).toEqual([{ application_name: 'hornhoof-app' }]);
++    } finally {
++      await poolOf(db).end();
++    }
++  });
++});
+diff --git a/apps/server/test/real/run.sh b/apps/server/test/real/run.sh
+index 6e8ce899..8bc0c48e 100644
+--- a/apps/server/test/real/run.sh
++++ b/apps/server/test/real/run.sh
+@@ -1,30 +1,57 @@
+ #!/bin/sh
+-# Runs the tests that need a real ACME server against Pebble, Let's Encrypt's test CA, in a container of its own.
++# Runs the tests that need a real ACME server against Pebble, Let's Encrypt's test CA, and the tests that need real
++# Postgres against the image compose's db runs, each in a container of its own. With HH_REAL_PG set, Postgres is that one.
+ set -eu
+ 
+ PEBBLE=ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+ NAME="hornhoof-pebble-$$"
+ WAIT_SECONDS=30
++POSTGRES=postgres:17.11@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
++PG_NAME="hornhoof-pg-$$"
++PG_WAIT_SECONDS=60
+ 
+ if ! docker info > /dev/null 2>&1; then
+   echo 'test:real needs Docker' >&2
+   exit 1
+ fi
+ 
+ TEMP=$(mktemp -d)
+ cleanup() {
+-  docker rm -f "$NAME" > /dev/null 2>&1 || true
++  docker rm -f "$NAME" "$PG_NAME" > /dev/null 2>&1 || true
+   rm -rf "$TEMP"
+ }
+ trap cleanup EXIT
+ trap 'exit 130' INT
+ trap 'exit 143' TERM
+ 
++# pg_isready over TCP, since the image's first start runs a server on its socket alone and then restarts it.
++start_postgres() {
++  password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
++  docker run --detach --name "$PG_NAME" -e POSTGRES_PASSWORD="$password" -p 127.0.0.1::5432 "$POSTGRES" \
++    -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10 -c max_prepared_transactions=0 > /dev/null
++  waited=0
++  until docker exec "$PG_NAME" pg_isready -h 127.0.0.1 -U postgres > /dev/null 2>&1; do
++    waited=$((waited + 1))
++    if [ "$waited" -ge "$PG_WAIT_SECONDS" ]; then
++      echo "Postgres did not answer within $PG_WAIT_SECONDS seconds" >&2
++      docker logs "$PG_NAME" >&2
++      exit 1
++    fi
++    sleep 1
++  done
++  published=$(docker port "$PG_NAME" 5432/tcp | head -n 1)
++  HH_REAL_PG="postgres://postgres:$password@127.0.0.1:${published##*:}/postgres"
++}
++
++if [ -z "${HH_REAL_PG:-}" ]; then
++  start_postgres
++fi
++
+ # PEBBLE_VA_NOSLEEP drops the delay Pebble adds before each validation, which only slows these tests down.
+ docker run --detach --name "$NAME" -e PEBBLE_VA_NOSLEEP=1 -p 14000:14000 -p 15000:15000 \
+   --add-host acme.test:host-gateway "$PEBBLE" -config test/config/pebble-config.json -strict > /dev/null
+ 
+ waited=0
+ until curl -ksf https://localhost:14000/dir > /dev/null 2>&1; do
+   waited=$((waited + 1))
+   if [ "$waited" -ge "$WAIT_SECONDS" ]; then
+@@ -33,12 +60,13 @@ until curl -ksf https://localhost:14000/dir > /dev/null 2>&1; do
+     exit 1
+   fi
+   sleep 1
+ done
+ 
+ # Pebble's test CA stays in its image and is copied out at run time, so no certificate is ever committed.
+ docker cp "$NAME:/test/certs/pebble.minica.pem" "$TEMP/ca.pem" > /dev/null
+ 
++HH_REAL_PG="$HH_REAL_PG" \
+ NODE_EXTRA_CA_CERTS="$TEMP/ca.pem" \
+ PEBBLE_DIRECTORY=https://localhost:14000/dir \
+ PEBBLE_MANAGEMENT=https://localhost:15000 \
+   npx vitest run -c vitest.real.config.ts
+

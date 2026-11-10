@@ -1,0 +1,120 @@
+UNCOVERED relay/relay.py:350 False -> True
+KILLED    relay/relay.py:385 0 -> 1
+KILLED    relay/relay.py:385 == -> !=
+UNCOVERED relay/relay.py:404 and -> or
+UNCOVERED relay/relay.py:404 == -> !=
+UNCOVERED relay/relay.py:404 1 -> 0
+UNCOVERED relay/relay.py:404 == -> !=
+UNCOVERED relay/relay.py:404 1 -> 0
+UNCOVERED relay/relay.py:582 True -> False
+UNCOVERED relay/relay.py:779 - -> +
+UNCOVERED relay/relay.py:779 * -> /
+UNCOVERED relay/relay.py:779 1 -> 0
+UNCOVERED relay/relay.py:1226 True -> False
+UNCOVERED relay/relay.py:1348 1 -> 0
+UNCOVERED relay/relay.py:1383 0 -> 1
+Function                  Namespace            Killed  Survived  Uncovered  Sites   Score
+-----------------------------------------------------------------------------------------
+__init__                  relay.relay.Window        0         0          0      0    n/a
+_dash_get                 relay.relay               0         0          0      7    n/a
+admin                     relay.relay               0         0          1     21    n/a
+allow                     relay.relay.Window        0         0          0     15    n/a
+authenticate              relay.relay               0         0          0      3    n/a
+authenticate_call         relay.relay               0         0          0      3    n/a
+authorize_link            relay.relay.Handler       0         0          0      7    n/a
+bearer_key                relay.relay.Handler       0         0          0      1    n/a
+binding_state             relay.relay               0         0          0      1    n/a
+call_deadline             relay.relay               0         0          0      1    n/a
+call_metas                relay.relay               0         0          0      1    n/a
+check_name                relay.relay               0         0          0      4    n/a
+check_route_holder        relay.relay               0         0          5      8    n/a
+client_id_reason          relay.relay               0         0          0     12    n/a
+client_ip                 relay.relay.Handler       0         0          0      2    n/a
+create_binding            relay.relay.Handler       0         0          0     22    n/a
+dash_answer               relay.relay               0         0          0      6    n/a
+dash_client_records       relay.relay               0         0          0      7    n/a
+dash_clients              relay.relay               0         0          0      1    n/a
+db                        relay.relay               0         0          0      0    n/a
+do_DELETE                 relay.relay.Handler       0         0          0     11    n/a
+do_GET                    relay.relay.Handler       0         0          0      9    n/a
+do_POST                   relay.relay.Handler       0         0          0      5    n/a
+error                     relay.relay.Handler       0         0          0      0    n/a
+frpc_config               relay.relay               0         0          0      0    n/a
+frps_answers              relay.relay               0         0          0      4    n/a
+frps_ok                   relay.relay               0         0          0      2    n/a
+frps_route                relay.relay               0         0          0      3    n/a
+frps_started_file         relay.relay               0         0          0      1    n/a
+handle_one_request        relay.relay.Handler       0         0          0      0    n/a
+handle_plugin             relay.relay.Handler       0         0          1      5    n/a
+health_answer             relay.relay.Handler       0         0          0      4    n/a
+hold_route_lock           relay.relay               0         0          1      4    n/a
+init_db                   relay.relay               0         0          0      0    n/a
+key_answer                relay.relay.Handler       0         0          0      3    n/a
+key_hash                  relay.relay               0         0          0      0    n/a
+key_kind                  relay.relay               0         0          0      6    n/a
+legacy_run_id_proven      relay.relay               0         0          1      1    n/a
+locked_route_of           relay.relay               0         0          0      0    n/a
+log_line                  relay.relay               0         0          0      1    n/a
+log_message               relay.relay.Handler       0         0          0      0    n/a
+login_reason              relay.relay               0         0          0      7    n/a
+main                      relay.relay               0         0          1      8    n/a
+malformed_id_reason       relay.relay               0         0          0      6    n/a
+malformed_user_reason     relay.relay               0         0          0      3    n/a
+name_answer               relay.relay.Handler       0         0          0      0    n/a
+now                       relay.relay               0         0          0      0    n/a
+offer_reason              relay.relay               0         0          0      4    n/a
+path_parts                relay.relay.Handler       0         0          0      2    n/a
+peer_proxy_reason         relay.relay               0         0          0      7    n/a
+ping_key_matches          relay.relay               0         0          0      4    n/a
+plugin                    relay.relay               0         0          0      2    n/a
+plugin_decide             relay.relay               0         0          0      7    n/a
+plugin_request            relay.relay.Handler       0         0          0      2    n/a
+proxy_check               relay.relay               0         0          0      4    n/a
+read_json                 relay.relay.Handler       0         0          0      3    n/a
+register_locked           relay.relay               0         0          0      1    n/a
+register_route            relay.relay               0         0          0      2    n/a
+relay_started             relay.relay               0         0          0      0    n/a
+release_binding           relay.relay               0         0          0      3    n/a
+requested_name_reason     relay.relay               0         0          0      1    n/a
+reserved_names            relay.relay               0         0          0      5    n/a
+retain_ping_keys          relay.relay               0         0          0      0    n/a
+route_answer              relay.relay.Handler       0         0          0      1    n/a
+route_body                relay.relay               0         0          0      6    n/a
+route_lock                relay.relay               0         0          0      0    n/a
+route_of                  relay.relay               0         0          0      0    n/a
+run_id_conflict           relay.relay               0         0          0      9    n/a
+run_id_recorded_elsewhere relay.relay               0         0          0      0    n/a
+send_json                 relay.relay.Handler       0         0          0      1    n/a
+service_offer_reason      relay.relay               0         0          0      2    n/a
+set_sync                  relay.relay               0         0          0      3    n/a
+shared_route_fields       relay.relay               0         0          0      0    n/a
+store_link_key            relay.relay               0         0          0      5    n/a
+store_sync                relay.relay               0         0          0      3    n/a
+store_visitor_key         relay.relay               0         0          0      3    n/a
+straighten_route          relay.relay               0         0          0      7    n/a
+sync_answer               relay.relay.Handler       0         0          0      5    n/a
+sync_copy                 relay.relay               0         0          0      3    n/a
+sync_holder               relay.relay               0         0          0      5    n/a
+sync_integer              relay.relay               0         0          0      6    n/a
+sync_of                   relay.relay               0         0          0      2    n/a
+sync_text                 relay.relay               0         0          0      4    n/a
+touch                     relay.relay               0         0          0      3    n/a
+trace_client              relay.relay               0         0          0      2    n/a
+trace_plugin              relay.relay               0         0          3      6    n/a
+trace_run_id              relay.relay               0         0          0      1    n/a
+transaction               relay.relay               0         0          0      0    n/a
+tunnel_info               relay.relay               0         0          0      0    n/a
+unban_binding             relay.relay               0         0          0      0    n/a
+upsert_route              relay.relay               0         0          0      8    n/a
+valid_sync_body           relay.relay               0         0          0      4    n/a
+visitor_hash_matches      relay.relay               0         0          0      2    n/a
+visitor_key_answer        relay.relay.Handler       0         0          0      1    n/a
+watch_frps                relay.relay               0         0          0      5    n/a
+write                     relay.relay               0         0          0      5    n/a
+wrong_key                 relay.relay.Handler       0         0          0      0    n/a
+name_live                 relay.relay               2         0          0      2 100.0%
+-----------------------------------------------------------------------------------------
+Total                                               2         0         13    356  100.0%
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/mutate/relay.relay.edn
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/mutate/relay.relay.Handler.edn
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/mutate/relay.relay.Window.edn

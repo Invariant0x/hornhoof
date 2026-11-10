@@ -1,0 +1,7 @@
+remote: snapshot p1t7-suite314-20261104-171929-151580 ready after 20 s, waiting for a slot
+remote: started after 3291 s, log /home/altera/hornhoof-network/network-build/runs/remote-p1t7-suite314-20261104-171929-151580.log
+Ran 152 tests in 492.967s
+OK
+suite314 exit=0
+remote: command exited 0 after 3790 s
+exit=0

@@ -1,0 +1,9 @@
+Source hash: 0d9ecf8103e3
+bound acme for 127.0.0.1
+released acme for 127.0.0.1
+Stale DELETE status: 204 blocked binding survives: False
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-delete-ban-probe.py", line 90, in <module>
+    assert survives, 'a DELETE authorized before the ban removed the blocked binding'
+           ^^^^^^^^
+AssertionError: a DELETE authorized before the ban removed the blocked binding

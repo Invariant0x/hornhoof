@@ -1,0 +1,4 @@
+Plan 1b Task 2: all steps done and green. Nothing pending, no run of mine is active.
+Done: Deps.onRoute and publicRoutes (health, version, robots.txt) in apps/server/src/app.ts; x-robots-tag in apps/server/src/web.ts; new apps/server/test/before-sign-in.test.ts; static.test.ts expects x-robots-tag.
+Stopped at: after the report was written (network-build/runs/p1bt2-report.md). Next: lead review and commit "Tell nothing about the company before sign-in on the link, and ask search engines to stay away".
+Last output: vitest before-sign-in, health, version, static: 4 files, 20 tests passed. tsc, typecheck:tests, eslint clean. Remote gates (label p1bt2-gates3) exit 0: crapper max 7.0, dryer no duplicates.

@@ -1,0 +1,375 @@
+# Review package: batch 6, slice sql
+
+## 38e531ae Parse the orchestrator's SQL with Postgres's own parser, ahead of the tool that will call it
+
+This is the sql-check part of Plan 3 Task 3, split into its own lane. The check stands between the orchestrator's text and
+the database and sees what the database's rights cannot, such as COMMIT or SET, or a function that runs query text. Nothing
+calls checkAgentSql yet; confirm.ts, agent-sql.ts, client.ts, database.ts, the errors and the texts stay with that task's
+writer. REFUSED_FUNCTIONS is exported from here as the one list, for that writer's PUBLIC_REVOKES to import, so there is no
+second copy. Adds libpg-query at exactly 17.7.3, which brings @pgsql/types; the lane's hard-linked node_modules went first
+and npm ci ran, by ruling 7 of the parallel map.
+
+The walk goes over every key of the parser's tree, so a node kind nobody listed cannot hide a call: nested subqueries, CTEs,
+function arguments, the SET of an UPDATE, ON CONFLICT, RETURNING and the JSON and XML table forms each have a case. Text a
+function would run as SQL is refused by the function's name and never parsed.
+
+Proved by test/sql-check.test.ts, seen red first. The first green attempt also showed one bug of its own: an INSERT was
+refused because its field selectStmt ends in Stmt like a statement kind, so the rule now wants a capital first.
+
+A deep tree costs the parser's WASM about 150 KB per stack overflow (44 MB over 300 in a probe), and the parser answered
+correctly after them; the tool's limit of 20,000 characters already reaches that depth, one call at a time.
+
+Ruling: a text holding a NUL or half a surrogate pair is refused with kind syntax, beyond the plan - why: libpg-query's copy stops at a NUL and loses its end after a lone surrogate, as lengthBytesUTF8 counts it short, while pg sends every byte, so 'SELECT 1 /*...*/;COMMIT;' parsed as one SELECT and passed the check until this guard, seen red - cost if wrong: a text nobody writes on purpose is refused.
+Ruling: INTO and any statement but the four are refused at every level of the tree, not only at the top as the plan's interface reads - why: Postgres takes INTO on the leftmost branch of a UNION and MERGE inside WITH, and ruling 4 refuses both - cost if wrong: none, ruling 4 leaves such text no use.
+Ruling: net or net_local counts as a qualifier at any place in a function's name - why: Postgres takes db.net.f() when db is the database it runs in - cost if wrong: none.
+Ruling: every failure of the parser is SqlRefused kind syntax, not only its SqlError - why: an empty text throws a plain Error and a deep tree a RangeError - cost if wrong: a parser that failed to load reads as a syntax refusal, which still runs nothing.
+Ruling: tables in net and net_local stay with the database's rights, and the check refuses only calls there - why: the plan's interface says "any call", and its real tests expect 42501 for those tables - cost if wrong: none for access, as the rights hold; only the words of the refusal differ.
+Ruling: REFUSED_FUNCTIONS lives in sql-check.ts, while the plan's interface and plan 4 name agent-sql.ts - why: the build lead's note, one list and no second copy - cost if wrong: a later task imports it from another file, or agent-sql.ts re-exports it.
+
+---
+ apps/server/package.json           |   1 +
+ apps/server/src/db/sql-check.ts    | 119 +++++++++++++++++++++++
+ apps/server/test/sql-check.test.ts | 187 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 307 insertions(+)
+
+diff --git a/apps/server/package.json b/apps/server/package.json
+index f26c6cb2..c7cbd138 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -15,16 +15,17 @@
+     "@fastify/static": "^10.1.8",
+     "@fastify/websocket": "^11.3.4",
+     "@hornhoof/protocol": "*",
+     "@modelcontextprotocol/sdk": "^1.32.2",
+     "@peculiar/x509": "1.14.3",
+     "acme-client": "5.4.0",
+     "drizzle-orm": "^0.45.4",
+     "fastify": "^5.12.7",
++    "libpg-query": "17.7.3",
+     "pg": "^8.23.1",
+     "yaml": "^2.9.1",
+     "zod": "^4.6.7"
+   },
+   "devDependencies": {
+     "@electric-sql/pglite": "^0.5.13",
+     "@types/node": "^22.20.5",
+     "@types/pg": "^8.23.1",
+diff --git a/apps/server/src/db/sql-check.ts b/apps/server/src/db/sql-check.ts
+new file mode 100644
+index 00000000..77c8d96f
+--- /dev/null
++++ b/apps/server/src/db/sql-check.ts
+@@ -0,0 +1,119 @@
++import { parse, type A_Indirection, type ColumnRef, type FuncCall, type Node } from 'libpg-query';
++
++export const ONLY_STATEMENTS = 'This tool runs only SELECT, INSERT, UPDATE, DELETE and WITH statements; Hornhoof begins and commits the transaction itself.';
++
++/* What the tool refuses by name: these reach other sessions, settings or large objects, or run query text the parser never
++   sees. 'lo_*' stands for the prefix. This is the one list: what the database takes away from PUBLIC names the same functions. */
++export const REFUSED_FUNCTIONS: string[] = [
++  'pg_cancel_backend',
++  'pg_terminate_backend',
++  'pg_reload_conf',
++  'set_config',
++  'lo_*',
++  'loread',
++  'lowrite',
++  'query_to_xml',
++  'query_to_xmlschema',
++  'query_to_xml_and_xmlschema',
++  'ts_stat',
++  'ts_rewrite',
++];
++
++const REFUSED_NAMES = new Set(REFUSED_FUNCTIONS.filter(name => !name.endsWith('*')));
++const REFUSED_PREFIXES = REFUSED_FUNCTIONS.filter(name => name.endsWith('*')).map(name => name.slice(0, -1));
++const FENCE_SCHEMAS = new Set(['net', 'net_local']);
++const ROW_STATEMENTS = new Set(['SelectStmt', 'InsertStmt', 'UpdateStmt', 'DeleteStmt']);
++
++export class SqlRefused extends Error {
++  constructor(
++    readonly kind: 'statement' | 'function' | 'syntax',
++    message: string,
++  ) {
++    super(message);
++    this.name = 'SqlRefused';
++  }
++}
++
++/* The parser has already folded an unquoted name, and a quoted one in other case names another function. */
++const isRefusedName = (name: string): boolean => REFUSED_NAMES.has(name) || REFUSED_PREFIXES.some(prefix => name.startsWith(prefix));
++const ifRefused = (name: string | undefined): string | undefined => (name !== undefined && isRefusedName(name) ? name : undefined);
++
++/* The names in a list of parser nodes; a star or an index in the list has none. */
++const namesIn = (parts: Node[] = []): string[] => parts.flatMap(part => ('String' in part && part.String.sval) || []);
++
++/* Every part but the last counts as a qualifier, as Postgres takes `db.net.f()` when db is the database it runs in. */
++function refusedCall({ funcname }: FuncCall): string | undefined {
++  const parts = namesIn(funcname);
++  const inFence = parts.slice(0, -1).some(part => FENCE_SCHEMAS.has(part));
++  return inFence ? parts.join('.') : ifRefused(parts.at(-1));
++}
++
++/* Postgres resolves `a.f` as the call f(a) when a has no such column, so the last name counts as a call. A lone name
++   never does: it can only be a column. */
++const refusedColumn = ({ fields = [] }: ColumnRef): string | undefined => (fields.length >= 2 ? ifRefused(namesIn(fields).at(-1)) : undefined);
++
++/* `(x).f` is the call f(x) when x has no such field, wherever f stands in the chain. */
++const refusedIndirection = ({ indirection }: A_Indirection): string | undefined => namesIn(indirection).find(isRefusedName);
++
++function refusedNameIn(key: string, node: unknown): string | undefined {
++  switch (key) {
++    case 'FuncCall':
++      return refusedCall(node as FuncCall);
++    case 'ColumnRef':
++      return refusedColumn(node as ColumnRef);
++    case 'A_Indirection':
++      return refusedIndirection(node as A_Indirection);
++    default:
++      return undefined;
++  }
++}
++
++/* Every statement kind of the parser's grammar starts with a capital and ends in Stmt, and its version is pinned exactly; a
++   field such as an INSERT's selectStmt starts small and only holds a kind. This looks at every level, as WITH takes a MERGE,
++   and INTO stands on the leftmost branch of a set operation, not on the statement at the top. */
++const STATEMENT_KIND = /^[A-Z]\w*Stmt$/;
++const isRefusedStatement = (key: string): boolean => key === 'intoClause' || (STATEMENT_KIND.test(key) && !ROW_STATEMENTS.has(key));
++
++/* Every key of the tree with its value, whatever kind of node holds it, so that a kind nobody listed cannot hide a call. A
++   list of what waits, not recursion, as the parser can hand back a tree thousands of levels deep. */
++function* entriesOf(tree: unknown): Generator<[string, unknown]> {
++  const waiting = [tree];
++  while (waiting.length > 0) {
++    const value = waiting.pop();
++    if (typeof value !== 'object' || value === null) continue;
++    for (const entry of Object.entries(value)) {
++      yield entry;
++      waiting.push(entry[1]);
++    }
++  }
++}
++
++function refuseWhatTheTreeHolds(tree: unknown): void {
++  for (const [key, value] of entriesOf(tree)) {
++    if (isRefusedStatement(key)) throw new SqlRefused('statement', ONLY_STATEMENTS);
++    const name = refusedNameIn(key, value);
++    if (name) throw new SqlRefused('function', `This tool does not call ${name}.`);
++  }
++}
++
++/* Whatever stops the parser stops the text: it reports a deep tree as a plain stack error, not as a parse error of its own. */
++async function parsed(text: string): Promise<unknown> {
++  try {
++    return await parse(text);
++  } catch (err) {
++    throw new SqlRefused('syntax', err instanceof Error ? err.message : String(err));
++  }
++}
++
++/* The parser reads its own copy of the text. A NUL ends that copy, and half a surrogate pair is counted short when it is
++   made, so that it loses the text's end, while the database gets all of it. Such a text could say more to the database
++   than to this check. With the u flag the class matches only a half, never a whole pair. */
++const READ_DIFFERENTLY = /[\0\uD800-\uDFFF]/u;
++const UNREADABLE = 'The text holds a NUL or a broken Unicode character, so it cannot be checked.';
++
++/* Stands between the orchestrator's text and the database: the database's rights are the first guard, this one sees what
++   rights cannot, such as COMMIT or SET. It throws SqlRefused for a text that may not run. */
++export async function checkAgentSql(text: string): Promise<void> {
++  if (READ_DIFFERENTLY.test(text)) throw new SqlRefused('syntax', UNREADABLE);
++  refuseWhatTheTreeHolds(await parsed(text));
++}
+diff --git a/apps/server/test/sql-check.test.ts b/apps/server/test/sql-check.test.ts
+new file mode 100644
+index 00000000..fe24bd5c
+--- /dev/null
++++ b/apps/server/test/sql-check.test.ts
+@@ -0,0 +1,187 @@
++import { describe, expect, it } from 'vitest';
++import { checkAgentSql, ONLY_STATEMENTS, REFUSED_FUNCTIONS, SqlRefused } from '../src/db/sql-check.js';
++
++const refusedFor = (name: string) => expect.objectContaining({ kind: 'function', message: `This tool does not call ${name}.` });
++
++describe("the check on the orchestrator's SQL", () => {
++  it.each([
++    'SELECT 1',
++    'WITH x AS (SELECT 1) SELECT * FROM x',
++    "INSERT INTO notebook_notes (id, body) VALUES (1, 'a')",
++    "UPDATE notebook_notes SET body = 'b' WHERE id = 1",
++    'DELETE FROM notebook_notes WHERE id = 1',
++    'WITH d AS (DELETE FROM notebook_notes RETURNING id) SELECT count(*) FROM d',
++    'SELECT pg_sleep(1)',
++    "SELECT 1; UPDATE notebook_notes SET body = 'b'",
++  ])('lets reads and row changes through: %s', async text => {
++    await expect(checkAgentSql(text)).resolves.toBeUndefined();
++  });
++
++  /* Each of these holds a refused name where it calls nothing, so a check that only looked for the words would stop them. */
++  it.each([
++    "SELECT 'pg_cancel_backend(1)', 'net.assert_lease'",
++    'SELECT set_config FROM agents',
++    'SELECT net.id FROM agents net',
++    'SELECT a.name, a.* FROM agents a',
++    'SELECT (a).name, tags[1] FROM agents a',
++    "SELECT lower(name), logs FROM agents",
++    '/* only a comment */',
++  ])('leaves alone what only looks like a refused name: %s', async text => {
++    await expect(checkAgentSql(text)).resolves.toBeUndefined();
++  });
++
++  const notRowChanges = [
++    'COMMIT',
++    'BEGIN',
++    'SET LOCAL synchronous_commit = local',
++    'RESET transaction_timeout',
++    'SET CONSTRAINTS ALL IMMEDIATE',
++    'DO $$ BEGIN END $$',
++    'CALL p()',
++    "PREPARE TRANSACTION 'x'",
++    'MERGE INTO agents a USING agents b ON a.id = b.id WHEN MATCHED THEN DELETE',
++    'EXPLAIN SELECT 1',
++    'SELECT 1 INTO t',
++    'CREATE TABLE t (id int)',
++  ];
++  it.each([...notRowChanges, ...notRowChanges.map(text => `SELECT 1; ${text}`)])(
++    'refuses what is not a row change, also after a first statement: %s',
++    async text => {
++      await expect(checkAgentSql(text)).rejects.toMatchObject({ kind: 'statement', message: ONLY_STATEMENTS });
++    },
++  );
++
++  /* Postgres takes INTO on the leftmost branch of a set operation, and MERGE inside WITH, so looking only at the top misses both. */
++  it.each([
++    'SELECT 1 INTO t UNION SELECT 2',
++    'WITH x AS (SELECT 1) SELECT * INTO t FROM x',
++    'WITH m AS (MERGE INTO agents a USING agents b ON a.id = b.id WHEN MATCHED THEN DELETE RETURNING a.id) SELECT * FROM m',
++  ])('refuses a statement hidden inside an allowed one: %s', async text => {
++    await expect(checkAgentSql(text)).rejects.toMatchObject({ kind: 'statement', message: ONLY_STATEMENTS });
++  });
++
++  it.each([
++    ['SELECT pg_cancel_backend(1)', 'pg_cancel_backend'],
++    ['SELECT pg_catalog.pg_terminate_backend(1)', 'pg_terminate_backend'],
++    ['SELECT pg_reload_conf()', 'pg_reload_conf'],
++    ["SELECT set_config('transaction_timeout', '0', true)", 'set_config'],
++    ["SELECT set_config('search_path', 'public', true)", 'set_config'],
++    ["SELECT lo_from_bytea(0, '\\x00')", 'lo_from_bytea'],
++    ['SELECT loread(0, 1)', 'loread'],
++    ["SELECT query_to_xml('select 1', true, true, '')", 'query_to_xml'],
++    ["SELECT * FROM ts_stat('select 1')", 'ts_stat'],
++    ["SELECT ts_rewrite('x'::tsquery, $$SELECT 'x'::tsquery, 'y'::tsquery FROM net.assert_lease('0s', NULL)$$)", 'ts_rewrite'],
++    ["SELECT net.assert_lease('0 s', NULL)", 'net.assert_lease'],
++    ['SELECT 1 FROM agents WHERE id IN (SELECT id FROM agents WHERE pg_cancel_backend(1))', 'pg_cancel_backend'],
++    ["UPDATE agents SET name = set_config('a.b', 'c', true)", 'set_config'],
++    ['SELECT (pg_backend_pid()).pg_cancel_backend', 'pg_cancel_backend'],
++    ['SELECT a.pg_terminate_backend FROM agents a', 'pg_terminate_backend'],
++  ])('refuses the functions that reach other sessions, settings, large objects or hidden queries: %s', async (text, name) => {
++    await expect(checkAgentSql(text)).rejects.toEqual(refusedFor(name));
++  });
++
++  /* Each place is one a list of node kinds could forget. */
++  it.each([
++    'WITH d AS (DELETE FROM agents WHERE pg_reload_conf() RETURNING id) SELECT * FROM d',
++    'WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r WHERE pg_reload_conf()) SELECT * FROM r',
++    'SELECT lower(coalesce(pg_reload_conf()::text, name)) FROM agents',
++    'SELECT CASE WHEN pg_reload_conf() THEN 1 END',
++    'SELECT ARRAY[pg_reload_conf()]',
++    'SELECT 1 FROM agents ORDER BY pg_reload_conf()',
++    'SELECT 1 FROM agents GROUP BY 1 HAVING pg_reload_conf()',
++    'SELECT 1 LIMIT (SELECT 1 WHERE pg_reload_conf())',
++    'SELECT count(*) FILTER (WHERE pg_reload_conf()) FROM agents',
++    'SELECT sum(1) OVER (PARTITION BY pg_reload_conf()) FROM agents',
++    'SELECT * FROM agents a, LATERAL (SELECT pg_reload_conf()) x',
++    'SELECT * FROM agents a JOIN agents b ON pg_reload_conf()',
++    'SELECT 1 UNION SELECT 1 WHERE pg_reload_conf()',
++    'SELECT 1 FROM agents WHERE EXISTS (SELECT 1 WHERE pg_reload_conf())',
++    "SELECT * FROM JSON_TABLE('[]'::jsonb, '$' PASSING pg_reload_conf() AS p COLUMNS (x int PATH '$'))",
++    "SELECT * FROM XMLTABLE('/a' PASSING (pg_reload_conf()::text::xml) COLUMNS x int)",
++    'INSERT INTO agents (name) VALUES (pg_reload_conf()::text)',
++    'INSERT INTO agents (name) SELECT pg_reload_conf()::text',
++    "INSERT INTO agents (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET name = pg_reload_conf()::text",
++    'UPDATE agents SET (name, kind) = (SELECT pg_reload_conf()::text, 1)',
++    'UPDATE agents SET name = name FROM agents b WHERE pg_reload_conf()',
++    'DELETE FROM agents USING agents b WHERE pg_reload_conf()',
++    'DELETE FROM agents RETURNING pg_reload_conf()',
++  ])('finds a refused call wherever it stands: %s', async text => {
++    await expect(checkAgentSql(text)).rejects.toEqual(refusedFor('pg_reload_conf'));
++  });
++
++  it.each([
++    ['SELECT PG_CANCEL_BACKEND(1)', 'pg_cancel_backend'],
++    ['SELECT "pg_cancel_backend"(1)', 'pg_cancel_backend'],
++    ['SELECT U&"pg\\005fcancel\\005fbackend"(1)', 'pg_cancel_backend'],
++    ['SELECT lo_unlink(1)', 'lo_unlink'],
++    ['SELECT (1).lo_unlink', 'lo_unlink'],
++    ['SELECT net_local.whatever()', 'net_local.whatever'],
++    ['SELECT * FROM net.anything(1)', 'net.anything'],
++    /* Postgres takes a three part name when its first part is the database it runs in. */
++    ["SELECT hornhoof.net.assert_lease('0 s', NULL)", 'hornhoof.net.assert_lease'],
++    ['SELECT public.t.pg_cancel_backend FROM public.t', 'pg_cancel_backend'],
++    ['SELECT ((a).name).pg_cancel_backend FROM agents a', 'pg_cancel_backend'],
++    ['SELECT (a).pg_cancel_backend.name FROM agents a', 'pg_cancel_backend'],
++  ])('sees a refused name however it is spelled: %s', async (text, name) => {
++    await expect(checkAgentSql(text)).rejects.toEqual(refusedFor(name));
++  });
++
++  /* Written out here, not read from the code, as the other side of this list is what the database takes away from PUBLIC. */
++  const refusedNames = [
++    'pg_cancel_backend',
++    'pg_terminate_backend',
++    'pg_reload_conf',
++    'set_config',
++    'lo_*',
++    'loread',
++    'lowrite',
++    'query_to_xml',
++    'query_to_xmlschema',
++    'query_to_xml_and_xmlschema',
++    'ts_stat',
++    'ts_rewrite',
++  ];
++  it('shares the names of the refused functions', () => {
++    expect(REFUSED_FUNCTIONS).toEqual(refusedNames);
++  });
++
++  it.each(refusedNames.map(entry => entry.replace('*', 'x')))('refuses %s as a call and as a field', async name => {
++    await expect(checkAgentSql(`SELECT ${name}(1)`)).rejects.toEqual(refusedFor(name));
++    await expect(checkAgentSql(`SELECT a.${name} FROM agents a`)).rejects.toEqual(refusedFor(name));
++    await expect(checkAgentSql(`SELECT (1).${name}`)).rejects.toEqual(refusedFor(name));
++  });
++
++  it.each(['COMMIT', 'SELECT pg_reload_conf()', 'SELEC 1'])('throws its own error, for the tool to tell from the database: %s', async text => {
++    await expect(checkAgentSql(text)).rejects.toBeInstanceOf(SqlRefused);
++  });
++
++  it('says what the parser says about a typo', async () => {
++    await expect(checkAgentSql('SELEC 1')).rejects.toMatchObject({ kind: 'syntax', message: expect.stringContaining('syntax error') });
++  });
++
++  /* Half a surrogate pair is counted short when the parser's copy is made, so the copy loses the text's end, while the
++     database gets all of it. Here that end is the COMMIT. A NUL ends the copy the same way. */
++  it.each([
++    'SELECT 1 /*' + '\uD800\u4E00'.repeat(4) + '*/;COMMIT;',
++    'SELECT 1\0; COMMIT',
++    "SELECT '\uDC00'",
++  ])('refuses a text the parser would read differently from the database: %j', async text => {
++    await expect(checkAgentSql(text)).rejects.toMatchObject({ kind: 'syntax' });
++  });
++
++  it('takes a text with whole characters of any size', async () => {
++    await expect(checkAgentSql("SELECT '\u{1F600} \u4E00 \u00E9'")).resolves.toBeUndefined();
++  });
++
++  it('refuses a text the parser gives up on, and still answers after it', async () => {
++    await expect(checkAgentSql(' ')).rejects.toMatchObject({ kind: 'syntax' });
++    await expect(checkAgentSql(`SELECT ${'('.repeat(100_000)}1${')'.repeat(100_000)}`)).rejects.toMatchObject({ kind: 'syntax' });
++    /* A tree this deep runs the parser out of call stack, which it reports as no parse error of its own. */
++    await expect(checkAgentSql(`SELECT 1${'+1'.repeat(100_000)}`)).rejects.toMatchObject({ kind: 'syntax' });
++    await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
++  });
++
++  it('finds a refused call at the bottom of a deep expression', async () => {
++    await expect(checkAgentSql(`SELECT pg_reload_conf()::int${'+1'.repeat(1000)}`)).rejects.toEqual(refusedFor('pg_reload_conf'));
++  });
++});
+
