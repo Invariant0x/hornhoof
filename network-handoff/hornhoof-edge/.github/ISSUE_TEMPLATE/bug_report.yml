@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Hornhoof Edge does not work as it should.
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. A security problem goes to the Security tab instead, never here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Start the local relay
+        2. Open a company link
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you run, and the output of `frps -v`.
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The system you run, like "macOS 15" or "Ubuntu 24.04".
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant relay or frps log lines. Remove keys, passwords and links with codes first.
+      render: text

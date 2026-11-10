@@ -1,0 +1,26 @@
+[Unit]
+Description=frps for the Hornhoof relay
+After=network.target hornhoof-relay.service
+Wants=hornhoof-relay.service
+
+[Service]
+User=frps
+Group=frps
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+# systemd owns /run/frps; the relay reads the file to know when frps last started.
+RuntimeDirectory=frps
+RuntimeDirectoryMode=0755
+ExecStartPost=/bin/sh -c 'date +%%s > /run/frps/started'
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+# frps takes port 443 as this unprivileged user, and may do nothing else a root process could.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
