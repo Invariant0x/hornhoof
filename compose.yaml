@@ -28,7 +28,9 @@ services:
       # The same database, secret, certificate directory and relay as the app, since the keeper reads the link with the
       # app's own code.
       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
-      HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
+      # Empty on a machine that keeps none of the company's data, which holds no secret. Where the data is kept, the
+      # keeper itself refuses to start without it.
+      HORNHOOF_SECRET: ${HORNHOOF_SECRET:-}
       ACME_DIRECTORY: ${ACME_DIRECTORY:-}
       RELAY_URL: ${RELAY_URL:-}
       # The id frpc logs in with, written once by install.sh.
@@ -36,6 +38,15 @@ services:
       # The ports this machine publishes, which the keeper reports to the app; it publishes only the peer port itself.
       HORNHOOF_PORT: ${HORNHOOF_PORT:-8080}
       HORNHOOF_PEER_PORT: ${HORNHOOF_PEER_PORT:-8180}
+      # worker on a machine that joined the company and keeps none of its data: there the keeper reaches the company's
+      # server, at the address the join command came from, with the ticket the join brought, used once.
+      HORNHOOF_ROLE: ${HORNHOOF_ROLE:-data}
+      HORNHOOF_JOIN_SERVER: ${HORNHOOF_JOIN_SERVER:-}
+      HORNHOOF_JOIN_TICKET: ${HORNHOOF_JOIN_TICKET:-}
+      # Where the other machines of the company dial this one on its local network, and the name of its host, as
+      # install.sh wrote them down.
+      HORNHOOF_ADDRESSES: ${HORNHOOF_ADDRESSES:-}
+      HORNHOOF_HOSTNAME: ${HORNHOOF_HOSTNAME:-}
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.
@@ -43,6 +54,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+        # A machine that keeps no data has no database to wait for.
+        required: false
     networks:
       - default
       - internal
@@ -70,9 +83,11 @@ services:
       # install.sh puts a random database password into .env; a server set up before that keeps the one its database
       # was made with.
       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
-      HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
+      # Compose fills these in for every service, also on a machine that runs no app and has neither: the app itself
+      # refuses to start with one of them empty.
+      HORNHOOF_SECRET: ${HORNHOOF_SECRET:-}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
-      NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+      NODE_KEY: ${NODE_KEY:-}
       # Where the company's public link comes from.
       RELAY_URL: ${RELAY_URL:-}
       # The one container whose word on https and on the visitor's address the app believes.
@@ -145,7 +160,7 @@ services:
     environment:
       # Through front, like every visitor: front holds what the node sends while the app restarts.
       HORNHOOF_SERVER: http://front:8080
-      NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+      NODE_KEY: ${NODE_KEY:-}
       # The node signs in with a key of this machine, made from NODE_KEY, which itself never travels.
       HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
       # What the computer has, which install.sh writes on a Mac, where Docker runs in a smaller system.
@@ -195,6 +210,12 @@ services:
       HORNHOOF_SERVER_DIR: ${HORNHOOF_SERVER_DIR:-}
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hornhoof}
       HORNHOOF_COMPUTER_IMAGE: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}
+      # worker: it follows the company server's build, and installs it when the keeper passes on the server's word.
+      HORNHOOF_ROLE: ${HORNHOOF_ROLE:-data}
+      # linux: it reads the machine's own addresses for the keeper, which a container cannot see.
+      HORNHOOF_HOST_OS: ${HORNHOOF_HOST_OS:-}
+      # Where the build that runs answers with its commit, when that is not the server's own health: a worker's keeper.
+      HORNHOOF_HEALTH_URL: ${HORNHOOF_HEALTH_URL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - control:/control

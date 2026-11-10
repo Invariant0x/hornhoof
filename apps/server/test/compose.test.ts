@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { parse } from 'yaml';
 import { loadConfig } from '../src/config.js';
 
-type DependsOn = Record<string, { condition: string }> | string[];
+type DependsOn = Record<string, { condition: string; required?: boolean }> | string[];
 type Service = {
   image?: string;
   command?: string[];
@@ -19,6 +19,15 @@ type Service = {
   environment?: Record<string, string>;
   security_opt?: string[];
 };
+function hasCompose(): boolean {
+  try {
+    execFileSync('docker', ['compose', 'version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const composePath = fileURLToPath(new URL('../../../compose.yaml', import.meta.url));
 const composeText = readFileSync(composePath, 'utf8');
 const compose = parse(composeText) as { services: Record<string, Service> };
@@ -77,7 +86,10 @@ describe('front, keeper and migrate', () => {
 
   it('gives the keeper the peer port, the database, the control folder and nothing of Docker', () => {
     expect(keeper!.ports).toEqual(['${HORNHOOF_PEER_PORT:-8180}:7070']);
-    expect(Object.keys(keeper!.environment!)).toEqual(['DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT']);
+    expect(Object.keys(keeper!.environment!)).toEqual([
+      'DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT',
+      'HORNHOOF_ROLE', 'HORNHOOF_JOIN_SERVER', 'HORNHOOF_JOIN_TICKET', 'HORNHOOF_ADDRESSES', 'HORNHOOF_HOSTNAME',
+    ]);
     /* Its own volume holds the machine's key, which no other service reads. */
     expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper']);
     expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
@@ -141,13 +153,51 @@ describe('the database', () => {
 });
 
 describe('the compose file', () => {
-  /* The updater loads the new file with the .env of the build before, which has only these two required lines. */
-  it('loads with a .env from before this build', () => {
-    const required = ['HORNHOOF_SECRET', 'NODE_KEY'];
-    for (const [, name, kind] of composeText.matchAll(/\$\{(\w+)(:[-?])?/g)) {
-      expect(kind === ':-' || (kind === ':?' && required.includes(name!))).toBe(true);
-    }
-    for (const service of Object.values(compose.services)) expect(() => filled(service, REQUIRED)).not.toThrow();
+  /* The updater loads the new file with the .env of the build before, and a worker's .env has no secret at all: compose
+     fills every name in every service, whatever runs, so none may stop it. */
+  it('loads with any .env: every name it reads has a default', () => {
+    for (const [, name, kind] of composeText.matchAll(/\$\{(\w+)(:[-?])?/g)) expect(kind, name).toBe(':-');
+    for (const service of Object.values(compose.services)) expect(() => filled(service, {})).not.toThrow();
+  });
+
+  it('keeps every service for a server, and the data services out on a worker', () => {
+    const overlayText = readFileSync(fileURLToPath(new URL('../../../compose.worker.yaml', import.meta.url)), 'utf8');
+    const overlay = parse(overlayText) as { services: Record<string, unknown> };
+    expect(composeText).not.toMatch(/^\s*profiles:/m);
+    expect(overlay.services).toEqual({ db: { profiles: ['data'] }, migrate: { profiles: ['data'] }, app: { profiles: ['data'] }, node: { profiles: ['data'] } });
+    /* What is left on a worker depends on nothing that is out: front on the keeper, and the keeper on the database only
+       where there is one. */
+    expect(front!.depends_on).toEqual(['keeper']);
+    expect(keeper!.depends_on).toEqual({ db: { condition: 'service_healthy', required: false } });
+    expect(compose.services.updater!.depends_on).toBeUndefined();
+    const dockerfile = readFileSync(fileURLToPath(new URL('../../../Dockerfile', import.meta.url)), 'utf8');
+    expect(dockerfile).toContain('COPY compose.worker.yaml compose.worker.yaml');
+  });
+
+  it("tells the keeper and the updater what the machine is, and the keeper where it joined", () => {
+    expect(filled(keeper!, {})).toMatchObject({ HORNHOOF_ROLE: 'data', HORNHOOF_JOIN_SERVER: '', HORNHOOF_JOIN_TICKET: '', HORNHOOF_ADDRESSES: '', HORNHOOF_HOSTNAME: '', HORNHOOF_SECRET: '' });
+    const worker = { HORNHOOF_ROLE: 'worker', HORNHOOF_JOIN_SERVER: 'http://192.168.1.7:8080', HORNHOOF_JOIN_TICKET: 't'.repeat(43), HORNHOOF_HOST_OS: 'linux', HORNHOOF_HEALTH_URL: 'http://keeper:7080/api/keeper' };
+    expect(filled(keeper!, worker)).toMatchObject({ HORNHOOF_ROLE: 'worker', HORNHOOF_JOIN_SERVER: 'http://192.168.1.7:8080', HORNHOOF_JOIN_TICKET: 't'.repeat(43) });
+    const updater = compose.services.updater!;
+    expect(filled(updater, {})).toMatchObject({ HORNHOOF_ROLE: 'data', HORNHOOF_HOST_OS: '', HORNHOOF_HEALTH_URL: '' });
+    expect(filled(updater, worker)).toMatchObject({ HORNHOOF_ROLE: 'worker', HORNHOOF_HOST_OS: 'linux', HORNHOOF_HEALTH_URL: 'http://keeper:7080/api/keeper' });
+  });
+
+  /* The other machines of the company dial these ports on the machine's local network, on a Mac as on Linux. */
+  it('publishes its ports on every interface', () => {
+    const published = Object.values(compose.services).flatMap(service => service.ports ?? []);
+    expect(published).toEqual(['${HORNHOOF_PORT:-8080}:8080', '${HORNHOOF_PEER_PORT:-8180}:7070']);
+  });
+
+  /* The services compose itself lists, where Docker is there to ask. */
+  it.runIf(hasCompose())('lists the core alone with both files, and every service with one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-compose-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    for (const name of ['compose.yaml', 'compose.worker.yaml']) writeFileSync(join(dir, name), readFileSync(fileURLToPath(new URL(`../../../${name}`, import.meta.url))));
+    writeFileSync(join(dir, '.env'), '');
+    const services = (...files: string[]) => execFileSync('docker', ['compose', ...files.flatMap(file => ['-f', file]), 'config', '--services'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').sort();
+    expect(services('compose.yaml', 'compose.worker.yaml')).toEqual(['front', 'keeper', 'updater']);
+    expect(services('compose.yaml')).toEqual(['app', 'db', 'front', 'keeper', 'migrate', 'node', 'updater']);
   });
 });
 

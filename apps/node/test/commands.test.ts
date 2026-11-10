@@ -119,6 +119,41 @@ async function fakeServer() {
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, headers, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
 }
 
+describe('set-server', () => {
+  const FRONT = 'http://host.docker.internal:8081';
+
+  it('moves the node to another address of its server and keeps who it is', async () => {
+    await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+    new Outbox(data).add({ type: 'removed' });
+    const res = await run(['set-server'], `${FRONT}\n`);
+    expect(res.code).toBe(0);
+    expect(readState(data)).toEqual({ server: FRONT, subscriptionId: 'sub-1', provider: 'claude', key: KEY });
+    expect(statSync(join(data, 'node.json')).mode & 0o777).toBe(0o600);
+    /* It is the same node of the same company, so what it still has to say is still its own. */
+    expect(new Outbox(data).pending().map(entry => entry.msg.type)).toEqual(['removed']);
+  });
+
+  it('keeps a machine node a machine node', async () => {
+    await run(['set-key'], `${SERVER} node-1 machine ${KEY}\n`);
+    expect((await run(['set-server'], `${FRONT}\n`)).code).toBe(0);
+    expect(readState(data)).toEqual({ server: FRONT, subscriptionId: 'node-1', provider: null, key: KEY });
+  });
+
+  it('refuses a line that is no address, and a node that was never set up', async () => {
+    const none = await run(['set-server'], `${FRONT}\n`);
+    expect(none.code).toBe(1);
+    expect(none.err).toContain('set-server expects one line: <server>');
+    expect(existsSync(join(data, 'node.json'))).toBe(false);
+    await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+    for (const line of ['', 'front:8080', 'ftp://front', `${FRONT} extra`]) {
+      const res = await run(['set-server'], `${line}\n`);
+      expect(res.code, line).toBe(1);
+      expect(res.err).toContain('set-server expects one line: <server>');
+    }
+    expect(readState(data)!.server).toBe(SERVER);
+  });
+});
+
 describe('set-key', () => {
   it('saves the line from the installer as a private state file', async () => {
     const res = await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);

@@ -44,6 +44,8 @@ COPY scripts/install.sh scripts/install.sh
 COPY templates templates
 # The updater takes the installer and the compose file of the build it moves to from this image.
 COPY compose.yaml compose.yaml
+# A worker's updater takes the overlay that leaves the data services out as well.
+COPY compose.worker.yaml compose.worker.yaml
 COPY --from=build /app/apps/web/dist apps/web/dist
 # The keeper runs frpc as its child, and frpc carries the company's public link from hornhoof.org to the keeper.
 # It is the client the relay is built for, taken from its own image.

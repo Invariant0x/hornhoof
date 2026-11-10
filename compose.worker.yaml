@@ -1,0 +1,12 @@
+# A machine that joined the company and keeps none of its data names this file after compose.yaml in COMPOSE_FILE of its
+# .env. The services that keep the data or reach it are in a profile nobody turns on there, so they never start: front,
+# the keeper and the updater are that machine's whole core. A server's .env never names this file.
+services:
+  db:
+    profiles: ["data"]
+  migrate:
+    profiles: ["data"]
+  app:
+    profiles: ["data"]
+  node:
+    profiles: ["data"]

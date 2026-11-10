@@ -668,8 +668,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
 export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
-const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | wait-update | prepare-browser [repo]';
+const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | set-server | wait-update | prepare-browser [repo]';
 const SET_KEY_LINE = 'set-key expects one line: <server> <id> <provider or machine> <key>';
+const SET_SERVER_LINE = 'set-server expects one line: <server>';
+const WEB_ADDRESS = /^https?:\/\/\S+$/;
 /* A machine joined without a plan has a node of its own: it runs no agent program and has nothing to sign in to. */
 const MACHINE = 'machine';
 const NO_PLAN = 'This machine has no plan to sign in to.';
@@ -770,6 +772,19 @@ async function setKey(dir: string, io: Io): Promise<number> {
   if (isRemoved(dir) || !sameNode(was, server, subscriptionId)) clearOutbox(dir);
   /* A new key means Hornhoof took this machine back after a removal. */
   rmSync(join(dir, 'removed'), { force: true });
+  return 0;
+}
+
+/* The node goes to another address of the same company's server, as the front door of its own machine is. It stays the
+   node it was, with its key, so what waits in its outbox is still its own to say. */
+async function setServer(dir: string, io: Io): Promise<number> {
+  const server = (await firstLine(io.stdin)).trim();
+  const was = readState(dir);
+  if (!was || !WEB_ADDRESS.test(server) || !URL.canParse(server)) {
+    io.stderr.write(`${SET_SERVER_LINE}.\n`);
+    return 1;
+  }
+  writeState(dir, { ...was, server });
   return 0;
 }
 
@@ -963,6 +978,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
+    case 'set-server':
+      return setServer(dir, io);
     default:
       return upkeepCommand(dir, args, io);
   }
