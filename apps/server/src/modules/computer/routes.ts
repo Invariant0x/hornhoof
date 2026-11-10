@@ -8,6 +8,7 @@ import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { canViewComputer, onMachine, serverMachine } from './access.js';
+import { STARTS_FIRST } from '../sources/requests.js';
 
 /* The note that starts the orchestrator's turn once the CEO or the delegate opened access: the CEO's order, so it may use
    the computer. */
@@ -49,7 +50,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/computer', async req => view(await viewer(req)));
 
-  app.post('/api/computer/open', async req => {
+  app.post('/api/computer/open', STARTS_FIRST, async req => {
     const me = await ceo(req);
     if (!ctx.computer.available()) {
       throw new ApiError(409, 'conflict', "Hornhoof cannot reach this computer: its updater does not run. Run this server's install command again, it adds it.", 'updater_missing');
@@ -68,7 +69,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return view(me);
   });
 
-  app.post('/api/computer/close', async req => {
+  app.post('/api/computer/close', STARTS_FIRST, async req => {
     const me = await ceo(req);
     ctx.computer.close();
     changed(me.companyId);
@@ -76,7 +77,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return view(me);
   });
 
-  app.post('/api/computer/decline', async req => {
+  app.post('/api/computer/decline', STARTS_FIRST, async req => {
     const me = await ceo(req);
     if (ctx.computer.decline()) {
       changed(me.companyId);

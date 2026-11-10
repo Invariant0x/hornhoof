@@ -17,6 +17,7 @@ import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
+import { STARTS_FIRST } from '../sources/requests.js';
 
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
 const MessageBody = z
@@ -95,7 +96,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { started };
   });
 
-  app.post('/api/agents/:id/stop', async (req, reply) => {
+  app.post('/api/agents/:id/stop', STARTS_FIRST, async (req, reply) => {
     const { agent } = await agentFor(ctx, req);
     const { runningJobId } = await agentState(ctx, agent.id);
     if (!runningJobId) throw new ApiError(409, 'conflict', 'Nothing is running.', 'nothing_running');

@@ -1305,6 +1305,7 @@ export const en = {
     maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',
     read_only: 'Hornhoof only reads on this machine now, so nothing was changed.',
     not_confirmed: 'Hornhoof could not confirm this change. It may be saved; look before you try again.',
+    already_done: 'This change was already made, but its answer was lost. Reload the page to see it.',
     starting: 'Hornhoof is starting. Try again in a few seconds.',
     command_active: 'There is an active command for this place. Use it or wait until it expires.',
     codes: {

@@ -59,6 +59,7 @@ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
 import { handOverSession, requirePerson } from './auth/session.js';
+import { registerRequestSources } from './modules/sources/requests.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
@@ -183,6 +184,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* Again after the routes' own checks, which wait for the database: a socket that passed the gate above and crossed a
      step-down there is refused here, and from here to its upgrade nothing waits, so none opens outside lead. */
   app.addHook('preHandler', modeGate(ctx.mode));
+  registerRequestSources(app, deps.db);
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
   publicRoutes(app, ctx);

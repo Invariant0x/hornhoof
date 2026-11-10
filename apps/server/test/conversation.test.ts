@@ -870,6 +870,17 @@ describe("an employee's conversation", () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
+  it('stops an employee once when the page sends the stop again', async () => {
+    const { app, ceo, builtin, bruno } = await withEmployee();
+    await sayTo(app, ceo, bruno.id, 'Write a long essay');
+    const run = await nextRun(builtin);
+    const stop = () => app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/stop`, headers: { 'idempotency-key': '5f0c2b1e-8a43-4c1d-9e57-2b7f6a1d3c90' }, ...as(ceo) });
+    expect((await stop()).statusCode).toBe(202);
+    expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
+    expect((await stop()).json().error.reason).toBe('already_done');
+    expect(builtin.queued()).toBe(0);
+  });
+
   it('says why an employee without a subscription cannot answer', async () => {
     const { app, ceo, dev, hire } = await withEmployee();
     const idle = await hire('Ida', dev.id, null);

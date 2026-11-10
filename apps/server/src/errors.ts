@@ -132,9 +132,11 @@ export type ErrorReason =
   | 'maintenance'
   | 'read_only'
   | 'not_confirmed'
+  | 'already_done'
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
+export const ALREADY_DONE = 'This change was already made, but its answer was lost. Reload the page to see it.';
 
 /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {

@@ -11,6 +11,7 @@ import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
 import { nodeWaits } from './node-drain.js';
 import { sendToUpdater, UpdateWait } from './wait.js';
+import { STARTS_FIRST } from '../sources/requests.js';
 
 /* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
@@ -86,7 +87,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     return updatesView(ctx, wait, me.companyId);
   });
 
-  app.post('/api/updates', async (req, reply) => {
+  app.post('/api/updates', STARTS_FIRST, async (req, reply) => {
     const me = await requireCompanyPerson(req, ctx.db);
     const body = UpdateBody.parse(req.body);
     if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
@@ -100,7 +101,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(202).send({ id: request.id });
   });
 
-  app.delete('/api/updates', async (req, reply) => {
+  app.delete('/api/updates', STARTS_FIRST, async (req, reply) => {
     await requireCompanyPerson(req, ctx.db);
     wait.callOff();
     return reply.code(204).send();
