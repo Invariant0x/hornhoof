@@ -159,7 +159,7 @@ async function seedActor(fixture: PostgresFixture, context: { ctx: Ctx; pool: pg
   const [agent] = await fixture.db.insert(schema.agents).values({ companyId, departmentId, subscriptionId, kind: 'worker', name: `Worker ${number}`, model: '', roleKey: 'DEV-BE' }).returning();
   const [task] = await fixture.db.insert(schema.tasks).values({ companyId, departmentId, number, title: `PostgreSQL task ${number}`, status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id }).returning();
   /* Every executable task has its required route, as createTask gives it. */
-  await context.ctx.db.transaction(tx => createRoute(tx, task!, { paths: ['**'] }));
+  await context.ctx.db.transaction(tx => createRoute(tx, task!, { paths: ['**'] }, context.ctx.templates.stagesOf('development')));
   const [job] = await fixture.db.insert(schema.jobs).values({ companyId, subscriptionId, agentId: agent!.id, taskId: task!.id, kind: 'conversation', prompt: 'Check PostgreSQL', timeoutMs: 900000, status: 'running' }).returning();
   return { ...context, task: task!, job: { id: job!.id, companyId, agentId: agent!.id, agentKind: 'worker', roleKey: 'DEV-BE', departmentId, skills: [] } };
 }
