@@ -89,7 +89,8 @@ problem of its own; `types.ts` (688 lines) repeats shapes that also live in `pac
 - **Running tests.** Thirteen ways, from `npm test` to `run_tests` with a hand-written command. Eight layers decide
   what to run and where: part planning, pace learning, timings, fingerprints, result reuse, impact selection, impact
   mutation, harness builds.
-- **Rules in skills.** The same paragraph stands in 4 to 13 skill files (security review, test rules, turn modes).
+- **Rules in skills.** Word for word little repeats: 14 sentences stand in three or more of the 178 skill files, 1.7% of
+  their text. What costs is how much a role is given at once, and rules that say the same thing in different words.
 
 ## Unused
 
@@ -118,8 +119,22 @@ Checked by searching for importers outside tests.
   person keeps it waking every 10 minutes (`agents/timers.ts`, `workFor`).
 - A nudge from the watchdog is a turn on the task; three such turns without a move raise the task as stuck.
 - The quiet department notice gets a new key each time the head answers, so it comes again every 15 minutes.
-- A wake that cannot be queued is removed from the outbox as if it went out (`tasks/wake.ts`, `wakeAll`).
 - The node types words again after 15 quiet seconds even when the program took them and its log is late.
+
+Checked and not a fault: a wake that is not queued leaves the outbox only when a turn already waits on the task or its
+agent is gone or has no plan, and the minute round wakes a holder that became available again.
+
+## Done on the branch `refactor`
+
+- Removed: the staging and workspace store with its 12 tables, the node's external git, task folders and workspace
+  retiring, the test planning history, the hook answer encoder, the wake cause `changes`, `gateCounts`,
+  `independentView` and smaller pieces nothing read. About 7,000 lines: 2,600 of source and 4,400 of their tests.
+- Comments moved to the declarations they describe or reworded to what the code does, in every server and node module.
+- A quiet program is an alarm after 10 minutes (a running tool after 30), goes to whoever sees its screen, and is called
+  about again each time the quiet doubles.
+- Bounded: the wait between tries of words a program did not record doubles up to four hours; five failed turns in a
+  row on a task block it for whoever gave it out; a timer for work skips its round while every open task waits on
+  purpose.
 
 ## The structure to move towards
 
