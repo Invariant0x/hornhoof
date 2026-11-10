@@ -1,11 +1,11 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { machines } from '../src/db/schema.js';
@@ -55,8 +55,8 @@ function ask(port: number, options: http.RequestOptions = {}, body?: unknown): P
 
 /* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
    reports the test's own address as the place to dial it at. */
-async function company(extra: Partial<KeeperOptions> = {}) {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID });
+async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}) {
+  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
   const ceo = await setUpCompany(app);
   await app.listen({ host: '127.0.0.1', port: 0 });
   const appPort = (app.server.address() as AddressInfo).port;
@@ -322,6 +322,30 @@ describe("a worker's keeper", () => {
     const empty = await workerOn(c, { ...w.config, dir: folder() });
     await until(() => empty.status().disconnected);
     expect(empty.lines.join('\n')).toContain('its join ticket was used or has expired');
+  });
+
+  it("downloads the server's build and installs when told", async () => {
+    const c = await company({}, { HORNHOOF_COMMIT: 'b'.repeat(40) });
+    const build = { version: '0.19.0', tag: 'b'.repeat(40), digest: 'sha256:app', nodeDigest: 'sha256:node', updaterDigest: 'sha256:updater', commit: 'b'.repeat(40) };
+    vi.spyOn(c.app.ctx.updates, 'find').mockResolvedValue({ tag: build.tag, digest: build.digest, version: build.version, commit: build.commit, created: '', title: '', migrations: 0 });
+    vi.spyOn(c.app.ctx.updates, 'siblings').mockResolvedValue({ node: build.nodeDigest, updater: build.updaterDigest });
+    const w = await worker(c);
+    const control = (name: string) => join(w.config.controlDir, name);
+    const read = (name: string) => JSON.parse(readFileSync(control(name), 'utf8')) as { id: string; tag?: string; commit?: string; until?: number };
+    /* The view names the server's build, and the keeper asks the machine's updater for it. */
+    await until(() => existsSync(control('request.json')));
+    const request = read('request.json');
+    expect(request).toMatchObject({ version: '0.19.0', tag: build.tag, digest: 'sha256:app', nodeDigest: 'sha256:node', updaterDigest: 'sha256:updater' });
+    expect(existsSync(control('go.json'))).toBe(false);
+    /* The updater downloaded it and waits: the keeper says so, and the server gives this machine its turn. */
+    writeFileSync(control('status.json'), JSON.stringify({ id: request.id, version: '0.19.0', state: 'running', step: 'wait', log: '', at: '' }));
+    await until(async () => (await c.rowOf(w.machine)).updateState === 'ready');
+    await until(() => existsSync(control('go.json')));
+    const go = read('go.json');
+    expect(go).toMatchObject({ id: request.id, commit: build.tag });
+    expect(go.until! * 1000 - Date.now()).toBeGreaterThan(14 * 60_000);
+    expect((await c.rowOf(w.machine)).goCommit).toBe(build.tag);
+    expect(read('request.json').id).toBe(request.id);
   });
 
   it("has a data machine's keeper report its addresses and its host's name", async () => {

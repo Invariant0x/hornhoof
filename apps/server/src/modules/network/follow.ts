@@ -4,16 +4,10 @@ import type { Db } from '../../db/client.js';
 import { jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { FULL_SHA } from '../updates/registry.js';
+import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, type Go, type LeaderBuild } from './build.js';
 
-/* The server's own build, as a worker installs it: the image of the server's commit and the node and updater images of
-   the same commit, each by its digest. */
-export type LeaderBuild = { version: string; tag: string; digest: string; nodeDigest: string; updaterDigest: string; commit: string };
-/* The server's word that a worker may install now. until: when the word ends, in ISO. */
-export type Go = { commit: string; until: string };
+export { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, type Go, type LeaderBuild } from './build.js';
 
-/* How long a worker has to install once it was told to, and how long after a try that failed or ran out it is told again. */
-export const FOLLOW_TURN_MS = 15 * 60_000;
-export const FOLLOW_RETRY_MS = 6 * 3_600_000;
 /* The pg_advisory_xact_lock key of the grants, used for nothing else: one grant is decided at a time. */
 export const FOLLOW_LOCK = 0x68686677;
 

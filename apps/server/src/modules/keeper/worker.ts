@@ -16,6 +16,7 @@ import { ownAddresses } from './addresses.js';
 import { askApp, type AppAnswer } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
+import { Following } from './following.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 import { updaterBusy } from './updater-status.js';
@@ -99,6 +100,9 @@ const Answer = z.object({
   data: z.array(Data).optional().catch(undefined),
   link: Link.nullable().optional().catch(undefined),
 });
+/* The server's build and this machine's turn to install it, as the leader's view names them; none when it names none. */
+const Build = z.object({ version: z.string(), tag: z.string(), digest: z.string(), nodeDigest: z.string(), updaterDigest: z.string(), commit: z.string() });
+const Follow = z.object({ build: Build.nullable().catch(null).default(null), go: z.object({ commit: z.string(), until: z.string() }).nullable().catch(null).default(null) });
 const SignedShape = z.object({ payload: z.string(), signature: z.string() });
 const Renewed = z.object({ authorityPem: z.string(), role: z.enum(MACHINE_ROLES), certPem: z.string().nullable(), until: z.string().nullable(), view: z.unknown() });
 
@@ -133,6 +137,7 @@ export class WorkerKeeper {
   private sessions!: PeerSessions;
   private tunnel: TunnelKeeper<Visit> | null = null;
   private readonly measures: Measures;
+  private readonly following: Following;
   private readonly door: LeaderDoor;
   /* Where the door to the leader's app listens. The front door reads it at each request, so a door that had to take
      another port is found there. */
@@ -157,6 +162,7 @@ export class WorkerKeeper {
 
   constructor(private readonly opts: WorkerKeeperOptions) {
     this.measures = new Measures({ dir: opts.config.dir });
+    this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, now: opts.now, log: opts.log });
     this.door = new LeaderDoor({ connect: () => this.sessions.connectApp() });
   }
 
@@ -460,11 +466,18 @@ export class WorkerKeeper {
   private async readView(): Promise<void> {
     try {
       const res = await this.askLeader('GET', '/api/network/peers');
-      if (res?.ok) this.mergeView(res.json());
+      if (res?.ok) this.takeView(res.json());
       else if (res && !this.disconnected) throw new Error(`the company server answered ${res.status}`);
     } catch (err) {
       if (!this.stopped) this.sayHourly('view', `Could not read the network's state from the company server: ${reasonOf(err)}`);
     }
+  }
+
+  /* The leader's view, which alone also says what build the server runs and whether this machine may install it now. */
+  private takeView(answer: unknown): void {
+    this.mergeView(answer);
+    const follow = Follow.safeParse(answer);
+    if (follow.success) this.following.heard(follow.data.build, follow.data.go);
   }
 
   private async report(): Promise<void> {
@@ -479,6 +492,7 @@ export class WorkerKeeper {
         addresses: this.own(),
         path: state.path,
         directFails: state.directFails,
+        update: this.following.update(),
       };
       const res = await this.askLeader('POST', '/api/network/report', body);
       if (res && !res.ok && !this.disconnected) throw new Error(`the company server answered ${res.status}`);
