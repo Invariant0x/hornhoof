@@ -1,36 +1,45 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
-import { until } from './helpers-basic.js';
+import { until } from './helpers.js';
 
-/* A stand-in for the tunnel client: it writes the token it was started with and its process id, then runs until it is
-   stopped, or ends at once when its token says so. */
+/* A stand-in for the tunnel client: it writes the token it was started with, its process id and whether it can see the
+   keeper's secret, then runs until it is stopped, or ends at once when its token says so. */
 const FAKE_CLIENT = `
 const [out, token] = process.argv.slice(1);
-require('node:fs').appendFileSync(out, token + ' ' + process.pid + '\\n');
+require('node:fs').appendFileSync(out, [token, process.pid, 'HORNHOOF_SECRET' in process.env].join(' ') + '\\n');
 if (token === 'ends') process.exit(3);
 setInterval(() => {}, 1000);
 `;
 
-function tunnel() {
+type Answer = TunnelSettings | null | undefined;
+
+function tunnel({ program = process.execPath, first = null as Answer } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-tunnel-'));
-  const file = join(dir, 'tunnel.json');
   const out = join(dir, 'started.txt');
   const lines: string[] = [];
+  let answer = first;
+  let reads = 0;
   const keeper = new TunnelKeeper({
-    file,
+    read: async () => {
+      reads++;
+      return answer;
+    },
     everyMs: 20,
     restartMs: 30,
     clientFor: (s: TunnelSettings) => {
       if (s.tunnel.token === 'unusable') throw new Error('The tunnel settings name no server.');
-      return { program: process.execPath, args: ['-e', FAKE_CLIENT, out, String(s.tunnel.token)] };
+      return { program, args: ['-e', FAKE_CLIENT, out, String(s.tunnel.token)] };
     },
     log: line => lines.push(line),
   });
   onTestFinished(() => keeper.stop());
-  const write = (token: string) => writeFileSync(file, JSON.stringify({ url: 'https://acme.hornhoof.test', name: 'acme', key: 'k', tunnel: { token } }));
+  const answers = (next: Answer) => {
+    answer = next;
+  };
+  const write = (token: string) => answers(settingsWith(token));
   const started = () => (existsSync(out) ? readFileSync(out, 'utf8').trim().split('\n').map(l => l.split(' ')) : []);
   const alive = (pid: string) => {
     try {
@@ -40,76 +49,80 @@ function tunnel() {
       return false;
     }
   };
-  return { keeper, file, write, started, alive, lines };
+  const readsFrom = async (count: number) => {
+    const from = reads;
+    await until(() => reads >= from + count);
+  };
+  return { keeper, answers, write, started, alive, lines, readsFrom };
 }
 
-describe('the tunnel container', () => {
+const settingsWith = (token: string): TunnelSettings => ({ url: 'https://acme.hornhoof.test', name: 'acme', key: 'k', tunnel: { token }, mode: 'http' });
+
+describe('the tunnel keeper', () => {
   it('waits while there are no settings, then starts the client with them', async () => {
-    /* The keeper reads its settings when the test moves its clock. */
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    onTestFinished(() => { vi.useRealTimers(); });
-    const { keeper, write, started, lines } = tunnel();
+    const { keeper, write, started, readsFrom } = tunnel();
     keeper.start();
-    await vi.advanceTimersByTimeAsync(100);
-    expect(lines).toEqual([]);
+    await readsFrom(3);
     expect(started()).toEqual([]);
     write('first');
-    await vi.advanceTimersByTimeAsync(20);
     await until(() => started().length === 1);
     expect(started()[0]![0]).toBe('first');
   });
 
-  it('starts the client again with new settings, and stops it when they go', async () => {
-    /* The keeper reads its settings, and would start a client that ended again, when the test moves its clock. */
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
-    onTestFinished(() => { vi.useRealTimers(); });
-    const { keeper, file, write, started, alive, lines } = tunnel();
+  it('starts the client again with new settings', async () => {
+    const { keeper, write, started, alive } = tunnel();
     write('first');
     keeper.start();
     await until(() => started().length === 1);
     const firstPid = started()[0]![1]!;
     write('second');
-    await vi.advanceTimersByTimeAsync(20);
     await until(() => started().length === 2);
     expect(started()[1]![0]).toBe('second');
     await until(() => !alive(firstPid));
-    const secondPid = started()[1]![1]!;
-    rmSync(file);
-    await vi.advanceTimersByTimeAsync(20);
-    await until(() => !alive(secondPid));
-    /* The keeper is done with the client that went: it says it waits. Past the longest pause before a start again, it
-       started nothing more. */
-    await until(() => lines.includes('No public link: the tunnel waits.'));
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(lines.filter(l => l.startsWith('Carrying'))).toHaveLength(2);
-    expect(started()).toHaveLength(2);
   });
 
-  it('starts a client that ended again, after a pause', async () => {
-    /* The pauses before a start again go by a clock the test moves: 30 ms, then twice that. */
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
-    onTestFinished(() => { vi.useRealTimers(); });
-    const { keeper, write, started, lines } = tunnel();
-    const ends = () => lines.filter(l => l.includes('ended')).length;
-    write('ends');
+  it('stops it when read answers null', async () => {
+    const { keeper, answers, write, started, alive, readsFrom } = tunnel();
+    write('first');
     keeper.start();
-    for (const [count, pauseMs] of [[1, 30], [2, 60]] as const) {
-      await until(() => ends() === count);
-      await vi.advanceTimersByTimeAsync(pauseMs - 1);
-      expect(started()).toHaveLength(count);
-      await vi.advanceTimersByTimeAsync(1);
-      await until(() => started().length === count + 1);
-    }
+    await until(() => started().length === 1);
+    answers(null);
+    await until(() => !alive(started()[0]![1]!));
+    await readsFrom(3);
+    expect(started()).toHaveLength(1);
   });
 
-  it('keeps waiting on settings it cannot read', async () => {
-    const { keeper, file, write, started, lines } = tunnel();
-    writeFileSync(file, '{not json');
+  it('keeps the client running while read answers undefined', async () => {
+    const { keeper, answers, write, started, alive, readsFrom } = tunnel();
+    write('first');
     keeper.start();
-    await until(() => lines.some(l => l.includes('cannot read')));
+    await until(() => started().length === 1);
+    answers(undefined);
+    await readsFrom(5);
+    expect(started()).toHaveLength(1);
+    expect(alive(started()[0]![1]!)).toBe(true);
+
+    /* The same settings after that are no change, since each start may cost the link up to 40 s. */
+    write('first');
+    await readsFrom(5);
+    expect(started()).toHaveLength(1);
+  });
+
+  it('starts nothing while read answers undefined from the start', async () => {
+    const { keeper, write, started, readsFrom } = tunnel({ first: undefined });
+    keeper.start();
+    await readsFrom(3);
     expect(started()).toEqual([]);
     write('first');
     await until(() => started().length === 1);
+  });
+
+  it('starts a client that ended again, after a pause', async () => {
+    const { keeper, write, started, lines } = tunnel();
+    write('ends');
+    keeper.start();
+    await until(() => started().length >= 3);
+    expect(lines.some(l => l.includes('ended'))).toBe(true);
   });
 
   it('keeps waiting on settings the client cannot use', async () => {
@@ -129,5 +142,58 @@ describe('the tunnel container', () => {
     await until(() => started().length === 1);
     await keeper.stop();
     expect(alive(started()[0]![1]!)).toBe(false);
+  });
+
+  it('starts no client for a read that answers after it stopped', async () => {
+    let answerNow: (settings: TunnelSettings) => void = () => {};
+    const reading = new Promise<TunnelSettings>(resolve => {
+      answerNow = resolve;
+    });
+    const client = vi.fn(() => ({ program: process.execPath, args: ['-e', ''] }));
+    const keeper = new TunnelKeeper({ read: () => reading, everyMs: 1000, restartMs: 30, clientFor: client, log: () => {} });
+    keeper.start();
+    await keeper.stop();
+    answerNow(settingsWith('late'));
+    /* The late answer has been taken once the event loop has turned, with no clock in it. */
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(client).not.toHaveBeenCalled();
+  });
+
+  it('reads once at a time, however long a read takes', async () => {
+    let reads = 0;
+    let finishRead = () => {};
+    const keeper = new TunnelKeeper({
+      read: () => {
+        reads++;
+        return new Promise(resolve => {
+          finishRead = () => resolve(null);
+        });
+      },
+      everyMs: 5,
+      restartMs: 30,
+      clientFor: () => ({ program: process.execPath, args: [] }),
+      log: () => {},
+    });
+    /* The keeper looks again when the test moves its clock: ten looks fall due while the first read still runs. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    onTestFinished(() => keeper.stop());
+    keeper.start();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(reads).toBe(1);
+    finishRead();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(reads).toBe(2);
+  });
+
+  /* frpc fills in the environment wherever its config says {{ .Envs.NAME }}, and the config carries what the relay gave. */
+  it("gives the client none of the keeper's secrets, and finds it by the PATH", async () => {
+    vi.stubEnv('HORNHOOF_SECRET', 'not a real secret');
+    onTestFinished(() => void vi.unstubAllEnvs());
+    const { keeper, write, started } = tunnel({ program: 'node' });
+    write('first');
+    keeper.start();
+    await until(() => started().length === 1);
+    expect(started()[0]![2]).toBe('false');
   });
 });

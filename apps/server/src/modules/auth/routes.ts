@@ -2,10 +2,11 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { guard, limiter } from '../../auth/limit.js';
+import { refuse } from '../../auth/limit.js';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { endSession, personColumns, requirePerson, startSession } from '../../auth/session.js';
+import { signInTry, signInWorked } from '../../auth/sign-in-limit.js';
 import { clientAddress } from '../../auth/tunnel.js';
 import { companies, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -22,15 +23,12 @@ const fallbackHash = () => (dummyHash ??= hashPassword('hornhoof-no-such-person'
 const wrongPassword = () => new ApiError(401, 'unauthorized', 'Wrong email or password.', 'wrong_password');
 
 export function authRoutes(app: FastifyInstance, { db, config, bus }: Ctx): void {
-  /* Counted per email and address, so whoever knows the owner's email cannot lock the owner out from elsewhere; and per
-     email from anywhere, more softly, so many addresses cannot guess one password freely. */
-  const attempts = limiter();
-  const perEmail = limiter({ max: 50, windowMs: 60 * 60 * 1000 });
-
   app.post('/api/auth/login', async (req, reply) => {
     const body = LoginBody.parse(req.body);
-    guard(reply, attempts, `${body.email} ${await clientAddress(req, config)}`);
-    guard(reply, perEmail, body.email);
+    /* Counted in the database per email and address, per email and per address, so whoever knows the owner's email
+       cannot lock the owner out from elsewhere, and many addresses cannot guess one password freely. */
+    const attempt = await signInTry(db, body.email, await clientAddress(req, config));
+    if (!attempt.allowed) refuse(reply, attempt.retryAfterS, attempt.windowMs);
     const [row] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.email, body.email));
     const ok = await verifyPassword(body.password, row?.passwordHash ?? (await fallbackHash()));
     if (!row?.passwordHash || !ok || row.status !== 'active') throw wrongPassword();
@@ -39,6 +37,7 @@ export function authRoutes(app: FastifyInstance, { db, config, bus }: Ctx): void
     const { passwordHash: _, ...person } = row;
     /* An owner link or a disable that lands during the check above makes this password an old one. */
     if (!(await startSession(reply, db, config, person.id, row.passwordHash))) throw wrongPassword();
+    await signInWorked(db, attempt.id);
     return { person };
   });
 

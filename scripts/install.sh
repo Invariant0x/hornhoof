@@ -12,7 +12,8 @@
 # starts: by the build's tag, or as HORNHOOF_APP_REF, HORNHOOF_NODE_REF and HORNHOOF_UPDATER_REF give them. The updater
 # service runs the installer of the build it moves to with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup,
 # the compose file it brings, the images it checked by digest, and this server's nodes on this machine move to the
-# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them.
+# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them. An updater
+# that does not say HORNHOOF_UPDATER_REV=2 or later hands the update to the updater of this build first.
 #
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
@@ -79,6 +80,7 @@ LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
+FIRST_PEER_PORT=8180
 USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall'
 
 OS=''
@@ -302,10 +304,12 @@ pull_image() {
   fi
 }
 
+random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
+
 machine_id() {
   mkdir -p "$STATE_DIR"
   if ! grep -Eq '^[0-9a-f]{32}$' "$STATE_DIR/machine" 2> /dev/null; then
-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$STATE_DIR/machine"
+    random_hex 16 > "$STATE_DIR/machine"
   fi
   cat "$STATE_DIR/machine"
 }
@@ -753,12 +757,17 @@ uninstall_mode() {
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
 # The database password goes into the database address, so it is hex.
-new_password() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
+new_password() { random_hex 24; }
+
+# value_in <file> <key>: the key's value in a .env, empty when it has none or cannot be read.
+value_in() { grep "^$2=" "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
+
+env_value() { value_in "$SERVER_DIR/.env" "$1"; }
 
 # The port a server's .env keeps; one from before servers kept a port has the first one.
 port_of() {
   local port
-  port=$(grep '^HORNHOOF_PORT=' "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true)
+  port=$(value_in "$1" HORNHOOF_PORT)
   printf '%s\n' "${port:-$FIRST_PORT}"
 }
 
@@ -767,19 +776,6 @@ port_answers() {
   local rc=0
   curl -s -o /dev/null --max-time 2 "http://localhost:$1/" > /dev/null 2>&1 || rc=$?
   [ "$rc" -ne 7 ]
-}
-
-# The first port from 8080 that no other Hornhoof on this computer keeps, running or not, and nothing listens on.
-free_port() {
-  local port=$FIRST_PORT env claimed=' '
-  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
-    if [ -f "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then claimed="$claimed$(port_of "$env") "; fi
-  done
-  while case "$claimed" in *" $port "*) true ;; *) false ;; esac || port_answers "$port"; do
-    port=$((port + 1))
-    [ "$port" -lt $((FIRST_PORT + 100)) ] || fail "No free port from $FIRST_PORT to $((FIRST_PORT + 99)) for Hornhoof. Stop what uses them, then run this command again."
-  done
-  printf '%s' "$port"
 }
 
 # set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner. The new
@@ -800,8 +796,6 @@ set_env() {
   )
   mv "$new" "$file"
 }
-
-env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
 
 # compose.yaml comes inside the app image, so the compose file always matches the build it starts.
 compose_from_image() {
@@ -888,43 +882,271 @@ nodes_stay() {
   [ -n "$cid" ] && [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$cid" 2> /dev/null)" = true ]
 }
 
-# Only the nodes the updater named, whatever image the built-in node runs: each is free by itself.
+# Only the nodes the updater named, whatever image the built-in node runs: each is free by itself. The app and what it
+# stands on already run the build these nodes join, so nothing else is started.
 replace_named_nodes() {
   if named_free builtin; then
     prepare_builtin_stop "$@"
-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
-  else
-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
+    compose_step "$@" up -d --no-build --no-deps node || start_failed
   fi
   sweep_nodes "$@"
 }
 
+# --- Ports: one list per computer ---------------------------------------------------------------
+
+# The list says which company's folder keeps which web and peer port, so a company that is stopped and pruned keeps them
+# too. It is the file registry in the volume hornhoof-ports, reached through a short container of the app image, since
+# the updater's container sees only its own company's folder. One line per folder: <folder> <web port> <peer port>.
+PORT_LOCK=hornhoof-port-lock
+PORT_LOCK_BUSY='Another Hornhoof install on this computer is choosing its ports. Wait a minute, then run this command again.'
+PORT_LOCK_ID=''
+# This folder's .env holds a company that ran before this run.
+ENV_BEFORE=''
+# This run chose the web or the peer port by the free search, so it may move it when something outside Docker holds it.
+NEW_WEB=''
+NEW_PEER=''
+# Ports Docker refused during this run.
+REFUSED_PORTS=''
+
+# Whoever made a lock more than 2 minutes ago is gone. It goes by the id just read, so a lock made meanwhile stays.
+remove_stale_port_lock() {
+  local seen since
+  seen=$("${DOCKER[@]}" inspect --format '{{.Id}} {{index .Config.Labels "io.hornhoof.since"}}' "$PORT_LOCK" 2> /dev/null) || return 1
+  since=${seen##* }
+  case "$since" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$(($(date +%s) - since))" -gt 120 ] || return 1
+  "${DOCKER[@]}" rm "${seen%% *}" > /dev/null 2>&1
+}
+
+# A container's name is the one thing Docker hands out to one caller alone, so the lock is a container that never runs.
+take_port_lock() {
+  local deadline
+  "${DOCKER[@]}" volume create hornhoof-ports > /dev/null
+  deadline=$(($(date +%s) + ${HORNHOOF_PORT_LOCK_WAIT:-180}))
+  until PORT_LOCK_ID=$("${DOCKER[@]}" create --name "$PORT_LOCK" --label "io.hornhoof.since=$(date +%s)" "$APP_REF" true 2> /dev/null); do
+    [ "$(date +%s)" -lt "$deadline" ] || fail "$PORT_LOCK_BUSY"
+    remove_stale_port_lock || sleep 1
+  done
+}
+
+drop_port_lock() { "${DOCKER[@]}" rm "$1" > /dev/null 2>&1 || true; }
+
+read_registry() { "${DOCKER[@]}" run --rm --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat /ports/registry 2> /dev/null || true'; }
+
+write_registry() { "${DOCKER[@]}" run --rm -i --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat > /ports/registry.new && mv /ports/registry.new /ports/registry'; }
+
+# The host ports every container publishes, running or stopped. A container gone since the list leaves the others.
+bound_ports() {
+  local ids
+  ids=$("${DOCKER[@]}" ps -aq 2> /dev/null) || true
+  [ -n "$ids" ] || return 0
+  # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per container
+  "${DOCKER[@]}" inspect --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}} {{end}}{{end}}' $ids 2> /dev/null | tr '\n' ' ' || true
+}
+
+# A folder may hold spaces, so a line's ports are its last two words and the folder is what comes before them.
+line_folder() { printf '%s' "${1% * *}"; }
+
+line_ports() {
+  local rest=${1% *}
+  printf '%s %s' "${rest##* }" "${1##* }"
+}
+
+other_lines() {
+  local line
+  while IFS= read -r line; do
+    if [ -n "$line" ] && [ "$(line_folder "$line")" != "$SERVER_DIR" ]; then printf '%s\n' "$line"; fi
+  done <<< "$1"
+}
+
+own_ports() {
+  local line
+  while IFS= read -r line; do
+    if [ "$(line_folder "$line")" = "$SERVER_DIR" ]; then line_ports "$line"; fi
+  done <<< "$1"
+}
+
+# Every port another company keeps, a container publishes or Docker refused, as words.
+held_ports() {
+  local line env
+  other_lines "$1" | while IFS= read -r line; do printf '%s ' "$(line_ports "$line")"; done
+  bound_ports
+  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
+    if [ -r "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then printf '%s %s ' "$(port_of "$env")" "$(value_in "$env" HORNHOOF_PEER_PORT)"; fi
+  done
+  printf '%s ' "$REFUSED_PORTS"
+}
+
+# From the updater localhost is its own container, so only a run by hand can ask it.
+port_is_free() {
+  case "$2" in *" $1 "*) return 1 ;; esac
+  [ -n "$FROM_UPDATER" ] || ! port_answers "$1"
+}
+
+# first_free_port <first> <held words>: the first free one of the hundred from <first>.
+first_free_port() {
+  local port=$1
+  until port_is_free "$port" "$2"; do
+    port=$((port + 1))
+    [ "$port" -lt $(($1 + 100)) ] || fail "No free port from $1 to $(($1 + 99)) for Hornhoof. Stop what uses them, then run this command again."
+  done
+  printf '%s' "$port"
+}
+
+# kept_port <refused> <.env key> <list value>: the port this company keeps already, unless Docker just refused it.
+kept_port() {
+  local port
+  port=$(env_value "$2")
+  port=${port:-$3}
+  if [ "$port" != "$1" ]; then printf '%s' "$port"; fi
+}
+
+# The list comes first: a failed write leaves .env as it was, and a failed .env write a line that only holds the ports.
+record_ports() {
+  local lock
+  lock=$("${DOCKER[@]}" inspect --format '{{.Id}}' "$PORT_LOCK" 2> /dev/null) || true
+  [ "$lock" = "$PORT_LOCK_ID" ] || fail "$PORT_LOCK_BUSY"
+  { other_lines "$1"; printf '%s %s %s\n' "$SERVER_DIR" "$2" "$3"; } | write_registry ||
+    fail "Could not write the list of Hornhoof's ports on this computer. Run this command again."
+  set_env HORNHOOF_PORT "$2"
+  set_env HORNHOOF_PEER_PORT "$3"
+  # People get the company's link at setup, so the server starts at its address on this computer. Another address of
+  # its own, such as a domain, goes into PUBLIC_URL later.
+  if [ -z "$ENV_BEFORE" ]; then set_env PUBLIC_URL "http://localhost:$2"; fi
+}
+
+choose_ports() {
+  local registry own held web peer
+  registry=$(read_registry) || fail "Could not read the list of Hornhoof's ports on this computer. Run this command again."
+  own=$(own_ports "$registry")
+  held=" $(held_ports "$registry") "
+  web=$(kept_port "$1" HORNHOOF_PORT "${own%% *}")
+  peer=$(kept_port "$1" HORNHOOF_PEER_PORT "${own##* }")
+  # A company from before ports were kept runs on the first one.
+  if [ -z "$web" ] && [ -n "$ENV_BEFORE" ]; then web=$FIRST_PORT; fi
+  if [ -z "$web" ]; then
+    web=$(first_free_port "$FIRST_PORT" "$held")
+    NEW_WEB=1
+  fi
+  if [ -z "$peer" ]; then
+    peer=$(first_free_port "$FIRST_PEER_PORT" "$held")
+    NEW_PEER=1
+  fi
+  record_ports "$registry" "$web" "$peer"
+}
+
+# reserve_ports [<port>]: settles this company's two ports under the lock, which goes whatever happens. Given a port
+# Docker refused, the side it belongs to searches again and the other side keeps its port.
+reserve_ports() {
+  if [ -n "${1:-}" ]; then REFUSED_PORTS="$REFUSED_PORTS $1"; fi
+  take_port_lock
+  trap 'drop_port_lock "$PORT_LOCK_ID"' EXIT
+  choose_ports "${1:-}"
+  trap - EXIT
+  drop_port_lock "$PORT_LOCK_ID"
+}
+
+# The host port Docker could not bind, from words like "Bind for 0.0.0.0:8080 failed: port is already allocated" or
+# "listen tcp 0.0.0.0:8080: bind: address already in use". The first number after a colon is the port.
+refused_port() {
+  printf '%s\n' "$1" | grep -E 'port is already allocated|address already in use' | head -1 | grep -oE ':[0-9]+' | head -1 | tr -d ':' || true
+}
+
+port_is_new() {
+  { [ -n "$NEW_WEB" ] && [ "$1" = "$(env_value HORNHOOF_PORT)" ]; } || { [ -n "$NEW_PEER" ] && [ "$1" = "$(env_value HORNHOOF_PEER_PORT)" ]; }
+}
+
+# These two publish the ports, so this is where a port something outside Docker holds shows. A port this run chose moves
+# to the next one, up to 5 times; a port the company already has stays, as other things know it by that port.
+start_keeper_and_front() {
+  local moved=0 port
+  until compose_step "$@" up -d --no-build keeper front; do
+    port=$(refused_port "$STEP_OUTPUT")
+    [ -n "$port" ] || start_failed
+    if [ "$moved" -ge 5 ] || ! port_is_new "$port"; then
+      fail "Port $port is taken by a program outside Docker. Stop what uses it, then run this command again."
+    fi
+    moved=$((moved + 1))
+    say "Port $port is taken, so Hornhoof takes another one."
+    reserve_ports "$port"
+  done
+}
+
+# What the last compose step said, for what a failure tells the person.
+STEP_OUTPUT=''
+# compose_step <compose command...>: runs in the server folder, showing what compose says as it comes.
+compose_step() {
+  local said rc=0
+  said=$(mktemp)
+  (cd "$SERVER_DIR" && "$@") 2>&1 | tee "$said" || rc=$?
+  STEP_OUTPUT=$(cat "$said")
+  rm -f "$said"
+  return "$rc"
+}
+
+start_failed() {
+  if [ -n "$FROM_UPDATER" ]; then fail "Hornhoof did not start."; fi
+  fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+}
+
+# The app waits for migrate, so compose runs it first and a failed start may be the database not reaching this build.
+# Older versions of Compose 2 say "didn't completed", so the check stops before that word.
+start_app() {
+  compose_step "$@" && return 0
+  case "$STEP_OUTPUT" in
+    *'"migrate" didn'*) fail "Hornhoof could not bring its database up to this build. Run docker compose logs migrate in $SERVER_DIR to see why." ;;
+  esac
+  start_failed
+}
+
+# The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
+# comes back, so the maintenance answer is up while migrate runs.
 start_server_services() {
+  say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
+  if [ -n "$NODES_ONLY" ]; then
+    replace_named_nodes "$@"
+    return 0
+  fi
+  (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
+  compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
+  start_keeper_and_front "$@"
   if [ -n "$FROM_UPDATER" ]; then
-    say "Starting Hornhoof ${PIN:-latest}."
-    if [ -n "$NODES_ONLY" ]; then
-      replace_named_nodes "$@"
-    elif nodes_stay "$@"; then
-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
+    if nodes_stay "$@"; then
+      start_app "$@" up -d --no-build app
     else
       prepare_builtin_stop "$@"
-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
+      start_app "$@" up -d --no-build app node
       sweep_nodes "$@"
     fi
     return 0
   fi
-  say "Starting Hornhoof."
   if nodes_stay "$@"; then
-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+    start_app "$@" up -d --no-build app updater
     node_unchanged "$@" || say "The updater replaces the built-in node and the other nodes on this computer when what they run has ended."
   else
     prepare_builtin_stop "$@"
-    (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+    start_app "$@" up -d --no-build
   fi
 }
 
+# Only a revision it can read as 2 or more goes on, so a value it cannot read ends in the handover, which is safe.
+older_updater_runs_this() { [ -n "$FROM_UPDATER" ] && ! [ "${HORNHOOF_UPDATER_REV:-1}" -ge 2 ] 2> /dev/null; }
+
+# An older updater cannot run this build's move, so this build's updater takes the update over: the helper starts it,
+# which replaces the updater this script runs under, and with it this script. Until then only .env and compose.yaml
+# have changed, and the old installer writes both back on the way back. This never returns: an older updater takes a 0
+# for a finished install, and removes what the new compose file does not name while the old app runs. A helper that
+# lacks its two folders finds no update and exits 0, which shows only as this wait running out, and then it goes back.
+hand_over_update() {
+  say "This build's updater takes over the update first."
+  "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
+    fail "Could not start the updater of this build, so nothing changed."
+  sleep "${HORNHOOF_HANDOVER_WAIT:-300}"
+  fail "The updater of this build did not take over, so nothing changed. Run install.sh server in $SERVER_DIR."
+}
+
 server_mode() {
-  local env_file url public port local_url project link fact id i=0
+  local env_file public local_url project link fact id i=0
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -946,6 +1168,9 @@ server_mode() {
   env_file="$SERVER_DIR/.env"
   if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
   if [ -f "$env_file" ]; then
+    # A new .env keeps its HORNHOOF_PORT empty until the ports are chosen, so a first run that stopped before that is
+    # not taken for a company from before ports were kept, which runs on the first port.
+    if ! grep -q '^HORNHOOF_PORT=$' "$env_file"; then ENV_BEFORE=1; fi
     say "Keeping the settings in $env_file."
     # A .env without POSTGRES_PASSWORD keeps the password compose gives, the one its database was made with.
     if ! grep -q '^NODE_KEY=' "$env_file"; then
@@ -953,12 +1178,9 @@ server_mode() {
       say "Added NODE_KEY to $env_file."
     fi
   else
-    port=$(free_port)
-    # People get the company's link at setup, so the server starts at its address on this computer. Another address of
-    # its own, such as a domain, goes into PUBLIC_URL later.
     (
       umask 077
-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "$(new_password)" "http://localhost:$port" "$port" > "$env_file.new"
+      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nHORNHOOF_PORT=\n' "$(new_secret)" "$(new_secret)" "$(new_password)" > "$env_file.new"
     )
     mv "$env_file.new" "$env_file"
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
@@ -989,9 +1211,9 @@ server_mode() {
     id=$(host_id)
     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
   fi
-  local_url="http://localhost:$(port_of "$env_file")"
-  public=$(env_value PUBLIC_URL)
-  [ -n "$public" ] || public=$local_url
+  # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
+  # random hex from the updater, whose container cannot read that key.
+  if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
 
   if [ -n "$FROM_UPDATER" ] && [ -n "$COMPOSE_SRC" ]; then
     cp "$COMPOSE_SRC" "$SERVER_DIR/compose.yaml"
@@ -1002,14 +1224,21 @@ server_mode() {
     compose_from_image
   fi
 
+  if older_updater_runs_this; then hand_over_update "$project"; fi
+
   # The updater downloads them before it saves the database; an updater from before leaves it to this.
   if [ -z "$PULLED" ]; then
     say "Downloading the Hornhoof images."
     (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
+  reserve_ports
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   start_server_services "${compose[@]}"
   if [ -n "$FROM_UPDATER" ]; then return 0; fi
+  # Worked out only now, since a port this run chose may have moved while the services started.
+  local_url="http://localhost:$(port_of "$env_file")"
+  public=$(env_value PUBLIC_URL)
+  [ -n "$public" ] || public=$local_url
   say "Waiting for Hornhoof to answer."
   until curl -fsS --max-time 5 "$local_url/api/health" > /dev/null 2>&1; do
     i=$((i + 1))

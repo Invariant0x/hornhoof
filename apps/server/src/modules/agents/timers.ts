@@ -131,19 +131,47 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   ]);
 }
 
-/* Does the minute round while the server runs; left-behind turns and old files are looked at as it starts too. */
+/* What is looked at as the app starts leading, without waiting for the first minute round. */
+async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  await serverStarted(ctx.db).catch(failed('ending the node connections of the last run failed'));
+  await checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
+  await checkWaitHealth(ctx).catch(failed('checking task waits failed'));
+  await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
+  await Promise.all([
+    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed')),
+    reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed')),
+  ]);
+}
+
+/* A leading app's sweeps, one at a time: those of the way in, then a round on each tick. A tick that finds a sweep still
+   running is dropped, since the next one does what it would have. Entering waits for no sweep; leaving stops the ticks
+   and waits for what runs, so nothing of this writes once the app has left lead. */
+export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS): { enter: () => void; leave: () => Promise<void> } {
+  let timer: NodeJS.Timeout | null = null;
+  let running: Promise<void> | null = null;
+  const alone = (sweep: () => Promise<void>) => {
+    if (running) return;
+    running = sweep().finally(() => {
+      running = null;
+    });
+  };
+  return {
+    enter() {
+      alone(entry);
+      timer = setInterval(() => alone(round), everyMs);
+      timer.unref();
+    },
+    async leave() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      await running;
+    },
+  };
+}
+
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  app.addHook('onReady', async () => {
-    await serverStarted(ctx.db).catch(failed('ending the node connections of the last run failed'));
-    await checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
-    await checkWaitHealth(ctx).catch(failed('checking task waits failed'));
-    await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
-    void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
-    void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
-    void reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed'));
-  });
-  const timer = setInterval(() => void minuteRound(ctx, new Date(), failed), TICK_MS);
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed));
+  ctx.mode.whenLead(enter, leave);
 }

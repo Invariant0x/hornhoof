@@ -1,6 +1,9 @@
 import { DrizzleQueryError } from 'drizzle-orm';
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { notConfirmed, requestRoute } from './db/confirm.js';
+import { isLeaseRefused } from './db/net.js';
+import { READ_ONLY_MESSAGE } from './modules/keeper/app-mode.js';
 
 export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone' | 'too_many' | 'unavailable';
 
@@ -125,7 +128,13 @@ export type ErrorReason =
   | 'relay_unreachable'
   | 'link_taken'
   | 'link_reserved'
-  | 'link_invalid';
+  | 'link_invalid'
+  | 'maintenance'
+  | 'read_only'
+  | 'not_confirmed'
+  | 'starting';
+
+export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
 
 /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {
@@ -176,18 +185,36 @@ function requestError(status: number, message: string, url: string) {
   return body('validation', `The text is too large to send in one request. ${next}`, 'attachment_invalid');
 }
 
+/* A write that failed at a fence reaches people as what it is, never as "Something went wrong.". */
+function fenceAnswer(err: unknown, req: FastifyRequest, reply: FastifyReply): FastifyReply | undefined {
+  if (isLeaseRefused(err)) return reply.status(503).send(body('unavailable', READ_ONLY_MESSAGE, 'read_only'));
+  if (!notConfirmed(err)) return undefined;
+  req.log.warn({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A commit was not confirmed.');
+  return reply.status(503).send(body('unavailable', NOT_CONFIRMED, 'not_confirmed'));
+}
+
+function validationAnswer(err: ZodError, reply: FastifyReply): FastifyReply {
+  const first = err.issues[0];
+  const where = first?.path.length ? first.path.join('.') + ': ' : '';
+  return reply.status(400).send(body('validation', where + (first?.message ?? 'Invalid input.')));
+}
+
+const statusOf = (err: FastifyError | Error): number => ('statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500);
+
+function errorAnswer(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
+  if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
+  if (err instanceof ZodError) return validationAnswer(err, reply);
+  const status = statusOf(err);
+  if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));
+  const atFence = fenceAnswer(err, req, reply);
+  if (atFence) return atFence;
+  req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');
+  return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong.' } });
+}
+
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
-  app.setErrorHandler((err: FastifyError | Error, req, reply) => {
-    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
-    if (err instanceof ZodError) {
-      const first = err.issues[0];
-      const where = first?.path.length ? first.path.join('.') + ': ' : '';
-      return reply.status(400).send(body('validation', where + (first?.message ?? 'Invalid input.')));
-    }
-    const status = 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500;
-    if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));
-    req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');
-    return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong.' } });
-  });
+  /* The log lines of a transaction name the route that ran it, however many awaits lie between them. */
+  app.addHook('preHandler', (req, _reply, done) => requestRoute.run(`${req.method} ${req.routeOptions.url}`, done));
+  app.setErrorHandler(errorAnswer);
   app.setNotFoundHandler(async (req, reply) => (await fallback?.(req, reply)) ?? reply.status(404).send(body('not_found', 'Not found.')));
 }

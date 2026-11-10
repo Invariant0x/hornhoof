@@ -687,3 +687,7 @@ export type DepartmentTree = {
   time: AgentTime[];
   idle: IdleStretch[];
 };
+
+/* Where the public link's encryption ends, as GET /api/link says: the tunnel's mode, whether the company's machine holds
+   the link's own certificate, when it ends, and when the last try to get one failed. */
+export type TlsView = { mode: 'http' | 'https'; certificate: boolean; expiresAt: string | null; failedAt: string | null };

@@ -52,6 +52,7 @@ describe('web app serving', () => {
       /* A picture at the line shows from the browser's memory until it goes. */
       expect(res.headers['content-security-policy']).toContain("img-src 'self' data: blob:;");
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-robots-tag']).toBe('noindex, nofollow');
     }
   });
 

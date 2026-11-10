@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 /* What the tests of the updater share: a server folder of its own, and one pass of updater.sh over it with stub docker and curl. */
 
 const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
+const REV1 = fileURLToPath(new URL('./updater-rev1.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
 /* The updater reads and writes its files with jq, so these tests take the jq of this machine, wherever it is. */
 export const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
@@ -40,11 +41,10 @@ export function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stan
   return { dir, control, server, log };
 }
 
-/* One pass of the updater over request.json, with stub docker and curl first on PATH, and its own temporary files in the
-   stand. It takes as long as it takes: only the runner's limit for the test ends one that never ends. */
-export async function runOnce(s: Stand, request: object | null, env: Record<string, string> = {}) {
-  if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
-  const child = spawn('bash', [SCRIPT, '--once'], {
+/* One run of an updater script, with stub docker and curl first on PATH, and its own temporary files in the stand. It
+   takes as long as it takes: only the runner's limit for the test ends one that never ends. */
+async function run(script: string, flag: string, s: Stand, env: Record<string, string>) {
+  const child = spawn('bash', [script, flag], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       TMPDIR: s.dir,
@@ -72,5 +72,17 @@ export async function runOnce(s: Stand, request: object | null, env: Record<stri
   const status = existsSync(join(s.control, 'status.json')) ? JSON.parse(readFileSync(join(s.control, 'status.json'), 'utf8')) : null;
   return { code, out: stdout + stderr, calls, status };
 }
+
+/* One pass of an updater over request.json. */
+function pass(script: string, s: Stand, request: object | null, env: Record<string, string>) {
+  if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
+  return run(script, '--once', s, env);
+}
+
+export const runOnce = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(SCRIPT, s, request, env);
+/* The updater from before revision 2, which starts the update that moves an install in. */
+export const runRev1 = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(REV1, s, request, env);
+/* The helper container this build's installer starts when an older updater runs it. */
+export const takeOver = (s: Stand, env: Record<string, string> = {}) => run(SCRIPT, '--take-over', s, env);
 
 export const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));

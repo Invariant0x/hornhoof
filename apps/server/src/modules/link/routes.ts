@@ -13,7 +13,7 @@ const NameParams = z.object({ name: z.string().max(200) });
 export function linkRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/link', async req => {
     await requireCompanyPerson(req, ctx.db);
-    return { link: await linkOf(ctx.db), domain: ctx.links.domain() };
+    return { link: await linkOf(ctx.db), domain: ctx.links.domain(), tls: await ctx.tls.view() };
   });
 
   app.get('/api/link/names/:name', async req => {

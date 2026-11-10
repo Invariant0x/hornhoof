@@ -21,6 +21,38 @@ const Bound = z
   .refine(b => new URL(b.url).hostname.startsWith(`${b.name}.`) && new URL(b.url).pathname === '/');
 export type Bound = z.infer<typeof Bound>;
 
+const Count = z.number().int().nonnegative();
+const SyncRecord = z.object({ state: z.enum(['on', 'off']), copy: z.string().nullable(), epoch: Count, generation: Count, at: Count.nullable() });
+export type SyncRecord = z.infer<typeof SyncRecord>;
+
+/* The route answer may grow fields (R2), so extra ones are let through; every field read here must be right. */
+const RouteBody = z.object({
+  state: z.enum(['held', 'empty']),
+  client: z.string().nullable(),
+  since: Count,
+  generation: Count,
+  relayStarted: Count,
+  evictionBound: Count,
+  sync: SyncRecord,
+});
+export type Route = ({ known: true } & z.infer<typeof RouteBody>) | { known: false; why: 'unreachable' | 'slow' | 'refused' | 'malformed' };
+
+export type SyncPost = { client: string; generation: number; state: 'on' | 'off'; copy: string | null; epoch: number };
+export type SyncResult = { stored: true; sync: SyncRecord } | { stored: false; why: 'not_holder' | 'stale_epoch' | 'unknown' };
+
+/* A relay from before passthrough has no such field, and that reads as not passing through. */
+const Health = z.object({ ok: z.literal(true), frps: z.literal(true), relayStarted: Count, passthrough: z.boolean().default(false) });
+export type Health = { up: boolean; relayStarted: number | null; passthrough: boolean };
+const DOWN: Health = { up: false, relayStarted: null, passthrough: false };
+
+const KeyAnswer = z.object({ key: z.string().min(16).max(1000) });
+const VisitorKeyAnswer = z.object({ visitorKey: z.string().min(16).max(1000) });
+
+/* How long a read of the relay's route or sync answer waits when the caller does not say. */
+const READ_MS = 2000;
+
+type Reply = { res: Response } | { failed: 'slow' | 'unreachable' };
+
 const unreachable = () => new ApiError(503, 'unavailable', 'hornhoof.org does not answer now. Try again in a few minutes.', 'relay_unreachable');
 const invalid = () => new ApiError(400, 'validation', 'A link name takes 1 to 63 lowercase Latin letters, digits and hyphens, with no hyphen at either end.', 'link_invalid');
 const busy = () => new ApiError(429, 'too_many', 'hornhoof.org got too many requests from here. Wait a little and try again.');
@@ -32,20 +64,85 @@ async function reasonOf(res: Response): Promise<string> {
   return typeof said === 'string' ? said : typeof (said as { reason?: unknown })?.reason === 'string' ? (said as { reason: string }).reason : '';
 }
 
+/* The relay's 409 on a sync post names why; any other word reads as unknown. */
+async function conflictOf(res: Response): Promise<'not_holder' | 'stale_epoch' | 'unknown'> {
+  const said = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error;
+  return said === 'not_holder' || said === 'stale_epoch' ? said : 'unknown';
+}
+
+/* The stored record carries the post's own fields and nothing else changed them. */
+const echoes = (stored: SyncRecord, post: SyncPost): boolean =>
+  stored.state === post.state && stored.copy === post.copy && stored.epoch === post.epoch && stored.generation === post.generation;
+
 /* The relay hands out public links like acme.hornhoof.org and carries their traffic to this server through the
    tunnel. Only the server talks to it: the browser asks Hornhoof, never the relay. */
 export class Relay {
   constructor(private readonly base: string) {}
 
-  private async call(method: string, path: string, opts: { body?: object; key?: string } = {}): Promise<Response> {
+  /* Never throws: a call that got no answer says whether it was too slow or could not connect. */
+  private async attempt(method: string, path: string, opts: { body?: object; key?: string }, timeoutMs: number): Promise<Reply> {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (opts.body) headers['content-type'] = 'application/json';
     if (opts.key) headers.authorization = `Bearer ${opts.key}`;
     try {
-      return await fetch(`${this.base}/api/v1${path}`, { method, headers, body: opts.body && JSON.stringify(opts.body), redirect: 'error', signal: AbortSignal.timeout(WAIT_MS) });
-    } catch {
-      throw unreachable();
+      const res = await fetch(`${this.base}/api/v1${path}`, { method, headers, body: opts.body && JSON.stringify(opts.body), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+      /* The body is read here, on a clone, so a stall in it counts as slow and a cut as unreachable. */
+      await res.clone().text();
+      return { res };
+    } catch (error) {
+      return { failed: (error as Error).name === 'TimeoutError' ? 'slow' : 'unreachable' };
     }
+  }
+
+  private async call(method: string, path: string, opts: { body?: object; key?: string } = {}): Promise<Response> {
+    const reply = await this.attempt(method, path, opts, WAIT_MS);
+    if ('failed' in reply) throw unreachable();
+    return reply.res;
+  }
+
+  /* Who holds the link's route. Anything but a clean answer reads as unknown, never as empty (R2). */
+  async route(name: string, key: string, timeoutMs = READ_MS): Promise<Route> {
+    const reply = await this.attempt('GET', `/links/${encodeURIComponent(name)}/route`, { key }, timeoutMs);
+    if ('failed' in reply) return { known: false, why: reply.failed };
+    if (reply.res.status !== 200) return { known: false, why: 'refused' };
+    const body = RouteBody.safeParse(await reply.res.json().catch(() => null));
+    return body.success ? { known: true, ...body.data } : { known: false, why: 'malformed' };
+  }
+
+  /* Posts the sync record. It counts as stored only when the relay answers with exactly what was posted. */
+  async setSync(name: string, key: string, post: SyncPost, timeoutMs = READ_MS): Promise<SyncResult> {
+    const reply = await this.attempt('POST', `/links/${encodeURIComponent(name)}/sync`, { key, body: post }, timeoutMs);
+    if ('failed' in reply) return { stored: false, why: 'unknown' };
+    if (reply.res.status === 409) return { stored: false, why: await conflictOf(reply.res) };
+    if (reply.res.status !== 200) return { stored: false, why: 'unknown' };
+    const answer = z.object({ sync: SyncRecord }).safeParse(await reply.res.json().catch(() => null));
+    return answer.success && echoes(answer.data.sync, post) ? { stored: true, sync: answer.data.sync } : { stored: false, why: 'unknown' };
+  }
+
+  /* Whether frps takes logins, since when the relay runs, and whether it routes by TLS server name. */
+  async health(timeoutMs = READ_MS): Promise<Health> {
+    const reply = await this.attempt('GET', '/health', {}, timeoutMs);
+    if ('failed' in reply || reply.res.status !== 200) return DOWN;
+    const body = Health.safeParse(await reply.res.json().catch(() => null));
+    return body.success ? { up: true, relayStarted: body.data.relayStarted, passthrough: body.data.passthrough } : DOWN;
+  }
+
+  /* A new link key; the old one stops working at once. */
+  async changeKey(name: string, key: string): Promise<string> {
+    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/key`, key, KeyAnswer)).key;
+  }
+
+  /* A new visitor key for the link, replacing the one before. */
+  async visitorKey(name: string, key: string): Promise<string> {
+    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/visitor-key`, key, VisitorKeyAnswer)).visitorKey;
+  }
+
+  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>): Promise<T> {
+    const res = await this.call('POST', path, { key });
+    if (res.status === 429) throw busy();
+    const parsed = res.ok ? answer.safeParse(await res.json().catch(() => null)) : null;
+    if (!parsed?.success) throw unreachable();
+    return parsed.data;
   }
 
   /* A name no link can have is answered here, without asking. */

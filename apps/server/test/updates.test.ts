@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
+import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 
@@ -122,8 +123,8 @@ async function fakeRegistry(
   };
 }
 
-async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
-  const { app, db } = await testApp({
+const updatableApp = (registry: { base: string }, commit: string, control: string, env: NodeJS.ProcessEnv = {}) =>
+  testApp({
     HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
     REGISTRY_URL: registry.base,
     HORNHOOF_VERSION: '0.4.0',
@@ -131,7 +132,29 @@ async function company(registry: { base: string }, commit = 'aaa', control = mkd
     HORNHOOF_CONTROL_DIR: control,
     ...env,
   });
+
+async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await updatableApp(registry, commit, control, env);
   return { app, db, control, ceo: await setUpCompany(app) };
+}
+
+/* A company whose app leads on a keeper's word, with an agent at work, and the step down the keeper can order. */
+async function leadingCompany(registry: { base: string }) {
+  const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+  const say = (mode: Mode) => writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
+  const { app, db } = await updatableApp(registry, 'aaa', control, { HORNHOOF_KEEPER: 'on' });
+  /* Said once the app is built and not yet started, so a slow build cannot make the word stale. */
+  say('lead');
+  const ceo = await setUpCompany(app);
+  updaterAlive(control);
+  const [acme] = await db.select().from(companies);
+  const [sub] = await db.select().from(subscriptions);
+  const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+  const stepDown = async () => {
+    say('read');
+    await app.ctx.mode.check();
+  };
+  return { app, db, ceo, control, acme: acme!, job: job!, say, stepDown };
 }
 
 /* The updater is alive when it touched alive in the last 30 seconds. A touch an hour ahead of the clock stays that fresh
@@ -143,6 +166,7 @@ const updaterAlive = (control: string, ageSeconds = -3600) => {
 };
 const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
 const SHA = 'b'.repeat(40);
+const HELD_AFTER_MS = 10 * 60_000;
 /* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
 const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   id,
@@ -525,6 +549,94 @@ describe('updates', () => {
     await until(() => request(control) !== null);
     expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+  });
+
+  it('stops waiting when the app leaves lead, and starts no updater on a machine that no longer leads', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+    await stepDown();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await settled();
+    expect(request(control)).toBeNull();
+  });
+
+  it('hands over nothing when the app leaves lead while the agents are counted', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    const hold = holdNextCount();
+    await publishWorking(app.ctx, acme.id);
+    await hold.counted;
+    await stepDown();
+    hold.resume();
+    await settled();
+    expect(request(control)).toBeNull();
+  });
+
+  /* An update just handed over, with the turns still held, and the timeout that ends the hold, which the test may run
+     without waiting its ten minutes. */
+  async function handedOver() {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const made = await leadingCompany(registry);
+    const { app, db, ceo, control, acme, job } = made;
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timeouts.mockRestore());
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await expect.poll(() => request(control)).not.toBeNull();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === HELD_AFTER_MS);
+    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout };
+  }
+
+  it('lets the turns held after a hand-over go when its timeout ends', async () => {
+    const { app, acme, holdEnds } = await handedOver();
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+  });
+
+  it('keeps the turns held when the timeout of a hand-over ends and another update waits', async () => {
+    const { app, db, ceo, acme, job, holdEnds } = await handedOver();
+    await db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, job.id));
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+  });
+
+  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    onTestFinished(() => cleared.mockRestore());
+    const { app, acme, stepDown, holdTimeout } = await handedOver();
+    await stepDown();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect(cleared).toHaveBeenCalledWith(holdTimeout);
+  });
+
+  it('refuses an update whose reading of the registry crossed a step-down', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control, acme, say, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    const read = app.ctx.updates.siblings.bind(app.ctx.updates);
+    app.ctx.updates.siblings = async tag => {
+      await stepDown();
+      return read(tag);
+    };
+    for (const whenIdle of [true, false]) {
+      const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle }, ...as(ceo) });
+      expect(res.json().error?.reason).toBe('read_only');
+      /* The next attempt crosses the same step-down, from lead again. */
+      say('lead');
+      await app.ctx.mode.check();
+    }
+    expect(request(control)).toBeNull();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
   });
 
   it('says when no updater runs', async () => {

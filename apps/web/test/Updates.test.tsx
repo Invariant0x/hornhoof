@@ -151,6 +151,24 @@ describe('updates', () => {
     expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.');
   });
 
+  it('shows maintenance while the server answers with it', async () => {
+    let view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
+    let maintenance = false;
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': () =>
+        maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const bar = () => screen.getByRole('progressbar', { name: 'Update progress' });
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'));
+    maintenance = true;
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.'));
+    maintenance = false;
+    view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 4 of 4: waiting for the new server'));
+  });
+
   it('lists versions and marks the running one', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     const user = userEvent.setup();
@@ -253,7 +271,7 @@ describe('updates', () => {
   it('gives the time of the last check as the chosen language writes it', () => {
     localStorage.setItem('hh-lang', 'ru');
     const view = updates();
-    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, cut: null, check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {} };
+    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, cut: null, check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {} };
     render(
       <LanguageProvider>
         <Versions updates={idle} onClose={() => {}} />

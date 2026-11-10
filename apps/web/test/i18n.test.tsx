@@ -62,6 +62,19 @@ describe('The agent in the center', () => {
 describe('errorText', () => {
   it('shows a known reason in the chosen language', () => {
     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);
+    const notConfirmed = new ApiFailure(503, 'unavailable', 'x', 'not_confirmed');
+    expect(errorText(en, notConfirmed)).toBe('Hornhoof could not confirm this change. It may be saved; look before you try again.');
+    expect(errorText(ru, notConfirmed)).toBe('Hornhoof не смог подтвердить это изменение. Возможно, оно сохранено: проверьте, прежде чем повторять.');
+  });
+
+  it('words the reasons of maintenance, read-only and starting in both languages', () => {
+    const answer = (reason: string) => new ApiFailure(503, 'unavailable', 'x', reason);
+    expect(errorText(en, answer('maintenance'))).toBe('Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.');
+    expect(errorText(ru, answer('maintenance'))).toBe('Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.');
+    expect(errorText(en, answer('read_only'))).toBe('Hornhoof only reads on this machine now, so nothing was changed.');
+    expect(errorText(ru, answer('read_only'))).toBe('Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.');
+    expect(errorText(en, answer('starting'))).toBe('Hornhoof is starting. Try again in a few seconds.');
+    expect(errorText(ru, answer('starting'))).toBe('Hornhoof запускается. Попробуйте еще раз через несколько секунд.');
   });
 
   it('tells a person who tried too often to wait, in both languages', () => {

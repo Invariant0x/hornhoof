@@ -5,7 +5,7 @@ import { agents, departments, nodes, people, personAccess, subscriptions, teams,
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { expireStaleNodes, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { planNodes, type NodeRow } from '../nodes/nodes.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
 export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
@@ -119,7 +119,6 @@ function accountViews(mine: NodeRow[], accountOf: Map<string, Account | null>, v
 const shownNode = <T extends { status: string }>(up: T[]): T | undefined => up.find(n => n.status === 'ready') ?? up.find(n => n.status === 'needs_setup') ?? up[0];
 
 export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
-  await expireStaleNodes(db);
   const live = isNull(subscriptions.removedAt);
   const companyId = viewer?.companyId;
   const rows = await db

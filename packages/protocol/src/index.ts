@@ -431,6 +431,21 @@ export const NodeReconnect = z.object({
 });
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
+/* The node messages that change the company's data. A node numbers them from 1 within a stream and keeps each until the
+   server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
+   answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
+   agent.restarted and node.stopping. */
+export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
+/* Optional, so a build that does not number still talks to one that does. */
+const MessageNumber = z.number().int().min(1).optional();
+/* The header of the upgrade answer of a server that sends ack. */
+export const ACKS_HEADER = 'hornhoof-acks';
+/* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
+   the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
+export const HELLO_IDS_MAX = 20_000;
+/* A server that sends no ack drops a hello that lists more than this. */
+export const HELLO_IDS_BEFORE_ACKS = 100;
+
 const NodeMessage = z.discriminatedUnion('type', [
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced,
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -443,7 +458,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     loggedIn: z.boolean(),
     /* Signed in, but the program waits for a first setup only the plan's owner may pass, such as accepting its terms. */
     setupNeeded: z.boolean().optional(),
-    running: z.array(z.string()).max(100),
+    running: z.array(z.string()).max(HELLO_IDS_MAX),
     models: Models.optional(),
     terminals: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
@@ -458,7 +473,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
     live: Live,
-    tests: z.array(z.string()).max(100).optional(),
+    tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
     skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
@@ -470,12 +485,14 @@ const NodeMessage = z.discriminatedUnion('type', [
     build: NodeBuild.optional().catch(undefined),
     restart: NodeExit.optional(),
     nodeLog: NodeLog.optional(),
+    /* The outbox the node numbers its messages in: a uuid made with its file, so a wiped volume never reuses a number. */
+    stream: z.uuid().optional(),
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape, live: Live }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
-  z.object({ type: z.literal('tests.started'), partId: z.string() }),
+  z.object({ type: z.literal('tests.started'), partId: z.string(), n: MessageNumber }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */
   z.object({
     type: z.literal('tests.done'),
@@ -489,6 +506,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* How each test file went, where its runner says; none means its suite's outcome is all that is known. */
     files: z.array(FileOutcome).max(10_000).optional(),
     kept: KeptFiles.optional(),
+    n: MessageNumber,
   }),
   z.object({
     type: z.literal('status'),
@@ -511,10 +529,11 @@ const NodeMessage = z.discriminatedUnion('type', [
     kind: CredKind,
     version: z.number().int().min(1),
     envelopes: z.array(z.object({ nodeId: Id, sealed: Sealed })).max(MAX_ENVELOPES),
+    n: MessageNumber,
   }),
   /* How the sign-in Hornhoof started on this node ended. */
-  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable() }),
-  z.object({ type: z.literal('job.started'), jobId: z.string() }),
+  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), n: MessageNumber }),
+  z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   z.object({
     type: z.literal('job.done'),
     jobId: z.string(),
@@ -529,8 +548,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     failure: Failure.optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
     exit: ProgramExit.optional(),
+    n: MessageNumber,
   }),
-  z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
+  z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent, n: MessageNumber }),
   /* What the turn's program does now: sent at each change of its state or tool, and while the turn runs at least once a
      minute, so Hornhoof knows the node is there. since: when the state began; tool: the tool it runs; signAt: when the
      program last gave any sign of life, a hook call or a line in its log; retry: its own retry while retrying. Older
@@ -551,8 +571,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     exitCode: ProgramExit.shape.code.optional(),
     signal: ProgramExit.shape.signal.optional(),
     screen: z.string().max(PROGRAM_SCREEN_MAX).optional(),
+    n: MessageNumber,
   }),
-  z.object({ type: z.literal('removed') }),
+  z.object({ type: z.literal('removed'), n: MessageNumber }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
   z.object({ type: z.literal('term.exit'), termId: TermId }),
   /* Whether the agent's program runs in the view's session yet: while it starts, the window shows a loader. */
@@ -569,13 +590,14 @@ const NodeMessage = z.discriminatedUnion('type', [
     agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
     event: z.string().regex(/^[a-z]{1,20}$/),
     reason: z.string().min(1).max(300),
+    n: MessageNumber,
   }),
   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
-  z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
+  z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1), n: MessageNumber }),
   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
   /* Said ok means the program recorded the words, or Codex holds them. Unheard follows if they never entered a turn. */
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
-  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
+  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000), n: MessageNumber }),
   z.object({ type: z.literal('agent.words_settled'), agentKey: Id, jobId: Id }),
   /* Words a program's input held, that nobody sent, before a new turn: Hornhoof keeps them and answers, and only then does
      the node clear the input. typed: someone typed at the terminal since Hornhoof last typed there. The same ref means the
@@ -585,6 +607,10 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
+
+const NUMBERED_TYPES: ReadonlySet<string> = new Set(NUMBERED);
+/* Whether a node numbers this message, whether or not this one carries a number. */
+export const isNumbered = (m: NodeMessage): boolean => NUMBERED_TYPES.has(m.type);
 
 /* A git repository over https and a branch name git takes as a plain name, never as an option. The token has its own
    field: an address with a name or password in it would put them on command lines and into the clone's settings. The
@@ -657,6 +683,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
+  /* Hornhoof has every numbered message of the node's stream up to this number, applied or failed for good; the node
+     drops them. */
+  z.object({ type: z.literal('ack'), upto: z.number().int().min(0) }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),

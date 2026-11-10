@@ -195,6 +195,8 @@ Want to add something? [Write to us](https://github.com/Invariant0x/hornhoof/iss
 
 **Can I use my phone?** Yes, to watch, answer and approve from the browser.
 
+**What if the hornhoof.org link stops opening after an update?** Put `ACME_DIRECTORY=off` in the `.env` file in the `~/hornhoof` folder and run `docker compose up -d app` there. The link opens again within a minute, with its https ending at hornhoof.org as before. Then tell us in an issue.
+
 ## What Hornhoof is not
 
 - Not a cloud service. There is no sign-up and no account with us.

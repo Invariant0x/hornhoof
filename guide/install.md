@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 ```
 
 - It goes into `~/hornhoof-acme`, as its own compose project.
-- It takes the first free port from 8080 and keeps it in `.env` as `HORNHOOF_PORT`.
+- It takes the first free web port from 8080 and peer port from 8180, and keeps them in `.env` as `HORNHOOF_PORT` and `HORNHOOF_PEER_PORT`. A list in the Docker volume `hornhoof-ports` keeps every company's ports on this computer, so no two companies get the same one, even while one is stopped.
 - Run the same command again to update that company.
 
 Machines can carry nodes for several companies too. Each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's nodes.

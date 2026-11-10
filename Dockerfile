@@ -45,7 +45,7 @@ COPY templates templates
 # The updater takes the installer and the compose file of the build it moves to from this image.
 COPY compose.yaml compose.yaml
 COPY --from=build /app/apps/web/dist apps/web/dist
-# The tunnel container runs this image too, and frpc carries the company's public link from hornhoof.org to the app.
+# The keeper runs frpc as its child, and frpc carries the company's public link from hornhoof.org to the keeper.
 # It is the client the relay is built for, taken from its own image.
 COPY --from=fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e /usr/bin/frpc /usr/local/bin/frpc
 # Our package files as they are, over those the install took: without HORNHOOF_VERSION the server reads its version

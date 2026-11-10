@@ -116,8 +116,22 @@ export const sessions = pgTable(
     personId: uuid('person_id').notNull().references(() => people.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
+    /* True only on rows made before the __Host- cookie existed: the migration's default marks them, startSession never does. */
+    beforeHostCookie: boolean('before_host_cookie').notNull().default(true),
   },
   t => [index('sessions_person_id').on(t.personId)],
+);
+
+/* One row per sign-in try that was let through, kept an hour. Only SHA-256 hashes of the email and the address are stored. */
+export const signInAttempts = pgTable(
+  'sign_in_attempts',
+  {
+    id: id(),
+    emailHash: text('email_hash').notNull(),
+    addressHash: text('address_hash').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('sign_in_attempts_email').on(t.emailHash, t.at), index('sign_in_attempts_address').on(t.addressHash, t.at), index('sign_in_attempts_at').on(t.at)],
 );
 
 export const invites = pgTable(
@@ -719,6 +733,8 @@ export const taskEvents = pgTable(
   'task_events',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /* What names this event across machines, where the serial id of each differs. */
+    uuid: uuid('uuid').notNull().defaultRandom().unique(),
     companyId: companyId(),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     kind: text('kind', { enum: TASK_EVENT_KINDS }).notNull(),
@@ -1977,3 +1993,51 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
   isDigest('model_check_certificates_binding', t.bindingDigest),
 ]);
+
+/* The certificate of the company's public link, which ends TLS on this machine, and the ACME account it comes from. The
+   private keys are kept only as encryptSecret gives them, like the link's own key. The mode is kept here so a restart
+   writes the same tunnel settings and the link does not blink. */
+export const linkTls = pgTable('link_tls', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id),
+  /* The CA the account is at. */
+  directory: text('directory').notNull(),
+  accountKeyEnc: text('account_key_enc').notNull(),
+  accountUrl: text('account_url'),
+  /* The link name the certificate is for. */
+  name: text('name'),
+  /* The chain. */
+  certPem: text('cert_pem'),
+  /* The CA the certificate came from. */
+  certDirectory: text('cert_directory'),
+  certKeyEnc: text('cert_key_enc'),
+  notAfter: timestamp('not_after', { withTimezone: true }),
+  renewAt: timestamp('renew_at', { withTimezone: true }),
+  /* When to ask the CA's renewal information again. */
+  askAt: timestamp('ask_at', { withTimezone: true }),
+  /* No order before this, after a failure. */
+  nextTryAt: timestamp('next_try_at', { withTimezone: true }),
+  /* The last failure's AcmeError type, else its kind; null after a success. */
+  failure: text('failure'),
+  failedAt: timestamp('failed_at', { withTimezone: true }),
+  mode: text('mode', { enum: ['http', 'https'] }).notNull().default('http'),
+  /* No switch to https before this. */
+  httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* Where a change came from: a node message or a web request, written in the change's own transaction, so a retry finds
+   its source listed. */
+export const applied = pgTable('applied', {
+  source: text('source').primaryKey(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* Where a tool's change came from: the call's invocation id, so a call repeated after a lost answer finds it. */
+export const toolCalls = pgTable('tool_calls', {
+  id: uuid('id').primaryKey(),
+  jobId: uuid('job_id').notNull().references(() => jobs.id),
+  answer: jsonb('answer'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+});

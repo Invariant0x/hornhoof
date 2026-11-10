@@ -4,18 +4,45 @@
 # how many the database has now. STUB_DIGESTS words are "tag=digest": the build each tag points at in the registry,
 # which also keeps every build by its digest. STUB_RUNNING_IMAGES words are "service=image": the image each service
 # runs now, as Docker keeps it by digest. STUB_PLAN_NODES words are "name=plan=image": the other nodes on this computer,
-# with the plan on their label and the image they run.
+# with the plan on their label and the image they run. STUB_BUILD_SERVICES words are "tag=service,service": the services the compose
+# file of that build names; STUB_SERVICES answers for any other file. STUB_PROJECT_CONTAINERS words are "id=service":
+# the containers of the compose project.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
-commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
-digest_of() { for w in ${STUB_DIGESTS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+word() {
+  local key=$1 w
+  shift
+  for w in "$@"; do [ "${w%%=*}" = "$key" ] && { printf '%s' "${w#*=}"; return; }; done
+}
+commit_of() { word "$1" ${STUB_COMMITS:-}; }
+digest_of() { word "$1" ${STUB_DIGESTS:-}; }
+running_image() { word "$1" ${STUB_RUNNING_IMAGES:-}; }
+build_services() { word "$1" ${STUB_BUILD_SERVICES:-}; }
+project_service() { word "$1" ${STUB_PROJECT_CONTAINERS:-}; }
 tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' "${w%%=*}"; return; }; done; }
 # An image by digest or by tag: what tag it is a build of, and the id of the build it is.
 ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
 ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
-running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 image_by_id() {
   for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done
   for w in ${STUB_PLAN_NODES:-}; do [ "$(ref_id "${w##*=}")" = "$1" ] && { printf '%s' "${w##*=}"; return; }; done
+}
+# The compose file a command reads: the one it names, else the one in the folder it runs in.
+compose_file() {
+  while [ $# -gt 0 ]; do
+    [ "$1" = -f ] && { printf '%s' "$2"; return; }
+    shift
+  done
+  printf 'compose.yaml'
+}
+# The services a compose file names, by the build unpacking wrote into it.
+services_in() {
+  local names service
+  names=$(build_services "$(sed -n 's/^# build //p' "$1" 2> /dev/null)")
+  if [ -n "$names" ]; then
+    printf '%s\n' "$names" | tr ',' '\n'
+    return
+  fi
+  for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done
 }
 case "$1 $2" in
   # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server.
@@ -27,20 +54,38 @@ case "$1 $2" in
   # STUB_NODES_UPDATERS: the containers of the updater of a server's nodes there are now, and STUB_NODES_UPDATER_IMAGE the
   # image the one of its name runs.
   'ps -aq') for w in ${STUB_NODES_UPDATERS:-}; do echo "$w"; done ;;
+  # The containers of the compose project, by id and service, or the other nodes on this computer, by name and plan.
   'ps -a')
-    for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
+    case "$*" in
+      *com.docker.compose.project*) for w in ${STUB_PROJECT_CONTAINERS:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
+      *) for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
+    esac ;;
   'compose ps')
     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+  # The container of front holds the web port until it goes. STUB_RM_FAILS names containers that cannot be removed.
+  'rm -f')
+    [ "$(project_service "$3")" = front ] && rm -f "$STUB_STATE/port-holder"
+    case " ${STUB_RM_FAILS:-} " in *" $3 "*) exit 1 ;; esac ;;
   'exec dbcid')
     case "$*" in
-      *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
-      *'FROM drizzle.__drizzle_migrations'*) cat "$STUB_STATE/migrations" ;;
+      # Each copy says which one it is. STUB_DUMP=fail: the database cannot be saved.
+      *pg_dump*)
+        [ "${STUB_DUMP:-ok}" = fail ] && { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
+        copy=$(($(cat "$STUB_STATE/copies" 2> /dev/null || echo 0) + 1))
+        printf '%s' "$copy" > "$STUB_STATE/copies"
+        printf -- '-- a dump of the hornhoof database\n-- migrations %s\n-- copy %s\n' "$(cat "$STUB_STATE/migrations")" "$copy" ;;
+      # What the updater had said by the time it first asked the database.
+      *'FROM drizzle.__drizzle_migrations'*)
+        [ -f "$STUB_STATE/status-when-asked" ] || cp "$HORNHOOF_CONTROL_DIR/status.json" "$STUB_STATE/status-when-asked"
+        cat "$STUB_STATE/migrations" ;;
       *'RENAME TO hornhoof'*) mv "$STUB_STATE/restored" "$STUB_STATE/migrations" ;;
     esac ;;
   # A dump going into the copy of the database that takes the place of the one there.
   'exec -i')
     [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
-    sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored" ;;
+    dump=$(cat)
+    printf '%s\n' "$dump" | sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored"
+    printf '%s\n' "$dump" | sed -n 's/^-- copy //p' | tr -d '\n' > "$STUB_STATE/restored-copy" ;;
   'image inspect')
     last=${!#}
     case "${4:-}" in
@@ -67,8 +112,15 @@ case "$1 $2" in
           *' pull '*)
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
-          # STUB_SERVICES: the services the compose file in the server folder names.
-          *' config --services '*) for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done ;;
+          *' config --services '*) services_in "$(compose_file "$@")" ;;
+          # STUB_UPDATER_UP=fail: this build's updater does not start, the one named by HORNHOOF_UPDATER_REF does;
+          # never: no updater starts.
+          *' up '*' updater '*)
+            printf 'updater up HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+            case "${STUB_UPDATER_UP:-ok}" in
+              never) exit 1 ;;
+              fail) [ -n "${HORNHOOF_UPDATER_REF:-}" ] || exit 1 ;;
+            esac ;;
         esac ;;
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
@@ -84,7 +136,9 @@ case "$1 $2" in
             echo cid-computer ;;
           *) echo "cid-$(ref_tag "$2")" ;;
         esac ;;
+      # Any other container than a command's only starts.
       start)
+        [ "$2" = -a ] || exit 0
         echo "ran: $(cat "$STUB_STATE/computer-command")"
         [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
         if [ -n "${STUB_COMPUTER_RUNS:-}" ]; then
@@ -109,15 +163,36 @@ case "$1 $2" in
 case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
 [ -z "\${HORNHOOF_NODES_FREE:-}" ] || printf 'installer told the nodes are free\n' >> "$STUB_LOG"
 [ -z "\${HORNHOOF_NODES_ONLY:-}" ] || printf 'installer told only %s\n' "\$HORNHOOF_NODES_ONLY" >> "$STUB_LOG"
-printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+# As the real installer, it writes the server folder's compose file and .env before it starts anything.
+cp "\$HORNHOOF_COMPOSE_FILE" "\$HORNHOOF_SERVER_DIR/compose.yaml"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
+# STUB_HANDS_OVER names builds whose installer, run by an updater from before revision 2, starts this build's updater,
+# and compose replacing the updater that runs it stops it. STUB_HANDOVER=fail: it could not start that updater.
+if [ -z "\${HORNHOOF_UPDATER_REV:-}" ]; then
+  case " ${STUB_HANDS_OVER:-} " in
+    *" $tag "*)
+      [ "${STUB_HANDOVER:-}" != fail ] || { echo 'Could not start the updater of this build, so nothing changed.'; exit 1; }
+      echo 'installer hands over' >> "$STUB_LOG"
+      kill -9 "\$PPID"
+      exit 0 ;;
+  esac
+fi
+printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s HORNHOOF_UPDATER_REV=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" "\${HORNHOOF_UPDATER_REV:-}" >> "$STUB_LOG"
+# STUB_HANG names builds whose installer does not end: what it started sleeps, its output in the install log.
+case " ${STUB_HANG:-} " in *" $tag "*) sleep 60 & printf '%s' "\$!" > "$STUB_STATE/hung-child"; wait ;; esac
+# front holds the web port from a build that has it on, so a build without it cannot take the port.
+case ",$(build_services "$tag")," in
+  *,front,*) touch "$STUB_STATE/port-holder" ;;
+  *) [ ! -f "$STUB_STATE/port-holder" ] || { echo 'Bind for 0.0.0.0:8080 failed: port is already allocated'; exit 1; } ;;
+esac
 # The build migrates the database when it starts, also when it fails afterwards.
 want=\$(for w in ${STUB_MIGRATIONS:-}; do [ "\${w%%=*}" = "$tag" ] && printf '%s' "\${w#*=}"; done)
 [ -n "\$want" ] && [ "\$want" -gt "\$(cat "$STUB_STATE/migrations")" ] && printf '%s' "\$want" > "$STUB_STATE/migrations"
 case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
 SCRIPT
             ;;
-          *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+          # The build's name in a comment, so services_in can tell whose file it is.
+          *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
         esac ;;
     esac ;;
 esac

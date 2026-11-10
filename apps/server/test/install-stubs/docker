@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 . "$STUB_SRC/_log.sh"
+# The helper of updater.sh --take-over. Without the socket, the server's folder at its own path and the control folder of
+# the project .env names, it finds no update and exits 0, as the real one does. STUB_HELPER=replaces: with them, compose
+# replaces the updater a moment later, which kills the installer running under it.
+take_over_helper() {
+  [ "${STUB_HELPER:-}" = replaces ] || return 0
+  for word in "$@"; do case "$word" in HORNHOOF_SERVER_DIR=*) dir=${word#*=} ;; esac; done
+  project=$(grep '^COMPOSE_PROJECT_NAME=' "${dir:-}/.env" 2> /dev/null | cut -d= -f2-)
+  case " $* " in *' -v /var/run/docker.sock:/var/run/docker.sock '*) ;; *) return 0 ;; esac
+  case " $* " in *" -v ${dir:-}:${dir:-} "*) ;; *) return 0 ;; esac
+  case " $* " in *" -v ${project}_control:/control "*) ;; *) return 0 ;; esac
+  printf 'helper replaced the updater\n' >> "$STUB_LOG"
+  (sleep 1; kill -9 "$PPID") > /dev/null 2>&1 &
+}
+# The list of ports and its lock live here, so several installs of one test can share them.
+PORTS=${STUB_PORTS_DIR:-$STUB_STATE}
 works() {
   case "${STUB_DOCKER:-ok}" in
     ok) return 0 ;;
@@ -17,11 +32,53 @@ id_of() {
   for w in ${STUB_IMAGE_IDS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s\n' "${w#*=}"; return; }; done
   printf 'id-%s\n' "$1"
 }
+# The services a "compose ... up" names: nothing when it starts them all.
+up_services() {
+  while [ $# -gt 0 ] && [ "$1" != up ]; do shift; done
+  [ $# -gt 0 ] && shift
+  for word in "$@"; do case "$word" in -*) ;; *) printf '%s ' "$word" ;; esac; done
+}
+# STUB_BIND_FAIL words are ports something outside Docker holds: the first up that binds one fails.
+binds_ports() {
+  case " $(up_services "$@") " in '  ' | *' keeper '* | *' front '*) ;; *) return 0 ;; esac
+  for port in ${STUB_BIND_FAIL:-}; do
+    grep -Eq "^HORNHOOF_(PEER_)?PORT=$port\$" .env || continue
+    [ ! -f "$STUB_STATE/bind-failed-$port" ] || continue
+    touch "$STUB_STATE/bind-failed-$port"
+    if [ "${STUB_BIND_WORDS:-}" = address ]; then
+      echo "Error response from daemon: failed to bind port 0.0.0.0:$port/tcp: listen tcp4 0.0.0.0:$port: bind: address already in use" >&2
+    else
+      echo "Error response from daemon: driver failed programming external connectivity on endpoint front (9f1e): Bind for 0.0.0.0:$port failed: port is already allocated" >&2
+    fi
+    exit 1
+  done
+}
+# STUB_UP_FAIL words are services whose up fails for a reason that has nothing to do with ports.
+up_fails() {
+  for service in ${STUB_UP_FAIL:-}; do
+    case " $(up_services "$@") " in *" $service "*) echo "service \"$service\" failed to build: something else went wrong" >&2; exit 1 ;; esac
+  done
+}
+# STUB_MIGRATE=fail: compose runs migrate first for every up that starts the app, and migrate fails.
+migrate_runs() {
+  case " $(up_services "$@") " in '  ' | *' app '*) ;; *) return 0 ;; esac
+  if [ "${STUB_MIGRATE:-}" = fail ]; then echo "service \"migrate\" didn't complete successfully: exit 1" >&2; exit 1; fi
+}
 case "$1" in
   info) echo "Server Version: 28.0.0" ;;
   # STUB_PULL: "fail" for every image, "node" for the node's alone.
   pull) case "${STUB_PULL:-ok}:$2" in fail:* | node:*hornhoof-node*) echo "pull access denied" >&2; exit 1 ;; esac ;;
-  create) echo cid-app ;;
+  create)
+    case "$*" in
+      *'--name hornhoof-port-lock'*)
+        if [ -f "$PORTS/lock" ]; then echo "Error response from daemon: Conflict. The container name is already in use" >&2; exit 1; fi
+        n=$(($(cat "$PORTS/lock-count" 2> /dev/null || echo 0) + 1))
+        echo "$n" > "$PORTS/lock-count"
+        echo "lock-$n" > "$PORTS/lock"
+        echo "lock-$n" ;;
+      *) echo cid-app ;;
+    esac ;;
+  rm) if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi ;;
   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
@@ -38,10 +95,17 @@ case "$1" in
     if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
     # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
     if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
-    [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
+    case "$*" in
+      # STUB_LOCK_SINCE is when the lock was made; STUB_LOCK_TAKEN=1 says another install has taken it over since.
+      *io.hornhoof.since*) [ -f "$PORTS/lock" ] || exit 1; echo "$(cat "$PORTS/lock") ${STUB_LOCK_SINCE:-$(date +%s)}" ;;
+      *hornhoof-port-lock) if [ "${STUB_LOCK_TAKEN:-}" = 1 ]; then echo lock-other; else cat "$PORTS/lock" 2> /dev/null; fi ;;
+      *PortBindings*) echo "${STUB_BOUND_PORTS:-}" ;;
+      *) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
+    esac ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
+    case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; migrate_runs "$@" ;; esac
     case "$*" in
       *' pull') case "${STUB_PULL:-ok}" in fail) echo "pull access denied" >&2; exit 1 ;; esac ;;
       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
@@ -52,12 +116,29 @@ case "$1" in
   # STUB_NODES_UPDATER: the container of the updater of this server's nodes, when there is one.
   ps)
     case "$*" in *hornhoof.updater=nodes*) [ -z "${STUB_NODES_UPDATER:-}" ] || echo "$STUB_NODES_UPDATER"; exit 0 ;; esac
+    # STUB_BOUND_PORTS are the ports containers publish, so a test that names them need not name the containers.
+    if [ "$*" = 'ps -aq' ]; then
+      if [ -n "${STUB_BOUND_IDS:-}${STUB_BOUND_PORTS:-}" ]; then echo "${STUB_BOUND_IDS:-bound-1}"; fi
+      exit 0
+    fi
     for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
+    case "$*" in
+      # STUB_REGISTRY=fail: the write fails; STUB_REGISTRY=unreadable: the read does.
+      *'cat > /ports/registry.new'*)
+        if [ "${STUB_REGISTRY:-}" = fail ]; then echo "docker: Error response from daemon: failed to create task" >&2; exit 1; fi
+        cat > "$PORTS/registry"
+        exit 0 ;;
+      *'cat /ports/registry'*)
+        if [ "${STUB_REGISTRY:-}" = unreadable ]; then echo "docker: Error response from daemon: failed to create task" >&2; exit 1; fi
+        cat "$PORTS/registry" 2> /dev/null
+        exit 0 ;;
+    esac
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
-    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi
+    WORD=--take-over; if has "$@"; then take_over_helper "$@"; fi ;;
   exec)
     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.

@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance } from 'fastify';
@@ -12,8 +12,10 @@ import { buildApp, type Deps } from '../src/app.js';
 import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
+import { agentRole, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
+import type { LeaseKind, LeaseSync } from '../src/db/net.js';
+import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { openTestDb, timed } from './helpers-db.js';
@@ -25,6 +27,25 @@ export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
 export { TEST_API_KEY, SETUP, appFixture, withoutOperations, setUpCompany, invitePerson } from './helpers-company.js';
 
+type LeaseChange = { until?: string; kind?: LeaseKind; sync?: LeaseSync | null; termNumber?: number };
+const LEASE_COLUMNS: Record<keyof LeaseChange, string> = { until: 'until', kind: 'kind', sync: 'sync', termNumber: 'term_number' };
+
+/* Changes what the test database's lease says. The until is a timestamptz as text: '-infinity' or an ISO time. */
+export async function setLease(db: Db, change: LeaseChange): Promise<void> {
+  const columns = (Object.keys(change) as (keyof LeaseChange)[]).map(name => sql`${sql.identifier(LEASE_COLUMNS[name])} = ${change[name] ?? null}`);
+  await db.execute(sql`UPDATE net_local.lease SET ${sql.join(columns, sql`, `)}`);
+}
+
+/* The tunnel container's address in tests: start the app with testApp({ TUNNEL_HOST: TUNNEL }). */
+export const TUNNEL = '192.0.2.10';
+
+/* A request that came over https through the tunnel container, as a visitor of the public link sends it. */
+export const viaLink = (token?: string) => ({
+  remoteAddress: TUNNEL,
+  headers: { 'x-forwarded-proto': 'https' },
+  cookies: (token ? { [LINK_SESSION_COOKIE]: token } : {}) as Record<string, string>,
+});
+
 /* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
    hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
 function agentSqlOn(client: PGlite): AgentSql {
@@ -32,12 +53,14 @@ function agentSqlOn(client: PGlite): AgentSql {
   let granted: Promise<unknown> | null = null;
   return {
     run: async (text, mode) => {
-      granted ??= client.exec(`${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
+      granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
       await granted;
       return client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
         await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
-        return (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+        const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+        if (mode === 'write') await tx.exec(PRE_COMMIT);
+        return answers;
       });
     },
     close: async () => {},
@@ -60,8 +83,8 @@ const markedInTest: CommitMarker = async () => ({ ok: true });
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const db = drizzle(client, { schema }) as unknown as Db;
-  /* Tests never reach the real registry unless they ask. */
-  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
+  /* Tests never reach the real registry or a real CA unless they ask. */
+  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
   const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }) }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };

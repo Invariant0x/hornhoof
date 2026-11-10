@@ -4,23 +4,37 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyPerson, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
-import { pumpWaiting } from '../conversation/queue.js';
-import { workingCount } from '../events/store.js';
 import type { UpdateState } from './check.js';
-import { holdTurns } from './drain.js';
+import { modeGate } from '../keeper/app-mode.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
 import { nodeWaits } from './node-drain.js';
+import { sendToUpdater, UpdateWait } from './wait.js';
 
 /* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
-/* While an update waits for the agents, the working count is checked when it changes and this often besides. */
-const IDLE_CHECK_MS = 30_000;
-/* An update handed over restarts Hornhoof within minutes; one that did not keeps no turns waiting longer. */
-const HELD_AFTER_MS = 10 * 60_000;
 
-type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
+const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.latest?.commit && state.latest.commit !== commit);
+
+async function updatesView(ctx: Ctx, wait: UpdateWait, companyId: string) {
+  const { version, commit, migrations } = ctx.config;
+  const state = ctx.updates.state();
+  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: wait.shown() };
+  return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
+}
+
+/* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
+   digests pin it: the updater installs only the app image the app read, and the node and updater images of the
+   same tag, read now. */
+async function requestFor(ctx: Ctx, build: Build, id: string): Promise<UpdateRequest> {
+  const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
+  const siblings = await ctx.updates.siblings(tag).catch(err => {
+    ctx.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
+    throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
+  });
+  return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
+}
 
 /* An update now stops the turns that run, on this server's computer in any company, so it goes only for as many as the
    person saw. */
@@ -50,77 +64,12 @@ function howFast(body: z.infer<typeof UpdateBody>): Pick<UpdateRequest, 'urgent'
   return body.whenIdle ? {} : { immediate: true };
 }
 
-const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.latest?.commit && state.latest.commit !== commit);
-
 /* The running build summary is for every signed-in person. Published builds and update controls
    are for people who see the whole company. */
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
-  const { version, commit, migrations } = ctx.config;
-  let waiting: Waiting | null = null;
-
-  async function view(companyId: string) {
-    const state = ctx.updates.state();
-    const updater: UpdaterView = {
-      present: ctx.updater.present(),
-      status: ctx.updater.status(),
-      waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
-    };
-    return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
-  }
-
-  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
-  function callOff(release = true) {
-    waiting?.stop();
-    if (waiting && release) letTurnsGo(waiting.companyId);
-    waiting = null;
-  }
-
-  function letTurnsGo(companyId: string) {
-    holdTurns(ctx, companyId, false);
-    void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
-  }
-
-  /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
-     digests pin it: the updater installs only the app image the app read, and the node and updater images of the
-     same tag, read now. */
-  async function requestFor(build: Build, id: string): Promise<UpdateRequest> {
-    const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
-    const siblings = await ctx.updates.siblings(tag).catch(err => {
-      app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
-      throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
-    });
-    return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
-  }
-
-  function send(request: UpdateRequest) {
-    const { id, ...rest } = request;
-    ctx.updater.request(rest, id);
-  }
-
-  /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile.
-     It stops waiting only once the updater has it: a request that could not be written is tried again on the next
-     check, and the failure goes to the log instead of taking the server down. */
-  async function sendWhenIdle(companyId: string, request: UpdateRequest) {
-    let done = false;
-    const wanted = () => !done && waiting?.request.id === request.id;
-    const check = async () => {
-      if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
-      send(request);
-      done = true;
-      callOff(false);
-      setTimeout(() => waiting?.companyId === companyId || letTurnsGo(companyId), HELD_AFTER_MS).unref();
-    };
-    const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
-    const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
-    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
-    timer.unref();
-    waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
-    /* No new turn starts meanwhile, so the running ones can end. */
-    holdTurns(ctx, companyId, true);
-    await tryCheck();
-  }
-
-  app.addHook('onClose', async () => callOff(false));
+  const { version, commit } = ctx.config;
+  const wait = new UpdateWait(ctx);
+  ctx.mode.whenLeaving(() => wait.standDown());
 
   app.get('/api/updates/current', async req => {
     await requirePerson(req, ctx.db);
@@ -128,13 +77,13 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.get('/api/updates', async req => {
-    return view((await requireCompanyPerson(req, ctx.db)).companyId);
+    return updatesView(ctx, wait, (await requireCompanyPerson(req, ctx.db)).companyId);
   });
 
   app.post('/api/updates/check', async req => {
     const me = await requireCompanyPerson(req, ctx.db);
     await ctx.updates.now();
-    return view(me.companyId);
+    return updatesView(ctx, wait, me.companyId);
   });
 
   app.post('/api/updates', async (req, reply) => {
@@ -142,16 +91,18 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = UpdateBody.parse(req.body);
     if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
     requireFreeUpdater(ctx);
-    const request = { ...(await requestFor(await publishedBuild(ctx, body.version), randomUUID())), ...howFast(body) };
-    callOff();
-    if (request.urgent || request.immediate) send(request);
-    else await sendWhenIdle(me.companyId, request);
+    const request = { ...(await requestFor(ctx, await publishedBuild(ctx, body.version), randomUUID())), ...howFast(body) };
+    /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
+    await modeGate(ctx.mode)(req);
+    wait.callOff();
+    if (request.urgent || request.immediate) sendToUpdater(ctx, request);
+    else await wait.sendWhenIdle(me.companyId, request);
     return reply.code(202).send({ id: request.id });
   });
 
   app.delete('/api/updates', async (req, reply) => {
     await requireCompanyPerson(req, ctx.db);
-    callOff();
+    wait.callOff();
     return reply.code(204).send();
   });
 }

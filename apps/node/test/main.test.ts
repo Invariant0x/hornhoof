@@ -8,11 +8,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
+import { HELLO_IDS_BEFORE_ACKS, parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
 import { DEFAULT_BACKOFF } from '../src/connection.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
+import { Outbox } from '../src/outbox.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost } from '../src/terminal/host.js';
@@ -42,9 +43,12 @@ function grantCheck(socket: WebSocket, frame: { type: string; id?: string }, all
   if (allowed && frame.type === 'check.acquire') socket.send(JSON.stringify({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
 }
 
-async function fakeServer(grantChecks = true) {
-  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
+/* grantChecks: it gives every check slot a node asks for at once. acks: it says in its upgrade answer that it confirms
+   numbered messages, as a server of this build does. port: the one a server of the same node listened on before. */
+async function fakeServer({ grantChecks = true, acks = false, port }: { grantChecks?: boolean; acks?: boolean; port?: number } = {}) {
+  const server = new WebSocketServer({ port: port ?? await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
+  if (acks) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];
   let socket: WebSocket | null = null;
@@ -63,7 +67,17 @@ async function fakeServer(grantChecks = true) {
     send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref });
     await wait(() => received.some(m => m.type === 'agent.said' && m.ref === ref));
   };
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send, drop: () => socket!.terminate(), wait, barrier };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send, drop: () => socket!.terminate(), wait, barrier,
+    /* The server closes the socket with a code, and how many sockets it has open. */
+    close: (code: number) => socket!.close(code),
+    open: () => server.clients.size,
+    port: (server.address() as AddressInfo).port,
+    /* The server goes away, as an app that is restarting does. */
+    stop: () => {
+      for (const client of server.clients) client.terminate();
+      return new Promise<void>(done => server.close(() => done()));
+    },
+  };
 }
 
 /* A job's own limit that cannot run out in a test: runJob gives up a tenth of it later, 30 s at most, and setTimeout takes
@@ -835,25 +849,6 @@ describe('runNode', () => {
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
   });
 
-  it('keeps the last fifty ends of jobs a server does not confirm', async () => {
-    const server = await fakeServer();
-    const run = async () => ({ ok: true, sessionId: null, result: 'ready', output: '', error: null, limits: null });
-    const logs: string[] = [];
-    fakeClock();
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run }, log: line => logs.push(line) });
-    onTestFinished(() => node.stop());
-    const hellos = () => server.received.filter(m => m.type === 'hello');
-    await server.wait(() => hellos().length === 1);
-    for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
-    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52);
-    await dropAndReturn(server, logs);
-    await server.wait(() => hellos().length === 2);
-    const running = hellos()[1]!.running as string[];
-    expect(running).toHaveLength(50);
-    expect(running).not.toContain('j1');
-    expect(running).toContain('j52');
-  });
-
   it('says in hello how it came up: the same after a dropped connection, anew once it starts again', async () => {
     const server = await fakeServer(), logs: string[] = [];
     const dir = nodeDir(server.url);
@@ -1185,7 +1180,7 @@ describe('runNode', () => {
   });
 
   it('takes a machine check slot before preparing a part or reporting that it started', async () => {
-    const server = await fakeServer(false), ran: string[] = [];
+    const server = await fakeServer({ grantChecks: false }), ran: string[] = [];
     const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'checked' }; };
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
     onTestFinished(() => node.stop());
@@ -1204,7 +1199,7 @@ describe('runNode', () => {
   });
 
   it('cancels a queued part without starting preparation or claiming execution began', async () => {
-    const server = await fakeServer(false), ran: string[] = [];
+    const server = await fakeServer({ grantChecks: false }), ran: string[] = [];
     const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' }; };
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
     onTestFinished(() => node.stop());
@@ -1277,6 +1272,311 @@ describe('runNode', () => {
     expect(lines).toContain('Playwright Chromium, Firefox and WebKit are ready.');
     expect(existsSync(join(dir, 'browser-error'))).toBe(false);
   });
+
+  describe('numbered messages', () => {
+    const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null };
+    const numbered = (server: Awaited<ReturnType<typeof fakeServer>>, from = 0) => server.received.slice(from).filter(m => typeof m.n === 'number');
+    const helloCount = (server: Awaited<ReturnType<typeof fakeServer>>) => server.received.filter(m => m.type === 'hello').length;
+
+    /* A program that says two things and then, once the test lets it, ends. */
+    function gated() {
+      let open!: () => void;
+      const gate = new Promise<void>(r => (open = r));
+      const talking: ProviderAdapter = {
+        ...adapter,
+        run: async input => {
+          input.onEvent?.({ kind: 'text', text: 'first' });
+          await gate;
+          input.onEvent?.({ kind: 'text', text: 'second' });
+          return adapter.run(input);
+        },
+      };
+      return { adapter: talking, open };
+    }
+
+    it('sends numbered messages again until the server confirms them', async () => {
+      const server = await fakeServer({ acks: true });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => (input.onEvent?.({ kind: 'text', text: 'a' }), input.onEvent?.({ kind: 'text', text: 'b' }), adapter.run(input)) }, log: () => {} });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(run);
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      const first = numbered(server);
+      expect(first.map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
+
+      const seen = server.received.length;
+      server.drop();
+      await server.wait(() => helloCount(server) === 2);
+      await server.wait(() => numbered(server, seen).length === 4);
+      expect(numbered(server, seen)).toEqual(first);
+      expect(server.received[seen]).toMatchObject({ type: 'hello', stream: expect.any(String) });
+      expect(server.received[0]).toMatchObject({ stream: server.received[seen]!.stream });
+
+      server.send({ type: 'ack', upto: 4 });
+      await server.barrier('confirmed');
+      const before = server.received.length;
+      server.drop();
+      await server.wait(() => helloCount(server) === 3);
+      await server.barrier('third-hello');
+      expect(numbered(server, before)).toEqual([]);
+      expect(server.received[before]).toMatchObject({ type: 'hello', running: [] });
+    });
+
+    it('keeps its messages through its own restart', async () => {
+      const first = await fakeServer({ acks: true });
+      const dir = nodeDir(first.url);
+      const talking = gated();
+      const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
+      onTestFinished(() => node.stop());
+      await first.wait(() => first.received.some(m => m.type === 'hello'));
+      first.send(run);
+      await first.wait(() => first.received.some(m => m.type === 'job.event'));
+      const stream = String(first.received[0]!.stream);
+      await first.stop();
+      talking.open();
+      await first.wait(() => readFileSync(join(dir, 'outbox.jsonl'), 'utf8').includes('"second"'));
+      node.stop();
+
+      const second = await fakeServer({ acks: true, port: first.port });
+      const again = await runNode({ dir, adapter, log: () => {} });
+      onTestFinished(() => again.stop());
+      await second.wait(() => second.received.some(m => m.type === 'job.done'));
+      expect(second.received[0]).toMatchObject({ type: 'hello', stream });
+      expect(numbered(second).map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
+      expect(numbered(second)[2]).toMatchObject({ event: { text: 'second' } });
+    });
+
+    it('talks to a server of the build before', async () => {
+      const first = await fakeServer();
+      const talking = gated();
+      const dir = nodeDir(first.url);
+      const lines: string[] = [];
+      const node = await runNode({ dir, adapter: talking.adapter, log: line => lines.push(line) });
+      onTestFinished(() => node.stop());
+      await first.wait(() => first.received.some(m => m.type === 'hello'));
+      first.send(run);
+      await first.wait(() => first.received.some(m => m.type === 'job.event'));
+      expect(first.received[0]).toMatchObject({ type: 'hello' });
+      await first.stop();
+      /* The node must see its socket gone first: what a server that confirms nothing was sent is given up. */
+      await first.wait(() => lines.some(line => line.includes('Connection closed')));
+      talking.open();
+      /* The job has ended, with nobody to tell, once its end waits in the outbox. */
+      await first.wait(() => readFileSync(join(dir, 'outbox.jsonl'), 'utf8').includes('"job.done"'));
+
+      const second = await fakeServer({ port: first.port });
+      await second.wait(() => second.received.some(m => m.type === 'job.done'));
+      expect(numbered(second).map(m => m.type)).toEqual(['job.event', 'job.done']);
+      expect(second.received[0]).toMatchObject({ type: 'hello', running: ['j1'] });
+
+      const before = second.received.length;
+      second.drop();
+      await second.wait(() => helloCount(second) === 2);
+      await second.wait(() => numbered(second, before).length > 0);
+      await second.barrier('second-hello');
+      expect(numbered(second, before).map(m => m.type)).toEqual(['job.done']);
+
+      second.send({ type: 'job.ack', jobId: 'j1' });
+      await second.barrier('confirmed');
+      const last = second.received.length;
+      second.drop();
+      await second.wait(() => helloCount(second) === 3);
+      await second.barrier('third-hello');
+      expect(numbered(second, last)).toEqual([]);
+    });
+
+    it('does not run a part again whose end waits for its ack', async () => {
+      const server = await fakeServer({ acks: true });
+      const ran: string[] = [];
+      const runPart: typeof runTests = async m => (ran.push(m.partId), { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
+      const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      const part = { type: 'tests.run', partId: 'p1', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 };
+      server.send(part);
+      await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+      server.send(part);
+      await server.barrier('asked-again');
+      expect(ran).toEqual(['p1']);
+      expect(server.received.filter(m => m.type === 'tests.started')).toHaveLength(1);
+    });
+
+    it("does not send a job's end again that a new connection sent and Hornhoof confirmed while the limits were read", async () => {
+      const server = await fakeServer({ acks: true });
+      let finish!: () => void;
+      const reading = new Promise<void>(r => (finish = r));
+      /* The first read is the node's start; the next is the one after the job, which the test holds. */
+      let reads = 0;
+      const models = async () => {
+        if (++reads > 1) await reading;
+        return [{ id: 'm', name: 'M' }];
+      };
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: () => {} });
+      onTestFinished(() => node.stop());
+      await server.wait(() => helloCount(server) === 1);
+      server.send(run);
+      await server.wait(() => reads === 2);
+      expect(server.received.some(m => m.type === 'job.done')).toBe(false);
+
+      server.drop();
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      const end = server.received.find(m => m.type === 'job.done')!;
+      server.send({ type: 'ack', upto: end.n });
+      await server.barrier('confirmed');
+
+      finish();
+      await server.wait(() => server.received.some(m => m.type === 'status'));
+      await server.barrier('after-status');
+      expect(server.received.filter(m => m.type === 'job.done')).toEqual([end]);
+    });
+
+    describe('a hello with many ends waiting', () => {
+      const ends = (dir: string) => {
+        const box = new Outbox(dir);
+        for (let i = 0; i < 150; i++) box.hold({ type: 'job.done', jobId: `end-${i}`, ok: true, sessionId: null, result: '', tail: '', error: null });
+        for (let i = 0; i < 120; i++) box.hold({ type: 'tests.done', partId: `part-${i}`, ok: true, exitCode: 0, error: null, commit: null, log: '' });
+      };
+      const lastHello = (server: Awaited<ReturnType<typeof fakeServer>>) => {
+        const hello = server.received.findLast(m => m.type === 'hello')!;
+        return { ...hello, running: hello.running as string[], tests: hello.tests as string[] };
+      };
+
+      it('lists them all to a server that confirms, and that server can read it', async () => {
+        const server = await fakeServer({ acks: true });
+        const dir = nodeDir(server.url);
+        ends(dir);
+        const node = await runNode({ dir, adapter, log: () => {} });
+        onTestFinished(() => node.stop());
+        await server.wait(() => helloCount(server) === 1);
+        const hello = lastHello(server);
+        expect(hello.running).toHaveLength(150);
+        expect(hello.tests).toHaveLength(120);
+        expect(parseNodeMessage(JSON.stringify(hello))).not.toBeNull();
+      });
+
+      it('stays within what an older server takes, the runs still going first', async () => {
+        const server = await fakeServer();
+        const dir = nodeDir(server.url);
+        ends(dir);
+        const talking = gated();
+        const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
+        onTestFinished(() => {
+          talking.open();
+          node.stop();
+        });
+        await server.wait(() => helloCount(server) === 1);
+        expect(lastHello(server).running).toHaveLength(HELLO_IDS_BEFORE_ACKS);
+        expect(lastHello(server).tests).toHaveLength(HELLO_IDS_BEFORE_ACKS);
+
+        server.send(run);
+        await server.wait(() => server.received.some(m => m.type === 'job.started'));
+        server.drop();
+        await server.wait(() => helloCount(server) === 2);
+        expect(lastHello(server).running).toHaveLength(HELLO_IDS_BEFORE_ACKS);
+        expect(lastHello(server).running[0]).toBe('j1');
+      });
+    });
+  });
+
+  describe('being removed', () => {
+    const removals = (server: Awaited<ReturnType<typeof fakeServer>>) => server.received.filter(m => m.type === 'removed');
+    const stopped = (lines: string[]) => lines.some(line => line.startsWith('Node stopping'));
+    /* A node that answers has sent all it had to say and has not closed its socket. */
+    const stillThere = (server: Awaited<ReturnType<typeof fakeServer>>) => server.barrier('still-there');
+
+    async function connected(server: Awaited<ReturnType<typeof fakeServer>>, nodeAdapter = adapter) {
+      const lines: string[] = [];
+      const dir = nodeDir(server.url);
+      const node = await runNode({ dir, adapter: nodeAdapter, log: line => lines.push(line) });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      return { dir, lines };
+    }
+
+    it('stays connected until Hornhoof confirms removed, and says it again on a new connection', async () => {
+      const server = await fakeServer({ acks: true });
+      const { dir, lines } = await connected(server);
+      server.send({ type: 'remove' });
+      await server.wait(() => removals(server).length === 1);
+      await stillThere(server);
+      expect(server.open()).toBe(1);
+      expect(stopped(lines)).toBe(false);
+
+      server.drop();
+      await server.wait(() => removals(server).length === 2);
+      expect(removals(server)[1]).toEqual(removals(server)[0]);
+
+      server.send({ type: 'ack', upto: removals(server)[0]!.n });
+      await server.wait(() => server.open() === 0);
+      expect(stopped(lines)).toBe(true);
+      expect(new Outbox(dir).pending()).toEqual([]);
+    });
+
+    /* The socket drops while the node's job stops, and the node goes on to say removed with no socket. */
+    async function removedWhileAway(server: Awaited<ReturnType<typeof fakeServer>>) {
+      let letGo!: () => void;
+      const stopping = new Promise<void>(r => (letGo = r));
+      const slow: ProviderAdapter = {
+        ...adapter,
+        run: input =>
+          new Promise(done => {
+            input.signal?.addEventListener('abort', () => void stopping.then(() => done({ ok: false, sessionId: null, result: '', output: 'stopped', error: 'agent_failed', limits: null })));
+          }),
+      };
+      const { lines } = await connected(server, slow);
+      server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      server.send({ type: 'remove' });
+      server.drop();
+      await server.wait(() => lines.some(line => line.startsWith('Connection closed')));
+      letGo();
+      await server.wait(() => removals(server).length === 1);
+      expect(server.received.filter(m => m.type === 'hello')).toHaveLength(2);
+      return lines;
+    }
+
+    it('says removed on the next connection when the socket drops while its jobs stop', async () => {
+      const server = await fakeServer({ acks: true });
+      const lines = await removedWhileAway(server);
+      await stillThere(server);
+      expect(stopped(lines)).toBe(false);
+    });
+
+    it('is over once it said removed on the next connection to an older server', async () => {
+      const server = await fakeServer();
+      const lines = await removedWhileAway(server);
+      await server.wait(() => stopped(lines));
+    });
+
+    it('is over once removed went to an older server, which confirms nothing', async () => {
+      const server = await fakeServer();
+      const { dir, lines } = await connected(server);
+      server.send({ type: 'remove' });
+      await server.wait(() => server.open() === 0);
+      expect(removals(server)).toHaveLength(1);
+      expect(stopped(lines)).toBe(true);
+      expect(new Outbox(dir).owes('removed')).toBe(false);
+    });
+
+    it('is over when Hornhoof refuses its key, which it does once it has heard', async () => {
+      const server = await fakeServer({ acks: true });
+      const { lines } = await connected(server);
+      server.send({ type: 'remove' });
+      await server.wait(() => removals(server).length === 1);
+      server.close(4001);
+      await server.wait(() => stopped(lines));
+    });
+
+    it('keeps going when Hornhoof refuses its key and nothing removed it', async () => {
+      const server = await fakeServer({ acks: true });
+      const { lines } = await connected(server);
+      server.close(4001);
+      await server.wait(() => lines.some(line => line.startsWith('Hornhoof does not know this machine')));
+      /* A node that this stops says so in the same turn of the event loop. */
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(stopped(lines)).toBe(false);
+    });
+  });
 });
 
 function descriptionRepo(dir: string) {
@@ -1292,7 +1592,7 @@ const environmentTestUid = 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000
 const environmentTestUser = { uid: environmentTestUid, gid: environmentTestUid };
 
 it('queues description discovery before reading a cold mirror and replies with a typed missing descriptor', async () => {
-  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const server = await fakeServer({ grantChecks: false }), dir = nodeDir(server.url), source = descriptionRepo(dir);
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: expect.arrayContaining([expect.objectContaining({ id: 'node' })]) });
@@ -1307,7 +1607,7 @@ it('queues description discovery before reading a cold mirror and replies with a
 });
 
 it('waits for its turn to get a product harness ready, says how it went, and says it takes harnesses', async () => {
-  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const server = await fakeServer({ grantChecks: false }), dir = nodeDir(server.url), source = descriptionRepo(dir);
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testHarness: 1 });
@@ -1350,7 +1650,7 @@ it('describes a product by itself with what lets the server reuse results', asyn
 });
 
 it('cancels a queued description before repository materialization', async () => {
-  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const server = await fakeServer({ grantChecks: false }), dir = nodeDir(server.url), source = descriptionRepo(dir);
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   const requestId = '44444444-4444-4444-8444-444444444444'; server.send({ type: 'tests.describe', requestId, ...source });

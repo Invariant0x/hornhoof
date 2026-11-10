@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentChanges, agentEvents, agents, departments, jobs, requests, tasks } from '../src/db/schema.js';
-import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
+import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -574,5 +574,72 @@ describe('timers', () => {
     await minuteRound(app.ctx, at(12), () => () => {});
     expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(1);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+  });
+});
+
+describe('the sweeps of a leading app', () => {
+  const EVERY_MS = 1000;
+  /* Sweeps that stay running until the test ends them, and how many of each kind started. */
+  function sweeps() {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const started = { entry: 0, tick: 0 };
+    let end: () => void = () => undefined;
+    const running = (kind: keyof typeof started) => () => {
+      started[kind]++;
+      return new Promise<void>(done => (end = done));
+    };
+    return { started, endSweep: () => end(), ...leadSweeps(running('entry'), running('tick'), EVERY_MS) };
+  }
+  /* Tells whether a promise has ended by now, after everything already due has run. */
+  async function ended(promise: Promise<unknown>): Promise<boolean> {
+    let done = false;
+    void promise.then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(0);
+    return done;
+  }
+
+  it('does not leave while the sweeps of the way in still run', async () => {
+    const { started, endSweep, enter, leave } = sweeps();
+    enter();
+    expect(started.entry).toBe(1);
+    const leaving = leave();
+    expect(await ended(leaving)).toBe(false);
+    endSweep();
+    expect(await ended(leaving)).toBe(true);
+  });
+
+  it('starts no round over the sweeps of the way in', async () => {
+    const { started, endSweep, enter, leave } = sweeps();
+    enter();
+    vi.advanceTimersByTime(EVERY_MS);
+    expect(started.tick).toBe(0);
+    endSweep();
+    await vi.advanceTimersByTimeAsync(EVERY_MS);
+    expect(started.tick).toBe(1);
+    endSweep();
+    await leave();
+  });
+
+  it('starts no round over a round that overran, and leaving waits for the one that runs', async () => {
+    const { started, endSweep, enter, leave } = sweeps();
+    enter();
+    endSweep();
+    await vi.advanceTimersByTimeAsync(EVERY_MS);
+    await vi.advanceTimersByTimeAsync(3 * EVERY_MS);
+    expect(started.tick).toBe(1);
+    const leaving = leave();
+    expect(await ended(leaving)).toBe(false);
+    endSweep();
+    expect(await ended(leaving)).toBe(true);
+  });
+
+  it('starts no round once it has left', async () => {
+    const { started, endSweep, enter, leave } = sweeps();
+    enter();
+    endSweep();
+    await leave();
+    await vi.advanceTimersByTimeAsync(3 * EVERY_MS);
+    expect(started.tick).toBe(0);
   });
 });

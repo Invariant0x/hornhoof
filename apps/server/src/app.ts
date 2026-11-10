@@ -5,6 +5,7 @@ import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
 import { loggable, registerErrorHandling } from './errors.js';
+import { AppMode, modeGate, whileLeading } from './modules/keeper/app-mode.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
 import { conversationRoutes } from './modules/conversation/routes.js';
@@ -51,22 +52,27 @@ import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
+import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
+import { LinkTls } from './modules/tls/manager.js';
 import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
+import { handOverSession, requirePerson } from './auth/session.js';
+import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
 import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
-   from config.templatesDir unless given: a test file reads them once for all its servers. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; templates?: Templates };
+   from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
+   route before any is added; a test uses it to ask each route what it tells a stranger. */
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
-   check for newer builds, access to the computer the server runs on, the company's public link, the commit a
-   repository's branch is at and the mark a full test run leaves on a commit. */
+   check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
+   its certificate, the commit a repository's branch is at and the mark a full test run leaves on a commit. */
 export type Ctx = Deps & {
   /* When this server came up: it did not hear of any machine before then. */
   startedAt: Date;
@@ -81,6 +87,9 @@ export type Ctx = Deps & {
   computer: ComputerAccess;
   templates: Templates;
   links: PublicLinks;
+  challenges: Challenges;
+  tls: LinkTls;
+  mode: AppMode;
 };
 
 declare module 'fastify' {
@@ -88,22 +97,54 @@ declare module 'fastify' {
     /* For tests and the few places outside a route that need the same context. */
     ctx: Ctx;
   }
+  interface FastifyRequest {
+    /* The request came over the public link: its session cookie is the __Host- one. Set by the first onRequest hook. */
+    overLink: boolean;
+  }
+}
+
+/* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
+   company or which build is behind the name. The health answer is 503 while the app is off, so a check can tell it has
+   not started. */
+function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
+  const { version, commit, migrations } = config;
+  app.get('/api/health', async (req, reply) => {
+    const ok = mode.current() !== 'off';
+    if (!ok) reply.code(503);
+    return req.overLink ? { ok } : { ok, version, commit, mode: mode.current() };
+  });
+  app.get('/api/version', async req => {
+    if (req.overLink) await requirePerson(req, db);
+    return { version, commit, migrations };
+  });
+  app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
+}
+
+/* A node or a terminal connected while leading sends nothing more once the app stops leading; 1012 tells it to come back. */
+function closeOpenSockets(app: FastifyInstance): void {
+  for (const client of app.websocketServer.clients) client.close(1012, 'Hornhoof takes no changes now.');
 }
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
+  if (deps.onRoute) app.addHook('onRoute', deps.onRoute);
+  app.decorateRequest('overLink', false);
+  app.addHook('onRequest', async req => {
+    req.overLink = await overLink(req, deps.config);
+  });
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
+  ctx.mode = new AppMode({ dir: deps.config.controlDir, fromKeeper: deps.config.keeper, log: line => app.log.info(line) });
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg, transport) => receiveNodeMessage(ctx, id, msg, transport),
+    onMessage: whileLeading(ctx.mode, (id, msg, transport) => receiveNodeMessage(ctx, id, msg, transport)),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
-    onClose: id => handleNodeClose(ctx, id),
-    onConnected: (id, link, at) => nodeConnected(ctx, id, link, at),
-    onDisconnected: (id, end) => nodeDisconnected(ctx, id, end),
+    onClose: whileLeading(ctx.mode, id => handleNodeClose(ctx, id)),
+    onConnected: whileLeading(ctx.mode, (id, link, at) => nodeConnected(ctx, id, link, at)),
+    onDisconnected: whileLeading(ctx.mode, (id, end) => nodeDisconnected(ctx, id, end)),
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
@@ -120,17 +161,31 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
-  app.addHook('onReady', async () => ctx.updates.start());
-  app.addHook('onClose', async () => ctx.updates.stop());
-  app.addHook('onReady', async () => ctx.links.sync());
+  ctx.challenges = new Challenges();
+  ctx.tls = new LinkTls(ctx);
+  app.addHook('onClose', async () => ctx.tls.stop());
+  ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+  ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+  ctx.mode.whenLeaving(() => closeOpenSockets(app));
+  app.addHook('onReady', async () => {
+    ctx.mode.start();
+    await ctx.mode.settled();
+  });
+  app.addHook('onClose', async () => ctx.mode.stop());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
+  /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+  app.addHook('onRequest', async (req, reply) => {
+    if (ctx.mode.current() === 'lead') await handOverSession(req, reply, deps.db, deps.config);
+  });
   /* After the socket plugin, so a refused socket is closed by it. */
+  app.addHook('onRequest', modeGate(ctx.mode));
+  /* Again after the routes' own checks, which wait for the database: a socket that passed the gate above and crossed a
+     step-down there is refused here, and from here to its upgrade nothing waits, so none opens outside lead. */
+  app.addHook('preHandler', modeGate(ctx.mode));
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
-  const { version, commit, migrations } = deps.config;
-  app.get('/api/health', async () => ({ ok: true, version, commit }));
-  app.get('/api/version', async () => ({ version, commit, migrations }));
+  publicRoutes(app, ctx);
   setupRoutes(app, ctx);
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
@@ -163,5 +218,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   outboundRoutes(app, ctx);
+  challengeRoutes(app, ctx.challenges);
   return app;
 }

@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, MachineView, Me, SubView } from '../types';
+import type { BuiltinView, MachineView, Me, SubView, TlsView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -26,11 +26,46 @@ const GIB = 1024 ** 3;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
 const SMALLER = 1.1;
 
+/* The link's certificate is warned about this long before it ends. */
+const CERT_WARNING_MS = 14 * 24 * 3600_000;
+
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 
 const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
+
+/* The date the link's certificate ends, when that is near and the machine has not renewed it. */
+function endingSoon(tls: TlsView | null, now: number): string | null {
+  if (!tls?.expiresAt) return null;
+  const ends = Date.parse(tls.expiresAt);
+  return ends - now < CERT_WARNING_MS ? tls.expiresAt : null;
+}
+
+/* The link's certificate runs out soon: people who see the whole company are told above the list. */
+function CertificateWarning({ ends }: { ends: string }) {
+  const t = useT();
+  const { language } = useLanguage();
+  return <p className="alert" role="status">{t.machines.certEnds(new Date(ends).toLocaleDateString(language))}</p>;
+}
+
+/* The link's encryption as the server says, only for people who see the whole company; an answer that fails says nothing. */
+function useLinkTls(me: Me): TlsView | null {
+  const [tls, setTls] = useState<TlsView | null>(null);
+  const whole = me.person.scopeKind === 'company';
+  useEffect(() => {
+    if (!whole) return;
+    let live = true;
+    api
+      .get<{ tls?: TlsView | null }>('/api/link')
+      .then(found => live && setTls(found.tls ?? null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [whole]);
+  return tls;
+}
 
 function lastSeen(t: Messages, language: Language, iso: string | null): string {
   if (!iso) return t.machines.notSeen;
@@ -270,6 +305,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
+  const certificateEnds = endingSoon(useLinkTls(me), now);
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [subs, setSubs] = useState<SubView[]>([]);
@@ -391,6 +427,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         />
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
 
       {machines && <Pool {...pool} />}
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}

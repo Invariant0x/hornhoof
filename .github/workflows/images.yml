@@ -168,6 +168,18 @@ jobs:
           TESTS_SINCE: ${{ needs.mark.outputs.base }}
         run: node scripts/tests-mark.mjs --leave
 
+  # The ACME tests run against Pebble, Let's Encrypt's test CA, in Docker, and stay out of the suite above.
+  test-real:
+    runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run test:real
+
   images:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.

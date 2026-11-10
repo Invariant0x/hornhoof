@@ -39,12 +39,15 @@ describe('what the build runs', () => {
   /* install.sh writes them into .env: by digest from the updater, which checked them, or by the build's tag. */
   it("runs Hornhoof's own images as .env names them", () => {
     const images = read('compose.yaml').split('\n').filter(l => /^ {4}image: /.test(l)).map(l => l.trim());
+    const app = 'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}';
+    /* Front, the keeper and migrate run the app's own image, so they move with the app. */
     expect(images).toEqual([
-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
+      app,
+      app,
+      app,
+      app,
       expect.stringMatching(/^image: postgres:/),
       'image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}',
-      /* The tunnel runs the app's own image, so it moves with the app. */
-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
       'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
     ]);
   });

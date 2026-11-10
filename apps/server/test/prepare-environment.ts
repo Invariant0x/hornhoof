@@ -11,6 +11,7 @@ import { migrate as migratePostgres } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+import { AFTER_MIGRATIONS } from '../src/db/net.js';
 import * as schema from '../src/db/schema.js';
 
 const FORMAT = 'hornhoof-pglite-v1';
@@ -37,12 +38,20 @@ function inputPaths(): string[] {
 function inputs(): Record<string, string> {
   return Object.fromEntries(inputPaths().map(path => [path, sha(readFileSync(join(ROOT, path)))]));
 }
+/* Every test database holds this lease and says it is fenced (helpers.ts), so the whole suite runs under fence 1. */
+const ENDLESS_LEASE = `
+  INSERT INTO net_local.state (term_number, term_machine, machine, cluster)
+    SELECT 1, 'test', 'test', system_identifier::text FROM pg_control_system();
+  INSERT INTO net_local.lease (term_number, term_machine, kind, until, sync) VALUES (1, 'test', 'normal', 'infinity', 'alone');`;
+
 export async function migratedPgliteDump(): Promise<Buffer> {
   const client = new PGlite();
   try {
     const db = pgliteDb(client, { schema });
     await migratePglite(db, { migrationsFolder: MIGRATIONS });
     await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    await client.exec(ENDLESS_LEASE);
     /* The roles of agent SQL with their rights, as a server makes them as it starts: a test that runs agent SQL then
        changes nothing beyond rows of the database its file shares. */
     await client.exec(`${grantsFor(agentRole('postgres'))};\n${readerGrantsFor(readerRole('postgres'))}`);
