@@ -42,6 +42,8 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
    curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
    ```
 
+   On a computer that already runs Hornhoof, yours or another person's, it asks a name for the new company, such as `home`, and sets it up apart, with its own database and port. `server --name home` gives the name without the question.
+
 2. Open the link it shows, name your company and pick one of nine templates. You are the CEO.
 
    ![Setting up a company](.github/assets/setup.gif)

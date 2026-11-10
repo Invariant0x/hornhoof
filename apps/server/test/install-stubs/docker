@@ -33,6 +33,8 @@ case "$1" in
     fi ;;
   # STUB_STOPPED words are containers that exist and do not run.
   inspect)
+    # The host port the app container of a server in STUB_SERVERS keeps, running or not.
+    case "${3:-}" in *HostPort*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p _ port <<< "$s"; [ "${!#}" = "app-$p" ] && echo "$port "; done; exit 0 ;; esac
     # STUB_NODE_ENV: the settings a node was started with, one per line.
     case "${3:-}" in *.Config.Env*) printf '%b' "${STUB_NODE_ENV:-}"; exit 0 ;; esac
     if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
@@ -52,6 +54,11 @@ case "$1" in
   # STUB_NODES_UPDATER: the container of the updater of this server's nodes, when there is one.
   ps)
     case "$*" in *hornhoof.updater=nodes*) [ -z "${STUB_NODES_UPDATER:-}" ] || echo "$STUB_NODES_UPDATER"; exit 0 ;; esac
+    # STUB_SERVERS words are "project:folder:port", the Hornhoof servers anyone on this computer runs.
+    case "$*" in
+      *com.docker.compose.service=app*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p d _ <<< "$s"; echo "$p|$d|ghcr.io/invariant0x/hornhoof:latest|app-$p"; done; exit 0 ;;
+      *com.docker.compose.project=*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p d _ <<< "$s"; case "$* " in *"com.docker.compose.project=$p "*) echo "$d" ;; esac; done; exit 0 ;;
+    esac
     for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
