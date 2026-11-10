@@ -247,7 +247,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = PersonPatch.parse(req.body);
-    /* Anyone may rename their own title; everything else needs the whole company. */
+    /* Anyone may change their own name and title; everything else needs the whole company. */
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
     const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));

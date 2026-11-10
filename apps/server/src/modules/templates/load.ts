@@ -11,7 +11,7 @@ export type Lang = { en: string; ru: string };
 export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
 
-/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, and writing to another employee. */
+/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, and writing to employees of other departments. */
 export const GRANTS = ['agents', 'failures', 'message_employee', 'restart_program', 'improvements'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };

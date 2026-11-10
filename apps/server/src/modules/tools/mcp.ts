@@ -33,9 +33,6 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* The head of Operations keeps the company running, so it reads Hornhoof's database; changes stay with the orchestrator. */
 export const DATABASE_ROLES = ['OPS-HEAD'];
 
-/* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
-   and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
-   orchestrator also proposes cards and does whatever the CEO can do in the screens. */
 type StaffLines = ReturnType<typeof withRequiredRoles>;
 
 const withSkills = (lines: StaffLines) => lines.map(p => ({ ...p, skills: p.skills ?? { on: [], off: [] } }));
@@ -47,6 +44,9 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
   return lines.every(line => !line.checked || state(line.role).holder);
 }
 
+/* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
+   and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
+   orchestrator also proposes cards and does whatever the CEO can do in the screens. */
 function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(

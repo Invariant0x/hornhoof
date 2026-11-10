@@ -178,7 +178,6 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 }
 
-/* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
 /* Who holds a role is who an employee is: it goes with the full view, as the employees do. */
 async function stateSeen(db: Db, me: Person, dept: Parameters<typeof requiredState>[1]) {
   const held = await requiredState(db, dept);
@@ -186,6 +185,7 @@ async function stateSeen(db: Db, me: Person, dept: Parameters<typeof requiredSta
   return (role: string) => (full ? held(role) : { ...held(role), holder: null });
 }
 
+/* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -304,9 +304,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { created: result.fresh, removed: result.removed.map(r => r.id) };
   });
 
-  /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
-     subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
-     picks from its roles, products and subscriptions. */
   /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
   app.put('/api/departments/:id/repository', async req => {
     const me = await requirePerson(req, db);
@@ -349,6 +346,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
+  /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
+     subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
+     picks from its roles, products and subscriptions. */
   app.get('/api/departments/:id/roster', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);

@@ -53,23 +53,6 @@ export function messageHeading(message: MessageEnvelope): string {
   return `From ${sender} to ${partyLine(message.to)}:`;
 }
 
-/* An attribute's value: Claude Code reads these entities back, and a bare quote or bracket would end the value or the tag. */
-const attribute = (text: string): string =>
-  oneLine(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-/* No tag of the message starts or ends inside its text, in any case or spacing an agent may still read as one. */
-const tagless = (text: string): string => text.replace(/<(\s*\/?\s*teammate-message)/gi, '&lt;$1');
-
-/* A message as Claude Code shows a teammate's: one line that names the sender, opened with Ctrl+O. The sender's name is
-   its teammate_id; the sender's role and what the message is about are its summary. Claude Code shows it so only with
-   its agent teams switched on and only for a short paste, so no turn is written this way yet. */
-export function teammateMessage(text: string, from: MessageParty, about: string | null): string {
-  /* Each part is trimmed before it counts: an attribute of only spaces comes out empty, and Claude Code reads no empty one. */
-  const name = oneLine(nameOf(from)) || PEOPLE;
-  const details = detailsOf(from).map(oneLine).filter(Boolean).join(', ');
-  const summary = [details, oneLine(about ?? '')].filter(Boolean).join(': ') || name;
-  return `<teammate-message teammate_id="${attribute(name)}" summary="${attribute(summary)}">\n${tagless(text)}\n</teammate-message>`;
-}
-
 /* Applied after history and service instructions are composed, on both queued and live delivery paths. */
 export function addressed(text: string, message: MessageEnvelope): string {
   const heading = messageHeading(message);

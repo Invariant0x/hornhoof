@@ -99,7 +99,6 @@ const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
   retry: i.retryOf !== null,
 });
 
-/* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<{ team: { id: string; name: string } | null; teams: { id: string; name: string }[] }> {
   if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [] };
   const deptTeams = await db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
@@ -219,6 +218,7 @@ function cardState(agent: AgentRow, running: boolean): AgentCard['state'] {
   return running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription';
 }
 
+/* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const { db, hub } = ctx;
   const online: IsOnline = node => hub.isOnline(node);
@@ -283,7 +283,7 @@ async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): Promise
   await tryPlaceOperator(ctx, agent.companyId);
 }
 
-/* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
+/* Back on: a checker that can take the waiting stage of a route takes it again and the task turns it missed go out. Off: its work goes back
    once no turn of it runs. */
 async function afterSwitch(ctx: Ctx, me: Person, agent: AgentRow, next: AgentRow): Promise<void> {
   if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, actorOf(me), agent.id);

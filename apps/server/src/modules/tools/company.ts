@@ -26,7 +26,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
   const staff = await db.select().from(agents).where(and(eq(agents.companyId, companyId), ne(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   const allTeams = await db.select().from(teams).where(eq(teams.companyId, companyId)).orderBy(asc(teams.createdAt));
   /* Each department's employees, so a head knows its team: role, product and what it runs on. The id is what create_task
-     takes as the executor, the role id what it takes as a gate. */
+     takes as the executor; the role id names the role it holds. */
   const employeesOf = (dept: (typeof depts)[number]) =>
     staff
       .filter(a => a.departmentId === dept.id)

@@ -114,7 +114,6 @@ async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string
   return say(JSON.stringify({ department: top, owner: await departmentOwner(ctx, job.companyId, top), rules: await departmentRules(ctx.db, top), waitDates: await departmentWaitPolicies(ctx, top) }));
 }
 
-/* The tools every agent has for approvals: it reads how a department's go, and asks under them. */
 /* A goal in danger, as a head or the orchestrator says it: a new episode, or what this adds to the one that is open. */
 async function escalateGoal(ctx: Ctx, job: ToolJob, ref: number | string, said: { goal: string; why: string; impact: GoalImpact; on: 'task' | 'turn' }) {
   const task = await heldTask(ctx, job, ref);
@@ -142,6 +141,7 @@ async function endGoalRisk(ctx: Ctx, job: ToolJob, ref: number | string, why: st
   return say('Recorded: the goal is out of danger.');
 }
 
+/* The tools every agent has for approvals: it reads how a department's go, and asks under them. */
 export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'approval_policy',

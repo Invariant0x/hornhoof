@@ -96,7 +96,8 @@ async function sentLine(ctx: Ctx, name: string, jobId: string, machineWaits: boo
 }
 
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
-   writing to another employee as itself; and a head's way to tell the orchestrator. */
+   restarting a program. Every employee has message_employee, which a grant only widens to other departments, and a head
+   has tell_orchestrator. */
 export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
   registerRoleTools(server, ctx, job);
   const { db } = ctx;

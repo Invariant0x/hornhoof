@@ -8,7 +8,6 @@ import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile } from '../tasks/reconcile.js';
-import { checkSilentTurns, SILENT_TURN_MS } from '../tasks/silent.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
 import { checkWaitHealth } from '../tasks/wait-monitor.js';
 import { checkExternalWaits } from '../tasks/external-wait.js';
@@ -20,8 +19,6 @@ import { checkOperatorHealth } from '../program-operator/health.js';
 import { modelCheckRound } from '../model-checks/store.js';
 import { outboundReviewRound, outboundRound, reconcileOutbound } from '../outbound/dispatcher.js';
 import { certifyPassed, liveEvaluator } from '../outbound/live-checks.js';
-
-export { checkSilentTurns, SILENT_TURN_MS };
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */

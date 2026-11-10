@@ -28,7 +28,7 @@ const DEPTH = 50;
 const ready = (f: Facts, t: TaskFacts) => !t.after.some(id => f.notDone.has(id));
 const asking = (f: Facts, agentId: string, t: TaskFacts) => f.asked.has(`${agentId}:${t.id}`);
 
-/* An employee acts on the task: as its executor before any gate, or as a reviewer still to give a verdict at its gate, and
+/* An employee acts on the task: as its executor, or as a reviewer still to give a verdict at its checking stage, and
    neither waiting for the tasks it comes after nor for a person's answer. */
 export function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;

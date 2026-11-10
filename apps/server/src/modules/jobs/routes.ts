@@ -15,7 +15,6 @@ import { jobView, publicJob } from './views.js';
 
 const IdParams = z.object({ id: z.uuid() });
 
-/* A test turn is its writer's and its plan owner's; an employee's turn is for whoever reaches the employee now. */
 /* A job of an agent goes with the agent; one of no agent, a plan's test say, with who started it and whose plan it is. */
 async function mayRead(db: Db, me: Person, view: NonNullable<Awaited<ReturnType<typeof jobView>>>): Promise<boolean> {
   if (!view.agentId) return me.scopeKind === 'company' || view.createdBy === me.id || view.ownerId === me.id;
