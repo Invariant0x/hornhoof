@@ -778,6 +778,79 @@ port_answers() {
   [ "$rc" -ne 7 ]
 }
 
+# A company's name on this computer: lowercase letters, digits and dashes, up to 32 characters.
+valid_name() {
+  case "$1" in '' | -* | *[!a-z0-9-]*) return 1 ;; esac
+  [ "${#1}" -le 32 ]
+}
+
+# The Hornhoof servers anyone on this computer runs, running or not, as "project|folder|container" lines. Docker is one
+# for every person on a computer, so these are other people's companies too, whatever folder they run from.
+hornhoof_servers() {
+  "${DOCKER[@]}" ps -a --filter label=com.docker.compose.service=app --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Image}}|{{.ID}}' 2> /dev/null |
+    while IFS='|' read -r project folder image id; do
+      case "$project|$image" in *hornhoof*) printf '%s|%s|%s\n' "$project" "$folder" "$id" ;; esac
+    done
+}
+
+# project_elsewhere <project> <folder>: the folder another company runs that compose project from; nothing when none does.
+project_elsewhere() {
+  "${DOCKER[@]}" ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2> /dev/null |
+    grep -v -x -F -e "$2" | head -1 || true
+}
+
+# The compose project of the server in SERVER_DIR: its name's, else the one its .env keeps, else its folder's.
+server_project() {
+  local project
+  if [ -n "$NAME" ]; then
+    project="hornhoof-$NAME"
+  else
+    project=$(env_value COMPOSE_PROJECT_NAME)
+    [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  fi
+  printf '%s' "$project"
+}
+
+# On a computer that runs Hornhoof already, this person's or anyone else's, a new company takes a name of its own, and
+# with it its own folder, compose project, database and port. Enter sets up again the company of this person's folder.
+choose_name() {
+  local own='' others default_taken prompt answer taken i=0
+  if [ -f "$SERVER_DIR/.env" ]; then own=1; fi
+  others=$(hornhoof_servers | awk -F'|' -v me="$SERVER_DIR" '$2 != me { print "  " $2 }' | sort -u)
+  [ -n "$own$others" ] || return 0
+  default_taken=$(project_elsewhere "$(server_project)" "$SERVER_DIR")
+  say "This computer already runs Hornhoof:"
+  if [ -n "$own" ]; then say "  $SERVER_DIR"; fi
+  if [ -n "$others" ]; then say "$others"; fi
+  say "A new company takes a name of its own, in lowercase letters, digits and dashes, such as home."
+  if [ -n "$own" ]; then
+    prompt="Name of the new company, or Enter to set up the one in $SERVER_DIR again: "
+  elif [ -z "$default_taken" ]; then
+    prompt="Name of the new company, or Enter to put it in $SERVER_DIR: "
+  else
+    prompt='Name of the new company: '
+  fi
+  while [ "$i" -lt 3 ]; do
+    i=$((i + 1))
+    answer=$(ask "$prompt" '')
+    if [ -z "$answer" ]; then
+      if [ -n "$own" ] || [ -z "$default_taken" ]; then return 0; fi
+      say "The Hornhoof in $default_taken already has the name this one would take." >&2
+    elif ! valid_name "$answer"; then
+      say "A name takes lowercase letters, digits and dashes, up to 32 characters, such as home." >&2
+    else
+      taken=$(project_elsewhere "hornhoof-$answer" "$BASE_DIR-$answer")
+      if [ -z "$taken" ]; then
+        NAME=$answer
+        SERVER_DIR="$BASE_DIR-$NAME"
+        return 0
+      fi
+      say "The name $answer is taken by the Hornhoof in $taken." >&2
+    fi
+  done
+  fail "No name for the new company. Run this command again with --name and a name no company here has, such as --name home."
+}
+
 # set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner. The new
 # file is written whole and then moved into place, so a failed write leaves the old one. It starts as a copy, so it
 # keeps the owner when the updater writes it as root.
@@ -1146,7 +1219,7 @@ hand_over_update() {
 }
 
 server_mode() {
-  local env_file public local_url project link fact id i=0
+  local env_file public local_url project taken link fact id i=0
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -1161,8 +1234,13 @@ server_mode() {
   else
     fail "Docker Compose is missing. Install the Docker Compose plugin, then run this command again."
   fi
+  if [ -z "$FROM_UPDATER" ] && [ -z "$NAME" ] && [ -z "${HORNHOOF_SERVER_DIR:-}" ]; then choose_name; fi
   # A named server is its own compose project, so its containers, network and volumes never meet another's.
   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
+  if [ -z "$FROM_UPDATER" ]; then
+    taken=$(project_elsewhere "$(server_project)" "$SERVER_DIR")
+    [ -z "$taken" ] || fail "The Hornhoof in $taken already has the name $(server_project) on this computer, and this one would start in its containers. Run this command again with --name and a name no company here has, such as --name home."
+  fi
 
   mkdir -p "$SERVER_DIR"
   env_file="$SERVER_DIR/.env"
@@ -1186,12 +1264,7 @@ server_mode() {
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
   fi
   # .env names the compose project and the folder too, for the updater and for docker compose run by hand here.
-  if [ -n "$NAME" ]; then
-    project="hornhoof-$NAME"
-  else
-    project=$(env_value COMPOSE_PROJECT_NAME)
-    [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
-  fi
+  project=$(server_project)
   set_env COMPOSE_PROJECT_NAME "$project"
   set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
   set_env HORNHOOF_VERSION "${PIN:-latest}"
@@ -1291,10 +1364,7 @@ done
 
 if [ -n "$NAME" ]; then
   [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
-  case "$NAME" in
-    -* | *[!a-z0-9-]*) fail "--name takes lowercase letters, digits and dashes, such as acme." ;;
-  esac
-  [ "${#NAME}" -le 32 ] || fail "--name takes up to 32 characters."
+  valid_name "$NAME" || fail "--name takes lowercase letters, digits and dashes, up to 32 characters, such as acme."
   SERVER_DIR="$BASE_DIR-$NAME"
 fi
 # The updater names the folder it runs in.

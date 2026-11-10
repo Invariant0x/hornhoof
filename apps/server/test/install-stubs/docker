@@ -99,7 +99,7 @@ case "$1" in
       # STUB_LOCK_SINCE is when the lock was made; STUB_LOCK_TAKEN=1 says another install has taken it over since.
       *io.hornhoof.since*) [ -f "$PORTS/lock" ] || exit 1; echo "$(cat "$PORTS/lock") ${STUB_LOCK_SINCE:-$(date +%s)}" ;;
       *hornhoof-port-lock) if [ "${STUB_LOCK_TAKEN:-}" = 1 ]; then echo lock-other; else cat "$PORTS/lock" 2> /dev/null; fi ;;
-      *PortBindings*) echo "${STUB_BOUND_PORTS:-}" ;;
+      *PortBindings*) echo "${STUB_BOUND_PORTS:-}$(for s in ${STUB_SERVERS:-}; do printf ' %s' "${s##*:}"; done)" ;;
       *) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
     esac ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
@@ -116,11 +116,17 @@ case "$1" in
   # STUB_NODES_UPDATER: the container of the updater of this server's nodes, when there is one.
   ps)
     case "$*" in *hornhoof.updater=nodes*) [ -z "${STUB_NODES_UPDATER:-}" ] || echo "$STUB_NODES_UPDATER"; exit 0 ;; esac
-    # STUB_BOUND_PORTS are the ports containers publish, so a test that names them need not name the containers.
+    # STUB_BOUND_PORTS are the ports containers publish, so a test that names them need not name the containers. The app
+    # container of each server in STUB_SERVERS publishes its port too.
     if [ "$*" = 'ps -aq' ]; then
-      if [ -n "${STUB_BOUND_IDS:-}${STUB_BOUND_PORTS:-}" ]; then echo "${STUB_BOUND_IDS:-bound-1}"; fi
+      if [ -n "${STUB_BOUND_IDS:-}${STUB_BOUND_PORTS:-}${STUB_SERVERS:-}" ]; then echo "${STUB_BOUND_IDS:-bound-1}"; fi
       exit 0
     fi
+    # STUB_SERVERS words are "project:folder:port", the Hornhoof servers anyone on this computer runs.
+    case "$*" in
+      *com.docker.compose.service=app*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p d _ <<< "$s"; echo "$p|$d|ghcr.io/invariant0x/hornhoof:latest|app-$p"; done; exit 0 ;;
+      *com.docker.compose.project=*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p d _ <<< "$s"; case "$* " in *"com.docker.compose.project=$p "*) echo "$d" ;; esac; done; exit 0 ;;
+    esac
     for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.

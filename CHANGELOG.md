@@ -5,6 +5,23 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.4] - 2026-11-10
+
+A second company on a computer that already runs Hornhoof gets a name of its own instead of starting in the first
+company's containers.
+
+### Changed
+
+- On a computer that already runs Hornhoof, of this person or of another person on it, `install.sh server` asks a name
+  for the new company and sets it up in its own folder, compose project, database and port. Enter sets up again the
+  company of this person's folder. `server --name home` gives the name without the question.
+
+### Fixed
+
+- A server installed without a name no longer starts in the containers of a company that runs under the same compose
+  project from another folder, which left that company's server unable to open its database. The installer refuses
+  such a name, and leaves the port of a stopped company of another person to it.
+
 ## [0.18.3] - 2026-11-10
 
 Department templates come with their people, their turnkey team and their own route of checks, and a hire runs the

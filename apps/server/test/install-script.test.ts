@@ -318,7 +318,7 @@ describe('install.sh', () => {
   it('keeps an existing .env and adds a missing NODE_KEY', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n');
-    const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+    const r = install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: dir } });
     expect(r.code).toBe(0);
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
@@ -335,7 +335,7 @@ describe('install.sh', () => {
     writeFileSync(file, 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n', { mode: 0o644 });
     chmodSync(file, 0o644);
     const before = statSync(file).ino;
-    const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+    const r = install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: dir } });
     expect(r.code).toBe(0);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     /* A new file moved into place, so a failed write never leaves half a .env behind. */
@@ -347,7 +347,7 @@ describe('install.sh', () => {
   it('keeps an existing .env that has no PUBLIC_URL and opens localhost', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\n');
-    const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+    const r = install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: dir } });
     expect(r.code).toBe(0);
     expect(r.out).toContain('Hornhoof is running at http://localhost:8080.');
   });
@@ -445,6 +445,56 @@ describe('install.sh', () => {
     const named = install({ args: ['server', '--name', 'beta'], tty: '\n', env: { HOME: home, HORNHOOF_DIR: join(home, 'hornhoof') } });
     expect(named.code).toBe(0);
     expect(readFileSync(join(home, 'hornhoof-beta', '.env'), 'utf8')).toContain('HORNHOOF_PORT=8081');
+  });
+
+  /* Docker is one for every person on a computer: a company anyone runs here keeps its compose project and its port. */
+  describe('on a computer that already runs Hornhoof', () => {
+    const ANNA = 'hornhoof:/home/anna/Projects/Hornhoof:8080';
+    const BOB = 'hornhoof-home:/home/bob/hornhoof-home:8081';
+    const started = (r: ReturnType<typeof install>) => r.docker.filter(c => /^docker compose .*(pull|up -d)/.test(c));
+    /* How a server starts: the database first, then the keeper and front, which take the ports, then the rest. */
+    const startOf = (compose: string) => [`${compose} pull`, `${compose} up -d --no-build --remove-orphans --wait db`, `${compose} up -d --no-build keeper front`, `${compose} up -d --no-build`];
+
+    it('asks a name for the new company and sets it up apart, on a port no company here keeps, even a stopped one', () => {
+      const r = install({ args: ['server'], tty: 'shop\n', env: { STUB_SERVERS: `${ANNA} ${BOB}` } });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('/home/anna/Projects/Hornhoof');
+      expect(r.out).toContain('/home/bob/hornhoof-home');
+      const env = readFileSync(join(r.dir, 'home', 'hornhoof-shop', '.env'), 'utf8');
+      expect(env).toMatch(/^COMPOSE_PROJECT_NAME=hornhoof-shop$/m);
+      expect(env).toContain('HORNHOOF_PORT=8082');
+      expect(existsSync(join(r.dir, 'home', 'hornhoof'))).toBe(false);
+      expect(started(r)).toEqual(startOf('docker compose -p hornhoof-shop'));
+    });
+
+    it('starts nothing in the containers of a company of another folder, whatever name it is given', () => {
+      for (const [args, tty, why] of [
+        [['server'], '\n', '/home/anna/Projects/Hornhoof'],
+        [['server'], 'home\n', '/home/bob/hornhoof-home'],
+        [['server'], 'Home!\n', 'lowercase letters, digits and dashes'],
+        [['server', '--name', 'home'], '\n', '/home/bob/hornhoof-home'],
+      ] as const) {
+        const r = install({ args: [...args], tty, env: { STUB_SERVERS: `${ANNA} ${BOB}` } });
+        expect(r.code, tty).not.toBe(0);
+        expect(r.out, tty).toContain(why);
+        expect(r.out, tty).toContain('--name');
+        expect(started(r), tty).toEqual([]);
+      }
+    });
+
+    it('sets up the company of its own folder again on Enter, and a new one on a name', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+      writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_PORT=8080\n');
+      const again = install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: dir, STUB_SERVERS: `hornhoof:${dir}:8080` } });
+      expect(again.code).toBe(0);
+      expect(again.out).toContain(`or Enter to set up the one in ${dir} again`);
+      expect(again.out).toContain('Keeping the settings');
+      expect(started(again)).toEqual(startOf('docker compose'));
+      const another = install({ args: ['server'], tty: 'home\n', env: { HORNHOOF_DIR: dir, STUB_SERVERS: `hornhoof:${dir}:8080` } });
+      expect(another.code).toBe(0);
+      expect(readFileSync(`${dir}-home/.env`, 'utf8')).toContain('HORNHOOF_PORT=8081');
+      expect(started(another)).toEqual(startOf('docker compose -p hornhoof-home'));
+    });
   });
 
   it('pins the version and the project name for the updater', () => {
