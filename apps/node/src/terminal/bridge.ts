@@ -5,6 +5,7 @@ import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
+import { ToolsMemory } from './tools-memory.js';
 
 /* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
 const MAX_BODY = 4 * 1024 * 1024;
@@ -31,7 +32,8 @@ export class Bridge {
   private readonly listing = new Map<string, Set<(asked: number) => void>>();
   /* When each agent's program last asked for the list of its tools that the bridge then handed it. */
   private readonly listedAt = new Map<string, number>();
-  /* When each agent's program last connected to its tools and was turned away, as no turn ran: it does not try again. */
+  /* When each agent's program last connected to its tools and was turned away, as no turn ran and the node knew no answer
+     for Hornhoof: it does not try again, and keeps no tools for the rest of its session. */
   private readonly refusedAt = new Map<string, number>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
@@ -43,13 +45,19 @@ export class Bridge {
   private readonly calls = new HookCalls();
   private readonly checkStops = new Map<string, Set<AbortController>>();
   private readonly failures: HookFailures;
+  /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
+  private readonly refusals: HookFailures;
+  private readonly memory = new ToolsMemory();
 
   constructor(
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void } = {},
-  ) { this.failures = new HookFailures(options.rejected); }
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected } = {},
+  ) {
+    this.failures = new HookFailures(options.rejected);
+    this.refusals = new HookFailures(options.refused);
+  }
 
   async start(): Promise<void> {
     const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
@@ -213,9 +221,10 @@ export class Bridge {
     const body = await reading;
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
+    const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
+    if (known !== null) return this.answered(res, key, body, known, asked);
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
-    if (!token && kind === 'mcp' && asks(body, 'initialize')) this.refusedAt.set(key, asked);
-    if (!token) return kind === 'mcp' ? noTurn(res, body) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
+    if (!token) return kind === 'mcp' ? this.noTools(res, key, body, asked) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {
       const v = req.headers[h];
@@ -228,9 +237,24 @@ export class Bridge {
       const v = up.headers.get(h);
       if (v) out[h] = v;
     }
+    const answer = Buffer.from(await up.arrayBuffer());
     res.writeHead(up.status, out);
-    res.end(Buffer.from(await up.arrayBuffer()));
+    res.end(answer);
+    if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  /* With no turn open, a program that connects or lists its tools hears what Hornhoof said to the same before. */
+  private answered(res: ServerResponse, key: string, body: Buffer, known: string, asked: number): void {
+    reply(res, known ? 200 : 202, known);
+    if (asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  /* A call the node cannot answer for Hornhoof with no turn open: a tool call gets words the agent reads, and a program
+     turned away as it connects keeps no tools until it starts again. Each refusal goes to the node's log. */
+  private noTools(res: ServerResponse, key: string, body: Buffer, asked: number): void {
+    if (asks(body, 'initialize') || asks(body, 'tools/list')) this.refusedAt.set(key, asked);
+    if (noTurn(res, body)) this.refusals.reject(key, messages(body).map(m => String(m?.method)).join(', '), 'no Hornhoof turn is running');
   }
 
   private changeCheckToken(key: string, token: string | null): void {
@@ -276,8 +300,9 @@ function reply(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
-/* MCP clients take an HTTP error as a broken or signed-out server; a JSON-RPC error reaches the agent as words instead. */
-function noTurn(res: ServerResponse, body: Buffer): void {
+/* MCP clients take an HTTP error as a broken or signed-out server; a JSON-RPC error reaches the agent as words instead.
+   Whether it refused a request, which a notification is not. */
+function noTurn(res: ServerResponse, body: Buffer): boolean {
   let id: unknown = null;
   try {
     const msg = JSON.parse(body.toString('utf8'));
@@ -285,8 +310,12 @@ function noTurn(res: ServerResponse, body: Buffer): void {
   } catch {
     /* Not JSON-RPC. */
   }
-  if (id === null) return reply(res, 202, '');
+  if (id === null) {
+    reply(res, 202, '');
+    return false;
+  }
   reply(res, 200, JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32001, message: "No Hornhoof turn is running for this agent. Hornhoof's tools work during a turn." } }));
+  return true;
 }
 
 /* The messages an MCP client sends while it connects and looks at what the server has. */

@@ -165,7 +165,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
     closers.push(() => bridge.stop(), () => up.server.close());
     const a = bridge.agent('agent-1');
     bridge.waitForTurns('agent-1', NEVER);
-    const post = (id: number) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method: 'initialize' }) });
+    const post = (id: number, method = 'initialize') => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method }) });
     const holds = () => bridge['waiting'].get('agent-1')?.size === 1;
     const waiting = post(1);
     await eventually(holds);
@@ -178,13 +178,62 @@ describe("the node's bridge to Hornhoof's tools", () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     bridge.waitForTurns('agent-1', 100);
     let answered = false;
-    const late = post(2).then(res => { answered = true; return res.json(); });
+    /* A list of tools Hornhoof never gave this agent. */
+    const late = post(2, 'tools/list').then(res => { answered = true; return res.json(); });
     await eventually(holds);
     await vi.advanceTimersByTimeAsync(99);
     expect(answered).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await late).toMatchObject({ id: 2, error: { message: expect.stringContaining('No Hornhoof turn') } });
     expect(up.seen).toHaveLength(1);
+  });
+
+  it("answers a program that connects with no turn open with what Hornhoof said to the same before, and says what it refused", async () => {
+    const up = await upstream();
+    const refused: [string | null, string, string][] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { refused: (...said) => refused.push(said) });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const post = (body: object) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', ...body }) });
+    bridge.setToken('agent-1', 'tok-turn');
+    await post({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+    await post({ id: 1, method: 'tools/list' });
+    bridge.setToken('agent-1', null);
+    const since = Date.now();
+
+    expect(await (await post({ id: 5, method: 'initialize', params: { protocolVersion: '2025-06-18' } })).json()).toEqual({ jsonrpc: '2.0', id: 5, result: { ok: true } });
+    expect((await post({ method: 'notifications/initialized' })).status).toBe(202);
+    expect(await (await post({ id: 6, method: 'tools/list' })).json()).toEqual({ jsonrpc: '2.0', id: 6, result: { ok: true } });
+    expect(await (await post({ id: 7, method: 'ping' })).json()).toEqual({ jsonrpc: '2.0', id: 7, result: {} });
+    expect(bridge.listedSince('agent-1', since)).toBe(true);
+    expect(up.seen).toHaveLength(2);
+
+    /* What Hornhoof never said, it does not say for it: another protocol version, another agent's tools, a tool call. */
+    expect(await (await post({ id: 8, method: 'initialize', params: { protocolVersion: '2099-01-01' } })).json()).toMatchObject({ id: 8, error: { code: -32001 } });
+    expect(await (await fetch(bridge.agent('agent-2').mcpUrl, { method: 'POST', body: '{"jsonrpc":"2.0","id":9,"method":"tools/list"}' })).json()).toMatchObject({ id: 9, error: { code: -32001 } });
+    await post({ id: 10, method: 'tools/call', params: { name: 'task' } });
+    await post({ id: 11, method: 'tools/call', params: { name: 'task' } });
+    expect(up.seen).toHaveLength(2);
+    expect(refused).toEqual([['agent-1', 'initialize', 'no Hornhoof turn is running'], ['agent-2', 'tools/list', 'no Hornhoof turn is running'], ['agent-1', 'tools/call', 'no Hornhoof turn is running']]);
+  });
+
+  it('remembers a program it turned away as it connected between turns, until the program lists its tools', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const since = Date.now();
+    const post = (method: string) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method }) });
+    await post('tools/call');
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(false);
+    expect(await (await post('initialize')).json()).toMatchObject({ error: { code: -32001 } });
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(true);
+    expect(bridge.toolsRefusedSince('agent-1', Date.now() + 1)).toBe(false);
+    bridge.setToken('agent-1', 'tok-turn');
+    await post('tools/list');
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(false);
   });
 
   it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {

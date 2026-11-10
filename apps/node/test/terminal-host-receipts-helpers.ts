@@ -11,7 +11,7 @@ import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, kimiScreen, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, listsAtStart, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 /* What the tests of program receipts for live words share: an agent at work whose program, Claude, Codex or Kimi, records
@@ -88,6 +88,7 @@ export async function atWork(kind: Kind, mode: Mode) {
     }
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30 });
+  listsAtStart(host);
   const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
   if (mode === 'bridge') await host.start();
   const run = () => {

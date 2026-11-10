@@ -14,7 +14,7 @@ import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, kimiScreen, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, listsAtStart, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 export const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   /* The host runs on the fake clock, which moves only as the test moves it: c.until, c.on and c.pass. Turns of the event
      loop stay real, for the sockets of the bridge. */
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
@@ -51,9 +51,12 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   let initial = true;
   let turn = 0;
   let hookUrl = '';
-  /* Hooks reach the bridge on real sockets: while one is on its way there or back, the clock stands still. */
+  /* Hooks and the program's calls to its tools reach the bridge on real sockets: while one is on its way there or back, the
+     clock stands still. A call the bridge holds for a turn to open waits on the clock instead. */
   let transit = 0;
-  const clocked = { held: () => transit > 0 };
+  let calls = 0;
+  const holding = () => [...host['bridge']['waiting'].values()].reduce((n, waiters) => n + waiters.size, 0);
+  const clocked = { held: () => transit > 0 || calls > holding() };
   const hook = async (event: string, body: object = {}) => {
     if (event === 'prompt') initial = false;
     transit++;
@@ -113,13 +116,15 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     transit--;
     try { return await handle(...args); } finally { transit++; }
   });
+  /* The program lists its tools as it starts, unless the test makes its calls to them. */
+  if (!options.connects) listsAtStart(host);
   await host.start();
   const results: Promise<unknown>[] = [];
   const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt') => {
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: options.sessionId === undefined ? SESSION : options.sessionId, ...(prompt ? {} : { tools: undefined }) });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
     const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));
@@ -146,6 +151,11 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     until: (check: () => boolean | Promise<boolean>) => untilOnClock(check, clocked),
     on: <T>(promise: Promise<T>) => onClock(promise, clocked),
     pass: (ms: number) => passOnClock(ms, clocked),
+    /* A call the program makes to its tools through the bridge, which the test makes for it. */
+    carry: async <T>(go: () => Promise<T>): Promise<T> => {
+      calls++;
+      try { return await go(); } finally { calls--; }
+    },
     input: () => input, draft: (text: string) => { input = text; },
     /* The program ends with what it printed last, as tmux's recording of it would say. */
     ends: (output: string, code: number) => {

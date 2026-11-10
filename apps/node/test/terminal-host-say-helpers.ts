@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { Tmux } from '../src/terminal/tmux.js';
-import { codexJob, onClock, untilOnClock } from './terminal-host-helpers.js';
+import { codexJob, listsAtStart, onClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 /* What the tests of words typed into a running turn share: a Codex terminal at work, its log and its screen. */
@@ -48,6 +48,7 @@ export async function atWork(takePrompt = true) {
     }
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], log: logMessage, pollMs: 10, enterWaitMs: 100 });
+  listsAtStart(host);
   const job = { ...codexJob('say', 'HANG', { workDir, sessionId: SESSION }), home };
   const running = host.run(job);
   const turns = [running];
