@@ -79,7 +79,9 @@ describe('a new company', () => {
     expect(byRole('OPS-HEAD').kind).toBe('head');
     expect(byRole('OPS-WATCH')).toMatchObject({ timerMinutes: 10, timerForWork: true, name: 'Task watchdog' });
     expect(byRole('OPS-WATCH').timerAt).toBeInstanceOf(Date);
-    expect(byRole('OPS-PROGRAM')).toMatchObject({ timerMinutes: null, model: '', name: 'Program operator', createdBy: null });
+    /* Each runs the model its role asks for on the company's key, by name: the middle one for the operator, the lightest for the watchdog. */
+    expect(byRole('OPS-PROGRAM')).toMatchObject({ timerMinutes: null, model: 'claude-sonnet-5-5', name: 'Program operator', createdBy: null });
+    expect(byRole('OPS-WATCH').model).toBe('claude-haiku-5-5');
     const role = app.ctx.templates.roles.get('OPS-PROGRAM')!;
     expect(byRole('OPS-PROGRAM').skills).toEqual(role.skills.filter(s => s.on).map(s => s.id));
     expect(byRole('OPS-PROGRAM').templateHashes['OPS-PROGRAM']).toBe(role.hash);

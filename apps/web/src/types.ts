@@ -293,7 +293,7 @@ export type Serving = { id: string; provider: ProviderId; kind: 'personal' | 'ap
 
 /* A role of a department's template; subscription: the first one serving the department that runs the role's tier;
    required: Operations must always have it; holder: who is in that required role now. */
-export type RoleOption = { id: string; title: Lang; kind: 'head' | 'member'; tier: 'deep' | 'standard' | 'fast'; perProduct: boolean; skills: string[]; subscription: string | null; required: boolean; holder: string | null };
+export type RoleOption = { id: string; title: Lang; kind: 'head' | 'member'; tier: 'top' | 'deep' | 'standard' | 'fast'; perProduct: boolean; skills: string[]; subscription: string | null; required: boolean; holder: string | null };
 
 /* A line of a staff card. Left out: the name is the role's title, the subscription the role's first, the model Default. */
 export type StaffLine = { role: string; name?: string; product?: string | null; model?: string; subscription?: string | null; skills?: { on?: string[]; off?: string[] } | string[]; checked?: boolean };

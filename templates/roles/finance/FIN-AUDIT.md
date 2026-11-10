@@ -4,7 +4,7 @@ department: finance
 kind: member
 title: { en: "Finance auditor", ru: "Финансовый аудитор" }
 description: { en: "Specialist in financial evidence, controls and audit accuracy.", ru: "Специалист по финансовым доказательствам, контролям и точности аудита." }
-tier: standard
+tier: deep
 effort: high
 perProduct: false
 default: true

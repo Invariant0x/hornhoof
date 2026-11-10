@@ -286,7 +286,8 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(res.isError).toBeFalsy();
     const [qa] = await db.select().from(agents).where(eq(agents.roleKey, 'DEV-QA'));
     const role = app.ctx.templates.roles.get('DEV-QA')!;
-    expect(qa).toMatchObject({ name: role.title.en, model: '', createdBy: null, skills: role.skills.filter(s => s.on).map(s => s.id) });
+    /* No model was named, so it runs the one its role asks for on its plan, by name: the middle one of the company's key. */
+    expect(qa).toMatchObject({ name: role.title.en, model: 'claude-sonnet-5-5', createdBy: null, skills: role.skills.filter(s => s.on).map(s => s.id) });
     expect(qa!.subscriptionId).not.toBeNull();
     const [hired] = await db.select().from(agentChanges).where(eq(agentChanges.agentId, qa!.id));
     expect(hired).toMatchObject({ field: 'hired', personId: null, byOrchestrator: true });

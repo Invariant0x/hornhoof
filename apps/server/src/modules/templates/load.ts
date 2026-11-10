@@ -34,7 +34,10 @@ export type Role = {
   kind: 'head' | 'member';
   title: Lang;
   description: Lang;
-  tier: 'deep' | 'standard' | 'fast';
+  /* How strong a model the role asks for. top: the strongest there is, for work nobody checks after and whose mistakes
+     cost most. deep: a strong one, for whoever checks the work of others or leads. standard: the middle one, for work
+     that is checked after. fast: the lightest, for simple work that comes in a stream. */
+  tier: 'top' | 'deep' | 'standard' | 'fast';
   effort?: RoleEffort;
   perProduct: boolean;
   inDefault: boolean;
@@ -76,7 +79,7 @@ const RoleHead = z.object({
   kind: z.enum(['head', 'member']),
   title: LangText,
   description: LangText,
-  tier: z.enum(['deep', 'standard', 'fast']),
+  tier: z.enum(['top', 'deep', 'standard', 'fast']),
   effort: z.enum(ROLE_EFFORTS).optional(),
   perProduct: z.boolean().default(false),
   default: z.boolean().default(true),
