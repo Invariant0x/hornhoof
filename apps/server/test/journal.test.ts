@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { FENCED, isLeaseRefused, JOURNAL_NEEDS_PUTTING_BACK, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
-import { createTestDb, setLease, testApp } from './helpers.js';
+import { as, createTestDb, setLease, setUpCompany, testApp } from './helpers.js';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 type JournalRow = {
@@ -297,5 +297,21 @@ describe('what a killed migration can leave', () => {
     expect(await needsPuttingBack(db)).toBe(true);
     await db.$client.exec('SELECT net.attach_journal(); SELECT net.defer_foreign_keys();');
     expect(await needsPuttingBack(db)).toBe(false);
+  });
+});
+
+describe('a write when the lease has ended', () => {
+  it('answers read_only to a write when the lease has ended', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
+    await setLease(db, { until: '-infinity' });
+
+    expect((await app.inject({ method: 'GET', url: '/api/me', ...as(ceo) })).statusCode).toBe(200);
+
+    const rename = await app.inject({ method: 'PATCH', url: `/api/agents/${bruno!.id}`, payload: { name: 'Bruno the Second' }, ...as(ceo) });
+    expect(rename.statusCode).toBe(503);
+    expect(rename.json()).toMatchObject({ error: { code: 'unavailable', reason: 'read_only' } });
   });
 });

@@ -6,6 +6,7 @@ import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { NotConfirmed } from '../src/db/confirm.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -426,10 +427,37 @@ describe('the orchestrator reads and changes the database itself', () => {
     for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM applied', 'SELECT * FROM tool_calls', 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
-      expect(text(res), sql).toMatch(/permission denied|must be owner/);
+      expect(text(res), sql).toMatch(/permission denied|must be owner|Hornhoof did not run this SQL/);
     }
     expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain("Sign-ins, invites, install codes, sealed plan sign-ins, the public link and Hornhoof's records of where changes came from are closed to this tool.");
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+  });
+
+  it('refuses SQL that would get past a fence', async () => {
+    const { app, db } = await company();
+    const client = await mcp(app, TOKEN);
+    const before = await db.select({ id: agents.id, name: agents.name }).from(agents);
+    for (const sql of ['COMMIT', 'SET LOCAL synchronous_commit = local; UPDATE agents SET name = name', 'SELECT pg_cancel_backend(1)', 'SELECT 1; SET CONSTRAINTS ALL IMMEDIATE', "COMMIT; UPDATE agents SET name = 'Gone'"]) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toContain('Hornhoof did not run this SQL:');
+    }
+    expect(await db.select({ id: agents.id, name: agents.name }).from(agents)).toEqual(before);
+  });
+
+  it('answers in five seconds', async () => {
+    const { app } = await company();
+    const tools = (await (await mcp(app, TOKEN)).listTools()).tools;
+    expect(tools.find(t => t.name === 'database')!.description).toContain('a call may take 5 seconds');
+  });
+
+  it('says the call may have run when the database could not confirm it', async () => {
+    const { app } = await company();
+    const client = await mcp(app, TOKEN);
+    vi.spyOn(app.ctx.agentSql!, 'run').mockRejectedValueOnce(new NotConfirmed({ message: 'a warning' }));
+    const res = await call(client, 'database', { sql: 'UPDATE agents SET name = name' });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toBe('The database answered: The database could not confirm the commit, so the change may or may not be saved. The call may have run; check before repeating it.');
   });
 
   it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
@@ -468,6 +496,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     const refused = await rename('Bruno Z');
     expect(refused.isError).toBe(true);
     expect(text(refused)).toContain('In this turn the tool only reads: it answers neither the CEO nor the CEO delegate.');
+    expect(text(await call(client, 'database', { sql: 'SET TRANSACTION READ WRITE' }))).toMatch(/^Hornhoof did not run this SQL: .* In this turn the tool only reads/);
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people ORDER BY name' })))[0].rows).toEqual([{ name: 'Ivan' }, { name: 'Zed' }]);
     await wrote(null);
     expect((await rename('Bruno N')).isError).toBe(true);

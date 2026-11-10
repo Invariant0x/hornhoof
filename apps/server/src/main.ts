@@ -14,7 +14,7 @@ function requireDbUrl(url: string | undefined): string {
 
 const config = loadConfig(process.env);
 const url = requireDbUrl(config.databaseUrl);
-const db = openDb(url, APP_NAME);
+const db = openDb(url, APP_NAME, { fenced: config.keeper });
 const app = await buildApp({
   db,
   agentSql: await openAgentSql(url),
