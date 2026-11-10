@@ -87,7 +87,16 @@ export async function selectionPorts(root) {
   const { listTestUnits } = await import('../../apps/node/dist/test-environment.js');
   const collect = async changed => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', PROBE, JSON.stringify(changed)], { cwd: root, encoding: 'utf8', timeout: COLLECT_MS, maxBuffer: COLLECT_BYTES, stdio: ['ignore', 'pipe', 'inherit'] }));
   const read = path => { try { return readFileSync(join(root, path), 'utf8'); } catch { return null; } };
-  return { namedAfter, selectAffectedTests, collectVitestImpact, listTestUnits, collect, read };
+  return { namedAfter, selectAffectedTests, collectVitestImpact, listTestUnits, collect, read, readers: input => documentReaders(input, read) };
+}
+
+/* The tests that read a document, by the graph a fingerprint follows. A document gone from the commit is still named where it was. */
+async function documentReaders({ manifest, tracked: entries, paths, tests }, read) {
+  const { codeFilesOf, readersOf } = await import('../../apps/node/dist/test-fingerprint.js');
+  const known = new Set(entries.map(entry => entry.path));
+  const all = [...entries, ...paths.filter(path => !known.has(path)).map(path => ({ path, mode: '100644', oid: '0'.repeat(40) }))];
+  const texts = new Map(codeFilesOf(all).flatMap(path => { const text = read(path); return text === null ? [] : [[path, text]]; }));
+  return readersOf({ description: { manifest, inventory: [], inputDigests: [], runtimeCapabilities: [] }, tracked: all, texts }, paths, tests);
 }
 
 async function selection(args, plan, manifest, ports, root) {

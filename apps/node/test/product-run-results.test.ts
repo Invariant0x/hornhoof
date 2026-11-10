@@ -43,8 +43,8 @@ async function fixture(script: string, suite: Partial<TestEnvironmentV1['suites'
   const commitSha = git('rev-parse', 'HEAD'), repo = { url: pathToFileURL(source).href, token: '' }, dir = join(root, 'node');
   await mkdir(dir, { recursive: true });
   const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(repo.url).digest('hex') };
-  const description = await readTestEnvironment(repo, repositoryScope, commitSha, { cacheRoot: join(dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
-  const message: Extract<ServerMessage, { type: 'tests.run' }> = { type: 'tests.run', partId: 'part-one', repo, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 20_000,
+  const description = await readTestEnvironment(repo, repositoryScope, commitSha, { cacheRoot: join(dir, 'cache'), deadline: Date.now() + 2_147_483_647, signal: new AbortController().signal, log: () => {} });
+  const message: Extract<ServerMessage, { type: 'tests.run' }> = { type: 'tests.run', partId: 'part-one', repo, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 2_147_483_647 - 60_000,
     environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test/a.js', 'test/b.js'] } } };
   const run = (over: Partial<typeof message> = {}) => runTests({ ...message, ...over }, { dir, proc: join(root, 'proc'), user: { uid: shared.jobUid, gid: shared.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   return { run };

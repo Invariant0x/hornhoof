@@ -283,7 +283,9 @@ describe('external task wait', () => {
   it('wakes once at the deadline across repeated sweeps and a new server context, then resumes ordinary rules', async () => {
     const c = await fixture();
     const task = await c.task();
-    const until = new Date(Date.now() + 30_000);
+    /* A minute ahead, so no machine is slow enough to pass it by itself; the sweeps below run at the times the test names,
+       up to three minutes on, before the server takes a turn whose machine is away five minutes for lost. */
+    const until = new Date(Date.now() + 60_000);
     await c.wait(task.number, 'Images', until.toISOString());
     const failed = (what: string) => (error: unknown) => { throw new Error(what, { cause: error }); };
     await minuteRound(c.ctx, new Date(until.getTime() - 1), failed);
@@ -306,7 +308,7 @@ describe('external task wait', () => {
     const failed = (what: string) => (error: unknown) => { throw new Error(what, { cause: error }); };
     for (const action of ['close', 'wait again'] as const) {
       const task = await c.task();
-      const until = new Date(Date.now() + 30_000);
+      const until = new Date(Date.now() + 60_000);
       await c.wait(task.number, 'Images', until.toISOString());
       await minuteRound(c.ctx, until, failed);
       const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
@@ -491,7 +493,7 @@ describe('external task wait', () => {
   it('ends a wait once when two server sweeps race', async () => {
     const c = await fixture();
     const task = await c.task();
-    const until = new Date(Date.now() + 30_000);
+    const until = new Date(Date.now() + 60_000);
     await c.wait(task.number, 'Images', until.toISOString());
     const counts = await Promise.all([checkExternalWaits(c.ctx, until), checkExternalWaits({ ...c.ctx }, until)]);
     expect(counts.sort()).toEqual([0, 1]);

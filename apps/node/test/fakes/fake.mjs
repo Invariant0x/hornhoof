@@ -39,10 +39,11 @@ export function run(name) {
   const words = argv.join(' ');
 
   if (mode === 'hang') {
-    /* A program that ignores SIGTERM and has a child of its own still holding the output pipe. */
+    /* A program that ignores SIGTERM and has a child of its own still holding the output pipe. It ignores SIGTERM before
+       it tells its child, so a stop sent once the child is known always finds it ignoring. */
+    process.on('SIGTERM', () => {});
     const child = spawn('sleep', ['30'], { stdio: 'inherit' });
     log({ grandchild: child.pid });
-    process.on('SIGTERM', () => {});
     return void setInterval(() => {}, 1000);
   }
   /* needs_login: signed out until a login has run in this home. */

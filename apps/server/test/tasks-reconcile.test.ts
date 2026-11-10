@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, requests, subscriptions, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
@@ -60,12 +60,19 @@ async function company() {
   const job = async (set: Partial<typeof jobs.$inferInsert> = {}) =>
     (await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, kind: 'conversation', prompt: 'Work on it.', timeoutMs: 2 * 3_600_000, createdAt: at, ...set }).returning())[0]!;
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId));
+  /* The clock stands still from the round that queues a review until dueReview saw it held, so its settling delay cannot
+     run out on a slow machine. */
+  const stopClock = () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+  };
   /* Review keeps its normal settling delay; then the fixture advances that one queued deadline. */
   const dueReview = async (agentId: string) => {
     const [queued] = await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued')));
     expect(queued).toMatchObject({ notBefore: expect.any(Date), startedAt: null });
     expect(queued!.notBefore!.getTime()).toBeGreaterThan(Date.now());
     expect(send).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'job.run', jobId: queued!.id }));
+    vi.useRealTimers();
     await db.update(jobs).set({ notBefore: at }).where(eq(jobs.id, queued!.id));
     await pump(ctx, agentId);
   };
@@ -74,7 +81,7 @@ async function company() {
     await minuteRound(ctx, now, () => err => errors.push(err));
     expect(errors).toEqual([]);
   };
-  return { ctx, db, companyId, ceo: ceo!, sub: sub!, head, bruno, rita, tess, ready, send, at, task, reviewTask, ageMoves, snapshot, job, turnsOf, dueReview, round };
+  return { ctx, db, companyId, ceo: ceo!, sub: sub!, head, bruno, rita, tess, ready, send, at, task, reviewTask, ageMoves, snapshot, job, turnsOf, stopClock, dueReview, round };
 }
 
 type Company = Awaited<ReturnType<typeof company>>;
@@ -202,6 +209,7 @@ describe('turns on a machine that went away', () => {
     const job = await c.job({ subscriptionId: plan.id, nodeId: laptop.id, agentId: c.rita.id, taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + MIN) });
     c.ready.mockImplementation(id => id.kind === 'builtin' || id.nodeId === desktop.id);
     vi.spyOn(c.ctx.hub, 'awaySince').mockImplementation(id => id.kind === 'node' && id.nodeId === laptop.id ? c.at.getTime() : null);
+    c.stopClock();
     await c.round();
     await c.dueReview(c.rita.id);
     expect(await c.turnsOf(c.rita.id)).toEqual(expect.arrayContaining([
@@ -263,6 +271,7 @@ describe('work whose move lost its wake', () => {
     const c = await company();
     const task = status === 'review' ? await c.reviewTask() : await c.task({ status });
     const owner = status === 'review' ? c.rita : c.bruno;
+    if (status === 'review') c.stopClock();
     await c.round();
     if (status === 'review') await c.dueReview(owner.id);
     const [job] = await c.turnsOf(owner.id);
@@ -299,6 +308,7 @@ describe('work whose move lost its wake', () => {
     const c = await company();
     const task = await c.reviewTask();
     const snapshot = await c.snapshot(task.id);
+    c.stopClock();
     await c.round();
     await c.dueReview(c.rita.id);
     const [job] = await c.turnsOf(c.rita.id);

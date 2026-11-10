@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
-import { MACHINES, ME, mockApi, SUBS } from './api-mock';
+import { fixedAt, MACHINES, ME, mockApi, SUBS } from './api-mock';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -146,6 +146,7 @@ describe('Machines', () => {
   });
 
   it('says what runs on a machine now: its employees and the parts of test runs', async () => {
+    fixedAt();
     lists();
     render(<Machines me={ME} />);
     const mac = await openCard('ivan-mbp');
@@ -161,6 +162,7 @@ describe('Machines', () => {
   });
 
   it('says unknown for what an offline or older machine has not told', async () => {
+    fixedAt();
     lists();
     render(<Machines me={ME} />);
     const box = await openCard('build-box');
@@ -252,7 +254,7 @@ describe('Machines', () => {
   });
 
   it('keeps a card and its row order through the five second refresh and sorts unknown loads last both ways', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     let calls = 0;
     lists({ 'GET /api/machines': () => [200, { machines: ++calls === 1 ? MACHINES : MACHINES.map(m => ({ ...m, online: !m.online })), builtin: BUILTIN }] });
@@ -541,7 +543,7 @@ describe('Machines', () => {
   });
 
   it('keeps search and filters through refreshes and only offers groups with a choice', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null }] });
     render(<Machines me={ME} />);
@@ -593,7 +595,7 @@ describe('Machines', () => {
     });
 
     it('follows the count by itself and drops the line when the wait is over', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
       onTestFinished(() => { vi.useRealTimers(); });
       let drain: unknown = waiting(3);
       lists({ 'GET /api/machines': () => onMachine(drain) });

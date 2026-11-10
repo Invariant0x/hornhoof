@@ -331,9 +331,16 @@ describe('what cannot be told is refused, not allowed', () => {
     const calls = (next: string) => Array.from({ length: 200 }, () => `npm run ${next}`).join('; ');
     const scripts = Object.fromEntries(Array.from({ length: COMMAND_LIMITS.resolving }, (_, i) => [`s${i}`, calls(`s${i + 1}`)]));
     file('wide/package.json', JSON.stringify({ scripts: { ...scripts, [`s${COMMAND_LIMITS.resolving}`]: 'echo end' } }));
-    const started = Date.now();
-    expect(await agent('npm run s0', join(root, 'wide'))).toEqual(denied('command_guard_unavailable'));
-    expect(Date.now() - started).toBeLessThan(15_000);
+    /* Walking them all would take 200 ** 8 steps; it stops within its budget, a few lookups for each command it walks. */
+    let lookups = 0;
+    const counted: CommandFiles = {
+      lstat: async path => { lookups++; return localCommandFiles.lstat(path); },
+      realpath: async path => { lookups++; return localCommandFiles.realpath(path); },
+      read: async (path, maxBytes) => { lookups++; return localCommandFiles.read(path, maxBytes); },
+      list: async path => { lookups++; return localCommandFiles.list(path); },
+    };
+    expect(await classifyAgentCommand({ command: 'npm run s0', cwd: join(root, 'wide'), workspaceRoot: root }, counted)).toEqual(denied('command_guard_unavailable'));
+    expect(lookups).toBeLessThan(10 * COMMAND_LIMITS.walked);
   });
 
   it('tells two commands at once apart', async () => {

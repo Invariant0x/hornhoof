@@ -69,11 +69,11 @@ it('downloads the case PNG for its assigned operator, actual report recipient an
   expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(200);
 });
 
-it('refuses target workers, unrelated workers, unassigned operator turns and foreign jobs with the same generic 404', async () => {
+it('refuses the target, workers outside the program operator and the head of Operations, and foreign jobs with the same generic 404', async () => {
   const c = await fixture();
   const [foreign] = await c.db.insert(companies).values({ name: 'Foreign', singleton: false }).returning();
   const [outsider] = await c.db.insert(agents).values({ companyId: foreign!.id, name: 'Outsider', kind: 'orchestrator', model: '' }).returning();
-  const tokens = await Promise.all([c.agent.id, c.watcher.id, c.operator!.id].map(id => c.turn(id)));
+  const tokens = await Promise.all([c.agent.id, c.watcher.id].map(id => c.turn(id)));
   tokens.push(await c.turn(outsider!.id, foreign!.id));
   const unknown = await c.fetchPicture(c.operatorTurn.token, randomUUID());
   expect(unknown.statusCode).toBe(404);
@@ -84,7 +84,7 @@ it('refuses target workers, unrelated workers, unassigned operator turns and for
   }
 });
 
-it('checks the operator current role, Operations department, enabled state and case assignment', async () => {
+it('checks the operator current role, Operations department and enabled state, and lets Operations read a case given to another', async () => {
   const c = await fixture();
   const changes = [{ roleKey: 'OPS-WATCH' }, { kind: 'head' as const }, { departmentId: c.dev.id }, { departmentId: null }, { switchedOffAt: new Date() }, { removedAt: new Date() }];
   for (const change of changes) {
@@ -93,7 +93,9 @@ it('checks the operator current role, Operations department, enabled state and c
     await c.db.update(agents).set({ roleKey: c.operator!.roleKey, kind: c.operator!.kind, departmentId: c.operator!.departmentId, switchedOffAt: null, removedAt: null }).where(eq(agents.id, c.operator!.id));
   }
   await c.db.update(programOperatorCases).set({ operatorAgentId: c.watcher.id }).where(eq(programOperatorCases.id, c.incident.id));
-  expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
+  expect((await c.fetchPicture((await c.turn(c.operator!.id)).token)).statusCode).toBe(200);
+  const [olga] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Olga', kind: 'head', roleKey: 'OPS-HEAD', departmentId: c.watcher.departmentId, subscriptionId: c.sub.id, model: '' }).returning();
+  expect((await c.fetchPicture((await c.turn(olga!.id)).token)).statusCode).toBe(200);
 });
 
 it('checks the report recipient is still the target department head and rejects removed or switched off readers', async () => {
@@ -125,10 +127,10 @@ it('accepts only the exact case and PNG attachment identity with bounded bytes',
   }
 });
 
-it('refuses pictures associated with API and login/test targets', async () => {
+it('shows pictures of a program on an API key and refuses those of login and test turns', async () => {
   const c = await fixture();
   await c.db.update(subscriptions).set({ kind: 'api_key' }).where(eq(subscriptions.id, c.sub.id));
-  expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
+  expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(200);
   await c.db.update(subscriptions).set({ kind: 'personal' }).where(eq(subscriptions.id, c.sub.id));
   await c.db.update(jobs).set({ kind: 'test' }).where(eq(jobs.id, c.job.id));
   expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);

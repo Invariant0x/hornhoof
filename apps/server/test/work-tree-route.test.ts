@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -188,6 +188,9 @@ describe('GET /api/departments/:id/tree', () => {
     await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, jobId: author!.id, kind: 'program', createdAt: start,
       data: { program: { state: 'thinking', since: start.getTime(), tool: null }, alarm: null } });
     await submit(c.ctx, c.bruno.id, task.id, c.code);
+    /* The tree counts up to its own now: on a clock that stands still from here, the checker's turn has taken no time. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const checking = new Date();
     const [reviewer] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.claude.id, agentId: c.rita.id, taskId: task.id,
       kind: 'conversation', prompt: 'Check the candidate', timeoutMs: 3_600_000, status: 'running', createdAt: checking, startedAt: checking }).returning();
@@ -197,11 +200,7 @@ describe('GET /api/departments/:id/tree', () => {
     expect(response.statusCode).toBe(200);
     const { tree } = response.json<{ tree: DepartmentTree }>();
     expect(tree.time.find(time => time.agent.id === c.bruno.id)?.work).toBeGreaterThanOrEqual(2300);
-    const checker = tree.time.find(time => time.agent.id === c.rita.id);
-    expect(checker).toBeDefined();
-    expect(checker!.work).toBeGreaterThanOrEqual(0);
-    expect(checker!.work).toBeLessThan(60);
-    expect(checker!.unknown).toBeLessThan(60);
+    expect(tree.time.find(time => time.agent.id === c.rita.id)).toMatchObject({ work: 0, unknown: 0 });
   });
 
   it('keeps completed author time separate from later checking time after acceptance', async () => {

@@ -14,4 +14,13 @@ retries against the refusal; Kimi Code had no sign-in, which still shows its pro
   the top of the screen.
 - `*-rate-limits-question`: what Codex shows after a turn once its plan is 90% used, here at 160x48 on a model stub that says 95%.
 
+Claude Code's screens were captured on 2026-11-09 at 160x48 the same way, from Claude Code 2.1.319 started with
+`--dangerously-skip-permissions` in a folder of its own, signed in to a plan. The folder's path is replaced.
+
+- `claude-2.1.319-interrupted`: the empty prompt after Escape stopped a running shell command.
+- `claude-2.1.319-interrupted-resumed`: the same session after the program was killed and started again with `--resume`,
+  the interruption still on its screen.
+- `claude-2.1.319-interrupted-resumed-draft`: there, words typed key by key and not sent.
+- `claude-2.1.319-interrupted-resumed-pasted`: there, words pasted as the node pastes them and not sent.
+
 Antigravity's screens are in `../agy-tui`.

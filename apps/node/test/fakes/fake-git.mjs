@@ -53,10 +53,12 @@ const STEPS = {
     say(step.stderr, step.stdout);
     return step.exit;
   },
-  /* Ends by itself in the end, so that a test that could not stop it leaves nothing behind. */
+  /* Says once it is in place. Ends by itself only after the runner's limit for a test, so that a test that could not
+     stop it fails there and leaves nothing behind. */
   hang() {
     say('remote: still working\n');
-    setTimeout(() => process.exit(0), 15_000);
+    writeFileSync(join(dir, 'hanging'), '');
+    setTimeout(() => process.exit(0), 30_000);
     return null;
   },
   ignore_term() {

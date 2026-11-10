@@ -3,7 +3,7 @@ import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { AgentCardView, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
+import type { AgentCardView, Briefing, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
 export const ME: Me = {
@@ -70,6 +70,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
   '/api/tasks?status=all&department=d2': { tasks: TASKS },
   '/api/departments/d2/backlog': { items: [] },
+  '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],

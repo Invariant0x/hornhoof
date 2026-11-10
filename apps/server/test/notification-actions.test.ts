@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { answer, ask, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wordsForTurn } from '../src/modules/conversation/turn-words.js';
@@ -13,6 +13,11 @@ import { messageHeading } from '../src/modules/conversation/prompt.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
+
+/* Reports are combined within ten seconds of the server's clock, and waits end by it: here it stands still unless a test
+   moves it, so no window or wait runs out while a test works. */
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); });
+afterEach(() => { vi.useRealTimers(); });
 
 async function fixture() {
   const { app, db } = await testApp();

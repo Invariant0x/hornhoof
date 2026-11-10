@@ -191,14 +191,15 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const noTask = bar.getByRole('button', { name: words.noTask, exact: true });
       await openFromMap(page, lang);
       await expect(task).toBeEnabled();
-      await page.waitForTimeout(250);
+      /* The bar is laid out in its own fonts before it is measured. */
+      await page.evaluate(() => document.fonts.ready);
       const [withTask, closeWithTask, buttonWithTask] = [await box(bar), await box(close), await box(task)];
       expect(withTask.height, 'the header is one row').toBeLessThanOrEqual(40);
       await capture('header-with-task');
       live.hasTask = false;
       await openFromMap(page, lang);
       await expect(noTask).toBeDisabled();
-      await page.waitForTimeout(250);
+      await page.evaluate(() => document.fonts.ready);
       expect(await box(bar)).toEqual(withTask);
       expect(await box(close)).toEqual(closeWithTask);
       expect(await box(noTask), 'nothing in the bar moves').toEqual(buttonWithTask);

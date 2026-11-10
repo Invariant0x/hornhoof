@@ -59,7 +59,8 @@ async function company() {
     await until(async () => (await turnsOf(agentId)).length > after);
     return runOf((await turnsOf(agentId))[after]!.id);
   };
-  /* The node says the turn's program ended without its work done, as it ended. */
+  /* The node says the turn's program ended without its work done, as it ended. The server acknowledges the end once it
+     has handled it, the next turn it makes for it included. */
   const failed = async (run: Run, exit: Exit, more: { sessionId?: string | null; tail?: string; error?: 'agent_failed' | 'timeout' } = {}) => {
     node.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: more.sessionId ?? null, result: '', tail: more.tail ?? 'Program ended.', error: more.error ?? 'agent_failed', exit });
     await until(() => node.acks.includes(run.jobId));
@@ -75,7 +76,6 @@ async function company() {
   };
   /* What Bruno hands in while his turn runs, and the wakes it brings. */
   const handIn = async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'POST /checkout works.', evidence: 'Changed total tests.', review: { baseCommit: BASE } })).wakes);
-  const settle = () => new Promise(r => setTimeout(r, 150));
   /* A turn that brings a report waits a short while for other reports to join it: here the server's pump runs past that
      window at once, instead of the test waiting it out. */
   const pastReportWindow = async (agentId: string) => {
@@ -88,7 +88,7 @@ async function company() {
       clock.mockRestore();
     }
   };
-  return { app, db, ctx, companyId, sub: sub!, node, hana, bruno, rita, rob, task, turnsOf, jobOf, taskNow, runOf, nextTurn, failed, ended, brunoAtWork, handIn, settle, pastReportWindow };
+  return { app, db, ctx, companyId, sub: sub!, node, hana, bruno, rita, rob, task, turnsOf, jobOf, taskNow, runOf, nextTurn, failed, ended, brunoAtWork, handIn, pastReportWindow };
 }
 
 describe("a turn whose program ended without the work done", () => {
@@ -146,7 +146,6 @@ describe("a turn whose program ended without the work done", () => {
     await wakeAll(c.ctx, (await verdict(c.ctx, c.rita.id, c.task.id, { pass: true, comment: 'Looks right.', reviewedCommit: HEAD })).wakes);
     await c.failed(check, { code: 1, signal: null }, { tail: 'Verdict pass: true recorded.\n› ' });
     expect(await c.jobOf(check.jobId)).toMatchObject({ status: 'done', error: null, exitCode: 1, exitSignal: null, tail: expect.stringContaining('Verdict pass: true recorded.') });
-    await c.settle();
     expect((await c.turnsOf(c.rita.id)).map(j => j.id)).toEqual([check.jobId]);
     const current = await c.taskNow();
     expect(current.status).not.toBe('done');
@@ -182,7 +181,6 @@ describe("a turn whose program ended without the work done", () => {
     await c.handIn();
     await c.failed(more, { code: 1, signal: null }, { sessionId: 'bruno-session' });
     expect(await c.jobOf(more.jobId)).toMatchObject({ status: 'done', error: null, exitCode: 1 });
-    await c.settle();
     expect((await c.turnsOf(c.bruno.id)).map(j => j.id)).toEqual([work.jobId, more.jobId]);
   });
 
@@ -193,7 +191,6 @@ describe("a turn whose program ended without the work done", () => {
     const more = await c.nextTurn(c.bruno.id, 1);
     await c.failed(more, { code: 2, signal: null }, { sessionId: 'bruno-session', tail: 'Error: the model refused.' });
     expect(await c.jobOf(more.jobId)).toMatchObject({ status: 'failed', error: 'agent_failed', exitCode: 2, tail: 'Error: the model refused.' });
-    await c.settle();
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.continueOf === more.jobId)).toEqual([]);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'continued')))).filter(e => (e.data as { continuation?: string }).continuation)).toHaveLength(1);
   });
@@ -279,7 +276,6 @@ describe("a turn whose program ended without the work done", () => {
     const [timer] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.rob.id, kind: 'conversation', prompt: 'Your round.', timeoutMs: 60_000, status: 'running', startedAt: new Date() }).returning();
     await c.failed({ type: 'job.run', jobId: timer!.id, prompt: 'Your round.', sessionId: null }, { code: 2, signal: null }, { tail: 'Error: the round broke.' });
     expect(await c.jobOf(timer!.id)).toMatchObject({ status: 'failed', error: 'agent_failed', exitCode: 2, exitSignal: null, tail: 'Error: the round broke.' });
-    await c.settle();
     expect((await c.turnsOf(c.rob.id)).map(j => j.id)).toEqual([timer!.id]);
   });
 });

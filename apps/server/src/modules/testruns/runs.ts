@@ -22,11 +22,12 @@ import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
-import { markPromise, markRun, type RunMark } from './github-status.js';
+import { markPromise, markRun, TESTS_CONTEXT, type RunMark } from './github-status.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
 import { checkNamedFiles } from './named-files.js';
 import { pickMachine } from './pick.js';
+import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
 
@@ -144,10 +145,20 @@ const pinLine = (run: Pick<Run, 'branch' | 'commitSha'>) => (run.commitSha ? ` P
 /* Only a test run can leave a mark on its commit. */
 const markLine = (kind: RunKind, found: { department: { repoFullTestCommand: string | null } } | null, command: string) => (kind === 'tests' ? markPromise(found?.department.repoFullTestCommand, command) : '');
 
+/* What a run of the product's environment left out of the whole product, beside what it reused, which reuseLines says, and that it
+   leaves no mark on its commit when it does not stand for the whole product. */
+function scopeLines(run: Run): string[] {
+  const snapshot = run.environmentSnapshot, suite = run.environmentRequest?.suite;
+  if (run.kind !== 'tests' || run.command !== '' || !snapshot) return [];
+  const scope = runScope(scopeSource(snapshot), suite, 0), whole = [...new Set(['final', scope.fullProfile ?? 'final'])].join(' or ');
+  const left = scope.leftOut.length || scope.since ? [`It ran profile ${scope.profile}${scopeWords(scope)}`] : [];
+  return runPurpose(snapshot, suite) === 'final' ? left : [...left, `It leaves no ${TESTS_CONTEXT} on its commit: only a run of the whole product, with no one suite, of profile ${whole}, does.`];
+}
+
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
-  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`, ...reuseLines(run.fileCache, parts)];
+  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`, ...scopeLines(run), ...reuseLines(run.fileCache, parts)];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';

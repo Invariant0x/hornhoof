@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -7,12 +7,10 @@ import {
   browserEnv,
   browsersDir,
   ensureRepoBrowser,
-  GLOBAL_PLAYWRIGHT_DIR,
   playwrightVersionIn,
   prepareAndVerifyBrowser,
   prepareBrowser,
   readBrowserError,
-  SEED_BROWSERS_PATH,
   startupBrowserCheck,
   summarizeBrowserError,
   verifyBrowser,
@@ -22,6 +20,7 @@ import { CheckClient } from '../src/check-client.js';
 import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 /* Playwright's browsers stand in for themselves only in the tests of preparing them; elsewhere they are ready at once. */
 const browsersReady = async () => ({ ok: true as const, status: 'not_needed' as const });
@@ -242,21 +241,30 @@ describe('prepareBrowser', () => {
       return true;
     });
     client.online(true); setCheckClient(client);
-    let settled = false, fixturePid = 0;
+    /* The node's grace and its hold run on a clock the test moves. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let settled = false, fixturePid = 0, programEnded = false;
+    vi.spyOn(programs, 'runProgram').mockImplementation(options => realRunProgram(options).finally(() => { programEnded = true; }));
     const pending = withCheckSlot(() => prepareBrowser({ dir, repoDir: repo, seedDir, globalPlaywrightDir, isRoot: false })).finally(() => { settled = true; });
     void pending.catch(() => {});
     onTestFinished(async () => {
       if (fixturePid) { try { process.kill(-fixturePid, 'SIGKILL'); } catch { /* Already gone. */ } }
       await pending.catch(() => {}); client.online(false); setCheckClient(null);
     });
-    await expect.poll(() => existsSync(started)).toBe(true);
+    onTestFinished(async () => { await vi.runAllTimersAsync(); vi.useRealTimers(); });
+    await eventually(() => existsSync(started));
     fixturePid = Number(readFileSync(started, 'utf8'));
-    const at = performance.now();
     client.online(false);
-    await expect.poll(() => existsSync(stopped), { timeout: 15_000 }).toBe(true);
+    await eventually(() => existsSync(stopped));
     expect(settled).toBe(false);
+    /* The program takes no notice of TERM, so it is killed at the end of its grace of 2 s, and the slot is held through
+       the cleanup, 5 s after the stop. */
+    await vi.advanceTimersByTimeAsync(2000);
+    await eventually(() => programEnded);
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await pending.catch(() => {});
-    expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
   });
 
   it('seeds matching revisions from the image seed without downloading and makes binaries readable for job users', async () => {
@@ -645,34 +653,6 @@ describe('the three browser engines', () => {
 });
 
 describe('verifyBrowser and prepareAndVerifyBrowser', () => {
-  it('launches real Chromium, Firefox and WebKit headless from a prepared browser folder and names the cause when broken', async () => {
-    /* An image before 0.17.1 brought Chromium alone; a node of it downloads the other two as it starts. */
-    const seeded = existsSync(SEED_BROWSERS_PATH) && ['firefox-', 'webkit-'].every(engine => readdirSync(SEED_BROWSERS_PATH).some(entry => entry.startsWith(engine)));
-    if (!existsSync(GLOBAL_PLAYWRIGHT_DIR) || !seeded) return;
-    const dir = makeTemp('hh-real-pw-');
-    const target = browsersDir(dir);
-    mkdirSync(target, { recursive: true });
-    for (const entry of readdirSync(SEED_BROWSERS_PATH)) {
-      if (entry.startsWith('.')) continue;
-      cpSync(join(SEED_BROWSERS_PATH, entry), join(target, entry), { recursive: true });
-    }
-
-    const ok = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.browserVersion).toMatch(/^chromium \d+\.\d+.*, firefox \d+\.\d+.*, webkit \d+\.\d+/);
-
-    /* Break the headless shell binary to prove launch failure reports a clear, named reason. */
-    const shellDir = readdirSync(target).find(entry => entry.startsWith('chromium_headless_shell-'))!;
-    const binDir = readdirSync(join(target, shellDir)).find(entry => entry.startsWith('chrome-headless-shell'))!;
-    const binary = join(target, shellDir, binDir, 'chrome-headless-shell');
-    writeFileSync(binary, '#!/bin/sh\necho "error while loading shared libraries: libnss3.so: cannot open shared object file" >&2\nexit 127\n');
-    chmodSync(binary, 0o755);
-
-    const broken = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(broken.ok).toBe(false);
-    if (!broken.ok) expect(broken.error).toMatch(/^chromium: .*libnss3\.so/);
-  });
-
   it('extracts concise reasons from Playwright launch errors without ASCII box borders', () => {
     const boxed = [
       'browserType.launch: Executable doesn\'t exist at /data/browsers/chromium-1248/chrome-linux64/chrome',

@@ -4,13 +4,13 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people } from '../src/db/schema.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 type Seen = { type: string; jobId?: string; agentKey?: string };
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
-const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
 /* A person's Claude and Codex plans, each with its node on one machine and online, and one employee on the Claude plan. */
@@ -47,9 +47,12 @@ async function nextOf(node: FakeNode, type: string): Promise<Seen> {
   }
 }
 
-/* What came to this node by now, of this type. */
+/* What came to this node by now, of this type. A mark the node sends comes back after everything the server sent it
+   before, as one socket keeps their order, and after the node's own messages before it were handled. */
 async function arrived(node: FakeNode, type: string): Promise<Seen[]> {
-  await sleep(150);
+  const mark = randomUUID();
+  node.send({ type: 'job.done', jobId: mark, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(mark));
   const seen: Seen[] = [];
   while (node.queued()) {
     const message = await node.next() as Seen;
@@ -70,11 +73,11 @@ async function oneTurn({ app, ceo, bruno, a, db }: Awaited<ReturnType<typeof two
   return jobId!;
 }
 
-/* One more turn like this one, as if it had run. */
+/* One more turn like this one, as if it had run after it. */
 async function pastTurn({ db }: Awaited<ReturnType<typeof twoPlans>>, like: string, more: Partial<typeof jobs.$inferInsert>): Promise<string> {
   const [row] = await db.select().from(jobs).where(eq(jobs.id, like));
   const id = randomUUID();
-  await db.insert(jobs).values({ ...row!, id, toolTokenHash: null, ...more });
+  await db.insert(jobs).values({ ...row!, id, toolTokenHash: null, createdAt: new Date(row!.createdAt.getTime() + 1000), ...more });
   return id;
 }
 
@@ -115,7 +118,7 @@ describe('an agent moved to another plan', () => {
     const setup = await twoPlans();
     const last = await oneTurn(setup);
     const [orchestrator] = await setup.db.update(agents).set({ subscriptionId: setup.claude }).where(eq(agents.kind, 'orchestrator')).returning();
-    const his = await pastTurn(setup, last, { agentId: orchestrator!.id, createdAt: new Date(Date.now() + 1000) });
+    const his = await pastTurn(setup, last, { agentId: orchestrator!.id });
     expect((await setup.app.inject({ method: 'POST', url: `/api/subscriptions/${setup.codex}/orchestrator`, ...as(setup.ceo) })).statusCode).toBe(200);
     expect(await nextOf(setup.a, 'agent.release')).toEqual({ type: 'agent.release', agentKey: orchestrator!.id, jobId: his });
   });
@@ -124,7 +127,7 @@ describe('an agent moved to another plan', () => {
     const setup = await twoPlans();
     const last = await oneTurn(setup);
     const [orchestrator] = await setup.db.update(agents).set({ subscriptionId: setup.claude }).where(eq(agents.kind, 'orchestrator')).returning();
-    await pastTurn(setup, last, { agentId: orchestrator!.id, createdAt: new Date(Date.now() + 1000) });
+    await pastTurn(setup, last, { agentId: orchestrator!.id });
     expect((await setup.app.inject({ method: 'POST', url: `/api/subscriptions/${setup.claude}/orchestrator`, ...as(setup.ceo) })).statusCode).toBe(200);
     expect(await arrived(setup.a, 'agent.release')).toEqual([]);
   });
@@ -139,7 +142,7 @@ describe('an agent moved to another plan', () => {
     const hers = await connectNode(setup.url, joined.key);
     hers.send(hello);
     await setup.db.update(agents).set({ subscriptionId: plan, nodeId: joined.nodeId }).where(eq(agents.id, setup.bruno.id));
-    const onHers = await pastTurn(setup, last, { subscriptionId: plan, nodeId: joined.nodeId, createdAt: new Date(Date.now() + 1000) });
+    const onHers = await pastTurn(setup, last, { subscriptionId: plan, nodeId: joined.nodeId });
     const [person] = await setup.db.select().from(people).where(eq(people.email, 'maria@acme.com'));
     const [elsewhere] = await setup.db.insert(departments).values({ companyId: setup.bruno.companyId, templateKey: 'marketing', roleCode: 'MKT' }).returning();
     expect((await setup.app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { access: { departments: [elsewhere!.id] } }, ...as(setup.ceo) })).statusCode).toBe(200);
@@ -155,7 +158,7 @@ describe('an agent moved to another plan', () => {
   it('names no turn that never reached the node', async () => {
     const setup = await twoPlans();
     const last = await oneTurn(setup);
-    await pastTurn(setup, last, { status: 'failed', startedAt: null, createdAt: new Date(Date.now() + 1000) });
+    await pastTurn(setup, last, { status: 'failed', startedAt: null });
     await move(setup.app, setup.ceo, setup.bruno.id, setup.codex);
     expect(await nextOf(setup.a, 'agent.release')).toMatchObject({ jobId: last });
   });
@@ -194,7 +197,7 @@ describe('a node that comes back', () => {
     const setup = await twoPlans();
     const last = await oneTurn(setup);
     setup.a.close();
-    await sleep(50);
+    await until(() => !setup.app.ctx.hub.isOnline(nodeIdentity(setup.onA.nodeId)));
     await move(setup.app, setup.ceo, setup.bruno.id, setup.codex);
     const back = await connectNode(setup.url, setup.onA.key);
     back.send(hello);
@@ -208,7 +211,7 @@ describe('a node that comes back', () => {
     await move(setup.app, setup.ceo, setup.bruno.id, setup.claude);
     await nextOf(setup.a, 'agent.release');
     setup.a.close();
-    await sleep(50);
+    await until(() => !setup.app.ctx.hub.isOnline(nodeIdentity(setup.onA.nodeId)));
     const back = await connectNode(setup.url, setup.onA.key);
     back.send(hello);
     expect(await arrived(back, 'agent.release')).toEqual([]);

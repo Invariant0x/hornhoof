@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -16,6 +17,13 @@ const MACHINE_UP = '2026-11-01T08:00:00.000Z';
 
 /* How a node came up: its program, the machine under it and its container. */
 const boot = (startedAt: string, container = 'c0ffee000001', machineUpAt = MACHINE_UP) => ({ startedAt, machineUpAt, container });
+
+/* The node's mark comes back after every message it sent before was handled, one after the other as its socket keeps them. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
 
 type Run = { type: 'job.run'; jobId: string; prompt: string };
 async function nextRun(node: FakeNode): Promise<Run> {
@@ -286,7 +294,8 @@ describe('a turn cut off by a node restart', () => {
     await c.restart(boot('2026-11-03T00:11:00.000Z'));
     await until(async () => (await c.jobOf(timer!.id)).status === 'failed');
     expect((await c.jobOf(timer!.id)).interruption).toMatchObject({ cause: 'program', task: null });
-    await new Promise(r => setTimeout(r, 100));
+    /* The node's hello, which ended the turn and would have queued its retry, has been handled to its end. */
+    await marked(c.node());
     expect((await c.turnsOf(c.rob.id)).map(j => j.id)).toEqual([timer!.id]);
   });
 });

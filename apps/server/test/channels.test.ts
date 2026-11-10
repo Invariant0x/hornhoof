@@ -6,7 +6,7 @@ import { as, setUpCompany, testApp } from './helpers.js';
 describe('live channels', () => {
   it('are remembered for ten minutes after the last message, one per direction', () => {
     const bus = new EventBus();
-    const t0 = Date.now();
+    const t0 = Date.parse('2026-11-09T10:00:00.000Z');
     bus.publish('c1', { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } }, t0);
     bus.publish('c1', { type: 'pulse', from: { kind: 'department', id: 'd1' }, to: { kind: 'orchestrator' } }, t0 + 1000);
     bus.publish('c1', { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } }, t0 + 2000);

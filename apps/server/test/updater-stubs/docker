@@ -73,8 +73,9 @@ case "$1 $2" in
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
         [ "${STUB_STOP_IN:-}" = pull ] && [ ! -f "$STUB_STATE/stopped" ] && { touch "$STUB_STATE/stopped"; kill -9 "$PPID"; } ;;
-      # A command on the computer is made, then started. STUB_COMPUTER_SLEEP is how long it takes, STUB_COMPUTER_EXIT how
-      # it ends; the CEO closes access while it runs with STUB_COMPUTER_CLOSES, and while it is made with STUB_CLOSE_ON_CREATE.
+      # A command on the computer is made, then started. With STUB_COMPUTER_RUNS it runs until its container is removed,
+      # else it ends at once; STUB_COMPUTER_EXIT is how it ends. The CEO closes access while it runs with
+      # STUB_COMPUTER_CLOSES, and while it is made with STUB_CLOSE_ON_CREATE.
       create)
         case " $* " in
           *' --entrypoint bash '*)
@@ -86,8 +87,15 @@ case "$1 $2" in
       start)
         echo "ran: $(cat "$STUB_STATE/computer-command")"
         [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
-        sleep "${STUB_COMPUTER_SLEEP:-0}"
+        if [ -n "${STUB_COMPUTER_RUNS:-}" ]; then
+          mkfifo "$STUB_STATE/computer-removed"
+          touch "$STUB_STATE/computer-runs"
+          read -r _ < "$STUB_STATE/computer-removed"
+          rm -f "$STUB_STATE/computer-removed" "$STUB_STATE/computer-runs"
+        fi
         exit "${STUB_COMPUTER_EXIT:-0}" ;;
+      # The container goes, and a command that runs in it ends.
+      rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
       cp)
         tag=${2%%:*}; tag=${tag#cid-}
         case "$2" in

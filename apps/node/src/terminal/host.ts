@@ -32,9 +32,10 @@ import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
-import { LostWords } from './lost-words.js';
-import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
+import { holdsWords, LostWords } from './lost-words.js';
+import { inputShown, OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
+import type { ProgramFacts } from './program-access.js';
 import type { OperatorProgram } from './operator-control.js';
 import { operatorQuestion } from './operator-question.js';
 
@@ -141,6 +142,8 @@ type Agent = {
   pastedAt?: number;
   /* The prompt of a turn that ended as its program never took it: Hornhoof repeats those words itself. */
   ownLeft?: OwnLeft | null;
+  /* A copy of a prompt the program took, typed again while it was on its way in: none of it is to go. */
+  ownCopy?: OwnLeft | null;
   /* This turn's prompt has not gone in yet: what the program takes meanwhile is a person's. */
   promptWaits?: boolean;
   /* A person sent words meanwhile that the program has not finished answering. */
@@ -276,6 +279,7 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
+const TOOLS_LOST = "could not reach Hornhoof's tools when its program connected, so the program starts again in its session.";
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -407,7 +411,8 @@ export class TerminalHost {
   constructor(private readonly opts: Options) {
     const owner = ownership(opts, key => this.panes(key));
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
-      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
+      refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };
@@ -428,7 +433,10 @@ export class TerminalHost {
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
-    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), recovery: key => this.operatorRecovery(key), secrets: opts.secrets }) : null;
+    return opts.operator ? new OperatorRuntime(opts.operator, {
+      current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), recovery: key => this.operatorRecovery(key), secrets: opts.secrets,
+      facts: key => this.programFacts(key), press: (key, keys) => this.opts.tmux.keys(this.agents.get(key)!.name, ...keys), paste: (key, text) => this.opts.tmux.paste(this.agents.get(key)!.name, text),
+    }) : null;
   }
 
   private operatorTicks(): NodeJS.Timeout | null {
@@ -449,10 +457,31 @@ export class TerminalHost {
     return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
   }
 
-  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }> {
+  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; own: boolean; busy: boolean }> {
     const a = this.agents.get(key);
-    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, busy: false };
-    return { alive: true, input: inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true)), busy: a.busy };
+    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, own: false, busy: false };
+    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
+    return { alive: true, input, own: Boolean(input) && this.ownWordsOnly(a, input!), busy: a.busy };
+  }
+
+  /* What the orchestrator and Operations see of an agent's program besides its screen: the turn, whether it works and on what,
+     its question, what its input holds and whether Hornhoof's words wait to go in. */
+  private async programFacts(key: string): Promise<ProgramFacts | null> {
+    const a = this.agents.get(key);
+    if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
+    this.drain(a);
+    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
+    return { ...this.programIdentity(key, a), working: a.busy, ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+  }
+
+  /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
+  private programIdentity(key: string, a: Agent): Pick<ProgramFacts, 'jobId' | 'instance'> {
+    return { jobId: a.turn?.jobId ?? null, instance: this.operator!.identity(key)?.instance ?? a.instance! };
+  }
+
+  /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */
+  private ownWordsOnly(a: Agent, input: string): boolean {
+    return !this.stillTyping(a) && isOwnLeft(untakenOwn(a), a.typedAt, input);
   }
 
   private async operatorPane(key: string): Promise<{ cols: number; rows: number; cells: string }> {
@@ -475,6 +504,13 @@ export class TerminalHost {
   private intentional(a: Agent, why: Parameters<OperatorRuntime['intentional']>[1]): void { this.operator?.intentional(a.key, why); }
 
   private operatorEnabled(a: Agent): boolean { return Boolean(this.operator?.enabled(a.key)); }
+
+  /* A start the node could not prove came from the program, as when a busy node checks its caller after the caller gave up,
+     still says the program started: Hornhoof's prompt then waits only for its input to show, and nothing it carries is
+     taken. Otherwise no turn would ever type into that program. */
+  private unownedHook(key: string, event: string): void {
+    if (event === 'start') this.agents.get(key)?.started?.resolve();
+  }
 
   private hookRejected(key: string | null, event: string, reason: string): void {
     (this.opts.log ?? console.log)(`Hook ${event} rejected: ${reason}${key ? ` (agent ${key})` : ''}`);
@@ -558,10 +594,20 @@ export class TerminalHost {
     a.signedOut = job.signedOut;
     const launch = await this.launchFor(a, job);
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
+    this.toolsLost(a, job);
     const goesOn = await this.goesOn(a, job, launch.hash);
     if (!goesOn && (await this.asksPerson(a))) return this.leftAsking(a, job);
     a.launch = { job, spec: launch.spec };
     return this.turnOn(a, job, launch, goesOn);
+  }
+
+  /* A program turned away as it connected to its tools has none for the rest of its session, so it starts again in that
+     session for this turn, which says so. */
+  private toolsLost(a: Agent, job: TermJob): void {
+    if (!connectsAtStart(job) || !this.bridge.toolsRefusedSince(job.key, a.startedAt)) return;
+    a.hash = null;
+    this.log(`Agent ${job.key} (${job.program.kind}) ${TOOLS_LOST}`);
+    job.input.onEvent?.({ kind: 'text', text: `This agent ${TOOLS_LOST}` });
   }
 
   /* How this turn would start its program, in folders ready for it. */
@@ -583,9 +629,23 @@ export class TerminalHost {
     try {
       const failed = goesOn ? null : await this.startAnew(a, job, launch);
       if (failed) return failed;
-      return await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
+      const done = await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
+      if (!goesOn && !tools && done.ok) await this.toolsConnected(a, job);
+      return done;
     } finally {
       this.closesTurn(a, job, turn, starting);
+    }
+  }
+
+  /* Claude Code and Codex connect to their tools on their own time after they start, and one that connects with no turn
+     open gets an error and no tools for the rest of its session. So the turn that started one and typed its prompt ends
+     once the program has listed its tools, or once toolsMs have passed after the program's own end of the turn. A program
+     gone or a turn stopped meanwhile waits no longer. */
+  private async toolsConnected(a: Agent, job: TermJob): Promise<void> {
+    if (!connectsAtStart(job)) return;
+    const over = this.bridge.listed(job.key, this.toolsMs, a.startedAt).then(() => true);
+    while (!job.input.signal?.aborted && (await this.opts.tmux.alive(a.name))) {
+      if (await Promise.race([over, sleep(this.pollMs).then(() => false)])) return;
     }
   }
 
@@ -880,13 +940,14 @@ export class TerminalHost {
   }
 
   /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
-     Antigravity, reaches its tools a moment before Hornhoof opens their turn. */
+     Antigravity, reaches its tools a moment before Hornhoof opens their turn. Claude Code or Codex may still connect
+     after a turn called off as it started them, and the next turn opens soon after. */
   private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
     const programDir = programDirOf(input);
     if (program.kind === 'claude') await acceptClaudeDialogs(home, programDir, this.fs);
     if (program.kind === 'kimi') await prepareKimi(home, programDir, urls.mcpUrl, this.fs);
     if (program.kind === 'antigravity') await prepareAgy(programDir, urls.mcpUrl, this.fs);
-    this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
+    this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : this.toolsMs);
   }
 
   /* What a new Claude Code session was told from before goes with it to every resume. */
@@ -1112,7 +1173,12 @@ export class TerminalHost {
   }
 
   private leftByOthers(a: Agent, input: string): boolean {
-    return !this.stillTyping(a) && !isOwnLeft(a.ownLeft, a.typedAt, input) && !holdsFoldedPaste(input);
+    return !this.stillTyping(a) && !this.ownInInput(a, input) && !holdsFoldedPaste(input);
+  }
+
+  /* What the input holds is Hornhoof's own words: a prompt never taken, or a copy of one taken. */
+  private ownInInput(a: Agent, input: string): boolean {
+    return isOwnLeft(a.ownLeft, a.typedAt, input) || isOwnLeft(a.ownCopy, a.typedAt, input);
   }
 
   private secretsOf(job: TermJob): string[] {
@@ -1128,10 +1194,11 @@ export class TerminalHost {
   /* An input that holds nothing, or only what is safe elsewhere, which then goes. It takes no Escape, which stops a program. */
   private async inputCleared(a: Agent, job: TermJob, input: string): Promise<boolean> {
     if (!input) return true;
-    const own = isOwnLeft(a.ownLeft, a.typedAt, input);
-    if (this.stillTyping(a) || !(own || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input)))) return false;
+    const own = isOwnLeft(a.ownLeft, a.typedAt, input), copy = isOwnLeft(a.ownCopy, a.typedAt, input);
+    if (this.stillTyping(a) || !(own || copy || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input)))) return false;
     if (!(await this.eraseLeft(a))) return false;
     if (own) this.forgetOwnLeft(a);
+    if (copy) a.ownCopy = null;
     return true;
   }
 
@@ -1174,7 +1241,7 @@ export class TerminalHost {
     if (!typedSinceStart(a)) return true;
     await this.keepLeftInput(a, job);
     const input = await this.readInput(a);
-    return !input || isOwnLeft(a.ownLeft, a.typedAt, input) || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input));
+    return !input || this.ownInInput(a, input) || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input));
   }
 
   private async whilePromptWaits<T>(a: Agent, work: () => Promise<T>): Promise<T> {
@@ -1242,7 +1309,15 @@ export class TerminalHost {
       await this.inputLane(a, () => this.repeatLostWords(a, job, prompt, lost));
       await sleep(this.pollMs);
     }
+    this.ownCopyLeft(a, job, prompt, lost);
     return null;
+  }
+
+  /* A busy program can take the words and say so only after it stood still long enough for them to go in again. That copy
+     stays in its input, where the next words would wait on it: it is Hornhoof's own, so it goes before they do. It is no
+     words that never went, which whoever looks at the program would send. */
+  private ownCopyLeft(a: Agent, job: TermJob, prompt: string, lost: LostWords): void {
+    if (lost.typedAgain && !a.ownerTyped && !job.input.signal?.aborted) a.ownCopy = { text: prompt, jobId: job.input.jobId ?? null, at: a.pastedAt ?? -Infinity };
   }
 
   /* A program can miss the Enter or lose the words, more so as it starts or resumes a long session: the same turn tries again,
@@ -1324,9 +1399,19 @@ export class TerminalHost {
     }
     await this.settle(a, message);
     await this.planLimits(a);
+    if (job.input.tools && this.bridge.toolsRefusedSince(a.key, a.startedAt)) return await this.withoutTools(a, job);
     /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
     const output = message.trim() ? '' : await this.screen(job.key);
     return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
+  }
+
+  /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
+     for them then, and goes without them for the rest of its session. Its turns end saying so, not as turns that left
+     their task where it was, and the next one starts it anew, to connect while that turn runs. */
+  private withoutTools(a: Agent, job: TermJob): Promise<RunResult> {
+    a.hash = null;
+    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them. The next turn starts it anew.");
+    return this.failedTurn(a, job, 'agent_failed');
   }
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
@@ -1445,8 +1530,11 @@ export class TerminalHost {
     await this.lookTyped(a, turn);
   }
 
+  /* A program at its prompt with nothing typed, or with only Hornhoof's own words that never went, waits for them: the words
+     that go on erase those and go in once. A person's words keep it waiting for them. */
   private async ownerRecoveryReady(a: Agent): Promise<void> {
-    const ready = atEmptyPrompt(a.program!.kind, await this.opts.tmux.screen(a.name, 0, true));
+    const input = inputOf(a.program!.kind, await this.opts.tmux.screen(a.name, 0, true));
+    const ready = input === '' || (input !== null && this.ownWordsOnly(a, input));
     if (ready) a.fresh = true;
     this.operator!.recoveryReady(a.key, ready);
   }
@@ -2648,9 +2736,30 @@ export class TerminalHost {
     a.took = false;
     a.typing = text;
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
+    const pastedAt = Date.now();
+    a.pastedAt = pastedAt;
     await sleep(pasteWait(text));
     a.restarting = false;
     await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Enter'));
+    void this.enterUntilTaken(a, turn, text, pastedAt).catch(() => {});
+  }
+
+  /* A program that just started again can miss the Enter, as at its first start and more so on a busy machine: Enter again
+     while its input still holds these words, nothing shows it took them and nobody pressed a key since they went in. */
+  private async enterUntilTaken(a: Agent, turn: Turn, text: string, pastedAt: number): Promise<void> {
+    for (const end = Date.now() + this.readyMs; Date.now() < end;) {
+      await sleep(this.enterWaitMs);
+      if (!await this.inputLane(a, () => this.enterWaitingWords(a, turn, text, pastedAt))) return;
+    }
+  }
+
+  /* Capture and Enter share the input lane. A person's key can arrive while the capture waits, so check again after it. */
+  private async enterWaitingWords(a: Agent, turn: Turn, text: string, pastedAt: number): Promise<boolean> {
+    const input = await this.readInput(a);
+    this.drain(a);
+    if (a.turn !== turn || a.took || a.restarting || (a.typedAt ?? -Infinity) > pastedAt || !input || !holdsWords(input, text)) return false;
+    await this.opts.tmux.keys(a.name, 'Enter');
+    return true;
   }
 
   private async eraseInput(a: Agent, receipt: WordReceipt): Promise<void> {
@@ -3078,9 +3187,15 @@ type TurnLaunch = { spec: LaunchSpec; urls: AgentUrls; hash: string };
 /* What a program that just started shows after its prompt is its own, not words anybody left. */
 const typedSinceStart = (a: Agent): boolean => (a.typedAt ?? -Infinity) >= a.startedAt;
 
-function initialToolsNeeded({ program, input }: TermJob, goesOn: boolean): boolean {
+/* Whether a program with Hornhoof's tools connects to them as it starts. A new Kimi session connects with its first
+   message, and Antigravity once it takes a message or opens its MCP panel. */
+function connectsAtStart({ program, input }: TermJob): boolean {
   const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
-  return !goesOn && !input.prompt && Boolean(input.tools) && !lazy;
+  return Boolean(input.tools) && !lazy;
+}
+
+function initialToolsNeeded(job: TermJob, goesOn: boolean): boolean {
+  return !goesOn && !job.input.prompt && connectsAtStart(job);
 }
 
 function assignmentOutlastsTurn(a: Agent): boolean {
@@ -3115,6 +3230,25 @@ function kimiSignedOut(job: TermJob, kind: keyof typeof READY, screen: string): 
 
 function stopsAtSetup(step: Awaited<ReturnType<typeof pastColors>>, stuck: boolean): boolean {
   return step === 'terms' || stuck;
+}
+
+/* The tool the program runs and the question it asks, if any. */
+function programAsks(a: Agent): Pick<ProgramFacts, 'tool' | 'question'> {
+  return { tool: [...a.calls.values()][0]?.name ?? null, question: a.operatorQuestion ?? null };
+}
+
+/* Hornhoof's words wait to go in: they stand unsent in the input, are typed and not taken yet, or wait for the turn. */
+function wordsUndelivered(a: Agent): boolean {
+  return Boolean(a.ownLeft) || (a.typing != null && !a.took) || Boolean(a.turn?.words.pending().length);
+}
+
+/* Hornhoof's words that already went into the input and have not been taken, in the running turn or left from the last. */
+function untakenOwn(a: Agent): OwnLeft | null | undefined {
+  return pastedAndUntaken(a) ? { text: a.typing!, jobId: null, at: a.pastedAt! } : a.ownLeft;
+}
+
+function pastedAndUntaken(a: Agent): boolean {
+  return a.typing != null && !a.promptWaits && !a.took;
 }
 
 function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {

@@ -106,10 +106,18 @@ export async function acceptOperatorRecovery(ctx: Ctx, frame: OperatorEvidence):
   if (!await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, AT_PROMPT);
 }
 
-/* Words go on by themselves once. When that did not help, a person or Operations looks: the hold stays. */
+/* Words go on by themselves once, along every turn they went on in since: one let through by hand between counts too, as
+   a program that took none of them takes the next no better. When that did not help, a person or Operations looks: the
+   hold stays. */
 async function wentOnBefore(ctx: Ctx, row: Case): Promise<boolean> {
-  const [made] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.continuationJobId, row.jobId), sql`${programOperatorCases.resolution}->>'outcome' in (${sql.join(BY_ITSELF.map(outcome => sql`${outcome}`), sql`, `)})`)).limit(1);
-  return Boolean(made);
+  const seen = new Set<string>();
+  for (let turns = [row.jobId]; turns.length; ) {
+    for (const turn of turns) seen.add(turn);
+    const made = await ctx.db.select({ jobId: programOperatorCases.jobId, outcome: sql<string | null>`${programOperatorCases.resolution}->>'outcome'` }).from(programOperatorCases).where(inArray(programOperatorCases.continuationJobId, turns));
+    if (made.some(({ outcome }) => BY_ITSELF.includes(outcome ?? ''))) return true;
+    turns = [...new Set(made.map(({ jobId }) => jobId))].filter(turn => !seen.has(turn));
+  }
+  return false;
 }
 
 /* What ends a hold with nobody looking: a stop, a turn that finished after all, or a program that is gone, whose words no

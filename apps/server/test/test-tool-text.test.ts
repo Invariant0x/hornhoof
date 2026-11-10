@@ -15,4 +15,13 @@ describe('test tool guidance', () => {
     expect(text).toMatch(/own change[\s\S]*own workspace[\s\S]*need no run_tests/i);
     for (const fact of ['fingerprint', 'main branch', 'returns at once', 'fresh folder', 'woken on the task', 'full log', '{part}', '{parts}', 'hornhoof/tests']) expect(text).toContain(fact);
   });
+
+  /* A release once shipped on a run of the default profile, which left out the database and the browser. */
+  it('names the run that checks a release, and that a run without profile checks only the default one', () => {
+    const text = descriptions().get('run_tests')!;
+    expect(text).toMatch(/without profile[^.]*default profile[^.]*leave suites out/i);
+    expect(text).toMatch(/check of a release[^.]*execution\.fullRun\.profile[^.]*no suite and no candidate/i);
+    expect(text).toMatch(/every suite and every test file anew/i);
+    expect(text).not.toMatch(/run a release's check on the turn's branch/i);
+  });
 });

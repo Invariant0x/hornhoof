@@ -3,7 +3,6 @@ import { UNHEARD_MS } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TurnWords } from '../src/terminal/program-restart.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
-import { until } from './terminal-host-helpers.js';
 import { atWork, cleanups, TEXT } from './terminal-host-receipts-helpers.js';
 
 /* The owner of the plan at the terminal of an agent at work: what reaches the program's input, and their keys. */
@@ -13,7 +12,7 @@ async function atTerminal(c: Awaited<ReturnType<typeof atWork>>) {
   const tmux = c.host['opts'].tmux;
   vi.spyOn(tmux, 'attach').mockReturnValue(child as never);
   vi.spyOn(tmux, 'run').mockResolvedValue('');
-  await c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
+  await c.on(c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true }));
   const press = (data: string, pressedIn?: string) => c.host.input({ type: 'term.input', termId: 'view', data, ...(pressedIn ? { pressedIn } : {}) });
   return { stdin, press };
 }
@@ -22,6 +21,7 @@ describe('words the owner typed in a running turn, which the program takes after
   afterEach(async () => {
     vi.spyOn(Date, 'now').mockRestore();
     for (const cleanup of cleanups.splice(0)) await cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
   const QUESTION = 'and the limits';
@@ -39,11 +39,11 @@ describe('words the owner typed in a running turn, which the program takes after
     expect(stdin).toEqual([`${QUESTION}\r`]);
     c.record(claudeQueue('enqueue', QUESTION));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).toMatchObject({ wordsWaiting: true });
     taken(c, QUESTION);
     expect(opens(c)).toEqual([expect.objectContaining({ text: QUESTION, queuedFrom: 'job-receipt' })]);
-    await until(() => (c.host['agents'].get('receipt')!.unopened.length === 1));
+    await c.until(() => (c.host['agents'].get('receipt')!.unopened.length === 1));
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token', ref: (opens(c)[0] as { ref: string }).ref });
     expect(c.host["bridge"]["tokens"].get("receipt")).toBe("token");
     c.expire();
@@ -57,7 +57,7 @@ describe('words the owner typed in a running turn, which the program takes after
     press('line one\nline two\r', 'job-receipt');
     c.record(claudeQueue('enqueue', claudePasted('line one\nline two')));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     taken(c, claudePasted('line one\nline two'));
     expect(opens(c)).toEqual([expect.objectContaining({ text: 'line one\nline two', queuedFrom: 'job-receipt' })]);
   });
@@ -69,7 +69,7 @@ describe('words the owner typed in a running turn, which the program takes after
     c.record(claudeQueue('enqueue', QUESTION));
     c.record(claudeQueue('remove', '', { reason: 'absorbed_mid_turn' }));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).not.toMatchObject({ wordsWaiting: true });
     taken(c, 'the program asked for this itself');
     expect(opens(c)[0]).not.toHaveProperty('queuedFrom');
@@ -88,7 +88,7 @@ describe('words the owner typed in a running turn, which the program takes after
     c.drain();
     vi.restoreAllMocks();
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).not.toMatchObject({ wordsWaiting: true });
     taken(c, text as string);
     expect(opens(c)[0]).not.toHaveProperty('queuedFrom');
@@ -98,7 +98,7 @@ describe('words the owner typed in a running turn, which the program takes after
     const c = await atWork('claude', 'queued');
     c.record(claudeQueue('enqueue', QUESTION));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).not.toMatchObject({ wordsWaiting: true });
   });
 
@@ -109,7 +109,7 @@ describe('words the owner typed in a running turn, which the program takes after
     c.record(claudeQueue('enqueue', QUESTION));
     c.record(claudeQueue('remove', QUESTION));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).not.toMatchObject({ wordsWaiting: true });
     c.expire();
     expect(c.unheard()).toEqual([]);
@@ -121,7 +121,7 @@ describe('words the owner typed in a running turn, which the program takes after
     press(`${QUESTION}\r`, 'job-receipt');
     c.record(claudeQueue('enqueue', QUESTION));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     c.expire();
     expect(c.unheard()).toEqual([]);
     expect(c.sent).toContainEqual({ type: 'agent.words_settled', agentKey: 'receipt', jobId: 'job-receipt' });
@@ -131,28 +131,28 @@ describe('words the owner typed in a running turn, which the program takes after
     const c = await atWork('claude', 'queued');
     const { press } = await atTerminal(c);
     c.finish();
-    await c.running;
+    await c.on(c.running);
     press(`${QUESTION}\r`, 'job-receipt');
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: QUESTION });
-    await until(() => opens(c).length === 1);
+    await c.until(() => opens(c).length === 1);
     expect(opens(c)[0]).toMatchObject({ text: QUESTION, queuedFrom: 'job-receipt' });
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token', ref: (opens(c)[0] as { ref: string }).ref });
-    await prompt;
+    await c.on(prompt);
   });
 
   it('do not name the old turn for a prompt that comes long after the Enter', async () => {
     const c = await atWork('claude', 'queued');
     const { press } = await atTerminal(c);
     c.finish();
-    await c.running;
+    await c.on(c.running);
     press('yes\r', 'job-receipt');
     const now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now + UNHEARD_MS + 1);
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'the program asked for this itself' });
-    await until(() => opens(c).length === 1);
+    await c.until(() => opens(c).length === 1);
     expect(opens(c)[0]).not.toHaveProperty('queuedFrom');
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: null, toolToken: null, ref: (opens(c)[0] as { ref: string }).ref });
-    await prompt;
+    await c.on(prompt);
   });
 
   it.each(['codex', 'kimi'] as const)('name the old turn for a %s prompt right after that turn, which keeps no queue in its log', async kind => {
@@ -160,12 +160,12 @@ describe('words the owner typed in a running turn, which the program takes after
     const { press } = await atTerminal(c);
     press(`${QUESTION}\r`, 'job-receipt');
     c.finish();
-    await c.running;
+    await c.on(c.running);
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: QUESTION });
-    await until(() => opens(c).length === 1);
+    await c.until(() => opens(c).length === 1);
     expect(opens(c)[0]).toMatchObject({ text: QUESTION, queuedFrom: 'job-receipt' });
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token', ref: (opens(c)[0] as { ref: string }).ref });
-    await prompt;
+    await c.on(prompt);
   });
 
   it.each(['codex', 'kimi'] as const)('do not name the old turn for a %s prompt long after that turn ended', async kind => {
@@ -173,14 +173,14 @@ describe('words the owner typed in a running turn, which the program takes after
     const { press } = await atTerminal(c);
     press(`${QUESTION}\r`, 'job-receipt');
     c.finish();
-    await c.running;
+    await c.on(c.running);
     const now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now + UNHEARD_MS + 1);
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'the program asked for this itself' });
-    await until(() => opens(c).length === 1);
+    await c.until(() => opens(c).length === 1);
     expect(opens(c)[0]).not.toHaveProperty('queuedFrom');
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: null, toolToken: null, ref: (opens(c)[0] as { ref: string }).ref });
-    await prompt;
+    await c.on(prompt);
   });
 
   it('name no turn once a new turn began', async () => {
@@ -200,7 +200,7 @@ describe('words the owner typed in a running turn, which the program takes after
     c.drain();
     expect(c.host['agents'].get('receipt')!.pressed).toBeNull();
     press(`${QUESTION}\r`, 'job-receipt');
-    await c.host['hook']('receipt', 'prompt', { prompt: QUESTION });
+    await c.on(c.host['hook']('receipt', 'prompt', { prompt: QUESTION }));
     expect(c.host['agents'].get('receipt')!.pressed).toBeNull();
   });
 
@@ -208,9 +208,9 @@ describe('words the owner typed in a running turn, which the program takes after
     const c = await atWork('kimi', 'queued');
     const { press } = await atTerminal(c);
     press(`${QUESTION}\r`, 'job-receipt');
-    await c.host['hook']('receipt', 'queued', { prompt: [{ type: 'text', text: QUESTION }] });
+    await c.on(c.host['hook']('receipt', 'queued', { prompt: [{ type: 'text', text: QUESTION }] }));
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(c.sent.find(m => m.type === 'job.done')).toMatchObject({ wordsWaiting: true });
   });
 
@@ -218,8 +218,8 @@ describe('words the owner typed in a running turn, which the program takes after
     const c = await atWork('claude', 'queued');
     const { press } = await atTerminal(c);
     c.finish();
-    await c.running;
-    await until(() => c.host['agents'].get('receipt')!.turn === null);
+    await c.on(c.running);
+    await c.until(() => c.host['agents'].get('receipt')!.turn === null);
     press(`${QUESTION}\r`, 'job-receipt');
     c.record(claudeQueue('enqueue', QUESTION));
     c.drain();
@@ -232,36 +232,37 @@ describe('a letter delivered in the last seconds of a turn, which Claude takes a
   afterEach(async () => {
     vi.spyOn(Date, 'now').mockRestore();
     for (const cleanup of cleanups.splice(0)) await cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it('opens its turn when the prompt hook comes between the Stop and the log lines', async () => {
     const c = await atWork('claude', 'pasted');
-    expect(await c.host.say('receipt', TEXT)).toBe(true);
-    await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Done.' });
+    expect(await c.on(c.host.say('receipt', TEXT))).toBe(true);
+    await c.on(c.host['hook']('receipt', 'stop', { last_assistant_message: 'Done.' }));
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: claudePasted(TEXT) });
-    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    await c.until(() => c.sent.some(m => m.type === 'turn.open'));
     expect(c.sent.find(m => m.type === 'turn.open')).toMatchObject({ text: TEXT, queuedFrom: 'job-receipt' });
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'second', toolToken: 'token' });
-    await prompt;
+    await c.on(prompt);
     expect(c.host["bridge"]["tokens"].get("receipt")).toBe("token");
   });
 
   it('opens its turn though the Stop was refused and the log takes the letter before the end of the turn', async () => {
     const c = await atWork('claude', 'pasted');
-    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    expect(await c.on(c.host.say('receipt', TEXT))).toBe(true);
     c.record(claudeQueue('dequeue', claudePasted(TEXT)));
     c.record({ type: 'user', message: { role: 'user', content: claudePasted(TEXT) } });
     c.drain();
     expect(c.sent.some(m => m.type === 'turn.open')).toBe(false);
     c.finish();
-    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    await c.until(() => c.sent.some(m => m.type === 'turn.open'));
     expect(c.sent.find(m => m.type === 'turn.open')).toMatchObject({ text: TEXT, queuedFrom: 'job-receipt' });
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'second', toolToken: 'token' });
-    expect(await c.running).toMatchObject({ ok: true });
+    expect(await c.on(c.running)).toMatchObject({ ok: true });
     expect(c.host['agents'].get('receipt')!.turn?.jobId).toBe('second');
     c.finish();
-    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'second'));
+    await c.until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'second'));
   });
 
   it('counts words into the turn when they never showed in the queue, and leaves words it does not know alone', async () => {
@@ -274,30 +275,30 @@ describe('a letter delivered in the last seconds of a turn, which Claude takes a
       c.record({ type: 'user', message: { role: 'user', content: text } });
     }
     c.finish();
-    await c.running;
+    await c.on(c.running);
     expect(words.pending()).toEqual([]);
     expect(c.sent.some(m => m.type === 'turn.open')).toBe(false);
   });
 
   it('stays in the turn when Claude goes on after taking it', async () => {
     const c = await atWork('claude', 'pasted');
-    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    expect(await c.on(c.host.say('receipt', TEXT))).toBe(true);
     c.record(claudeQueue('dequeue', claudePasted(TEXT)));
     c.record({ type: 'user', message: { role: 'user', content: claudePasted(TEXT) } });
     c.record({ type: 'assistant', message: { content: [{ type: 'text', text: 'Taken.' }] } });
     c.finish();
-    expect(await c.running).toMatchObject({ ok: true, result: 'Taken.' });
+    expect(await c.on(c.running)).toMatchObject({ ok: true, result: 'Taken.' });
     expect(c.sent.some(m => m.type === 'turn.open')).toBe(false);
   });
 
   it('stays in the turn when a person stops it right after Claude took it', async () => {
     const c = await atWork('claude', 'pasted');
-    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    expect(await c.on(c.host.say('receipt', TEXT))).toBe(true);
     c.record(claudeQueue('dequeue', claudePasted(TEXT)));
     c.record({ type: 'user', message: { role: 'user', content: claudePasted(TEXT) } });
     c.drain();
-    await c.host['hook']('receipt', 'stop', { stopped: true });
-    await c.running;
+    await c.on(c.host['hook']('receipt', 'stop', { stopped: true }));
+    await c.on(c.running);
     expect(c.sent.some(m => m.type === 'turn.open')).toBe(false);
   });
 
@@ -314,6 +315,7 @@ describe('keys of the owner while their view of the session opens', () => {
   afterEach(async () => {
     vi.spyOn(Date, 'now').mockRestore();
     for (const cleanup of cleanups.splice(0)) await cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
   const slowView = async () => {
@@ -332,17 +334,17 @@ describe('keys of the owner while their view of the session opens', () => {
   it('reach the program in order once the view is open', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'first question' });
     c.host.input({ type: 'term.input', termId: 'view', data: '\r', pressedIn: 'job-receipt' });
     expect(stdin).toEqual([]);
     opened();
-    await open;
-    await until(() => stdin.length === 2);
+    await c.on(open);
+    await c.until(() => stdin.length === 2);
     expect(stdin).toEqual(['first question', '\r']);
     expect(c.host['agents'].get('receipt')!.pressed).toMatchObject({ jobId: 'job-receipt' });
     c.host.input({ type: 'term.input', termId: 'view', data: 'next' });
-    await until(() => stdin.length === 3);
+    await c.until(() => stdin.length === 3);
     expect(stdin.at(-1)).toBe('next');
   });
 
@@ -352,15 +354,15 @@ describe('keys of the owner while their view of the session opens', () => {
     const fitting = new Promise<void>(done => (fitted = done));
     const fit = vi.spyOn(c.host as unknown as { fit(key: string): Promise<void> }, 'fit').mockImplementation(() => (c.host['views'].has('view') ? fitting : Promise.resolve()));
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'first ' });
     opened();
-    await until(() => c.host['views'].has('view'));
+    await c.until(() => c.host['views'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'second' });
     expect(stdin).toEqual([]);
     fitted();
-    await open;
-    await until(() => stdin.length === 2);
+    await c.on(open);
+    await c.until(() => stdin.length === 2);
     expect(stdin).toEqual(['first ', 'second']);
     fit.mockRestore();
   });
@@ -368,10 +370,10 @@ describe('keys of the owner while their view of the session opens', () => {
   it('go nowhere from someone who only watches', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: false });
-    await until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'not for the program\r', pressedIn: 'job-receipt' });
     opened();
-    await open;
+    await c.on(open);
     expect(stdin).toEqual([]);
     expect(c.host['agents'].get('receipt')!.pressed ?? null).toBeNull();
   });
@@ -379,11 +381,11 @@ describe('keys of the owner while their view of the session opens', () => {
   it('go nowhere once the view closed while it opened, and a view that failed to open keeps none', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewsOpening'].has('view'));
     c.host.input({ type: 'term.input', termId: 'view', data: 'gone\r' });
     c.host.close({ type: 'term.close', termId: 'view' });
     opened();
-    await open;
+    await c.on(open);
     expect(stdin).toEqual([]);
     expect(c.host['earlyKeys'].size).toBe(0);
   });
@@ -391,11 +393,11 @@ describe('keys of the owner while their view of the session opens', () => {
   it('are bounded while the view opens', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
-    await until(() => c.host['viewsOpening'].has('view'));
+    await c.until(() => c.host['viewsOpening'].has('view'));
     for (let i = 0; i < 600; i++) c.host.input({ type: 'term.input', termId: 'view', data: 'k' });
     opened();
-    await open;
-    await until(() => stdin.length === 256);
+    await c.on(open);
+    await c.until(() => stdin.length === 256);
     expect(stdin).toHaveLength(256);
   });
 });

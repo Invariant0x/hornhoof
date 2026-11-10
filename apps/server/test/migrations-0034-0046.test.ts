@@ -229,10 +229,8 @@ describe('migration 0045', () => {
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
-    const started = performance.now();
     const target = await migrationsThrough('task_lookup_indexes');
     await migrate(db, { migrationsFolder: target });
-    console.info(`Migration 0045 on 20001 tasks: ${(performance.now() - started).toFixed(1)} ms`);
     await migrate(db, { migrationsFolder: target });
     expect((await db.execute(fingerprint)).rows).toEqual(before.rows);
     await db.execute(sql`analyze tasks`);

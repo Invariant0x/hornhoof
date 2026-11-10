@@ -2,7 +2,7 @@ import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, statSync, s
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { applyCredential, credentialSecrets, dropCredential, heldCredential } from '../src/credentials.js';
 import { nodeIdentity, seal, unseal } from '../src/keys.js';
@@ -38,8 +38,21 @@ async function fakeServer() {
     s.on('message', data => received.push(JSON.parse(String(data))));
   });
   const wait = (check: () => boolean) => eventually(check);
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
+  const send = (m: object) => socket!.send(JSON.stringify(m));
+  /* A node with no sign-in to start answers at once, after everything it sent before. */
+  const marked = async () => {
+    const answers = received.filter(m => m.type === 'login.done').length;
+    send({ type: 'login.start', fresh: false });
+    await wait(() => received.filter(m => m.type === 'login.done').length > answers);
+  };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send, wait, marked };
 }
+
+/* The node's own timers that look again, on a clock the test moves. */
+const fakeLooks = () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+};
 
 async function node(more: Partial<Parameters<typeof runNode>[0]> = {}, dir = mkdtempSync(join(tmpdir(), 'hh-cred-'))) {
   const server = await fakeServer();
@@ -174,12 +187,15 @@ describe('a sign-in its program refused', () => {
   it('keeps the node signed out until the sign-in changes, so turns do not go round on it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
     const refusing: ProviderAdapter = { ...adapter, run: async () => ({ ok: false, sessionId: null, result: '', output: 'Not logged in', error: 'not_logged_in', limits: null }) };
+    fakeLooks();
     const { server, me } = await node({ adapter: refusing, loginCheckMs: 30 }, dir);
     server.send({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: await seal(bytes(TOKEN), [me.recipient]) });
     await server.wait(() => existsSync(join(dir, 'home', 'claude-oauth-token')));
-    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 10000, prompt: 'hi', instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 2_147_483_647 - 30_000, prompt: 'hi', instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === false);
-    await new Promise(r => setTimeout(r, 300));
+    /* Three looks again find the same sign-in, and what they would say comes before the mark. */
+    await vi.advanceTimersByTimeAsync(90);
+    await server.marked();
     expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: false });
     /* A new sign-in from Hornhoof is tried again. */
     server.send({ type: 'cred.put', kind: 'claude_token', version: 2, sealed: await seal(bytes(TOKEN.replace('a', 'b')), [me.recipient]) });
@@ -223,7 +239,7 @@ describe("a Codex plan's lease on a node", () => {
     writeFileSync(join(dir, 'home', 'auth.json'), auth(1));
     writeFileSync(join(dir, 'codex-lease'), '');
   };
-  const JOB = { type: 'job.run', provider: 'codex', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 10000, prompt: 'hi', instructions: null, toolToken: null };
+  const JOB = { type: 'job.run', provider: 'codex', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 2_147_483_647 - 30_000, prompt: 'hi', instructions: null, toolToken: null };
   const sealedCount = (received: { type: string }[]) => received.filter(m => m.type === 'cred.sealed').length;
 
   it('seals a sign-in Codex renewed in a turn once for the plan, and nothing when it stayed the same', async () => {
@@ -250,8 +266,13 @@ describe("a Codex plan's lease on a node", () => {
     next = null;
     server.send({ ...JOB, jobId: 'j2' });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
-    await new Promise(r => setTimeout(r, 200));
-    expect(sealedCount(server.received)).toBe(2);
+    /* Each sealing takes the next number at once, so the next renewal shows whether the turn that changed nothing sealed. */
+    next = auth(3);
+    server.send({ ...JOB, jobId: 'j3' });
+    await server.wait(() => sealedCount(server.received) === 3);
+    const third = server.received.filter((m): m is { type: string; version: number; envelopes: { nodeId: string; sealed: string }[] } => m.type === 'cred.sealed')[2]!;
+    expect(third.version).toBe(6);
+    expect(new TextDecoder().decode(await unseal(third.envelopes.find(e => e.nodeId === 'n-peer')!.sealed, peer.identity))).toBe(auth(3));
   });
 
   it('seals a renewed sign-in for a node that joined under the same number too, and takes no list under an older one', async () => {
@@ -284,7 +305,8 @@ describe("a Codex plan's lease on a node", () => {
     const me = await nodeIdentity(dir);
     server.send({ type: 'cred.lease', hold: true });
     server.send({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: await seal(bytes(auth(1)), [me.recipient]) });
-    await new Promise(r => setTimeout(r, 200));
+    /* Both went in turn before the mark, and the built-in node turns each down at once. */
+    await server.marked();
     expect(existsSync(join(dir, 'codex-lease'))).toBe(false);
     expect(existsSync(join(dir, 'home', 'auth.json'))).toBe(false);
   });
@@ -292,13 +314,22 @@ describe("a Codex plan's lease on a node", () => {
   it('seals a sign-in Codex renewed between turns when it looks again', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
     holder(dir);
+    fakeLooks();
     const { server, me } = await node({ leaseCheckMs: 50 }, dir);
     server.send({ type: 'cred.seal', kind: 'codex_auth', version: 1, recipients: [{ nodeId: 'n-self', publicKey: me.recipient }] });
     await server.wait(() => sealedCount(server.received) === 1);
     writeFileSync(join(dir, 'home', 'auth.json'), auth(3));
+    await vi.advanceTimersByTimeAsync(50);
     await server.wait(() => sealedCount(server.received) === 2);
-    await new Promise(r => setTimeout(r, 300));
-    expect(sealedCount(server.received)).toBe(2);
+    /* Three more looks find it the same. Each sealing takes the next number at once, so the next renewal shows whether
+       they sealed. */
+    await vi.advanceTimersByTimeAsync(150);
+    writeFileSync(join(dir, 'home', 'auth.json'), auth(4));
+    await vi.advanceTimersByTimeAsync(50);
+    await server.wait(() => sealedCount(server.received) === 3);
+    const sealed = server.received.filter((m): m is { type: string; version: number; envelopes: { nodeId: string; sealed: string }[] } => m.type === 'cred.sealed');
+    expect(sealed.map(m => m.version)).toEqual([1, 2, 3]);
+    expect(new TextDecoder().decode(await unseal(sealed[2]!.envelopes[0]!.sealed, me.identity))).toBe(auth(4));
   });
 
   it('takes the plan over from the messages of a move sent all at once, and seals what it got and what Codex renews', async () => {
@@ -321,12 +352,15 @@ describe("a Codex plan's lease on a node", () => {
   it('as a spare machine stays signed out though a Codex still running there writes its file back', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
     holder(dir);
+    fakeLooks();
     const { server, me } = await node({ adapter: { ...adapter, loggedIn: async () => existsSync(join(dir, 'home', 'auth.json')) }, loginCheckMs: 30 }, dir);
     server.send({ type: 'cred.lease', hold: false });
     await server.wait(() => server.received.some(m => m.type === 'status' && m.loggedIn === false));
     expect(existsSync(join(dir, 'codex-spare'))).toBe(true);
     writeFileSync(join(dir, 'home', 'auth.json'), auth(9));
-    await new Promise(r => setTimeout(r, 300));
+    /* Three looks again find it spare, and what they would say comes before the mark. */
+    await vi.advanceTimersByTimeAsync(90);
+    await server.marked();
     expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: false });
     /* Given the plan, it works again. */
     server.send({ type: 'cred.lease', hold: true });

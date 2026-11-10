@@ -6,7 +6,6 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_ALIASES, MAX_INSTRUCTIONS, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -18,6 +17,7 @@ import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from 
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { CODEX_HEAD } from '../src/program-folder.js';
 import { runJob, type RunInput } from '../src/runner.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
@@ -64,7 +64,9 @@ afterEach(() => {
 });
 
 const adapter = (provider: ProviderId, secret: string | null = null) => adapterFor(provider, { home, tools, bin: join(FAKES, FAKE_BIN[provider]), secret });
-const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: 15000, instructions: null, tools: null, ...over });
+/* Limits no run reaches: the longest a timer waits, and a job's, which the runner gives up to 30 s more. */
+const NEVER_MS = 2_147_483_647, NEVER_JOB_MS = NEVER_MS - 30_000;
+const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: NEVER_MS, instructions: null, tools: null, ...over });
 const logged = (): Logged[] => readFileSync(logFile, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 const lastRun = () => logged().filter(l => l.argv)[logged().filter(l => l.argv).length - 1]!;
 
@@ -103,27 +105,27 @@ const alive = (pid: number) => {
 /* The child a hanging program started, once its whole line is in the log. A busy machine takes longer to start the
    program than any short wait, so a test stops it only after this. */
 const hangingChild = async (): Promise<number> => {
-  for (;; await sleep(20)) {
-    const pid = existsSync(logFile) && /"grandchild":(\d+)\}\n/.exec(readFileSync(logFile, 'utf8'))?.[1];
-    if (pid) return Number(pid);
-  }
+  let pid = 0;
+  await eventually(() => (pid = Number(existsSync(logFile) && /"grandchild":(\d+)\}\n/.exec(readFileSync(logFile, 'utf8'))?.[1]) || 0) > 0);
+  return pid;
 };
 /* Runs a hanging program into its timeout, on a clock that moves only once the program is up. The timeout ends the
    program's child, and the program, which takes no notice of it, goes after the grace. In between the program collects
    its ended child, as it would in the grace a real clock gives it; killed first, it would leave it to the system. */
-const timedOut = async (provider: ProviderId) => {
+const ranOut = async <T>(start: () => Promise<T>): Promise<T> => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
-    const run = adapter(provider).run(input({ timeoutMs: 200 }));
+    const run = start();
     const child = await hangingChild();
     await vi.advanceTimersByTimeAsync(200);
-    for (const end = Date.now() + 5000; alive(child) && Date.now() < end; ) await sleep(20);
+    await eventually(() => !alive(child));
     await vi.runAllTimersAsync();
     return await run;
   } finally {
     vi.useRealTimers();
   }
 };
+const timedOut = (provider: ProviderId) => ranOut(() => adapter(provider).run(input({ timeoutMs: 200 })));
 
 describe('output a program should not print', () => {
   it.each(['claude', 'codex', 'kimi'] as const)('%s goes on past lines that are JSON but no object', async provider => {
@@ -163,7 +165,7 @@ describe('failed program diagnostics', () => {
     process.env.FAKE_ERROR_SECRET = secret;
     const msg: Extract<ServerMessage, { type: 'job.run' }> = {
       type: 'job.run', jobId: 'diagnostics', subscriptionId: 'test', provider, prompt: 'fail',
-      sessionId: null, model: null, timeoutMs: 5000, secret, instructions: null, toolToken: null,
+      sessionId: null, model: null, timeoutMs: NEVER_JOB_MS, secret, instructions: null, toolToken: null,
     };
     const done = await runJob(adapter(provider), msg, dir);
     expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
@@ -287,7 +289,7 @@ describe('Claude Code', () => {
     writeFileSync(join(home, 'claude-oauth-token'), token + '\n', { mode: 0o600 });
     process.env.FAKE_MODE = 'say_token';
     const events: AgentEvent[] = [];
-    const msg = { type: 'job.run' as const, jobId: 'j1', subscriptionId: 's1', provider: 'claude' as const, prompt: 'hi', sessionId: null, model: null, timeoutMs: 15000, secret: null, instructions: null, toolToken: null };
+    const msg = { type: 'job.run' as const, jobId: 'j1', subscriptionId: 's1', provider: 'claude' as const, prompt: 'hi', sessionId: null, model: null, timeoutMs: NEVER_JOB_MS, secret: null, instructions: null, toolToken: null };
     const done = await runJob(adapter('claude'), msg, work, { onEvent: e => void events.push(e) });
     expect(lastRun().env.CLAUDE_CODE_OAUTH_TOKEN).toBe(token);
     expect(events).toContainEqual({ kind: 'text', text: 'my token is [hidden]' });
@@ -687,7 +689,7 @@ describe('Kimi Code', () => {
 
   it('stops at the timeout', async () => {
     process.env.FAKE_MODE = 'hang';
-    expect(await adapter('kimi').run(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: 'timeout' });
+    expect(await timedOut('kimi')).toMatchObject({ ok: false, error: 'timeout' });
   });
 
   it('signs in through login and saves the link it prints', async () => {
@@ -844,7 +846,7 @@ describe('Antigravity CLI', () => {
       expect(await a.limits!()).toBeNull();
     }
     process.env.FAKE_MODE = 'hang';
-    expect(await agyPlanLimits({ bin: join(FAKES, 'agy'), home, tools, timeoutMs: 200 })).toBeNull();
+    expect(await ranOut(() => agyPlanLimits({ bin: join(FAKES, 'agy'), home, tools, timeoutMs: 200 }))).toBeNull();
     delete process.env.FAKE_MODE;
 
     /* A symlink where the limits folder goes never makes the node crash or invent a reached limit. */
@@ -858,7 +860,7 @@ describe('Antigravity CLI', () => {
 
   it('stops at the timeout', async () => {
     process.env.FAKE_MODE = 'hang';
-    expect(await adapter('antigravity').run(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: 'timeout' });
+    expect(await timedOut('antigravity')).toMatchObject({ ok: false, error: 'timeout' });
   });
 
   it("installs agy the way Google's install script does: the release its manifest names, checked by SHA-512", async () => {
@@ -895,13 +897,23 @@ describe('calling a job off', () => {
   it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('stops the whole process group of %s', async provider => {
     process.env.FAKE_MODE = 'hang';
     const stop = new AbortController();
-    const run = adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
-    const child = await hangingChild();
-    const started = Date.now();
-    stop.abort();
-    await run;
-    expect(Date.now() - started).toBeLessThan(12_000);
-    expect(alive(child)).toBe(false);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const run = adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
+      const child = await hangingChild(), entries = logged(), program = entries[entries.findIndex(l => l.grandchild === child) - 1]!.pid;
+      /* The stop ends the program's child, which the program collects; the program takes no notice of it, and the kill at
+         the end of its grace of 2 s ends it, long before its timeout. */
+      stop.abort();
+      await eventually(() => !alive(child));
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(alive(program)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      await run;
+      expect(alive(program)).toBe(false);
+      expect(alive(child)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

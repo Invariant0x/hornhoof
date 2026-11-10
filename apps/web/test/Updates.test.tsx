@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import { Versions } from '../src/screens/Versions';
@@ -30,6 +30,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/* One turn of the event loop: an answer of the mock api comes in a chain of promises with no timer, so it has been taken in. */
+const answersTakenIn = () => new Promise(resolve => setImmediate(resolve));
+
+/* The screen asks the server again on its interval only as the test moves the clock; findBy* and userEvent keep real timeouts. */
+function heldPolls() {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
 async function openVersions(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Account' }));
   await user.click(screen.getByRole('button', { name: 'Versions' }));
@@ -48,14 +59,14 @@ describe('updates', () => {
   it('hides the banner for people who do not see the whole company', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
+    /* The screen would ask for updates as it mounts, before the map shows. */
     await screen.findByRole('button', { name: 'Map' });
-    await new Promise(r => setTimeout(r, 50));
     expect(calls.map(c => c.path)).not.toContain('/api/updates');
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
   });
 
   it('keeps a build hidden after Later', async () => {
-    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
+    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     const user = userEvent.setup();
     const { unmount } = render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Later' }));
@@ -63,7 +74,8 @@ describe('updates', () => {
     unmount();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await screen.findByRole('button', { name: 'Map' });
-    await new Promise(r => setTimeout(r, 50));
+    expect(calls.filter(c => c.path === '/api/updates')).toHaveLength(2);
+    await act(answersTakenIn);
     expect(screen.queryByRole('status', { name: 'Hornhoof update' })).not.toBeInTheDocument();
   });
 
@@ -109,12 +121,13 @@ describe('updates', () => {
     expect(screen.getByRole('button', { name: 'Update when agents finish' })).toBeDisabled();
     await act(async () => {
       answer();
-      await new Promise(r => setTimeout(r, 50));
+      await answersTakenIn();
     });
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
   });
 
   it('shows the update starting at once, then the server restarting', async () => {
+    heldPolls();
     let view = updates();
     let down = false;
     mockApi({
@@ -129,10 +142,13 @@ describe('updates', () => {
     expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Getting the update ready');
     view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
-    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
+    /* While it updates, the screen asks every two seconds. */
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing');
     expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuenow', '2');
     down = true;
-    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.'), { timeout: 4000 });
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.');
   });
 
   it('lists versions and marks the running one', async () => {
@@ -201,6 +217,7 @@ describe('updates', () => {
   });
 
   it('shows the step and the output while updating, and reloads on the new build', async () => {
+    heldPolls();
     let view = updates({}, { status: status('running', 'backup', 'Downloading 0.4.1.\nSaving the database.\n') });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
     const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
@@ -211,7 +228,8 @@ describe('updates', () => {
     expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: saving the database');
     expect(within(dialog).getByText(/Saving the database\./)).toBeInTheDocument();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
-    await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4000 });
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(reload).toHaveBeenCalled();
   });
 
   it('says how the last update ended', async () => {

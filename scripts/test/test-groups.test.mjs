@@ -9,7 +9,7 @@ import { realPorts } from '../author-check/main.mjs';
 import { fastSuites, selectTests } from '../author-check/select.mjs';
 import { runStages } from '../author-check/stages.mjs';
 import { selectionPorts } from '../author-check/wired.mjs';
-import { chooseTests } from '../github-tests/choose.mjs';
+import { chooseTests, takesWhole } from '../github-tests/choose.mjs';
 import { trackedIn } from './tracked-files.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
@@ -49,7 +49,6 @@ for (const [group, path, expected] of [
   ['the image of the app', 'Dockerfile', ['release-scripts', 'server']],
   ['the compose file', 'compose.yaml', ['release-scripts', 'server']],
   ['a browser scenario', 'apps/web/e2e/about.spec.ts', []],
-  ['a document', 'README.md', []],
 ]) {
   test(`a change of ${group} runs ${expected.join(', ') || 'no suite'}`, { timeout: 60_000 }, async () => {
     const selection = await runs(path);
@@ -76,6 +75,21 @@ test('a change of the templates or the skills runs every test that reads them an
     assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']], path);
     assert.deepEqual(filesOf(selection), readers, path);
   }
+});
+
+/* Built here, so that this test does not name it and read it itself. */
+const UNREAD = ['docs', 'nobody-reads.md'].join('/');
+
+test('a document runs the tests that read it by its path, and one no test names runs none', { timeout: 60_000 }, async () => {
+  for (const [path, reader] of [['docs/style-book.md', 'apps/server/test/templates.test.ts'], ['README.md', 'apps/server/test/test-environment-templates.test.ts']]) {
+    const selection = await runs(path);
+    assert.equal(selection.unavailable, undefined, path);
+    assert.ok(filesOf(selection).includes(reader), `${path}: ${filesOf(selection).join(', ')}`);
+    assert.ok(!selection.notes.includes(`document without tests: ${path}`), selection.notes.join('\n'));
+  }
+  const unread = await select([{ path: UNREAD, kind: 'added' }], [{ path: UNREAD, mode: '100644', oid: 'a'.repeat(40) }]);
+  assert.deepEqual(suites(unread), []);
+  assert.deepEqual(unread.notes, [`document without tests: ${UNREAD}`]);
 });
 
 test('a change of the templates beside a test runs that test and the readers of the templates, not the whole suite', { timeout: 60_000 }, async () => {
@@ -178,6 +192,14 @@ test('on GitHub, a change of one file of the server runs the server tests the se
   /* A release where only our own versions moved leaves no change: the checks run, and no test. */
   const none = await chooseTests(base, [], root);
   assert.deepEqual(none.plan?.parts, [{}], none.why);
+});
+
+/* No full run follows GitHub's tests, so a test the selection would leave to one runs there, or the whole suite does. */
+test('on GitHub, a document some test reaches only through code takes the whole suite, and a plain selection does not', () => {
+  const suites = [{ id: 'server' }, { id: 'node' }];
+  assert.match(takesWhole({ packages: [], notes: [], leftToFullRun: ['apps/server/test/far.test.ts'] }, suites), /1 test file .*through/);
+  assert.equal(takesWhole({ packages: [{ packageId: 'server', mode: 'related', units: [{ file: 'apps/server/test/a.test.ts' }] }], notes: [], leftToFullRun: [] }, suites), null);
+  assert.match(takesWhole({ unavailable: 'selection_is_whole_suite', notes: [] }, suites), /selection_is_whole_suite/);
 });
 
 /* The script as a step of the workflow runs it, in this checkout, outside this test runner: a node --test it starts reports as its own. */

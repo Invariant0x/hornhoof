@@ -10,6 +10,7 @@ import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
 import { failureCompany } from './failure-company.js';
+import { until } from './helpers.js';
 
 async function queuedWords(asOrchestrator = false) {
   let c = await failureCompany();
@@ -20,6 +21,8 @@ async function queuedWords(asOrchestrator = false) {
   const [before] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'work', status: 'done', timeoutMs: 1000, finishedAt: new Date() }).returning();
   const event = await appendEvent(c.ctx, { companyId: c.companyId, agentId: c.agent.id, jobId: before!.id, kind: 'message', data: { text: 'Keep these words.' } });
   const open = (text = addressed('Keep these words.', event.message!), node = BUILTIN) => handleNodeMessage(c.ctx, node, { type: 'turn.open', agentKey: c.agent.id, text, queuedFrom: before!.id, ref: 'queued' });
+  /* The wait for a program's queued words runs out only when a test moves this clock. */
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   return { ...c, before: before!, open };
 }
 
@@ -130,7 +133,7 @@ describe('a program starts a turn with its queued live words', () => {
     await vi.advanceTimersByTimeAsync(UNHEARD_MS - 1);
     expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
     await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(async () => expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' }));
+    await until(async () => (await c.jobOf(c.next)).status === 'running');
     await vi.advanceTimersByTimeAsync(UNHEARD_MS);
     expect(c.sent.mock.calls.filter(([, m]) => m.type === 'job.run' && m.jobId === c.next)).toHaveLength(1);
   });
@@ -214,7 +217,7 @@ describe('a program starts a turn with its queued live words', () => {
     await vi.advanceTimersByTimeAsync(UNHEARD_MS - 1);
     await c.done();
     await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(async () => expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' }));
+    await until(async () => (await c.jobOf(c.next)).status === 'running');
   });
 
   it('opens a human turn during the wait and keeps its author and answer', async () => {

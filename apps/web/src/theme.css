@@ -1243,7 +1243,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .trow-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--muted); }
 .trow-gate { color: var(--cyan-ink); font-weight: 600; }
 .trow-back { color: var(--amber-ink); }
-.tstate { justify-self: start; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); color: var(--muted); }
+.tstate { justify-self: start; white-space: nowrap; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); color: var(--muted); }
 .tstate.working, .tstate.review { color: var(--cyan-ink); border-color: currentColor; }
 .tstate.waiting, .tstate.blocked { color: var(--amber-ink); border-color: currentColor; }
 .tstate.done { color: var(--ok); border-color: currentColor; }
@@ -1621,6 +1621,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .task-sum p { margin: 0; overflow-wrap: anywhere; }
 .task-sum h3 { margin: 0; font-size: 13px; }
 .task-sum .entry-actions, .backlog > .entry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* An agent window lies over the end of the page, so while one is open the way into a task moves to the start of its row. */
+@media (min-width: 761px) { .body.with-window .task-sum .entry-actions { justify-content: flex-start; } }
 .bl-text { white-space: pre-wrap; }
 .backlog { display: grid; gap: 12px; }
 .backlog-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px; }

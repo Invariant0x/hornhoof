@@ -1,29 +1,52 @@
-import { and, desc, eq, isNotNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { tasks, TEST_RUN_STATUSES, testRuns } from '../../db/schema.js';
+import { tasks, testRuns } from '../../db/schema.js';
+import { ranEverything, runScope, scopeWords, type RunScope, type ScopeSource } from './purpose.js';
 
 type TaskPlace = Pick<typeof tasks.$inferSelect, 'id' | 'companyId' | 'turnId' | 'departmentId'>;
 
-/* What test runs say of one exact commit. run: the newest that passed on it, on any task of the company, as the final
-   check of a turn is rarely the task that asks; failedRun: the newest that failed on it, which whoever decides hears of all
+/* What test runs say of one exact commit. run: the passed run on it that ran every suite and every test file anew, else the newest
+   that passed on it, on any task of the company, as the final check of a turn is rarely the task that asks; scope: what that run
+   left out, for a run of the product's environment; failedRun: the newest that failed on it, which whoever decides hears of all
    the same; other: when none passed on it, the newest that passed on another commit of this work, and proves nothing here. */
-export type CommitProof = { commit: string; run: number | null; command: string | null; failedRun: number | null; other: { run: number; commitSha: string } | null };
+export type CommitProof = { commit: string; run: number | null; command: string | null; scope: RunScope | null; failedRun: number | null; other: { run: number; commitSha: string } | null };
 
 const COMMAND_SHOWN = 300;
+/* The passed runs of one commit a proof looks through for one that ran everything. */
+const PASSED_READ = 50;
 
 /* A command as a task shows it, however long it ran with: test_run shows it whole. */
 export const commandShown = (command: string) => (command.length > COMMAND_SHOWN ? `${command.slice(0, COMMAND_SHOWN - 3)}...` : command);
 
 const testsOf = (companyId: string) => and(eq(testRuns.companyId, companyId), eq(testRuns.kind, 'tests'));
 
-async function newestOn(db: Db, companyId: string, commit: string, status: (typeof TEST_RUN_STATUSES)[number]) {
-  const [run] = await db
-    .select({ number: testRuns.number, command: testRuns.command })
-    .from(testRuns)
-    .where(and(testsOf(companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, status)))
-    .orderBy(desc(testRuns.number))
-    .limit(1);
+/* What a proof reads of a run: of its snapshot only what says what it left out, as the inventory of a product is long. */
+const snapshot = testRuns.environmentSnapshot;
+const PASSED = {
+  number: testRuns.number, command: testRuns.command,
+  source: sql<ScopeSource | null>`case when ${snapshot} is null then null else jsonb_build_object('profile', ${snapshot}->'profile', 'manifest', ${snapshot}->'description'->'manifest', 'baseCommit', ${snapshot}->'candidate'->'baseCommit') end`,
+  suite: sql<string | null>`${testRuns.environmentRequest}->>'suite'`,
+  kept: sql<number | null>`(${testRuns.fileCache}->>'reused')::int`,
+};
+type Passed = { number: number; command: string; source: ScopeSource | null; suite: string | null; kept: number | null };
+/* What a run of the product's environment left out; none for a command. */
+const scopeOf = (run: Passed): RunScope | null => (run.command === '' && run.source ? runScope(run.source, run.suite, run.kept ?? 0) : null);
+
+async function newestFailed(db: Db, companyId: string, commit: string) {
+  const [run] = await db.select({ number: testRuns.number }).from(testRuns).where(and(testsOf(companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'))).orderBy(desc(testRuns.number)).limit(1);
   return run ?? null;
+}
+
+/* A run that ran everything proves the commit for a release, whatever narrower run passed after it. */
+async function bestPassed(db: Db, companyId: string, commit: string): Promise<(Passed & { scope: RunScope | null }) | null> {
+  const runs = await db
+    .select(PASSED)
+    .from(testRuns)
+    .where(and(testsOf(companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'passed')))
+    .orderBy(desc(testRuns.number))
+    .limit(PASSED_READ);
+  const scoped = runs.map(run => ({ ...run, scope: scopeOf(run) }));
+  return scoped.find(run => run.scope && ranEverything(run.scope)) ?? scoped[0] ?? null;
 }
 
 /* The newest run that pinned a commit and passed, on the task or on its department's work in this turn. As none passed on
@@ -41,14 +64,15 @@ async function passedElsewhere(db: Db, task: TaskPlace): Promise<CommitProof['ot
 }
 
 export async function commitProof(db: Db, task: TaskPlace, commit: string): Promise<CommitProof> {
-  const passed = await newestOn(db, task.companyId, commit, 'passed');
-  const failed = await newestOn(db, task.companyId, commit, 'failed');
-  return { commit, run: passed?.number ?? null, command: passed ? commandShown(passed.command) : null, failedRun: failed?.number ?? null, other: passed ? null : await passedElsewhere(db, task) };
+  const passed = await bestPassed(db, task.companyId, commit);
+  const failed = await newestFailed(db, task.companyId, commit);
+  return { commit, run: passed?.number ?? null, command: passed ? commandShown(passed.command) : null, scope: passed?.scope ?? null, failedRun: failed?.number ?? null, other: passed ? null : await passedElsewhere(db, task) };
 }
 
 /* The same in a sentence, for whoever asks for an approval, gives it, or releases on it. */
 export function proofLine(p: CommitProof): string {
-  const said = p.run !== null ? `Test run ${p.run} (${p.command}) passed on this commit.` : 'No passed test run checked this commit.';
+  const ran = p.scope ? `Test run ${p.run} passed on this commit with profile ${p.scope.profile}${scopeWords(p.scope)}` : `Test run ${p.run} (${p.command}) passed on this commit.`;
+  const said = p.run !== null ? ran : 'No passed test run checked this commit.';
   const failed = p.failedRun !== null ? ` Test run ${p.failedRun} failed on it.` : '';
   const other = p.other ? ` Test run ${p.other.run} passed on ${p.other.commitSha}, which proves nothing about this one.` : '';
   return `${said}${failed}${other}`;

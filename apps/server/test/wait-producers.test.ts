@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { answer, ask, cancel, createTask, leaveWork, report, submit, updateTask, verdict, type Task } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -71,12 +71,14 @@ describe('a task that comes after others', () => {
     const c = await company();
     await c.policy();
     const first = await c.task('First', { assigneeAgentId: c.rita.id });
-    const before = Date.now();
+    /* The moment it was given, on a clock that stands still. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const given = new Date();
     const follow = await c.task('Follow', { after: [first.id], independentNone: 'One piece.' });
     const [wait] = await c.waitsOf(follow);
     expect(wait).toMatchObject({ state: 'active', ownerAgentId: c.rita.id, plan: { provenance: { kind: 'department_policy', revision: 1 } }, level: 0 });
-    expect(wait!.ownerDueAt!.getTime()).toBeGreaterThanOrEqual(before + HOUR);
-    expect(wait!.ownerDueAt!.getTime()).toBeLessThan(Date.now() + HOUR + 1);
+    expect(wait!.ownerDueAt).toEqual(new Date(given.getTime() + HOUR));
   });
 
   it('is refused whole where the department set a policy, but none for this and no promise is given', async () => {

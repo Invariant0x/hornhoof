@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -122,7 +123,7 @@ describe('words for an agent at work', () => {
     vi.spyOn(c.ctx.hub, 'send').mockImplementation((node, m) => {
       if (m.type !== 'agent.say') return true;
       says.push({ agentKey: m.agentKey, text: m.text });
-      setTimeout(() => said(c.ctx, node, m.ref, ok), 10);
+      queueMicrotask(() => said(c.ctx, node, m.ref, ok));
       return true;
     });
     return { ...c, run: run!, says, task };
@@ -567,6 +568,20 @@ describe('waking agents for their tasks', () => {
     expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
   });
 
+  /* A node ends the turn of a program that has no Hornhoof tools in its session this way, and starts the program anew. */
+  it('does not remind an agent whose turn ended without its tools: the turn goes again later', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const noTools = () => db.update(jobs).set({ error: 'agent_failed', failure: { kind: 'tools', text: 'The program has no Hornhoof tools in this session.', retryable: true } }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    await finish(bruno.id, noTools, 'failed');
+    expect(await db.select({ kind: taskEvents.kind }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
+    const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.notBefore).not.toBeNull();
+  });
+
   it.each([
     ['instructions_too_long', "Bruno's instructions are 200857 characters, more than the 200000 a turn carries, so this turn did not go out."],
     ['node_too_old', "This machine's node is too old for these instructions; update it."],
@@ -712,6 +727,13 @@ describe('waking agents for their tasks', () => {
 const NODE_KEY = 'k'.repeat(40);
 type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null; repositoryScope?: { companyId: string; repositoryOwnerId: string; repoUrlHash: string } } | null };
 
+/* The node's mark comes back after everything the server sent it before, as one socket keeps their order. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
+
 async function nextRun(node: FakeNode): Promise<Run> {
   const m = await node.next();
   if (m.type !== 'job.run') throw new Error(`Expected job.run, got ${m.type}`);
@@ -752,7 +774,7 @@ describe("a plan's share for tasks", () => {
   it('holds task turns once a window of the plan used the share set for tasks, and says until when', async () => {
     const { ctx, db, builtin, bruno, task, resetsAt } = await plan(0.85);
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
-    await new Promise(r => setTimeout(r, 300));
+    await marked(builtin);
     expect(builtin.queued()).toBe(0);
     expect((await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, bruno.id)))).toEqual([{ status: 'queued' }]);
     expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: resetsAt, limitUntil: null });
@@ -949,7 +971,7 @@ describe("working in the product's repository", () => {
     await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, olga.id));
     await wakeAll(ctx, [{ agentId: olga.id, taskId: (await task(olga.id)).id, why: 'assigned' }]);
-    await new Promise(r => setTimeout(r, 150));
+    await marked(mac);
     expect(mac.queued()).toBe(0);
     expect((await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason).toBe('node_outdated');
   });
@@ -989,6 +1011,7 @@ describe('obsolete task turns', () => {
     await c.release();
 
     expect((await nextRun(c.builtin)).jobId).toBe(next);
+    await marked(c.builtin);
     expect(c.builtin.queued()).toBe(0);
     for (const [i, task] of [first!, second!, last!].entries()) {
       const [stale] = await c.db.select().from(jobs).where(eq(jobs.id, queued[i]!.id));
@@ -1056,6 +1079,7 @@ describe('obsolete task turns', () => {
     const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
     await c.db.update(tasks).set(set).where(eq(tasks.id, task.id));
     await c.release();
+    await marked(c.builtin);
     expect(c.builtin.queued()).toBe(0);
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'obsolete', error: 'stale', startedAt: null });
   });
@@ -1071,6 +1095,7 @@ describe('obsolete task turns', () => {
     await verdict(c.ctx, c.rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the current candidate.' });
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1000) }).where(eq(jobs.id, queued!.id));
     await c.release(held.id);
+    await marked(c.builtin);
     expect(c.builtin.queued()).toBe(0);
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
   });
@@ -1223,6 +1248,7 @@ describe('obsolete task turns', () => {
     await c.close([task.id]);
     vi.spyOn(instructionBuilder, 'instructionsOf').mockRejectedValue(new Error('These obsolete instructions are unavailable.'));
     await c.release();
+    await marked(c.builtin);
     expect(c.builtin.queued()).toBe(0);
     expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
   });

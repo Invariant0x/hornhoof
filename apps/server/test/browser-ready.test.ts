@@ -11,6 +11,8 @@ import { pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'builtin-node-key-0123456789abcdef';
+/* No ping comes in a test, so no stand-in node is dropped for a pong that came late on a busy machine. */
+const NODE_PING_MS = '2147483647';
 const GIB = 1024 ** 3;
 const load = (over: object = {}) => ({ cpus: 8, load: 1, memFree: 8 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 0, ...over });
 const machinesOf = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json();
@@ -18,7 +20,7 @@ const poolOf = async (app: FastifyInstance, token: string) => (await app.inject(
 
 describe('browser launch readiness before handing out work', () => {
   it('runs agent turns on a personal node whose browser failed, refuses new runs with the named cause while holding queued parts, and dispatches runs once recovered', async () => {
-    const { app, db } = await testApp({ NODE_PING_MS: '50', NODE_KEY });
+    const { app, db } = await testApp({ NODE_PING_MS, NODE_KEY });
     const url = await listen(app);
     onTestFinished(() => app.close());
     const ceo = await setUpCompany(app);
@@ -113,7 +115,7 @@ describe('browser launch readiness before handing out work', () => {
   });
 
   it('keeps agent turns running on a broken-browser personal node and on the built-in node while routing runs to a healthy peer machine', async () => {
-    const { app, db } = await testApp({ NODE_PING_MS: '50', NODE_KEY });
+    const { app, db } = await testApp({ NODE_PING_MS, NODE_KEY });
     const url = await listen(app);
     onTestFinished(() => app.close());
     const ceo = await setUpCompany(app);

@@ -1,223 +1,346 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
-import { Tmux } from '../../node/src/terminal/tmux';
-import { parentOf } from '../../node/src/terminal/host';
-import { sendTerminalOutput, ViewHistory } from '../../node/src/terminal/view-stream';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { runInThisContext } from 'node:vm';
+import { TERM_CHUNK } from '@hornhoof/protocol';
+import { expect as baseExpect, test, type Locator, type Page, type WebSocketRoute } from '@playwright/test';
+import ts from 'typescript';
+import type * as ViewStream from '../../node/src/terminal/view-stream';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
-async function clientTty(tmux: Tmux, child: ReturnType<Tmux['attach']>) {
-  for (const end = Date.now() + 5000; Date.now() < end;) {
-    for (const client of await tmux.clients()) if ((await parentOf(client.pid)) === child.pid) return client.tty;
-    await new Promise(resolve => setTimeout(resolve, 50));
+/* The node's view history and the agent window over what a real tmux said, recorded once in fixtures. Time is the test's
+   own on both sides: the node's clock moves only when the test lets it, and so does the page's. */
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const VIEW_STREAM = join(HERE, '../../node/src/terminal/view-stream.ts');
+/* A state is waited for as long as the test may run, never against a clock of its own. */
+const expect = baseExpect.configure({ timeout: 0 });
+const START = Date.parse('2026-11-09T12:00:00Z');
+/* Enough of the page's time for it to take in what came and draw a few frames. */
+const FRAMES_MS = 100;
+/* How long the window waits before it opens a view again, the first time (RETRY_MS in AgentTerminal.tsx). */
+const RETRY_MS = 500;
+
+type Pane = { history: string; saved: string; top: string; status: string };
+type Moment = { input: string | null; stream: string[]; pane: Pane; repaint: string[]; attach: string[] };
+type Recording = { program: string; moments: Moment[] };
+const RECORDED = JSON.parse(readFileSync(join(HERE, 'fixtures/terminal-live-scroll.json'), 'utf8')) as Record<'alternate' | 'early' | 'clear', Recording>;
+
+type Timer = { at: number; run: () => void };
+
+/* The node's clock in this test. A timer runs only when the test lets time go on, and then each read it starts runs to its
+   end before the next timer. */
+class NodeClock {
+  private readonly timers = new Map<number, Timer>();
+  private now = 0;
+  private last = 0;
+
+  readonly setTimeout = (run: () => void, ms = 0): number => {
+    this.timers.set(++this.last, { at: this.now + ms, run });
+    return this.last;
+  };
+
+  readonly clearTimeout = (id: number): void => {
+    this.timers.delete(id);
+  };
+
+  /* Time goes on until no timer is left. */
+  async settle(): Promise<void> {
+    for (let next = this.first(); next; next = this.first()) {
+      this.timers.delete(next[0]);
+      this.now = next[1].at;
+      next[1].run();
+      await new Promise(resolve => setImmediate(resolve));
+    }
   }
-  return null;
+
+  private first(): [number, Timer] | undefined {
+    return [...this.timers].reduce<[number, Timer] | undefined>((first, timer) => (first && first[1].at <= timer[1].at ? first : timer), undefined);
+  }
 }
 
-async function streamView(tmux: Tmux, child: ReturnType<Tmux['attach']>, send: (data: string) => void) {
-  const tty = await clientTty(tmux, child);
-  const history = new ViewHistory(tmux, 'agent', text => sendTerminalOutput(send, text), async () => { if (tty) await tmux.repaint(tty); });
-  await history.open();
-  child.stdout.on('data', chunk => {
-    const text = chunk.toString();
-    history.saw(text);
-    sendTerminalOutput(send, text);
+/* view-stream.ts as it is, compiled here so that its only timer, ViewHistory's, runs on the test's clock. */
+const VIEW_STREAM_JS = ts.transpileModule(readFileSync(VIEW_STREAM, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const IMPORTS: Record<string, unknown> = { 'node:crypto': { randomUUID }, '@hornhoof/protocol': { TERM_CHUNK } };
+
+function imported(name: string): unknown {
+  if (name in IMPORTS) return IMPORTS[name];
+  throw new Error(`view-stream.ts imports ${name}, which this test does not give it`);
+}
+
+function viewStream(clock: NodeClock): typeof ViewStream {
+  const module = { exports: {} as typeof ViewStream };
+  const load = runInThisContext(`(function (exports, require, module, setTimeout, clearTimeout) {${VIEW_STREAM_JS}\n})`, { filename: VIEW_STREAM }) as (...args: unknown[]) => void;
+  load(module.exports, imported, module, clock.setTimeout, clock.clearTimeout);
+  return module.exports;
+}
+
+/* tmux runs a line of commands apart at each ';'. */
+function commandsOf(args: string[]): string[][] {
+  const commands: string[][] = [[]];
+  for (const arg of args) {
+    if (arg === ';') commands.push([]);
+    else commands.at(-1)!.push(arg);
+  }
+  return commands.filter(command => command.length);
+}
+
+const lastLines = (text: string, count: number) => text.split('\n').slice(0, -1).slice(-count).map(line => `${line}\n`).join('');
+
+/* tmux as recorded: for each command ViewHistory runs, what tmux said of the pane at the moment the program is at. A range
+   of the history is the end of the whole history it said. */
+class RecordedTmux {
+  constructor(public pane: Pane) {}
+
+  async run(args: string[]): Promise<string> {
+    return commandsOf(args).map(command => this.answer(command)).join('');
+  }
+
+  private answer([name, ...flags]: string[]): string {
+    if (name === 'display-message') return flags.includes('-t') ? this.pane.status : `${flags.at(-1)}\n`;
+    if (name !== 'capture-pane') throw new Error(`tmux was not recorded for ${name}`);
+    if (flags.includes('-a')) return this.pane.saved;
+    const start = Number(flags[flags.indexOf('-S') + 1]);
+    return start === 0 ? this.pane.top : lastLines(this.pane.history, -start);
+  }
+}
+
+/* A view the window opened. It is ready once it was given the history and the first screen. */
+type View = { ws: WebSocketRoute; history: ViewStream.ViewHistory; frames: string[]; sent: number; ready: boolean };
+
+/* The recorded program as the node shows it to each view: the history first, then each piece of the attach stream to the
+   view and to its history, and what tmux's client draws when it is repainted after a history was given. */
+class RecordedProgram {
+  readonly clock = new NodeClock();
+  readonly views: View[] = [];
+  readonly inputs: string[] = [];
+  readonly resizes: string[] = [];
+  private readonly stream = viewStream(this.clock);
+  private readonly tmux: RecordedTmux;
+  private at = 0;
+
+  constructor(private readonly recording: Recording, private readonly write: boolean) {
+    this.tmux = new RecordedTmux(recording.moments[0]!.pane);
+  }
+
+  /* The window opens a view twice when it first shows, as React does in development, and keeps the last one. */
+  get view(): View {
+    return this.views.at(-1)!;
+  }
+
+  get streamed(): string {
+    return this.views.flatMap(view => view.frames).join('');
+  }
+
+  private get moment(): Moment {
+    return this.recording.moments[this.at]!;
+  }
+
+  async serve(page: Page): Promise<void> {
+    await page.routeWebSocket('**/api/agents/b1/terminal*', ws => this.connect(ws));
+  }
+
+  /* The program takes the input it was recorded with and writes what it wrote then. */
+  async play(input: string): Promise<void> {
+    this.at++;
+    expect(this.moment.input).toBe(input);
+    this.tmux.pane = this.moment.pane;
+    this.draw(this.view, this.moment.stream);
+    await this.clock.settle();
+  }
+
+  private async connect(ws: WebSocketRoute): Promise<void> {
+    const history = new this.stream.ViewHistory(this.tmux, 'agent', text => this.send(view, text), async () => this.draw(view, this.moment.repaint));
+    const view: View = { ws, history, frames: [], sent: 0, ready: false };
+    this.views.push(view);
+    ws.onClose(() => history.stop());
+    ws.onMessage(message => this.took(String(message)));
+    this.frame(view, { type: 'ready', write: this.write });
+    this.frame(view, { type: 'program', running: true });
+    await history.open();
+    this.draw(view, this.moment.attach);
+    view.ready = true;
+  }
+
+  private draw(view: View, chunks: string[]): void {
+    for (const chunk of chunks) {
+      view.history.saw(chunk);
+      this.send(view, chunk);
+    }
+  }
+
+  private send(view: View, text: string): void {
+    this.stream.sendTerminalOutput(data => {
+      view.frames.push(data);
+      this.frame(view, { type: 'data', data });
+    }, text);
+  }
+
+  private frame(view: View, message: object): void {
+    view.sent++;
+    view.ws.send(JSON.stringify(message));
+  }
+
+  private took(message: string): void {
+    const frame = JSON.parse(message) as { type: string; data?: string };
+    if (frame.type === 'input') this.inputs.push(frame.data!);
+    if (frame.type === 'resize') this.resizes.push(message);
+  }
+}
+
+type Seen = { terminalSocket: WebSocket | null; terminalFrames: number };
+
+/* The page counts the frames its newest terminal socket took in, each once the window handled it. A socket the window
+   closed at once took none. */
+async function countFrames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen = window as unknown as Seen;
+    const dispatch = EventTarget.prototype.dispatchEvent;
+    seen.terminalSocket = null;
+    seen.terminalFrames = 0;
+    EventTarget.prototype.dispatchEvent = function (event) {
+      const handled = dispatch.call(this, event);
+      if (event.type !== 'message' || !(this instanceof WebSocket) || !this.url.includes('/terminal')) return handled;
+      if (seen.terminalSocket !== this) Object.assign(seen, { terminalSocket: this, terminalFrames: 0 });
+      seen.terminalFrames++;
+      return handled;
+    };
   });
-  child.stderr.resume();
-  return history;
 }
 
-const hasTmux = (() => {
-  try { execFileSync('tmux', ['-V']); return true; } catch { return false; }
-})();
+type Window = { page: Page; program: RecordedProgram; rows: Locator };
 
-test.skip(!hasTmux, 'tmux is required');
+/* The page took in every frame the node sent to the view it keeps, and its time went on for it to draw them. */
+async function drawn({ page, program }: Window): Promise<void> {
+  await expect.poll(async () => {
+    const taken = await page.evaluate(() => (window as unknown as Seen).terminalFrames);
+    return program.view?.ready && taken === program.view.sent;
+  }).toBe(true);
+  await page.clock.runFor(FRAMES_MS);
+}
+
+/* The view comes to show this, the page's time going on a few frames at a time until it does. */
+async function comesTo({ page, rows }: Window, text: string | RegExp): Promise<void> {
+  await expect.poll(async () => {
+    await page.clock.runFor(FRAMES_MS);
+    return rows.textContent();
+  }).toMatch(text);
+}
+
+/* What the view shows once the page drew what came: the page's time stands still meanwhile, so it shows it now or never. */
+async function showsNow({ rows }: Window, text: string): Promise<void> {
+  expect(await rows.textContent()).toContain(text);
+}
+
+async function step(window: Window, input: string): Promise<void> {
+  await window.program.play(input);
+  await drawn(window);
+}
+
+async function wheel({ page, rows }: Window, deltaY: number): Promise<void> {
+  const box = (await rows.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, deltaY);
+}
+
+async function openWindow(page: Page, recording: Recording, write: boolean): Promise<Window> {
+  const program = new RecordedProgram(recording, write);
+  const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, canType: write };
+  await serveAgentWindow(page, live);
+  await program.serve(page);
+  await countFrames(page);
+  await page.clock.install({ time: START - 60_000 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.clock.pauseAt(START);
+  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
+  const window = { page, program, rows: page.locator('.xterm-rows') };
+  await drawn(window);
+  await program.clock.settle();
+  await drawn(window);
+  return window;
+}
+
 test('history stays in place and grows while the program redraws', async ({ page }, info) => {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-live-scroll-'));
-  const tmux = new Tmux({ socket: `hh-live-scroll-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-  const children: ReturnType<Tmux['attach']>[] = [];
-  const histories: ViewHistory[] = [];
-  try {
-    const program = `let i=0,ticking=false;process.stdout.write(Array.from({length:80},(_,i)=>\`LINE-\${i}\\r\\n\`).join('')+String.fromCharCode(27)+'[?1049h'+String.fromCharCode(27)+'[?1000h'+String.fromCharCode(27)+'[?1006hALT-START\\r\\n');process.stdin.on('data',()=>{if(!ticking){ticking=true;setInterval(()=>process.stdout.write(\`TICK-\${i++}\\r\\n\`),250)}});setInterval(()=>{},1000)`;
-    await tmux.launch('agent', { cwd: dir, cols: 80, rows: 24, command: [process.execPath, '-e', program] });
-    await expect.poll(async () => (await tmux.screen('agent')).includes('ALT-START')).toBe(true);
-    const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, canType: false };
-    let streamed = '';
-    await serveAgentWindow(page, live);
-    await page.routeWebSocket('**/api/agents/b1/terminal*', async ws => {
-      const child = tmux.attach('agent', 80, 24, false);
-      children.push(child);
-      let history: ViewHistory | null = null;
-      ws.onClose(() => {
-        history?.stop();
-        child.kill();
-      });
-      ws.send(JSON.stringify({ type: 'ready', write: false }));
-      ws.send(JSON.stringify({ type: 'program', running: true }));
-      history = await streamView(tmux, child, data => {
-        streamed += data;
-        ws.send(JSON.stringify({ type: 'data', data }));
-      });
-      histories.push(history);
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/');
-    await page.getByRole('button', { name: /Development/ }).click();
-    await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
-    const rows = page.locator('.xterm-rows');
-    await expect.poll(() => streamed).toContain('ALT-START');
-    await expect(rows).toContainText('ALT-START');
-    const box = await rows.boundingBox();
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await page.mouse.wheel(0, -8000);
-    await expect(rows).toContainText('LINE-0');
-    await tmux.paste('agent', 't\n');
-    await expect.poll(async () => (await tmux.screen('agent')).includes('TICK-3')).toBe(true);
-    await expect(rows).toContainText('LINE-0');
-    await page.screenshot({ path: info.outputPath('live-history.png') });
-    await page.mouse.wheel(0, 8000);
-    await expect(rows).toContainText(/TICK-\d+/);
-    await page.mouse.wheel(0, -8000);
-    await expect(rows).toContainText('LINE-0');
-  } finally {
-    for (const history of histories) history.stop();
-    for (const child of children) child.kill();
-    await tmux.stopAll();
-    rmSync(dir, { recursive: true, force: true });
+  const window = await openWindow(page, RECORDED.alternate, false);
+  const { program } = window;
+  expect(program.streamed).toContain('ALT-START');
+  await showsNow(window, 'ALT-START');
+  await wheel(window, -8000);
+  await comesTo(window, 'LINE-0');
+  for (let tick = 0; tick < 4; tick++) {
+    await step(window, 't\n');
+    await showsNow(window, 'LINE-0');
   }
+  expect(program.streamed).toContain('TICK-3');
+  await page.screenshot({ path: info.outputPath('live-history.png') });
+  await wheel(window, 8000);
+  await comesTo(window, /TICK-\d+/);
+  await wheel(window, -8000);
+  await comesTo(window, 'LINE-0');
 });
-
 
 for (const write of [false, true]) {
   test(`early view keeps 200 old and 44 new lines through repaint, resize and reconnect, write=${write}`, async ({ page }, info) => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-live-scroll-'));
-    const tmux = new Tmux({ socket: `hh-live-scroll-${process.pid}-${write}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const children: ReturnType<Tmux['attach']>[] = [];
-    const histories: ViewHistory[] = [];
-    const sockets: { close(options: { code: number; reason: string }): void }[] = [];
-    try {
-      const program = `let started=false;process.stdin.on('data',d=>{const s=String(d);if(s.includes('s')&&!started){started=true;process.stdout.write(Array.from({length:200},(_,i)=>\`LINE-\${i}\\r\\n\`).join(''));setInterval(()=>process.stdout.write(\`TICK-\${Date.now()}\\r\\n\`),250)}if(s.includes('m'))process.stdout.write(Array.from({length:44},(_,i)=>\`NEW-\${i}\\r\\n\`).join(''))});setInterval(()=>{},1000)`;
-      await tmux.launch('agent', { cwd: dir, cols: 80, rows: 24, command: [process.execPath, '-e', program] });
-      const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, canType: write };
-      await serveAgentWindow(page, live);
-      const inputs: string[] = [];
-      let historyFrames = 0;
-      await page.routeWebSocket('**/api/agents/b1/terminal*', async ws => {
-        sockets.push(ws);
-        const at = sockets.length;
-        historyFrames = 0;
-        const child = tmux.attach('agent', 80, 24, write);
-        children.push(child);
-        let history: ViewHistory | null = null;
-        ws.onClose(() => {
-          history?.stop();
-          child.kill();
-        });
-        ws.onMessage(message => {
-          const frame = JSON.parse(String(message)) as { type: string; data?: string };
-          if (frame.type === 'input') inputs.push(frame.data!);
-        });
-        ws.send(JSON.stringify({ type: 'ready', write }));
-        ws.send(JSON.stringify({ type: 'program', running: true }));
-        history = await streamView(tmux, child, data => {
-          if (at === sockets.length && data.includes('\x1b[1;2r')) historyFrames++;
-          ws.send(JSON.stringify({ type: 'data', data }));
-        });
-        histories.push(history);
-      });
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto('/');
-      await page.getByRole('button', { name: /Development/ }).click();
-      await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
-      const rows = page.locator('.xterm-rows');
-      await expect(rows).toBeVisible();
-      await tmux.paste('agent', 's\n');
-      await expect(rows).toContainText('LINE-199');
-      await expect.poll(() => historyFrames).toBeGreaterThan(0);
-      const box = await rows.boundingBox();
-      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-      const inputsBeforeWheel = inputs.length;
-      await page.mouse.wheel(0, -12000);
-      await expect(rows).toContainText('LINE-0');
-      await expect.poll(async () => ((await tmux.screen('agent', 200)).match(/TICK-/g) ?? []).length).toBeGreaterThanOrEqual(6);
-      await expect(rows).toContainText('LINE-0');
-      await tmux.paste('agent', 'm\n');
-      await expect.poll(async () => (await tmux.screen('agent')).includes('NEW-43')).toBe(true);
-      await expect(rows).toContainText('LINE-0');
-      expect(inputs).toHaveLength(inputsBeforeWheel);
-      await page.screenshot({ path: info.outputPath('live-history.png') });
-      await page.setViewportSize({ width: 1100, height: 900 });
-      await expect(rows).toContainText('LINE-0');
-      histories.at(-1)!.stop();
-      children.at(-1)!.kill();
-      const beforeReconnect = sockets.length;
-      sockets.at(-1)!.close({ code: 4410, reason: 'node_offline' });
-      await expect.poll(() => sockets.length).toBeGreaterThan(beforeReconnect);
-      await expect(rows).toContainText('NEW-43');
-      const inputsBeforeReconnectWheel = inputs.length;
-      await page.mouse.wheel(0, -12000);
-      await expect(rows).toContainText('LINE-0');
-      expect(inputs).toHaveLength(inputsBeforeReconnectWheel);
-    } finally {
-      for (const history of histories) history.stop();
-      for (const child of children) child.kill();
-      await tmux.stopAll();
-      rmSync(dir, { recursive: true, force: true });
+    const window = await openWindow(page, RECORDED.early, write);
+    const { program, rows } = window;
+    await expect(rows).toBeVisible();
+    await step(window, 's\n');
+    await showsNow(window, 'LINE-199');
+    expect(program.view.frames.filter(frame => frame.includes('\x1b[1;2r')).length).toBeGreaterThan(0);
+    const inputsBeforeWheel = program.inputs.length;
+    await wheel(window, -12000);
+    await comesTo(window, 'LINE-0');
+    for (let tick = 0; tick < 6; tick++) {
+      await step(window, 't\n');
+      await showsNow(window, 'LINE-0');
     }
+    await step(window, 'm\n');
+    expect(program.streamed).toContain('NEW-43');
+    await showsNow(window, 'LINE-0');
+    expect(program.inputs).toHaveLength(inputsBeforeWheel);
+    await page.screenshot({ path: info.outputPath('live-history.png') });
+    const resizes = program.resizes.length;
+    /* At 1100 the window keeps the terminal's size; at 900 the terminal has fewer columns. */
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expect.poll(() => program.resizes.length).toBeGreaterThan(resizes);
+    await drawn(window);
+    await showsNow(window, 'LINE-0');
+    const views = program.views.length;
+    program.view.history.stop();
+    await program.view.ws.close({ code: 4410, reason: 'node_offline' });
+    await expect(page.locator('.t-load')).toBeVisible();
+    await page.clock.runFor(RETRY_MS);
+    await expect.poll(() => program.views.length).toBe(views + 1);
+    await drawn(window);
+    await program.clock.settle();
+    await drawn(window);
+    await showsNow(window, 'NEW-43');
+    const inputsBeforeReconnectWheel = program.inputs.length;
+    await wheel(window, -12000);
+    await comesTo(window, 'LINE-0');
+    expect(program.inputs).toHaveLength(inputsBeforeReconnectWheel);
   });
 }
 
 test('3J preserves the reading place and the bottom on the real terminal', async ({ page }, info) => {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-live-scroll-'));
-  const tmux = new Tmux({ socket: `hh-live-scroll-${process.pid}-clear`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-  const children: ReturnType<Tmux['attach']>[] = [];
-  const histories: ViewHistory[] = [];
-  try {
-    const program = `process.stdout.write(Array.from({length:1000},(_,i)=>\`LINE-\${i}\\r\\n\`).join(''));setInterval(()=>{},1000)`;
-    await tmux.launch('agent', { cwd: dir, cols: 80, rows: 24, command: [process.execPath, '-e', program] });
-    const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, canType: false };
-    await serveAgentWindow(page, live);
-    let streamed = '';
-    await page.routeWebSocket('**/api/agents/b1/terminal*', async ws => {
-      const child = tmux.attach('agent', 80, 24, false);
-      children.push(child);
-      let history: ViewHistory | null = null;
-      ws.onClose(() => {
-        history?.stop();
-        child.kill();
-      });
-      ws.send(JSON.stringify({ type: 'ready', write: false }));
-      ws.send(JSON.stringify({ type: 'program', running: true }));
-      history = await streamView(tmux, child, data => {
-        streamed += data;
-        ws.send(JSON.stringify({ type: 'data', data }));
-      });
-      histories.push(history);
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/');
-    await page.getByRole('button', { name: /Development/ }).click();
-    await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
-    const rows = page.locator('.xterm-rows');
-    await expect(rows).toContainText('LINE-999');
-    await page.locator('.xterm-viewport').evaluate((el, line) => { el.scrollTop = el.scrollHeight * line / 1000; }, 676);
-    await expect(rows).toContainText('LINE-700');
-    histories.at(-1)!.resized();
-    await expect.poll(() => streamed).toContain('\x1b[3J');
-    await expect(rows).toContainText('LINE-700');
-    await page.screenshot({ path: info.outputPath('clear-history-reading.png') });
-    const box = await rows.boundingBox();
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await page.mouse.wheel(0, 12000);
-    await expect(rows).toContainText('LINE-999');
-    histories.at(-1)!.resized();
-    await expect(rows).toContainText('LINE-999');
-  } finally {
-    for (const history of histories) history.stop();
-    for (const child of children) child.kill();
-    await tmux.stopAll();
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const window = await openWindow(page, RECORDED.clear, false);
+  const { program } = window;
+  await showsNow(window, 'LINE-999');
+  await page.locator('.xterm-viewport').evaluate((el, line) => { el.scrollTop = el.scrollHeight * line / 1000; }, 676);
+  await comesTo(window, 'LINE-700');
+  program.view.history.resized();
+  await program.clock.settle();
+  expect(program.streamed).toContain('\x1b[3J');
+  await drawn(window);
+  await showsNow(window, 'LINE-700');
+  await page.screenshot({ path: info.outputPath('clear-history-reading.png') });
+  await wheel(window, 12000);
+  await comesTo(window, 'LINE-999');
+  program.view.history.resized();
+  await program.clock.settle();
+  await drawn(window);
+  await showsNow(window, 'LINE-999');
 });

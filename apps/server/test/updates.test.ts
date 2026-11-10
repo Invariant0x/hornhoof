@@ -134,8 +134,9 @@ async function company(registry: { base: string }, commit = 'aaa', control = mkd
   return { app, db, control, ceo: await setUpCompany(app) };
 }
 
-/* The updater is alive when it touched alive in the last 30 seconds. */
-const updaterAlive = (control: string, ageSeconds = 0) => {
+/* The updater is alive when it touched alive in the last 30 seconds. A touch an hour ahead of the clock stays that fresh
+   all through a test on any machine; one more than 30 seconds back is old already. */
+const updaterAlive = (control: string, ageSeconds = -3600) => {
   writeFileSync(join(control, 'alive'), '');
   const when = Date.now() / 1000 - ageSeconds;
   utimesSync(join(control, 'alive'), when, when);
@@ -382,7 +383,9 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
@@ -403,7 +406,9 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
 
     await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build 2', status: 'running', timeoutMs: 1000 });
     const now = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
@@ -516,7 +521,9 @@ describe('updates', () => {
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 

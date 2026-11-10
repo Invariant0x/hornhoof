@@ -3,11 +3,12 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent } from '../src/terminal/peer.js';
 import { hookClock } from './hook-test-clock.js';
 import { procFixture } from './terminal-proc-fixture.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
 const CLOCK = fileURLToPath(new URL('./fakes/hook-clock.cjs', import.meta.url));
 const close: (() => void)[] = [];
@@ -44,14 +45,14 @@ describe('owner check outlasting the hook client deadline', () => {
     close.push(release);
     /* All three clients time out and exit before the ownership lookups finish. */
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await vi.waitFor(() => expect(checking).toBe(attempt));
+      await eventually(() => checking === attempt);
       await clock.advance(15_000);
     }
     await exited;
     expect(child.exitCode).toBe(0);
     expect(ended).toEqual([]);
     release();
-    await vi.waitFor(() => expect(checks).toBe(3), { timeout: 4000 });
+    await eventually(() => checks === 3);
     expect(ended).toEqual(['first']);
     expect(turn).toBe('next');
   });

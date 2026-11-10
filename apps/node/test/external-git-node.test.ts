@@ -2,7 +2,8 @@ import { rmSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { ExternalGitOutcome } from '@hornhoof/protocol';
 import { parseGitMarker, type GitRegistration } from '../src/external-git.js';
-import { answer, calls, FakePort, head, jobOf, KEY, planFor, realGit, runShim, serve, type Stand, stand } from './external-git-helpers.js';
+import { eventually } from '../../../test-support/eventually.mjs';
+import { answer, calls, FakePort, graceClock, hanging, head, jobOf, KEY, killed, planFor, realGit, runShim, serve, type Stand, stand } from './external-git-helpers.js';
 
 describe('what stays unmanaged at the node', () => {
   const pushed = (s: Stand) => ({ kind: 'push', cwd: s.work, remote: 'origin', sourceSha: head(s), destinationRef: 'refs/heads/task-1', upstreamBranch: null, flags: [] });
@@ -189,8 +190,9 @@ describe('the marker is only telemetry', () => {
     const { env, adapter } = await serve(s, port);
     expect(adapter.operations(KEY)).toEqual([]);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
-    await vi.waitFor(() => { expect(adapter.operations(KEY)).toEqual([{ operationId: port.registered[0]!.operationId, state: 'waiting' }]); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
+    await eventually(() => adapter.operations(KEY)[0]?.state === 'waiting');
+    expect(adapter.operations(KEY)).toEqual([{ operationId: port.registered[0]!.operationId, state: 'waiting' }]);
     port.release();
     await ran;
     expect(adapter.operations(KEY)).toEqual([]);
@@ -233,25 +235,31 @@ describe('the child the node owns', () => {
     const port = new FakePort();
     const { env } = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(calls(s, 'push')).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => calls(s, 'push').length === 1);
     ran.signal('SIGTERM');
     await ran;
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
+    await eventually(() => port.recorded.length === 1);
     expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { kind: 'child' } });
-    await vi.waitFor(() => { expect(port.cancelled).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.cancelled.length === 1);
   });
 
   it('kills a child that ignores the request to stop', async () => {
     const s = stand();
     planFor(s, { push: [{ do: 'ignore_term' }] });
     const port = new FakePort();
+    graceClock();
+    const signals = killed();
     const { env } = await serve(s, port, true, { stopGraceMs: 300 });
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(ran.partial().code).toBeNull(); expect(calls(s, 'push')).toHaveLength(1); }, { timeout: 5000 });
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await eventually(() => hanging(s));
     ran.signal('SIGTERM');
     await ran;
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
+    await eventually(() => signals().length === 1);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(signals()).toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signals()).toEqual(['SIGTERM', 'SIGKILL']);
+    await eventually(() => port.recorded.length === 1);
     expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { exitCode: null, signal: 'SIGKILL' } });
   });
 
@@ -259,14 +267,24 @@ describe('the child the node owns', () => {
     const s = stand();
     planFor(s, { push: [{ do: 'hang' }] });
     const port = new FakePort();
-    const { env } = await serve(s, port, true, { stopGraceMs: 20, kill: () => {} });
+    graceClock();
+    const signals: string[] = [];
+    const { env } = await serve(s, port, true, { stopGraceMs: 20, kill: (_pid, signal) => { signals.push(signal); } });
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(calls(s, 'push')).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => calls(s, 'push').length === 1);
     ran.signal('SIGTERM');
     await ran;
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
+    await eventually(() => signals.length === 1);
+    await vi.advanceTimersByTimeAsync(19);
+    expect(signals).toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    await vi.advanceTimersByTimeAsync(19);
+    expect(port.recorded).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await eventually(() => port.recorded.length === 1);
     expect(port.recorded[0]!.settled).toBe(false);
-    await vi.waitFor(() => { expect(port.cancelled).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.cancelled.length === 1);
     expect(calls(s, 'push')).toHaveLength(1);
   });
 
@@ -286,9 +304,16 @@ describe('the child the node owns', () => {
     planFor(s, { push: [{ do: 'leave_process' }] });
     const port = new FakePort();
     port.replies = [{ accepted: true, state: 'outcome_unknown' }];
+    graceClock();
     const { env } = await serve(s, port, true, { exitGraceMs: 50 });
     /* The stray process lives 30 s, past the runner's limit for the test: waiting for it would fail the test. */
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, env);
+    const running = runShim(['push', 'origin', 'task-1'], s.work, env);
+    /* git ended: the node's grace for the pipes is its only timer that runs now. */
+    await eventually(() => calls(s, 'push').length === 1 && vi.getTimerCount() === 1);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(port.recorded).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    const ran = await running;
     expect(ran.code).toBe(0);
     expect(ran.stderr).toContain('-> task-1');
     expect(ran.stderr).toMatch(/state=outcome_unknown$/m);
