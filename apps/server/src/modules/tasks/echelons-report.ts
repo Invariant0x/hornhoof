@@ -29,10 +29,11 @@ export async function architectureReport(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
-type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] };
+type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true };
 const ChildReference: z.ZodType<AcceptedChild> = z.lazy(() => z.union([
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string() })) }),
   z.object({ taskId: z.uuid(), children: z.array(ChildReference) }),
+  z.object({ taskId: z.uuid(), turnkey: z.literal(true) }),
 ]));
 
 async function acceptedUnder(tx: Tx, task: Task, ancestors = new Set<string>()): Promise<AcceptedChild[]> {
@@ -54,6 +55,8 @@ async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<Ac
   const route = await routeOf(tx, child);
   if (route.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
   const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
+  /* Turnkey work has no candidate and no stages: its holder closed it alone, and nobody checks it after. */
+  if (route.state.resultKind === 'turnkey') return { taskId: child.id, turnkey: true };
   return route.state.resultKind === 'coordination' ? acceptedAggregate(tx, child, route, report?.data, path) : acceptedCode(tx, child, route, report?.data);
 }
 
