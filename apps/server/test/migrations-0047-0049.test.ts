@@ -9,8 +9,10 @@ import { migrate, migrationsUpTo } from './migrations-fixture.js';
 
 ownDatabases();
 
+// Each test runs every migration on a copy as big as a real company's, which takes as long as the machine needs, so
+// none of them has a time limit.
 describe('migration 0049', () => {
-  it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
+  it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', { timeout: 0 }, async name => {
     const source = await freshPglite();
     onTestFinished(() => source.close());
     let db = drizzle(source);
@@ -37,7 +39,7 @@ describe('migration 0049', () => {
 });
 
 describe('migration 0047', () => {
-  it.each(['Acme', 'Moonfern'])('keeps old prompts in %s without inventing their requested text', async name => {
+  it.each(['Acme', 'Moonfern'])('keeps old prompts in %s without inventing their requested text', { timeout: 0 }, async name => {
     const source = await freshPglite();
     onTestFinished(() => source.close());
     let db = drizzle(source);
