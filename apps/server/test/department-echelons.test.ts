@@ -33,7 +33,9 @@ async function fixture(templateKey: TemplateKey | null, roles: { head: string; a
   const create = (changes: Partial<NewTask> = {}) => createTask(app.ctx, { agentId: head.id }, { ...input, ...changes });
   const echelons = async (id: string) => (await taskDetail(app.ctx, await loadTask(db, id), () => true)).echelons;
   const log = async (id: string) => (await taskDetail(app.ctx, await loadTask(db, id), () => true)).log;
-  return { ctx: app.ctx, db, head, author, checker, create, echelons, log };
+  /* What was handed in last, as its hand-in recorded it. */
+  const handedIn = async (id: string) => ((await log(id)).findLast(event => event.kind === 'submitted')!.data as { candidate: { id: string; digest: string } }).candidate;
+  return { ctx: app.ctx, db, head, author, checker, create, echelons, log, handedIn };
 }
 
 const marketing = () => fixture('marketing', { head: 'MKT-HEAD', author: 'MKT-WRITE' }, ['hh-check-work']);
@@ -121,7 +123,7 @@ describe('a department that keeps no repository', () => {
     const { task } = await f.create({ paths: undefined });
     const handed = await submit(f.ctx, f.author.id, task.id, HAND_IN);
     expect(handed.task).toMatchObject({ status: 'review', assigneeAgentId: f.checker.id });
-    const candidate = (await f.log(task.id)).findLast(event => event.kind === 'submitted')!.data.candidate as { id: string; digest: string };
+    const candidate = await f.handedIn(task.id);
     expect(candidate).toMatchObject({ parentId: null, digest: expect.stringMatching(/^[a-f0-9]{64}$/), producedBy: { agentId: f.author.id, stage: 'development' } });
     expect(candidate).not.toHaveProperty('commit');
     const passed = await verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Every price matches the list.', candidateId: candidate.id });
@@ -143,7 +145,7 @@ describe('a department that keeps no repository', () => {
     expect(failed.task).toMatchObject({ status: 'working', assigneeAgentId: f.checker.id });
     const corrected = await submit(f.ctx, f.checker.id, task.id, { summary: 'Corrected the second price.', evidence: 'Compared with the price list again.' });
     expect(corrected.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
-    const candidate = (await f.log(task.id)).findLast(event => event.kind === 'submitted')!.data.candidate;
+    const candidate = await f.handedIn(task.id);
     expect(candidate).toMatchObject({ parentId: first, producedBy: { agentId: f.checker.id, stage: 'review' } });
   });
 
