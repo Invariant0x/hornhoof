@@ -39,7 +39,7 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
   const read = async () => {
     await submit(app.ctx, author!.id, task.id, { summary: 'Done', evidence: 'Author check', review: { baseCommit: OTHER } });
     const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted')));
-    return (event!.data.review as { quality: Quality; gateCounts: { source: string } });
+    return (event!.data.review as { quality: Quality });
   };
   return { db, app, task, head: head!, author: author!, job: job!, run: run!, part: part!, record, seed, read };
 }

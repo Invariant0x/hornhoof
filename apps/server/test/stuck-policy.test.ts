@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
-import { createTask, GOING_ON_TURNS, submit, verdict } from '../src/modules/tasks/engine.js';
+import { createTask, GOING_ON_TURNS, SILENT_TURNS, submit, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
-import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
+import { afterJob, checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, listen, mcp, setUpCompany, testApp, echelonsTurn } from './helpers.js';
 

@@ -7,8 +7,8 @@ import { agentEvents, agents, companies, departments, jobs, machines, nodes, pen
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
-import { ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask, verdict, type NewTask } from '../src/modules/tasks/engine.js';
-import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
+import { ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, SILENT_TURNS, startWork, submit, updateTask, verdict, type NewTask } from '../src/modules/tasks/engine.js';
+import { afterJob, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';

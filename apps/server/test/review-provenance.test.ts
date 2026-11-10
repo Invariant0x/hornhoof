@@ -13,7 +13,6 @@ describe('pinned review provenance', () => {
     await submit(ctx, author.id, task.id, { summary: 'Done', evidence: 'Both runs passed', review: { baseCommit: BASE } });
     expect((await event('submitted')).data.review).toMatchObject({
       commit: FIRST, branch: `task-${task.number}`, authorId: author.id,
-      gateCounts: { passed: 0, returned: 0 },
       runs: expect.arrayContaining([
         expect.objectContaining({ id: good.id, number: 1, commit: FIRST, verified: true, parts: { passed: 1, failed: 0, other: 0 } }),
         expect.objectContaining({ id: stale.id, number: 2, commit: SECOND, verified: false }),
@@ -86,13 +85,13 @@ describe('candidate source failures', () => {
 describe('explicit finding confirmation', () => {
   it('does not turn a reviewer verdict into a confirmed metric', async () => {
     const f = await rejectedFinding();
-    expect((await f.read()).reviewFindings).toMatchObject({ confirmedCount: 0, byVendor: [] });
+    expect((await f.read()).reviewFindings).toMatchObject({ uniqueConfirmed: 0, byVendor: [] });
   });
 
   it('lets the real head confirm existence before a fix without removing the block', async () => {
     const f = await rejectedFinding();
     expect((await f.confirm()).isError).toBeFalsy();
-    expect((await f.read()).reviewFindings).toMatchObject({ confirmedCount: 1, byVendor: [{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }] });
+    expect((await f.read()).reviewFindings).toMatchObject({ uniqueConfirmed: 1, byVendor: [{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }] });
     const [task] = await f.db.select().from(tasks).where(eq(tasks.id, f.task.id));
     expect(task).toMatchObject({ status: 'working', assigneeAgentId: f.reviewer.id });
     const history = await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id)).orderBy(taskEvents.id);
@@ -104,7 +103,7 @@ describe('explicit finding confirmation', () => {
     const outsider = await f.hire('Other', 'worker', 'DEV-BE');
     expect((await f.confirm(f.reviewer)).isError).toBe(true);
     expect((await f.confirm(outsider)).isError).toBe(true);
-    expect((await f.read()).reviewFindings.confirmedCount).toBe(0);
+    expect((await f.read()).reviewFindings.uniqueConfirmed).toBe(0);
   });
 
   it('requires the actual author to name a current fix and rejects stale revisions and SHAs', async () => {
@@ -114,7 +113,7 @@ describe('explicit finding confirmation', () => {
     expect((await f.confirm(f.author, { fixCommit: FIRST })).isError).toBe(true);
     expect((await f.confirm(f.author, { fixCommit: SECOND, revision: '00000000-0000-4000-8000-000000000000' })).isError).toBe(true);
     expect((await f.confirm(f.author, { fixCommit: SECOND })).isError).toBeFalsy();
-    expect((await f.read()).reviewFindings.confirmedCount).toBe(1);
+    expect((await f.read()).reviewFindings.uniqueConfirmed).toBe(1);
     expect((await f.db.select().from(tasks).where(eq(tasks.id, f.task.id)))[0]!.assigneeAgentId).not.toBe(f.author.id);
   });
 
@@ -125,7 +124,7 @@ describe('explicit finding confirmation', () => {
     await f.db.update(tasks).set({ executorAgentId: other.id }).where(eq(tasks.id, f.task.id));
     expect((await f.confirm(f.author, { fixCommit: SECOND })).isError).toBeFalsy();
     expect((await f.confirm(other, { fixCommit: SECOND })).isError).toBe(true);
-    expect((await f.read()).reviewFindings.confirmedCount).toBe(1);
+    expect((await f.read()).reviewFindings.uniqueConfirmed).toBe(1);
   });
 
   it('deduplicates concurrent confirmations and keeps revocation history without editing the source', async () => {
@@ -135,9 +134,9 @@ describe('explicit finding confirmation', () => {
     const args = { task: f.task.number, findingId: f.finding.findingId, revision: f.finding.revision, confirmed: true, reason: 'Verified' };
     const responses = await Promise.all([client.callTool({ name: 'confirm_finding', arguments: args }), client.callTool({ name: 'confirm_finding', arguments: args })]);
     expect(responses.every(r => !r.isError)).toBe(true);
-    expect((await f.read()).reviewFindings.confirmedCount).toBe(1);
+    expect((await f.read()).reviewFindings.uniqueConfirmed).toBe(1);
     expect((await f.confirm(f.head, { confirmed: false, reason: 'The defect was disproved' })).isError).toBeFalsy();
-    expect((await f.read()).reviewFindings.confirmedCount).toBe(0);
+    expect((await f.read()).reviewFindings.uniqueConfirmed).toBe(0);
     const history = (await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id))).filter(e => e.data.findingConfirmation);
     expect(history).toHaveLength(2);
     expect(await f.event('verdict')).toEqual(original);
@@ -161,8 +160,8 @@ describe('explicit finding confirmation', () => {
     const result = await (await f.tools(orchestrator!)).callTool({ name: 'pipeline_report', arguments: { turn: 8 } });
     expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
     expect(JSON.parse((result.content as { text: string }[])[0]!.text).reviewFindings).toMatchObject({
-      current: { confirmedCount: 1, byVendor: [{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }] },
-      baseline: { confirmedCount: null, status: 'unavailable', reason: 'finding-provenance-unavailable' },
+      current: { uniqueConfirmed: 1, byVendor: [{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }] },
+      baseline: { uniqueConfirmed: null, status: 'unavailable', reason: 'finding-provenance-unavailable' },
     });
   });
 });

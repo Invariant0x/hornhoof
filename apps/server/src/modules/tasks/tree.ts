@@ -51,7 +51,7 @@ export type TreeLine = {
   externalWait?: ExternalWait | null;
 };
 export type TreeActivity = { jobId: string; agent: TreeAgent; task: Pick<FactRelatedTask, 'id' | 'number' | 'title'> | null; segments: TreeSegment[] };
-/* Seconds of each kind from the start of the turn to now, over all of the agent's lines and review lines. */
+/* Seconds of each kind from the start of the turn to now, over all of the agent's lines, observed turns and waits. */
 export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost: number; alarm: number; queued: number; unknown: number };
 export type IdleStretch = {
   agent: TreeAgent;

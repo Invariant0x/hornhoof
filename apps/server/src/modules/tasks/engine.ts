@@ -16,7 +16,7 @@ import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArr
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
@@ -42,7 +42,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'unblocked' | 'tests' | 'work' | 'reviewed' | 'wait_ended';
+export type WakeWhy = 'assigned' | 'review' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'unblocked' | 'tests' | 'work' | 'reviewed' | 'wait_ended';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; version?: number; cause?: WakeCause };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -219,12 +219,12 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
   return row!;
 }
 
-/* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
 /* A line of Hornhoof's own, which nobody signed. */
 export async function ownNote(tx: Tx, task: Pick<Task, 'id' | 'companyId'>, n: { kind: TaskEventKind; text: string; data: Record<string, unknown> }): Promise<void> {
   await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, ...n });
 }
 
+/* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
 async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
   if (!n.returned || !n.actor.agentId) return null;
   return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
@@ -299,20 +299,10 @@ export function published(ctx: Pick<Ctx, 'bus'>, task: Task): void {
   ctx.bus.publish(task.companyId, { type: 'task', id: task.id, spot: taskSpot(task) });
 }
 
-/* Whoever gave the task, when that was an agent other than the one acting. */
+/* Whoever gave the task, when that was an agent other than the one acting. Whoever gave out a task that is done hears it
+   only for a task of its own: work under a bigger task is heard of once, when the last of it closes. */
 export const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[] =>
   task.createdByAgentId && task.createdByAgentId !== actorId && !(task.parentId && (why === 'done' || why === 'reported')) ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
-
-/* Whoever gave out a task that is done hears it only for a task of its own: work under a bigger task is heard of once,
-   when the last of it closes. */
-
-/* Whether the task's work lives in a repository: its product's, else its department's. */
-export async function inRepository(db: Db | Tx, task: Pick<Task, 'departmentId' | 'productId'>): Promise<boolean> {
-  const ids = [task.productId, task.departmentId].filter((x): x is string => Boolean(x));
-  if (!ids.length) return false;
-  const rows = await db.select({ repoUrl: departments.repoUrl }).from(departments).where(inArray(departments.id, ids));
-  return rows.some(r => r.repoUrl);
-}
 
 /* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
 export async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
@@ -636,7 +626,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   return { task: row, wakes: next.wakes };
 }
 
-type Verdict = ReviewVerdict & { comment: string; findings?: number; evidence?: object[] };
+type Verdict = ReviewVerdict & { comment: string; evidence?: object[] };
 
 /* One current checker owns both its verdict and its fixes. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
@@ -808,7 +798,7 @@ function releasedRoute(route: Route, agentId: string, current: boolean): Route['
 }
 
 /* Leaving an assignment never skips the stage or erases an immutable candidate. */
-export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
+export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[] }> {
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [], handed: string[] = [];
   for (const row of rows) await onFresh(ctx, row, async task => {
@@ -822,7 +812,7 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
     handed.push(task.id); wakes.push(...due);
     return task;
   });
-  return { wakes, handed, closed: [] };
+  return { wakes, handed };
 }
 
 async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
@@ -832,7 +822,7 @@ async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
   return checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, null);
 }
 
-export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[]; closed: Task[] }> {
+export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[] }> {
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), eq(tasks.status, 'waiting'), isNull(tasks.assigneeAgentId))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [];
   for (const row of rows) await onFresh(ctx, row, async task => {
@@ -846,7 +836,7 @@ export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver
     wakes.push(...due);
     return task;
   });
-  return { wakes, closed: [] };
+  return { wakes };
 }
 
 /* The work kind is metadata. Changing it leaves active waits and queued task versions intact. */
@@ -1276,8 +1266,6 @@ function auditOf(on: Delegation | undefined) {
 /* The answers someone else took first, or a right that went meanwhile: the words still reach the agent. */
 const PASSED_OVER = new Set<ErrorReason | undefined>(['request_closed', 'decision_not_allowed']);
 
-/* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
-   on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
 /* The person whose answer it is, also when the orchestrator passed it on. */
 const answerer = (personId: string | null, actor: Actor): Actor => (personId ? { personId } : actor);
 
@@ -1318,6 +1306,8 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
   return STATUS_AT_STAGE[route.state.stage ?? 'development'] ?? 'working';
 }
 
+/* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
+   on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');

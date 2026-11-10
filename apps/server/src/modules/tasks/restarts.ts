@@ -4,6 +4,7 @@ import { agents, departments, jobs, taskEvents, tasks, type Interruption, type R
 import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
+import { when } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { published } from './engine.js';
 import { repeatedTurn, type TaskWake } from './wake-state.js';
@@ -28,7 +29,6 @@ type Agent = typeof agents.$inferSelect;
 type Cut = Interruption & { job: string };
 type Ended = { job: Job; task: Task; agent: Agent; cut: Cut };
 
-const when = (at: string) => `${at.slice(0, 16).replace('T', ' ')} UTC`;
 const cutOff = (cut: Cut) => `was cut off at ${when(cut.at)}: ${cut.node.name} restarted, ${CAUSES[cut.cause]}`;
 
 /* Why a turn was cut off as Hornhoof kept it; a node that never said how it came up still names the cause as unknown. */

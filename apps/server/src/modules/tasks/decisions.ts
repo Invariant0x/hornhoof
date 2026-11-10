@@ -107,9 +107,6 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
   return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? ctx.computer.view().asked : null };
 }
 
-/* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
-   by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
-   computer for people who see the whole company and see him. */
 /* A machine still away waits for each of its people, on each one's card as this person sees them. */
 function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
   const byPerson = { ...counts.byPerson };
@@ -119,6 +116,9 @@ function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
   return { ...counts, byPerson, total: counts.total + away.length };
 }
 
+/* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
+   by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
+   computer for people who see the whole company and see him. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);

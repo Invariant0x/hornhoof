@@ -5,16 +5,11 @@ import { seesAgentId } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
 import { tasks, taskWaits } from '../../db/schema.js';
 import type { Task, Tx } from './engine.js';
-import { afterSourceKey, type TaskWait } from './wait-state.js';
+import { afterSourceKey, waitOwner, type TaskWait } from './wait-state.js';
 
 /* What a reader gets of the waits on a task: who answers by when and at which level, with no source, proof or route. */
 
 const shownDate = (at: Date | null): string | null => at?.toISOString() ?? null;
-
-function ownerOf(wait: TaskWait): WaitOwnerBinding | null {
-  if (wait.ownerAgentId) return { agentId: wait.ownerAgentId };
-  return wait.ownerPersonId ? { personId: wait.ownerPersonId } : null;
-}
 
 export const waitView = (wait: TaskWait): TaskWaitView => ({
   id: wait.id,
@@ -23,7 +18,7 @@ export const waitView = (wait: TaskWait): TaskWaitView => ({
   state: wait.state,
   generation: wait.generation,
   level: wait.level,
-  owner: ownerOf(wait),
+  owner: waitOwner(wait),
   ownerDueAt: shownDate(wait.ownerDueAt),
   headDueAt: shownDate(wait.headDueAt),
   decisionDueAt: shownDate(wait.decisionDueAt),

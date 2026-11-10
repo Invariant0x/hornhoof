@@ -253,7 +253,7 @@ export function pickOpsRecipient(able: Agent[], stuckAgentId: string, unavailabl
   return able.find(a => isFreeWatchdog(a, stuckAgentId, unavailable)) ?? able.find(a => isOpsHead(a, stuckAgentId)) ?? null;
 }
 
-const when = (iso: string) => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+export const when = (iso: string) => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
 
 function roleOf(ctx: Ctx, agent: Agent): string | null {
   if (agent.roleKey) return ctx.templates.roles.get(agent.roleKey)?.title.en ?? null;

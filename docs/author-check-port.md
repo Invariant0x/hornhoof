@@ -19,10 +19,9 @@ Task reads and verdicts revalidate receipts and authority. They retain the immut
 
 Only all six real passed stages, zero exit codes, complete matching receipts and present numbers can produce `passed`. A failed/stopped run, failed phase or CRAP at least 10 cannot pass. Dryer flags remain informational when its phase exited successfully. Missing stages, scope or numbers remain partial. Unknown coverage remains null. A record whose receipts or ownership changed is not accepted as current evidence.
 
-Three families stay separate:
+Two families stay separate:
 
 - `review.runs`: actual run IDs, commits, part counts and exit receipts.
 - `review.quality`: structured author-check results from producer 325, or explicit `unavailable` with a reason.
-- `review.gateCounts`, labeled `source: 'review-lifecycle'`: passed/returned review verdict counts, not quality-check numbers.
 
 Without a record, `review.quality` is `unavailable`, which is what every submission gets now. This port does not certify the release's author-check stages.

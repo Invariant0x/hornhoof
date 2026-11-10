@@ -13,13 +13,10 @@ import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart, afterRestartOutsideTask } from './restarts.js';
-import { clearTurnProgram, failedProgramData } from './silent.js';
+import { clearTurnProgram, failedProgramData, when } from './silent.js';
 import { afterFailure } from './failures.js';
-import { settle, tell } from './turns.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
-
-export { SILENT_TURNS, startWork } from './engine.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -38,8 +35,8 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
   return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };
 }
 
-/* Wakes whose text an employee wrote: the reasons of a gate, a report, a block, a cancellation. */
-const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled', 'review', 'unblocked'];
+/* Wakes whose text an employee wrote: the reasons of a report, a block, a cancellation. */
+const EMPLOYEES_SAY: WakeWhy[] = ['reported', 'blocked', 'cancelled', 'review', 'unblocked'];
 
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
@@ -81,8 +78,6 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
       return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
       return `${ref} passed Tests on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
-    case 'changes':
-      return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
     case 'done':
       return `${ref}, which you gave out, has an accepted result and is done. Read the result with the task tool, then go on with ${own}.`;
     case 'reported':
@@ -146,9 +141,8 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
   const left = await leaveWork(ctx, actor, agent);
   const { handed } = left;
   /* Another eligible checker may become available; the required stage is never skipped. */
-  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched off.`);
-  const wakes = [...left.wakes, ...regated.wakes];
-  const closed = [...left.closed, ...regated.closed];
+  const resumed = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched off.`);
+  const wakes = [...left.wakes, ...resumed.wakes];
   /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
   if (handed.length) {
     await ctx.db
@@ -156,41 +150,30 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
       .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
       .where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'), inArray(jobs.taskId, handed)));
   }
-  await wakeAll(ctx, await settled(ctx, agent.companyId, wakes, closed));
-}
-
-/* A gate an agent left or that went out of the way may have finished the last task of the open turn. */
-async function settled(ctx: Ctx, companyId: string, wakes: Wake[], closed: Task[]): Promise<Wake[]> {
-  let all = wakes;
-  for (const task of closed) {
-    const done = await settle(ctx, task);
-    if (done) all = tell(all, done, (await orchestratorOf(ctx, companyId))?.id ?? null, task.id);
-  }
-  return all;
+  await wakeAll(ctx, wakes);
 }
 
 /* A newly available checker can resume the same required stage and candidate. */
 export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<void> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || agent.switchedOffAt) return;
-  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched on.`);
-  await wakeAll(ctx, await settled(ctx, agent.companyId, regated.wakes, regated.closed));
+  const resumed = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched on.`);
+  await wakeAll(ctx, resumed.wakes);
   await pump(ctx, agentId);
 }
 
 /* An employee moved out of scope leaves its current assignment, not the route's required stage. */
 export async function leaveForTeam(ctx: Ctx, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<void> {
   const left = await leaveWork(ctx, actor, agent);
-  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} moved to a sub-unit.`);
-  const wakes = [...left.wakes, ...regated.wakes];
-  const closed = [...left.closed, ...regated.closed];
+  const resumed = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} moved to a sub-unit.`);
+  const wakes = [...left.wakes, ...resumed.wakes];
   if (left.handed.length) {
     await ctx.db
       .update(jobs)
       .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
       .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued'), inArray(jobs.taskId, left.handed)));
   }
-  await wakeAll(ctx, await settled(ctx, agent.companyId, wakes, closed));
+  await wakeAll(ctx, wakes);
 }
 
 /* Queues a turn for every agent a task move needs, one per agent and task: a turn already waiting reads the task as it is
@@ -300,7 +283,7 @@ export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
 }
 
 /* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn,
-   also each one it checks at a gate. */
+   also each one it checks at a stage. */
 export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
   const held = await ctx.db.select().from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])));
   const wakes: Wake[] = held.map(task => ({ agentId, taskId: task.id, why: task.status === 'review' ? 'review' : 'assigned' }));
@@ -417,11 +400,6 @@ async function programWorkedOnTask(ctx: Ctx, jobId: string, taskId: string): Pro
   return Boolean(fact);
 }
 
-/* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
-   SILENT_TURNS such turns its head is asked. Its own task needs a durable program or tool fact. A task carried inside that
-   turn needs a tool fact naming it, so a coalesced backlog alone never advances a counter.
-   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
-   tasks it comes after or on people. */
 function livenessJob(job: typeof jobs.$inferSelect | undefined): job is HeldJob & { taskId: string } {
   return !(!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG);
 }
@@ -436,6 +414,11 @@ async function livenessTasks(ctx: Ctx, job: HeldJob & { taskId: string }, carrie
   return held;
 }
 
+/* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
+   SILENT_TURNS such turns its head is asked. Its own task needs a durable program or tool fact. A task carried inside that
+   turn needs a tool fact naming it, so a coalesced backlog alone never advances a counter.
+   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
+   tasks it comes after or on people. */
 export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!livenessJob(job)) return;
@@ -488,8 +471,8 @@ function crashNote(job: Ended & { agentName: string }, task: Task): string {
 const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', anthropic_api: 'an Anthropic key', openai_api: 'an OpenAI key' };
 
 /* Who takes member work over while its executor's plan is at its limit: another employee of its role and department who
-   is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not one of the
-   task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
+   is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not in a
+   sub-unit. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
 async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
   const [me] = await ctx.db
     .select({ agent: agents, provider: subscriptions.provider })
@@ -600,8 +583,7 @@ type PlanStandIn = NonNullable<Awaited<ReturnType<typeof standIn>>>;
 const changedWhileResuming = (error: { reason?: string }) => error.reason === 'task_changed' ? null : Promise.reject(error);
 
 function planHandoffText(name: string | undefined, other: PlanStandIn, until: string): string {
-  const at = `${until.slice(0, 16).replace('T', ' ')} UTC`;
-  return `${name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`;
+  return `${name ?? 'Its executor'}'s plan is at its limit until ${when(until)}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`;
 }
 
 async function handOverAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string, other: PlanStandIn): Promise<Moved | null> {

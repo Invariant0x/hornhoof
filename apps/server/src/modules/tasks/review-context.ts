@@ -7,14 +7,13 @@ import { agents, subscriptions, taskEvents, testParts, testRuns } from '../../db
 import { repoAt } from '../departments/repository.js';
 import type { CompareResult } from '../testruns/compare.js';
 import type { CommitWanted, RepoAddress } from '../testruns/refs.js';
+import { modelProvider } from './echelons-policy.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { authorQuality, CheckReceiptPart, checkReceiptPart, QualityEvidence, unavailableQuality } from './review-quality.js';
 import { verifiedReuse } from './review-reuse.js';
 import { ReviewSha } from './review-schema.js';
 
 export { ReviewSha } from './review-schema.js';
-const VENDORS: Partial<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
-export const reviewVendor = (provider: string): string => VENDORS[provider] ?? provider;
 const Counts = z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), other: z.number().int().nonnegative() });
 const Run = z.object({ id: z.string().uuid(), number: z.number().int(), authorId: z.string().uuid(), commit: z.string().nullable(), command: z.string(), status: z.string(), parts: Counts, receipts: z.array(CheckReceiptPart).default([]), verified: z.boolean() });
 /* branch names where the work is when it is not on the task's own branch; commit, when given, must be its head. */
@@ -24,7 +23,6 @@ export const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
   authorId: z.string().uuid(), authorVendor: z.string().nullable(),
   status: z.enum(['pinned', 'degraded']), reason: z.string().nullable(),
-  gateCounts: z.object({ source: z.literal('review-lifecycle').default('review-lifecycle'), passed: z.number().int().nonnegative(), returned: z.number().int().nonnegative() }),
   quality: QualityEvidence.default(unavailableQuality),
   qualityTaskId: z.string().uuid().optional(),
   runs: z.array(Run), source: Source.nullable().default(null),
@@ -46,7 +44,7 @@ export const exactComparison = (result: CompareResult, base: string, head: strin
 export async function authorVendor(db: Store, authorId: string): Promise<string | null> {
   const [row] = await db.select({ provider: subscriptions.provider }).from(agents)
     .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, authorId));
-  return row?.provider ? reviewVendor(row.provider) : null;
+  return row?.provider ? modelProvider(row.provider) : null;
 }
 
 async function verifiedRun(run: TestRun, parts: Part[], commit: string | null): Promise<boolean> {
@@ -88,11 +86,6 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: 
   return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
 }
 
-async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts']> {
-  const verdicts = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict')));
-  return { source: 'review-lifecycle', passed: verdicts.filter(v => v.data.pass === true).length, returned: verdicts.filter(v => v.data.pass === false).length };
-}
-
 /* Resolve the repository before a task transaction; an outage refuses the submission rather than record it without a
    commit. A repair keeps the branch of the candidate it repairs unless another is named. */
 export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typeof ReviewSubmission>, branch?: string): Promise<Review> {
@@ -101,7 +94,7 @@ export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typ
   if (!found) throw refuse(409, 'repo_invalid', 'This task has no repository, so it has no code candidate. Report its result instead.');
   const named = input?.branch ?? branch;
   const pin = await readPin(ctx.readCommit, found.repo, named ? { branch: named } : { task: task.number }, input?.commit);
-  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
+  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
 }
 
 /* Keep immutable submission facts separate from the consumer's current receipt validation. */

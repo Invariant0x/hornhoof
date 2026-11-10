@@ -5,9 +5,9 @@ import { AuthorCheckInput, authorQuality, recordAuthorCheck } from '../src/modul
 import { SHA, OTHER, qualityFixture } from './review-quality-fixture.js';
 
 describe('the consumer of author-check records from task 325', () => {
-  it('reports missing quality numbers as unavailable, separate from review lifecycle counts', async () => {
+  it('reports missing quality numbers as unavailable', async () => {
     const f = await qualityFixture();
-    expect(await f.read()).toMatchObject({ quality: { status: 'unavailable', reason: 'author-check-record-unavailable', record: null }, gateCounts: { source: 'review-lifecycle' } });
+    expect(await f.read()).toMatchObject({ quality: { status: 'unavailable', reason: 'author-check-record-unavailable', record: null } });
   });
 
   it('delivers exact run/SHA/scope/stages and numbers from a server record, keeping dryer flags informational', async () => {

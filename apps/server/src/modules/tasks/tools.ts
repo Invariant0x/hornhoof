@@ -25,7 +25,7 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
-import { WaitInput, waitFor } from './external-wait.js';
+import { TaskReference as Ref, WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
@@ -64,10 +64,9 @@ function fitted<T extends TaskDetail>(detail: T): string {
   return JSON.stringify({ ...detail, log: detail.log.slice(drop), logLeftOut: drop }, english);
 }
 
-const Ref = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 const Title = z.string().trim().min(1).max(120);
 const Brief = z.string().max(600).describe('One to three sentences people read on the map and in the tracker.');
-const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the gates check), product, constraints. Rewrite it as the current truth.');
+const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the checking stages check), product, constraints. Rewrite it as the current truth.');
 const After = z
   .array(Ref)
   .max(10)
@@ -334,7 +333,7 @@ class TaskTools {
       'task',
       {
         description:
-          'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
+          'One task in full: its body (the current truth), stages and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
           "task.echelons is the required ordered route and current owner. Candidates and producing identities are immutable. Review and Security own their repairs in the same branch; optional Cleanup follows Review only when the head enabled it. review contains exact author receipts and quality evidence or unavailable; testEvidence proves only its exact current commit. echelonFindings contains deduplicated stage findings and independent confirmations.",
         inputSchema: { task: Ref },
       },
@@ -555,7 +554,7 @@ class TaskTools {
       'merge_turn',
       {
         description:
-          'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, gates, results and history; they start once when the target is open. ' +
+          'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, stages, results and history; they start once when the target is open. ' +
           'The source closes and its closed tasks stay there as history. Repeating the same merge is safe. Only turns of the same mode merge.',
         inputSchema: { source: Turn, target: Turn },
       },
@@ -701,11 +700,11 @@ class TaskTools {
   private registerConfirmFinding(): void {
     this.server.registerTool(
       'confirm_finding',
-      { description: 'The actual area author or its head explicitly confirms or rejects a structured finding. Read its findingId and revision from task.reviewFindings. An author must name its current exact fixCommit; a head may confirm existence before a fix. This records existence only; it never passes a gate or removes a blocking finding. History and vendor counts retain provenance.', inputSchema: { task: Ref, ...ConfirmationInput.shape } },
+      { description: 'The actual area author or its head explicitly confirms or rejects a structured finding. Read its findingId and revision from task.reviewFindings. An author must name its current exact fixCommit; a head may confirm existence before a fix. This records existence only; it never passes a stage or removes a blocking finding. History and vendor counts retain provenance.', inputSchema: { task: Ref, ...ConfirmationInput.shape } },
       async ({ task: ref, ...input }) => this.run(async () => {
         const { task } = await this.find(ref);
         await confirmFinding(this.ctx, this.job.agentId, task, input);
-        return { text: 'The finding confirmation is recorded; its gate and fix status are unchanged.' };
+        return { text: 'The finding confirmation is recorded; its stage and fix status are unchanged.' };
       }),
     );
   }

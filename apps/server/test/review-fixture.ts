@@ -47,7 +47,7 @@ export async function fixture() {
 }
 
 type Finding = { findingId: string; revision: string; reviewedCommit: string; reviewerId: string; reviewerVendor: string; taskId: string; authorId: string };
-type FindingReport = { confirmedCount: number; byVendor: { vendor: string; count: number; findingIds: string[] }[]; issues: Finding[]; legacyUncounted: number };
+type FindingReport = { uniqueConfirmed: number; byVendor: { vendor: string; count: number; findingIds: string[] }[]; issues: Finding[]; legacyUncounted: number };
 
 export async function rejectedFinding(category: 'security' | 'data' | 'spec' | 'other' | 'mechanical' = 'data') {
   const f = await fixture();

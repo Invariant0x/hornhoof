@@ -18,7 +18,7 @@ export const ConfirmationInput = z.object({ findingId: z.uuid(), revision: z.uui
 const Confirmation = ConfirmationInput.extend({ actorId: z.uuid(), authority: z.enum(['head', 'author']) });
 type Reader = Ctx['db'] | Tx;
 type Event = Pick<typeof taskEvents.$inferSelect, 'id' | 'companyId' | 'taskId' | 'agentId' | 'kind' | 'data'>;
-export type FindingReport = EchelonFindingsView & { confirmedCount: number; byVendor: { vendor: string; count: number; findingIds: string[] }[] };
+export type FindingReport = EchelonFindingsView & { byVendor: { vendor: string; count: number; findingIds: string[] }[] };
 
 export async function reviewEvents(db: Reader, ids: string[]): Promise<Event[]> {
   return ids.length ? db.select({ id: taskEvents.id, companyId: taskEvents.companyId, taskId: taskEvents.taskId, agentId: taskEvents.agentId, kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(inArray(taskEvents.taskId, ids)).orderBy(asc(taskEvents.id)) : [];
@@ -94,14 +94,14 @@ export function countedFindings(events: Event[]): FindingReport {
     const ids = [...new Set(issues.filter(issue => issue.reviewerVendor === vendor && confirmed.has(issue.findingId)).map(issue => issue.findingId))];
     return { vendor, count: ids.length, findingIds: ids };
   }).filter(item => item.count > 0);
-  return { uniqueReported: unique(issues), uniqueConfirmed: confirmed.size, confirmedCount: confirmed.size, review: counts('review'), security: counts('security'), cleanup: counts('cleanup'), byVendor, issues: issues.map(issue => ({ ...issue, confirmed: confirmed.has(issue.findingId) })) };
+  return { uniqueReported: unique(issues), uniqueConfirmed: confirmed.size, review: counts('review'), security: counts('security'), cleanup: counts('cleanup'), byVendor, issues: issues.map(issue => ({ ...issue, confirmed: confirmed.has(issue.findingId) })) };
 }
 
 export async function findingReport(db: Reader, ids: string[]): Promise<FindingReport> {
   return countedFindings(await reviewEvents(db, ids));
 }
 export type TurnFindingReport = (FindingReport & { status: 'recorded'; reason: null }) | {
-  status: 'unavailable'; reason: 'finding-provenance-unavailable'; confirmedCount: null; uniqueReported: null; uniqueConfirmed: null;
+  status: 'unavailable'; reason: 'finding-provenance-unavailable'; uniqueReported: null; uniqueConfirmed: null;
   review: null; security: null; cleanup: null; byVendor: []; issues: [];
 };
 
@@ -124,7 +124,7 @@ function submittedForVerdict(source: Event, verdict: Event): boolean {
 export async function findingTurnReport(db: Reader, companyId: string, number: number): Promise<TurnFindingReport> {
   const rows = await db.select({ id: tasks.id }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
   const events = await reviewEvents(db, rows.map(row => row.id));
-  if (hasUnattestedVerdict(events)) return { status: 'unavailable', reason: 'finding-provenance-unavailable', confirmedCount: null, uniqueReported: null, uniqueConfirmed: null, review: null, security: null, cleanup: null, byVendor: [], issues: [] };
+  if (hasUnattestedVerdict(events)) return { status: 'unavailable', reason: 'finding-provenance-unavailable', uniqueReported: null, uniqueConfirmed: null, review: null, security: null, cleanup: null, byVendor: [], issues: [] };
   return { ...countedFindings(events), status: 'recorded', reason: null };
 }
 

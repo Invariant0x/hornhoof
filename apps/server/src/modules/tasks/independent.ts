@@ -66,7 +66,3 @@ export async function independentViews(db: Db | Tx, taskIds: string[]): Promise<
 export async function currentIndependent(db: Db | Tx, taskId: string): Promise<IndependentRecord | null> {
   return (await independentViews(db, [taskId])).get(taskId) ?? null;
 }
-
-export async function independentView(db: Db | Tx, task: Pick<typeof tasks.$inferSelect, 'id' | 'after'>): Promise<IndependentRecord | null> {
-  return task.after.length ? currentIndependent(db, task.id) : null;
-}

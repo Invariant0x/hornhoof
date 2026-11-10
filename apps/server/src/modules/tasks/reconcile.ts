@@ -7,10 +7,8 @@ import { failOpenJobs } from '../nodes/messages.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, giver, lastMove, openAfter, type Task, type Wake } from './engine.js';
 import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
-import { checkSilentTurns, SILENT_TURN_MS } from './silent.js';
+import { checkSilentTurns } from './silent.js';
 import { wakeAll } from './wake.js';
-
-export { checkSilentTurns, SILENT_TURN_MS };
 
 const MACHINE_AWAY_MS = 5 * 60_000;
 const LOST_WAKE_MS = 2 * 60_000;
@@ -33,7 +31,7 @@ async function failAwayTurns(ctx: Ctx, now: Date): Promise<void> {
 type Move = Awaited<ReturnType<typeof lastMove>>;
 
 /* Only the current owner acts on an executable candidate. */
-async function wakesDue(_ctx: Ctx, task: Task, move: Move): Promise<Wake[]> {
+async function wakesDue(task: Task, move: Move): Promise<Wake[]> {
   if (task.status === 'blocked') return giver(task, 'blocked', task.assigneeAgentId ?? undefined, move?.text);
   return task.assigneeAgentId ? [{ agentId: task.assigneeAgentId, taskId: task.id, why: task.status === 'review' ? 'review' : 'assigned' }] : [];
 }
@@ -73,7 +71,7 @@ async function wakeMissing(ctx: Ctx, now: Date): Promise<void> {
     const move = await lastMove(ctx.db, task.id);
     const movedAt = move?.createdAt ?? task.createdAt;
     if (movedAt >= before || (await waitsOnPurpose(ctx, task))) continue;
-    for (const w of await wakesDue(ctx, task, move)) {
+    for (const w of await wakesDue(task, move)) {
       if (move?.agentId === w.agentId) continue;
       if (await canWake(ctx, w, movedAt, before)) await wakeAll(ctx, [w]);
     }
