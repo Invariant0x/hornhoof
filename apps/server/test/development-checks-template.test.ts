@@ -118,6 +118,19 @@ describe('turnkey work', () => {
     }
   });
 
+  it('teaches heads and the orchestrator the two modes of a turn, and that work outside a turn has no echelons', () => {
+    for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-plan-turn', 'orch-company']) {
+      expect(body(id), id).toMatch(/turn runs in echelons[^.]*or turnkey[^.]*one member of a turnkey team/);
+      expect(body(id), id).toMatch(/work outside a turn goes through no echelons[^.]*its holder does it end to end alone/);
+      expect(body(id), id).not.toMatch(/outside a turn[^.]*turnkey team/);
+    }
+  });
+
+  it('tells the orchestrator never to start a turn without its mode, which is fixed once the turn starts', () => {
+    expect(body('orch-plan-turn')).toMatch(/plan_turn[^.]*mode[^.]*never without/);
+    expect(body('orch-plan-turn')).toMatch(/mode is fixed once the turn starts[^.]*edit_turn[^.]*planned/);
+  });
+
   it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
     expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*report done true/);
   });

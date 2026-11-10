@@ -6,7 +6,7 @@ import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, s
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { listen, mcp, setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -35,6 +35,7 @@ async function company() {
   };
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
+  await echelonsTurn(db, companyId);
   return { app, ctx, db, companyId, sub: sub!, snapshot, CEO, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, tess, deptTask, memberTask, read };
 }
 

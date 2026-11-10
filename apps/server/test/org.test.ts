@@ -8,7 +8,7 @@ import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js
 import { failureCompany } from './failure-company.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
-import { as, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
+import { as, echelonsTurn, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 describe('GET /api/org', () => {
   it('reads failure state with the same number of queries as the company grows', async () => {
@@ -160,6 +160,7 @@ describe('GET /api/org', () => {
     await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev!.id));
     ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
     ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+    await echelonsTurn(db, companyId);
     const [ceoRow] = await db.select().from(people);
     const top = (await createTask(ctx, { personId: ceoRow!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: hana.id })).task;
     const member = async (title: string, agentId: string, reviewerAgentId = rita.id) =>
@@ -210,6 +211,7 @@ describe('GET /api/org', () => {
     app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
     app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
     const create = async (title: string, assigneeAgentId: string, reviewerAgentId: string) => (await createTask(app.ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
+    await echelonsTurn(db, company!.id);
     const page = await create('Checkout page', felix.id, rita.id);
     const api = await create('Checkout API', bruno.id, rex.id);
     await submit(app.ctx, felix.id, page.id, { summary: 'Page candidate', evidence: 'Changed page tests.', review: { baseCommit: BASE } });

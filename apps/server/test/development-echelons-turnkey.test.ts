@@ -60,11 +60,10 @@ describe('a task of a turnkey team never enters the echelons', () => {
     expect(wakePrompt(f.author, f.task, { agentId: f.author.id, taskId: f.task.id, why: 'assigned' }, 'code')).toMatch(/follow task\.echelons/);
   });
 
-  it('takes no Review, Security or Tests owner when it is made', async () => {
+  it('calls no Review, Security or Tests owner onto it, even when the head names one', async () => {
     const f = await turnkeyFixture();
-    for (const named of [{ reviewerAgentId: f.reviewer.id }, { securityAgentId: f.security.id }, { testsAgentId: f.tester.id }]) {
-      await expect(f.give(named)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('turnkey') as unknown });
-    }
+    const { task } = await f.give({ reviewerAgentId: f.reviewer.id, securityAgentId: f.security.id, testsAgentId: f.tester.id, cleanup: true });
+    expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', stages: [], assignment: null });
   });
 
   it('goes to another member of a turnkey team, never into the echelons', async () => {

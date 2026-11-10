@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireDepartmentHad } from '../../auth/departments.js';
 import { requirePerson, type Person } from '../../auth/session.js';
+import { TURN_MODES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { scheduleBacklog } from '../tasks/turns.js';
@@ -14,7 +15,8 @@ const Params = z.object({ id: z.uuid() });
 const ItemParams = z.strictObject({ id: z.uuid(), item: z.uuid() });
 const NewItem = z.strictObject({ title: z.string().trim().min(1).max(120), text: z.string().max(20000).default('') });
 const Order = z.strictObject({ ids: z.array(z.uuid()).max(500) });
-const Chosen = z.strictObject({ ids: z.array(z.uuid()).min(1).max(20) });
+/* mode: how the next turn runs, when the items start one or join a planned one. */
+const Chosen = z.strictObject({ ids: z.array(z.uuid()).min(1).max(20), mode: z.enum(TURN_MODES).default('echelons') });
 
 /* A department's list of work kept for later turns: what its people put aside, in the order they want it, until they or
    the orchestrator put items into the next turn. Only people who have the department read or change it. */
@@ -61,10 +63,10 @@ export function backlogRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/departments/:id/backlog/schedule', async req => {
     const me = await requirePerson(req, db);
     const department = await departmentOf(req, me);
-    const { ids } = Chosen.parse(req.body);
+    const { ids, mode } = Chosen.parse(req.body);
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     if (!orchestrator) throw new ApiError(409, 'conflict', 'This company has no orchestrator to give the tasks of a turn.', 'no_head');
-    const moved = await scheduleBacklog(ctx, { companyId: me.companyId, agentId: orchestrator.id, personId: me.id }, department.id, ids);
+    const moved = await scheduleBacklog(ctx, { companyId: me.companyId, agentId: orchestrator.id, personId: me.id }, department.id, ids, mode);
     await wakeAll(ctx, moved.wakes);
     return { turn: { number: moved.turn.number }, tasks: moved.tasks.map(t => ({ id: t.id, number: t.number })) };
   });

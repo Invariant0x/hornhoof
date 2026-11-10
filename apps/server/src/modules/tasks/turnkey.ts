@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, teams } from '../../db/schema.js';
+import { agents, teams, turns, type TurnMode } from '../../db/schema.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
@@ -15,10 +15,35 @@ export async function turnkeyTeamOf(db: Db | Tx, companyId: string, agentId: str
   return team ?? null;
 }
 
-/* Whether a task goes through the echelons, decided once as it is made. Every rule of which work skips them belongs here. */
-export async function throughEchelons(db: Db | Tx, task: Pick<Task, 'companyId' | 'executorAgentId' | 'assigneeAgentId'>): Promise<boolean> {
-  return !(await turnkeyTeamOf(db, task.companyId, task.executorAgentId ?? task.assigneeAgentId));
+/* A turnkey turn needs someone to carry it: a member of a turnkey team who is still at work. */
+export async function requireTurnkeyTeam(db: Db | Tx, companyId: string): Promise<void> {
+  const [member] = await db.select({ id: agents.id }).from(agents)
+    .innerJoin(teams, and(eq(teams.id, agents.teamId), eq(teams.companyId, companyId), eq(teams.turnkey, true)))
+    .where(and(eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  if (!member) throw refuse(409, 'no_turnkey_team', 'There is no turnkey team with a member to carry a turnkey turn. Mark a sub-unit "Works turnkey" on its department\'s screen first, or start the turn in echelons.');
 }
+
+/* Where a task is made: its company, its turn, if any, and who holds it. */
+type Placement = { companyId: string; turnId: string | null; holderId: string | null };
+
+async function turnMode(db: Db | Tx, at: Placement): Promise<TurnMode | null> {
+  if (!at.turnId) return null;
+  const [turn] = await db.select({ mode: turns.mode }).from(turns).where(and(eq(turns.id, at.turnId), eq(turns.companyId, at.companyId)));
+  return turn?.mode ?? null;
+}
+
+/* Whether work goes through the echelons, decided once as its task is made and never changed after. Every rule of which
+   work skips them belongs here: only a task of a turn started in echelons goes through them, and never one held by a
+   member of a turnkey team. The work of a turnkey turn goes only to members of turnkey teams. */
+export async function echelonsFor(db: Db | Tx, at: Placement): Promise<boolean> {
+  const team = await turnkeyTeamOf(db, at.companyId, at.holderId);
+  const mode = await turnMode(db, at);
+  if (mode === 'turnkey' && !team) throw refuse(409, 'task_invalid', 'Work of a turnkey turn goes only to a member of a turnkey team, who does it end to end alone.');
+  return mode === 'echelons' && !team;
+}
+
+export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'turnId' | 'executorAgentId' | 'assigneeAgentId'>) =>
+  echelonsFor(db, { companyId: task.companyId, turnId: task.turnId, holderId: task.executorAgentId ?? task.assigneeAgentId });
 
 export const turnkeyWork = (task: Pick<Task, 'number'>) =>
   refuse(409, 'task_invalid', `#${task.number} is turnkey work: its holder does it end to end alone and closes it with report, so no echelon takes it.`);

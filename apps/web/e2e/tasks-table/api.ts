@@ -23,7 +23,7 @@ const orgOf = (departments: { id: string; name: string }[]): Org => ({
 });
 
 const turn = (number: number, status: TurnView['status'], title: string, goal: string, tasks: TurnView['tasks']): TurnView => ({
-  id: `u${number}`, number, title, goal, status, messages: [], taskId: null, tasks,
+  id: `u${number}`, number, title, goal, status, mode: 'echelons', messages: [], taskId: null, tasks,
   startedAt: '2026-10-30T07:00:00.000Z', openedAt: status === 'planned' ? null : '2026-10-30T07:00:00.000Z', closedAt: status === 'closed' ? '2026-10-30T08:00:00.000Z' : null,
 });
 export const TURNS: TurnView[] = [

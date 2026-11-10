@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions, tasks, turns } from '../src/db/schema.js';
-import { as } from './helpers.js';
+import { as, echelonsTurn } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 type Viewer = keyof AclCompany['tokens'];
@@ -230,6 +230,7 @@ describe('tasks', () => {
   it('names no hidden agent on a seen task: not its stage owners, log, requests or files', async () => {
     const c = await aclCompany();
     const { createTask, comment, ask } = await import('../src/modules/tasks/engine.js');
+    await echelonsTurn(c.db, c.companyId);
     const parent = await c.work('Hidden parent', c.crew.other);
     const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, resultKind: 'code', reviewerAgentId: c.crew.other.id, parentId: parent.id });
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, 'Otto was here');

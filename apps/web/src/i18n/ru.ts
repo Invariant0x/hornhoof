@@ -1021,7 +1021,7 @@ export const ru: Messages = {
   tasks: {
     echelons: {
       coordination: 'Проверенный отчет по дочерним результатам',
-      turnkey: 'Под ключ: сотрудник сам делает ее от начала до конца, без этапов',
+      turnkey: 'Без этапов: сотрудник сам делает ее от начала до конца',
       findings: { heading: 'Находки по этапам', unique: n => `Уникальных находок: ${n}`, reported: n => `Найдено: ${n}`, confirmed: n => `Подтверждено: ${n}` },
       heading: 'Маршрут задачи',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
@@ -1042,6 +1042,9 @@ export const ru: Messages = {
     riskLine: (risk: string) => `риск: ${risk}`,
     turnProgress: (done, total) => `Готово ${done} из ${total} ${plural('ru', total, { one: 'задачи', few: 'задач', many: 'задач', other: 'задач' })}`,
     plannedTasks: n => `${n} ${plural('ru', n, { one: 'задача ждет', few: 'задачи ждут', many: 'задач ждут', other: 'задачи ждут' })} этот ход`,
+    turnMode: 'Как идет ход',
+    turnModeIs: { echelons: 'Как идет ход: по этапам', turnkey: 'Как идет ход: под ключ, один сотрудник сам' },
+    turnModes: { echelons: 'По этапам', turnkey: 'Под ключ, один сотрудник' },
     keep: 'Оставить',
     turnStates: { planned: 'Запланирован', open: 'Идет', closed: 'Завершен' },
     words: n => (n === 1 ? 'Исходный текст' : `Исходный текст, ${n} ${plural('ru', n, { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' })}`),
@@ -1251,6 +1254,7 @@ export const ru: Messages = {
     remove: 'Убрать',
     removeLabel: title => `Убрать из списка: ${title}`,
     schedule: n => (n ? `Поставить в следующий ход: ${n}` : 'Поставить в следующий ход'),
+    mode: 'Как пойдет следующий ход',
     scheduled: (turn, tasks) => `Теперь в ходе ${turn}: ${tasks}.`,
   },
   improvements: {
@@ -1430,6 +1434,8 @@ export const ru: Messages = {
     backlog_changed: 'Список тем временем изменился. Он показан заново, как есть сейчас.',
     backlog_unknown: 'Этой задачи уже нет в списке.',
     turn_open: 'Ход уже идет. Закройте его, прежде чем начать следующий.',
+    turn_mode_fixed: 'Этот ход уже начался, поэтому способ работы в нем не меняется. Запланируйте новую работу в новом ходе.',
+    no_turnkey_team: 'Ни один подотдел пока не работает под ключ, поэтому сделать ход в одиночку некому. Сначала отметьте подотдел «Работает под ключ» на экране его отдела или ведите ход по этапам.',
     no_head: 'У этого отдела еще нет руководителя. Сначала наймите его.',
     switched_off: 'Этот сотрудник сейчас выключен. Сначала включите его на схеме отдела.',
     repo_invalid: 'Нужен адрес https без имени и токена внутри, простое имя ветки, а у автора имя в одну строку и полная почта.',

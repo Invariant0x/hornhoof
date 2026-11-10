@@ -31,14 +31,15 @@ function changedPaths(route: Route, change: TaskChange): string[] {
   return paths;
 }
 
-/* Turnkey work stays with a member of a turnkey team, who does it alone: it takes no stage, Cleanup or checker. */
+/* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. Outside a turn it goes to
+   anyone; in a turn it stays with a member of a turnkey team, as the turn's work goes through no echelons only there. */
 async function turnkeyChange(ctx: Ctx, task: Task, route: Route, change: TaskChange): Promise<RouteChange> {
   if (change.cleanup !== undefined) throw turnkeyWork(task);
   const paths = changedPaths(route, change);
   const ownerId = change.ownerAgentId ?? change.executor;
   if (!ownerId) return { state: route.state, set: {}, paths };
   await requireAvailableOwner(ctx, task, ownerId);
-  if (!(await turnkeyTeamOf(ctx.db, task.companyId, ownerId))) throw refuse(409, 'task_invalid', `#${task.number} is turnkey work and stays with a member of a turnkey team. Give other work as a new task.`);
+  if (task.turnId && !(await turnkeyTeamOf(ctx.db, task.companyId, ownerId))) throw refuse(409, 'task_invalid', `#${task.number} goes through no echelons in its turn, so it stays with a member of a turnkey team. Give other work as a new task.`);
   return { state: route.state, set: { assigneeAgentId: ownerId, ...(task.executorAgentId || change.executor ? { executorAgentId: ownerId } : {}), status: 'open', silent: 0 }, paths };
 }
 

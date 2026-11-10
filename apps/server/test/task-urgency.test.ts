@@ -173,10 +173,10 @@ describe('the orchestrator', () => {
   it('lays out urgent tasks only in a turn that answers the CEO', async () => {
     const c = await company();
     const woken = await c.tools(c.orchestrator);
-    const refused = await call(woken, 'plan_turn', { title: 'Fix', goal: 'Fix it.', tasks: [item(c, 'Forged', true)] });
+    const refused = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Fix', goal: 'Fix it.', tasks: [item(c, 'Forged', true)] });
     expect(text(refused)).toBe(ONLY_CEO);
     expect(await c.db.select().from(tasks).where(eq(tasks.title, 'Forged'))).toEqual([]);
-    const plain = await call(woken, 'plan_turn', { title: 'Plain', goal: 'Plain work.', tasks: [item(c, 'Plain work')] });
+    const plain = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Plain', goal: 'Plain work.', tasks: [item(c, 'Plain work')] });
     expect(plain.isError, text(plain)).toBeFalsy();
     const answering = await c.tools(c.orchestrator, true);
     const urgent = await call(answering, 'add_tasks', { turn: 1, tasks: [item(c, 'Real', true)] });
@@ -303,7 +303,7 @@ describe('what people and agents read', () => {
     const c = await company();
     await c.db.update(teams).set({ urgentOnly: true }).where(eq(teams.id, c.quick.id));
     const inCompany = JSON.parse(text(await call(await c.tools(c.head), 'company', {}))) as { departments: { id: string; teams: { id: string; urgentOnly: boolean }[] }[] };
-    expect(inCompany.departments.find(d => d.id === c.dev.id)!.teams).toEqual([{ id: c.quick.id, name: 'Quick', urgentOnly: true }]);
+    expect(inCompany.departments.find(d => d.id === c.dev.id)!.teams).toEqual([{ id: c.quick.id, name: 'Quick', urgentOnly: true, turnkey: false }]);
     const org = (await c.app.inject({ url: '/api/org', ...as(c.ceoToken) })).json() as { departments: { id: string; teams: { id: string; urgentOnly: boolean }[] }[] };
     expect(org.departments.find(d => d.id === c.dev.id)!.teams[0]!.urgentOnly).toBe(true);
   });
@@ -539,11 +539,11 @@ describe('work for someone in a team that takes only urgent work', () => {
       await c.db.update(agents).set({ teamId: c.quick.id }).where(eq(agents.id, c.head.id));
       const item = (title: string, urgent?: boolean) => ({ department: c.dev.id, title, brief: '', body: '', ...(urgent === undefined ? {} : { urgent }) });
       const client = await c.tools(c.orchestrator, true);
-      const plain = await call(client, 'plan_turn', { title: 'Plain', goal: 'Plain work.', tasks: [item('Plain')] });
+      const plain = await call(client, 'plan_turn', { mode: 'echelons', title: 'Plain', goal: 'Plain work.', tasks: [item('Plain')] });
       expect(plain.isError, text(plain)).toBe(true);
       expect(text(plain)).toContain(TAKES_ONLY_URGENT);
       expect(await c.db.select().from(turns)).toEqual([]);
-      const urgent = await call(client, 'plan_turn', { title: 'Fix', goal: 'Fix it.', tasks: [item('Real', true)] });
+      const urgent = await call(client, 'plan_turn', { mode: 'echelons', title: 'Fix', goal: 'Fix it.', tasks: [item('Real', true)] });
       expect(urgent.isError, text(urgent)).toBeFalsy();
       const added = await call(client, 'add_tasks', { turn: 1, tasks: [item('Plain again')] });
       expect(added.isError, text(added)).toBe(true);
@@ -653,6 +653,7 @@ describe('work for someone in a team that takes only urgent work', () => {
 
     it('when their team took only urgent work after they got it', async () => {
       const c = await company();
+      await makeTurn(c.db, c.companyId);
       const held = await c.under((await c.root()).id, toSimon(c));
       await c.db.update(teams).set({ urgentOnly: true }).where(eq(teams.id, c.quick.id));
       await updateTask(c.ctx, c.head.id, held.id, { body: 'Now this.' });

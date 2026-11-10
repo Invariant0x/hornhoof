@@ -1,0 +1,1 @@
+ALTER TABLE "turns" ADD COLUMN "mode" text DEFAULT 'echelons' NOT NULL;

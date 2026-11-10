@@ -114,6 +114,8 @@ export type ErrorReason =
   | 'switched_off'
   | 'turn_open'
   | 'turn_unknown'
+  | 'turn_mode_fixed'
+  | 'no_turnkey_team'
   | 'repo_invalid'
   | 'repo_command_invalid'
   | 'attachment_invalid'

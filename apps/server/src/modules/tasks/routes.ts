@@ -10,7 +10,7 @@ import { departmentsHad, requireDepartmentHad } from '../../auth/departments.js'
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, TURN_MODES, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
@@ -30,7 +30,7 @@ import { detailFor, factsFor, linesFor, seesTask } from './sight.js';
 import { acknowledgeCard, waitCards } from './wait-cards.js';
 import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
-import { settle, tell, turnRows, type Turn } from './turns.js';
+import { editTurn, settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 
@@ -61,6 +61,8 @@ const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]),
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
+const TurnParams = z.object({ number: z.coerce.number().int().positive() });
+const TurnPatch = z.strictObject({ mode: z.enum(TURN_MODES) });
 const AnswerBody = z.union([
   z.object({ answer: Text.trim().min(1) }).strict(),
   z.object({ approve: z.boolean(), answer: Text.optional() }).strict(),
@@ -187,6 +189,7 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
     title: turn.title || turn.goal,
     goal: turn.goal,
     status: turn.status,
+    mode: turn.mode,
     messages: viewer.full ? turn.messages.map(({ by, text, at }) => ({ by, text, at })) : [],
     taskId: await turnTask(db, turn, viewer),
     startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
@@ -431,6 +434,16 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const viewer = await viewerOf(db, me);
     return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer))) };
+  });
+
+  /* A person who sees the whole company picks how a planned turn runs; a turn that has started keeps its mode. */
+  app.patch('/api/turns/:number', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { number } = TurnParams.parse(req.params);
+    const { mode } = TurnPatch.parse(req.body);
+    const turn = await editTurn(ctx, me.companyId, number, { mode });
+    return { turn: await turnView(db, turn, await viewerOf(db, me)) };
   });
 
   app.get('/api/turns/current', async req => {

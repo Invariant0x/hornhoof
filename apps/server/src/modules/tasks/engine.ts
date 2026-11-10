@@ -506,7 +506,8 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTa
 
 type CreatedTask = Moved & { independent: Task | null };
 
-async function turnForNewTask(tx: Tx, companyId: string, parent: Task | null): Promise<string | null> {
+/* The turn a new task belongs to: its parent's, or else the turn running now, if any. */
+export async function turnForNewTask(tx: Db | Tx, companyId: string, parent: Task | null): Promise<string | null> {
   const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
   const turnId = parent ? parent.turnId : (turn?.id ?? null);
   return turnId;

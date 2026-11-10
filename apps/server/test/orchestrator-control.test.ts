@@ -14,7 +14,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, echelonsTurn } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -45,6 +45,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
     db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo, createdBy }).returning();
   /* The orchestrator's turn is the CEO's, who started it without a message, so every tool works in it. */
   await running(orchestrator!.id, TOKEN, true, owner!.id);
+  await echelonsTurn(db, acme!.id);
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' })).task;
   return { app, db, ceo, ceoId: owner!.id, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
 }

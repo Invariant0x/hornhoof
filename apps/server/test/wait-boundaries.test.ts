@@ -21,7 +21,7 @@ async function pendingRequest() {
 }
 
 async function pendingQuiet() {
-  const c = await waitCompany();
+  const c = await waitCompany({ turn: false });
   const now = new Date();
   const since = new Date(now.getTime() - 900_000);
   const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Deliver', openedAt: since }).returning();

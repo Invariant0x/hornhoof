@@ -8,11 +8,12 @@ import { createTask, submit, updateTask, type Task } from '../src/modules/tasks/
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, echelonsTurn, listen, mcp, setUpCompany, testApp } from './helpers.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 
-async function company() {
+/* With a turn open in echelons, unless asked for none. */
+async function company({ turn = true } = {}) {
   const { app, db } = await testApp();
   await listen(app);
   const ceoToken = await setUpCompany(app);
@@ -44,6 +45,7 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
+  if (turn) await echelonsTurn(db, companyId);
   return { app, db, ctx: app.ctx, companyId, ceoToken, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, rita, tess, sam, tools };
 }
 
@@ -157,10 +159,10 @@ describe('task tools', () => {
   });
 
   it('refuses the eleventh task in one turn', async () => {
-    const { orchestrator, dev, tools } = await company();
+    const { orchestrator, dev, tools } = await company({ turn: false });
     const client = await tools(orchestrator);
     const ten = Array.from({ length: 10 }, (_, i) => ({ department: dev.id, title: `Task ${i + 1}`, brief: '', body: '' }));
-    expect((await call(client, 'plan_turn', { title: 'Big', goal: 'Ten things.', tasks: ten })).isError).toBeFalsy();
+    expect((await call(client, 'plan_turn', { mode: 'echelons', title: 'Big', goal: 'Ten things.', tasks: ten })).isError).toBeFalsy();
     const eleventh = await call(client, 'add_tasks', { turn: 1, tasks: [{ department: dev.id, title: 'Task 11', brief: '', body: '' }] });
     expect(eleventh.isError).toBe(true);
     expect(text(eleventh)).toMatch(/10 tasks/);
@@ -318,9 +320,9 @@ describe("a task's kind and risk class", () => {
   });
 
   it('come from the orchestrator in plan_turn and add_tasks, on each task', async () => {
-    const { db, dev, orchestrator, tools } = await company();
+    const { db, dev, orchestrator, tools } = await company({ turn: false });
     const client = await tools(orchestrator);
-    const planned = await call(client, 'plan_turn', { title: 'Next', goal: 'Do it.', tasks: [work(dev.id, 'One', { workKind: 'known_behavior', riskClass: 'none' }), work(dev.id, 'Two')] });
+    const planned = await call(client, 'plan_turn', { mode: 'echelons', title: 'Next', goal: 'Do it.', tasks: [work(dev.id, 'One', { workKind: 'known_behavior', riskClass: 'none' }), work(dev.id, 'Two')] });
     expect(planned.isError).toBeFalsy();
     const added = await call(client, 'add_tasks', { turn: 1, tasks: [work(dev.id, 'Three', { workKind: 'bug', riskClass: 'money' })] });
     expect(added.isError).toBeFalsy();

@@ -38,19 +38,14 @@ function codeState(task: Task, input: RouteInput, cleanup: boolean): Route['stat
 
 const NO_SECURITY: Route['state']['security'] = { required: false, reason: null, addedBy: null };
 
-/* Work done end to end by its holder alone: no stage, no candidate and nobody else called onto it. */
+/* Work done end to end by its holder alone: no stage, no candidate and nobody else called onto it, even when checkers are named. */
 async function turnkeyRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
-  if (input.reviewerAgentId || input.securityAgentId || input.testsAgentId || input.cleanup) {
-    throw new ApiError(409, 'conflict', `#${task.number} goes to a member of a turnkey team, who does it end to end alone with no echelons: name no Review, Security or Tests owner and no Cleanup.`, 'task_invalid');
-  }
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
     kind: 'development_echelons', version: 1, resultKind: 'turnkey', stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], security: NO_SECURITY,
   } });
 }
 
 export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
-  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input);
-  const cleanup = input.cleanup ?? await turnCleanupDefault(tx, task);
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
   if (resultKind === 'coordination') {
     await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: {
@@ -58,6 +53,8 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
     } });
     return;
   }
+  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input);
+  const cleanup = input.cleanup ?? await turnCleanupDefault(tx, task);
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: codeState(task, input, cleanup) });
 }
 

@@ -26,9 +26,9 @@ describe('task workflow', () => {
     expect(screen.getByText('The tests failed')).toBeTruthy();
   });
 
-  it('says plainly that turnkey work goes through no stages', () => {
+  it('says plainly that work with no stages is done by its employee alone, naming no turnkey team', () => {
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={{ ...workflow([], 'active'), resultKind: 'turnkey', stage: null }} /></LanguageProvider>);
-    expect(screen.getByRole('heading').textContent).toBe('Turnkey: the employee does it alone from start to finish, with no stages');
+    expect(screen.getByRole('heading').textContent).toBe('No stages: the employee does it alone from start to finish');
   });
 
   it('shows the phase of a cancelled task as cancelled', () => {

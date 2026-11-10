@@ -1,6 +1,6 @@
 import { api } from './api';
 import { useLive } from './tasks';
-import type { BacklogItem } from './types';
+import type { BacklogItem, TurnMode } from './types';
 
 const listPath = (departmentId: string) => `/api/departments/${departmentId}/backlog`;
 
@@ -13,8 +13,9 @@ export function useBacklog(departmentId: string | null) {
 export const addToBacklog = (departmentId: string, item: { title: string; text: string }) => api.post<{ item: BacklogItem }>(listPath(departmentId), item);
 export const orderBacklog = (departmentId: string, ids: string[]) => api.put<{ items: BacklogItem[] }>(`${listPath(departmentId)}/order`, { ids });
 export const removeFromBacklog = (departmentId: string, id: string) => api.del<{ items: BacklogItem[] }>(`${listPath(departmentId)}/${id}`);
-export const scheduleBacklog = (departmentId: string, ids: string[]) =>
-  api.post<{ turn: { number: number }; tasks: { id: string; number: number }[] }>(`${listPath(departmentId)}/schedule`, { ids });
+/* mode: how the next turn runs, when the items start one or join a planned one of that mode. */
+export const scheduleBacklog = (departmentId: string, ids: string[], mode: TurnMode) =>
+  api.post<{ turn: { number: number }; tasks: { id: string; number: number }[] }>(`${listPath(departmentId)}/schedule`, { ids, mode });
 
 /* The list with one item moved to another place, the rest in their order. */
 export function moved<T>(list: readonly T[], from: number, to: number): T[] {

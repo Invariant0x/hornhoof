@@ -986,7 +986,7 @@ export const en = {
   tasks: {
     echelons: {
       coordination: 'Checked coordination report',
-      turnkey: 'Turnkey: the employee does it alone from start to finish, with no stages',
+      turnkey: 'No stages: the employee does it alone from start to finish',
       findings: { heading: 'Findings by stage', unique: (n: number) => `Unique findings: ${n}`, reported: (n: number) => `Reported: ${n}`, confirmed: (n: number) => `Confirmed: ${n}` },
       heading: 'Task workflow',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
@@ -1007,6 +1007,9 @@ export const en = {
     riskLine: (risk: string) => `risk: ${risk}`,
     turnProgress: (done: number, total: number) => `${done} of ${total} tasks done`,
     plannedTasks: (n: number) => `${n} ${plural('en', n, { one: 'task', other: 'tasks' })} waiting for this turn`,
+    turnMode: 'How the turn runs',
+    turnModeIs: { echelons: 'How the turn runs: in stages', turnkey: 'How the turn runs: turnkey, by one employee alone' },
+    turnModes: { echelons: 'In stages', turnkey: 'Turnkey, one employee alone' },
     keep: 'Keep it',
     turnStates: { planned: 'Planned', open: 'Running', closed: 'Finished' },
     words: (n: number) => (n === 1 ? 'The words it came from' : `The words it came from, ${n} messages`),
@@ -1218,6 +1221,7 @@ export const en = {
     remove: 'Remove',
     removeLabel: (title: string) => `Remove from the list: ${title}`,
     schedule: (n: number) => (n ? `Put into the next turn: ${n}` : 'Put into the next turn'),
+    mode: 'How the next turn runs',
     scheduled: (turn: number, tasks: string) => `Now in turn ${turn}: ${tasks}.`,
   },
   improvements: {
@@ -1394,6 +1398,8 @@ export const en = {
     backlog_changed: 'The list changed meanwhile. It is shown again as it is now.',
     backlog_unknown: 'This task is no longer in the list.',
     turn_open: 'A turn is running. Close it before starting the next.',
+    turn_mode_fixed: 'This turn has started, so it keeps the way it runs. Plan new work in a new turn.',
+    no_turnkey_team: 'No sub-unit works turnkey yet, so nobody can do a turn alone. Mark one as "Works turnkey" on its department\'s screen first, or run the turn in stages.',
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',

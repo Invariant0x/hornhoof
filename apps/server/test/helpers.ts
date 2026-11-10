@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance } from 'fastify';
@@ -80,6 +80,12 @@ export async function approvalAsked(app: FastifyInstance) {
 }
 
 /* Moves these agents onto a new plan of this person's own: to see an agent one must own its plan and reach its department. */
+/* Echelons exist only in a turn started in echelons, so work a test sends through them is given while this turn runs. */
+export async function echelonsTurn(db: Db, companyId: string): Promise<typeof schema.turns.$inferSelect> {
+  const [last] = await db.select({ number: schema.turns.number }).from(schema.turns).where(eq(schema.turns.companyId, companyId)).orderBy(desc(schema.turns.number)).limit(1);
+  return (await db.insert(schema.turns).values({ companyId, number: (last?.number ?? 0) + 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() }).returning())[0]!;
+}
+
 export async function ownPlan(db: Db, email: string, ...agentIds: string[]): Promise<string> {
   const [person] = await db.select().from(schema.people).where(eq(schema.people.email, email));
   const [plan] = await db.insert(schema.subscriptions).values({ companyId: person!.companyId, provider: 'claude', kind: 'personal', label: `${person!.name}'s plan`, status: 'ready', ownerPersonId: person!.id }).returning();

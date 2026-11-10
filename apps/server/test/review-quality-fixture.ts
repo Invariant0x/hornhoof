@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, testParts, testRuns } from '../src/db/schema.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
 import type { AuthorCheckResult, Quality } from '../src/modules/tasks/review-quality.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { echelonsTurn, setUpCompany, testApp } from './helpers.js';
 
 export const SHA = 'a'.repeat(40);
 export const OTHER = 'b'.repeat(40);
@@ -17,6 +17,7 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const [head] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id, subscriptionId: sub!.id, model: 'claude-opus-5-5' }).returning();
   const [author] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Author', roleKey: 'DEV-BE', departmentId: dev!.id, subscriptionId: sub!.id, model: 'claude-opus-5-5', skills: app.ctx.templates.roles.get('DEV-BE')?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [] }).returning();
+  await echelonsTurn(db, companyId);
   const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Author check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author!.id, executor: true, small: true, paths: ['**'] })).task;
   app.ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const [job] = await db.insert(jobs).values({ companyId, agentId: author!.id, taskId: task.id, subscriptionId: sub!.id, kind: 'conversation', prompt: 'Check', timeoutMs: 1000 }).returning();

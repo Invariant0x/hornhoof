@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, requests, subscriptions, taskEvents, tasks, testRuns, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, requests, subscriptions, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
@@ -8,7 +8,7 @@ import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/message
 import { submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 const MIN = 60_000;
 
@@ -33,10 +33,11 @@ async function company() {
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
   vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
+  const turn = await echelonsTurn(db, companyId);
   let number = 0;
   const at = new Date(Date.now() - 10 * MIN);
   const task = async (set: Partial<typeof tasks.$inferInsert> = {}) => {
-    const [row] = await db.insert(tasks).values({ companyId, number: ++number, title: 'Checkout API', small: true, departmentId: dev!.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id, createdByAgentId: head.id, createdAt: at, updatedAt: at, ...set }).returning();
+    const [row] = await db.insert(tasks).values({ companyId, number: ++number, title: 'Checkout API', small: true, departmentId: dev!.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id, turnId: turn.id, createdByAgentId: head.id, createdAt: at, updatedAt: at, ...set }).returning();
     await db.transaction(tx => createRoute(tx, row!, { paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: tess.id }));
     await db.insert(taskEvents).values({ companyId, taskId: row!.id, kind: 'created', agentId: head.id, createdAt: at });
     return row!;
@@ -296,8 +297,7 @@ describe('work whose move lost its wake', () => {
 
   it('recovers only the current Review owner and its exact candidate in an open turn', async () => {
     const c = await company();
-    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 4, title: 'Payments', goal: 'Card payments.' }).returning();
-    const task = await c.reviewTask({ turnId: turn!.id });
+    const task = await c.reviewTask();
     const snapshot = await c.snapshot(task.id);
     await c.round();
     await c.dueReview(c.rita.id);

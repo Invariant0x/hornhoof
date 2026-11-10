@@ -1,72 +1,12 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, improvements, jobs, people, subscriptions, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
-import { appendEvent } from '../src/modules/events/store.js';
+import { agents, companies, departments, improvements, jobs, subscriptions, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { settle } from '../src/modules/tasks/turns.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
-
-async function company() {
-  const { app, db } = await testApp();
-  await listen(app);
-  const ceoToken = await setUpCompany(app);
-  const [acme] = await db.select().from(companies);
-  const companyId = acme!.id;
-  const [ceo] = await db.select().from(people);
-  const [sub] = await db.select().from(subscriptions);
-  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const [dev, sales, design] = await db
-    .insert(departments)
-    .values([
-      { companyId, templateKey: 'development', roleCode: 'DEV', position: 1 },
-      { companyId, templateKey: 'sales', roleCode: 'SAL', position: 2 },
-      { companyId, templateKey: 'design', roleCode: 'DSN', position: 3 },
-    ])
-    .returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
-  const hana = await hire('Hana', 'head', 'DEV-HEAD', dev!.id);
-  const sara = await hire('Sara', 'head', 'SAL-HEAD', sales!.id);
-  const bruno = await hire('Bruno', 'worker', 'DEV-BE', dev!.id);
-  let n = 0;
-  /* Hornhoof's tools as a running turn of this agent sees them. */
-  const tools = async (agent: { id: string }) => {
-    const token = `tool-token-${++n}-0123456789abcdef0123456789`;
-    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
-    return mcp(app, token);
-  };
-  /* What a person wrote to the orchestrator, as the window or his terminal stores it. Times count in milliseconds and
-     people write seconds apart, so it waits a little first. */
-  const say = async (text: string, personId = ceo!.id) => {
-    await new Promise(r => setTimeout(r, 5));
-    await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
-  };
-  /* A person's message to the orchestrator with the turn it makes: queued, or running with his tools. */
-  const message = async (text: string, status: 'running' | 'queued' = 'running') => {
-    await new Promise(r => setTimeout(r, 5));
-    const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: `Ivan (CEO): ${text}`, timeoutMs: 900000, status: 'queued', createdBy: ceo!.id }).returning();
-    await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text }, personId: ceo!.id });
-    const run = async () => {
-      const token = `tool-token-${++n}-0123456789abcdef0123456789`;
-      await db.update(jobs).set({ status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) }).where(eq(jobs.id, job!.id));
-      return mcp(app, token);
-    };
-    return { run, tools: status === 'running' ? await run() : null };
-  };
-  /* Turns queued for an agent, oldest first. */
-  const queued = async (agentId: string) => db.select({ prompt: jobs.prompt, taskId: jobs.taskId }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
-  const get = (token: string, url: string) => app.inject({ method: 'GET', url, headers: { cookie: `hh_session=${token}` } });
-  return { app, db, ctx: app.ctx, companyId, ceo: ceo!, ceoToken, orchestrator: orchestrator!, dev: dev!, sales: sales!, design: design!, hana, sara, bruno, tools, say, message, queued, get };
-}
-
-type Res = { content: { text: string }[]; isError?: boolean };
-const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
-const text = (r: Res) => r.content[0]!.text;
-const work = (department: string, title: string) => ({ department, title, brief: `${title}, in a line.`, body: `${title}: what to build.` });
+import { invitePerson } from './helpers.js';
+import { call, company, text, work } from './turns-company.js';
 
 describe('turns', () => {
   it('gives the orchestrator turn tools instead of handing out single tasks', async () => {
@@ -83,7 +23,7 @@ describe('turns', () => {
 
   it('starts the first turn at once and gives each task to its head', async () => {
     const { db, orchestrator, dev, sales, hana, sara, tools, queued } = await company();
-    const res = await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'People can pay by card.', tasks: [work(dev.id, 'Checkout'), work(sales.id, 'Pricing page copy')] });
+    const res = await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'People can pay by card.', tasks: [work(dev.id, 'Checkout'), work(sales.id, 'Pricing page copy')] });
     expect(res.isError).toBeFalsy();
     expect(text(res)).toContain('Turn 1');
     expect(text(res)).toContain('started');
@@ -102,11 +42,11 @@ describe('turns', () => {
   it('plans the next turns while one runs, and wakes nobody for them', async () => {
     const { db, orchestrator, dev, hana, tools, queued } = await company();
     const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    const second = await call(client, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const second = await call(client, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     expect(text(second)).toContain('Turn 2');
     expect(text(second)).toContain('planned');
-    const third = await call(client, 'plan_turn', { title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals')] });
+    const third = await call(client, 'plan_turn', { mode: 'echelons', title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals')] });
     expect(text(third)).toContain('Turn 3');
     expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
       [1, 'open'],
@@ -124,8 +64,8 @@ describe('turns', () => {
   it('merges a planned turn into the running one without recreating work or waking it twice', async () => {
     const { db, orchestrator, dev, hana, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const [checkout] = await db.select().from(tasks).where(eq(tasks.number, 1));
     const [refund] = await db.select().from(tasks).where(eq(tasks.number, 2));
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
@@ -149,10 +89,10 @@ describe('turns', () => {
   it('merges into a planned target without wakes and keeps the following turn order', async () => {
     const { db, orchestrator, dev, hana, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
-    await call(boss, 'plan_turn', { title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Target task')] });
-    await call(boss, 'plan_turn', { title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Source task')] });
-    await call(boss, 'plan_turn', { title: 'Four', goal: 'Fourth.', tasks: [work(dev.id, 'Next task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Target task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Source task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Four', goal: 'Fourth.', tasks: [work(dev.id, 'Next task')] });
     const [target, source, next] = await db.select().from(turns).where(inArray(turns.number, [2, 3, 4])).orderBy(asc(turns.number));
     const [sourceTask] = await db.select().from(tasks).where(eq(tasks.number, 3));
 
@@ -182,8 +122,8 @@ describe('turns', () => {
     const { db, companyId, ceoToken, orchestrator, dev, hana, bruno, message, get } = await company();
     const [idea] = await db.insert(improvements).values({ companyId, agentId: bruno.id, title: 'Keep links', text: 'Preserve the task link.' }).returning();
     const boss = (await message('Take this improvement into work.')).tools!;
-    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
-    await call(boss, 'plan_turn', { title: 'Source', goal: 'Linked work.', improvement: idea!.id, tasks: [work(dev.id, 'Improvement root')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Source', goal: 'Linked work.', improvement: idea!.id, tasks: [work(dev.id, 'Improvement root')] });
     const [target] = await db.select().from(turns).where(eq(turns.number, 1));
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
     const [root] = await db.select().from(tasks).where(eq(tasks.number, 2));
@@ -216,8 +156,8 @@ describe('turns', () => {
   it('closes all-closed and truly empty sources without moving their history', async () => {
     const { db, companyId, orchestrator, dev, tools } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
-    await call(boss, 'plan_turn', { title: 'History', goal: 'Closed work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Replaced')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'History', goal: 'Closed work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Replaced')] });
     const [target] = await db.select().from(turns).where(eq(turns.number, 1));
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
     const [checkout] = await db.select().from(tasks).where(eq(tasks.number, 1));
@@ -244,8 +184,8 @@ describe('turns', () => {
   it('does not treat blocked or review tasks as empty history', async () => {
     const { db, ctx, orchestrator, dev, hana, bruno, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
-    await call(boss, 'plan_turn', { title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked')] });
     const [target] = await db.select().from(turns).where(eq(turns.number, 1));
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.number, 2));
@@ -276,9 +216,9 @@ describe('turns', () => {
   it('rejects invalid merge directions and other companies without moving tasks', async () => {
     const { db, orchestrator, dev, tools } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
-    await call(boss, 'plan_turn', { title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Second task')] });
-    await call(boss, 'plan_turn', { title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Third task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Second task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Third task')] });
     const before = await db.select().from(tasks).orderBy(asc(tasks.id));
     expect((await call(boss, 'merge_turn', { source: 1, target: 1 })).isError).toBe(true);
     expect((await call(boss, 'merge_turn', { source: 1, target: 2 })).isError).toBe(true);
@@ -296,8 +236,8 @@ describe('turns', () => {
   it('merges only once when the same calls race', async () => {
     const { db, orchestrator, dev, hana, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
-    await call(boss, 'plan_turn', { title: 'Source', goal: 'Later work.', tasks: [work(dev.id, 'Source task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Source', goal: 'Later work.', tasks: [work(dev.id, 'Source task')] });
     const [root] = await db.select().from(tasks).where(eq(tasks.number, 2));
     const results = await Promise.all([call(boss, 'merge_turn', { source: 2, target: 1 }), call(boss, 'merge_turn', { source: 2, target: 1 })]);
     expect(results.map(r => !!r.isError)).toEqual([false, false]);
@@ -310,9 +250,9 @@ describe('turns', () => {
   it('closes empty planned turns as soon as their last task is cancelled', async () => {
     const { db, orchestrator, dev, tools } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
-    await call(boss, 'plan_turn', { title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals'), work(dev.id, 'Export')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals'), work(dev.id, 'Export')] });
     const [cancelledSource, mixedSource] = await db.select().from(turns).where(inArray(turns.number, [2, 3])).orderBy(asc(turns.number));
 
     expect((await call(boss, 'cancel_task', { task: 2, why: 'Replaced by Checkout.' })).isError).toBeFalsy();
@@ -330,8 +270,8 @@ describe('turns', () => {
   it('adds tasks to the running turn at once, and to a planned turn for later', async () => {
     const { db, orchestrator, dev, sales, hana, sara, tools, queued } = await company();
     const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(client, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const now = await call(client, 'add_tasks', { turn: 1, tasks: [work(sales.id, 'Tell the customers')] });
     expect(now.isError).toBeFalsy();
     expect(text(now)).toContain('Turn 1');
@@ -348,19 +288,19 @@ describe('turns', () => {
   it('refuses work it cannot place, in words the orchestrator can act on', async () => {
     const { db, orchestrator, dev, design, tools } = await company();
     const client = await tools(orchestrator);
-    const headless = await call(client, 'plan_turn', { title: 'Logo', goal: 'A logo.', tasks: [work(design.id, 'Logo')] });
+    const headless = await call(client, 'plan_turn', { mode: 'echelons', title: 'Logo', goal: 'A logo.', tasks: [work(design.id, 'Logo')] });
     expect(headless.isError).toBe(true);
     expect(text(headless)).toMatch(/no head/i);
     expect(await db.select().from(turns)).toEqual([]);
-    expect((await call(client, 'plan_turn', { title: 'Empty', goal: 'Nothing.', tasks: [] })).isError).toBe(true);
+    expect((await call(client, 'plan_turn', { mode: 'echelons', title: 'Empty', goal: 'Nothing.', tasks: [] })).isError).toBe(true);
     expect(text(await call(client, 'add_tasks', { turn: 4, tasks: [work(dev.id, 'Checkout')] }))).toMatch(/no turn 4/i);
   });
 
   it('closes a turn when its last task closes and opens the next planned one', async () => {
     const { db, orchestrator, dev, sales, hana, sara, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout'), work(sales.id, 'Pricing')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout'), work(sales.id, 'Pricing')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     expect(text(await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Checkout ships.' }))).not.toContain('Turn 2');
     expect((await db.select().from(turns).where(eq(turns.number, 1)))[0]!.status).toBe('open');
     const last = await call(await tools(sara), 'report', { task: 2, done: true, summary: 'Copy is live.' });
@@ -379,7 +319,7 @@ describe('turns', () => {
 
   it('keeps a turn open while work under its finished task is still open', async () => {
     const { db, ctx, orchestrator, dev, hana, tools } = await company();
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     const [top] = await db.select().from(tasks);
     /* As an older Hornhoof left it: the top task done, a subtask under it still open. */
     const [under] = await db.insert(tasks).values({ companyId: top!.companyId, number: 2, turnId: top!.turnId, parentId: top!.id, departmentId: dev.id, title: 'Webhook', assigneeAgentId: hana.id }).returning();
@@ -393,7 +333,7 @@ describe('turns', () => {
 
   it('closes the turn when a person cancels its last open task', async () => {
     const { db, orchestrator, dev, ceoToken, app, tools } = await company();
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     const [task] = await db.select().from(tasks);
     const res = await app.inject({ method: 'POST', url: `/api/tasks/${task!.id}/cancel`, payload: { why: 'Not now.' }, headers: { cookie: `hh_session=${ceoToken}` } });
     expect(res.statusCode).toBe(200);
@@ -404,9 +344,9 @@ describe('turns', () => {
     const { db, dev, say, message } = await company();
     await say('We need card payments, Stripe is fine.');
     const first = (await message('And Apple Pay too.')).tools!;
-    await call(first, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 2 });
+    await call(first, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 2 });
     const second = (await message('Also refunds later.')).tools!;
-    await call(second, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(second, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
     expect(one!.messages.map(m => [m.by, m.text])).toEqual([
       ['Ivan', 'We need card payments, Stripe is fine.'],
@@ -422,8 +362,8 @@ describe('turns', () => {
     const { db, dev, say, message } = await company();
     await say('How are you?');
     const first = (await message('Make card payments.')).tools!;
-    await call(first, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(first, 'plan_turn', { title: 'Again', goal: 'Same words.', tasks: [work(dev.id, 'Other')], words: 6 });
+    await call(first, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(first, 'plan_turn', { mode: 'echelons', title: 'Again', goal: 'Same words.', tasks: [work(dev.id, 'Other')], words: 6 });
     const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
     expect(one!.messages.map(m => m.text)).toEqual(['Make card payments.']);
     expect(two!.messages.map(m => m.text)).toEqual(['How are you?']);
@@ -433,8 +373,8 @@ describe('turns', () => {
     const { db, dev, message } = await company();
     const card = (await message('Card payments.')).tools!;
     const later = await message('Refunds too.', 'queued');
-    await call(card, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(await later.run(), 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(card, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await later.run(), 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
     expect(one!.messages.map(m => m.text)).toEqual(['Card payments.']);
     expect(two!.messages.map(m => m.text)).toEqual(['Refunds too.']);
@@ -443,16 +383,16 @@ describe('turns', () => {
   it("keeps no words with a turn he lays out when a task's news woke him", async () => {
     const { db, orchestrator, dev, tools, say } = await company();
     await say('Make card payments.');
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect((await db.select().from(turns))[0]!.messages).toEqual([]);
   });
 
   it('skips a planned turn whose tasks were all cancelled and starts the one after it', async () => {
     const { db, orchestrator, dev, hana, tools } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
-    await call(boss, 'plan_turn', { title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals')] });
     expect((await call(boss, 'cancel_task', { task: 2, why: 'Not needed.' })).isError).toBeFalsy();
     await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.' });
     expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
@@ -467,7 +407,7 @@ describe('turns', () => {
     const { db, companyId, ceo, orchestrator, dev, hana, tools } = await company();
     const [old] = await db.insert(turns).values({ companyId, number: 1, goal: 'Old goal', status: 'open', startedBy: ceo.id, openedAt: new Date() }).returning();
     await db.insert(tasks).values({ companyId, number: 1, turnId: old!.id, title: 'Turn 1: Old goal', status: 'done', closedAt: new Date(), createdByPersonId: ceo.id });
-    const res = await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const res = await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect(text(res)).toContain('started');
     expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
       [1, 'closed'],
@@ -478,7 +418,7 @@ describe('turns', () => {
 
   it('lists every open task for the tracker even after many newer closed ones', async () => {
     const { db, companyId, orchestrator, dev, tools, ceoToken, get } = await company();
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     const history = await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, departmentId: dev.id, number: i + 2, title: `Old ${i}`, status: 'done' as const, closedAt: new Date() }))).returning();
     /* Closed coordination history has a terminal route and no invented executable check. */
     const state: typeof taskRoutes.$inferInsert['state'] = { kind: 'development_echelons', version: 1, resultKind: 'coordination', stage: null, phase: 'done', candidateId: null, assignment: null, stages: [], security: { required: false, reason: null, addedBy: null } };
@@ -492,8 +432,8 @@ describe('turns', () => {
   it("keeps a planned task away from its department's head until its turn starts", async () => {
     const { orchestrator, dev, hana, bruno, tools } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const head = await tools(hana);
     expect(JSON.parse(text(await call(head, 'tasks', {}))).map((t: { number: number }) => t.number)).toEqual([1]);
     expect((await call(head, 'task', { task: 2 })).isError).toBe(true);
@@ -504,7 +444,7 @@ describe('turns', () => {
   it('renames a turn that has not closed', async () => {
     const { db, orchestrator, dev, tools } = await company();
     const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect((await call(client, 'edit_turn', { turn: 1, title: 'Card payments', goal: 'Cards and Apple Pay.' })).isError).toBeFalsy();
     expect((await db.select().from(turns))[0]).toMatchObject({ title: 'Card payments', goal: 'Cards and Apple Pay.' });
   });
@@ -512,8 +452,8 @@ describe('turns', () => {
   it('lists the running and planned turns with their tasks', async () => {
     const { orchestrator, dev, tools } = await company();
     const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(client, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(client, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const listed = JSON.parse(text(await call(client, 'turns', {})));
     expect(listed.map((t: { number: number; status: string; tasks: { number: number; status: string }[] }) => [t.number, t.status, t.tasks.map(x => [x.number, x.status])])).toEqual([
       [1, 'open', [[1, 'open']]],
@@ -524,8 +464,8 @@ describe('turns', () => {
   it('sends a task whose department lost its head back to the orchestrator when its turn opens', async () => {
     const { db, orchestrator, dev, sales, sara, hana, tools, queued } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement')] });
     await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, sara.id));
     await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.' });
     expect((await db.select().from(tasks).where(eq(tasks.title, 'Announcement')))[0]).toMatchObject({ status: 'blocked', assigneeAgentId: null });
@@ -534,8 +474,8 @@ describe('turns', () => {
 
   it('shows turns to everyone and the words behind them only to people with the whole company', async () => {
     const { app, orchestrator, dev, tools, message, ceoToken, get } = await company();
-    await call((await message('We need card payments.')).tools!, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call((await message('We need card payments.')).tools!, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const mine = (await get(ceoToken, '/api/turns')).json().turns;
     expect(mine.map((t: { number: number; title: string; status: string }) => [t.number, t.title, t.status])).toEqual([
       [1, 'Payments', 'open'],

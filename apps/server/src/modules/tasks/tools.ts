@@ -6,10 +6,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, TURN_MODES, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, turnForNewTask, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
@@ -33,7 +33,7 @@ import { reviewContext, ReviewSha, ReviewSubmission } from './review-context.js'
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
 import { bindReviewEvidence } from './review-verdict.js';
-import { turnkeyTeamOf } from './turnkey.js';
+import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 
@@ -102,6 +102,7 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
 
 const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
+const Mode = z.enum(TURN_MODES).describe('How the turn runs: echelons, where code work goes through Architecture, Development, Review, Security and Tests, or turnkey, where one member of a turnkey team does the whole turn alone.');
 const TurnWords = z
   .number()
   .int()
@@ -450,7 +451,7 @@ class TaskTools {
         const top = rows.length ? await this.db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
         const agent = await this.me();
         const lines = await taskLines(this.ctx, top, t => sees(agent, t));
-        return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
+        return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, mode: t.mode, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );
   }
@@ -498,8 +499,9 @@ class TaskTools {
         description:
           "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks: one for each of the CEO's goals, for the one department that owns it end to end, " +
           "going to that department's head; no separate tasks for plans, contracts or proofs. " +
-          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. department and product ids from company.',
-        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
+          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. department and product ids from company. ' +
+          'mode is required and fixed once the turn starts: echelons, or turnkey when one member of a turnkey team does the whole turn alone; a turnkey turn needs a turnkey team.',
+        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), mode: Mode, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
         this.run(async () => {
@@ -554,7 +556,7 @@ class TaskTools {
       {
         description:
           'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, gates, results and history; they start once when the target is open. ' +
-          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe.',
+          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe. Only turns of the same mode merge.',
         inputSchema: { source: Turn, target: Turn },
       },
       async input =>
@@ -568,7 +570,7 @@ class TaskTools {
   private registerEditTurn(): void {
     this.server.registerTool(
       'edit_turn',
-      { description: 'Gives a turn that is not over a new title or main point.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional() } },
+      { description: 'Gives a turn that is not over a new title or main point, or a planned turn another mode; a turn that has started keeps its mode.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional(), mode: Mode.optional() } },
       async input =>
         this.run(async () => {
           const turn = await editTurn(this.ctx, this.job.companyId, input.turn, input);
@@ -581,7 +583,7 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and where only the products of the department keep code, its product; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A task given to a member of a turnkey team goes through no echelons, whatever its text says: that member does it end to end alone and closes it with report, so it takes no checker ids, Cleanup or paths. Never write the echelons into a task\'s text: the route is the server\'s.',
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and where only the products of the department keep code, its product; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
@@ -593,7 +595,7 @@ class TaskTools {
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
-          if (!(await turnkeyTeamOf(this.db, agent.companyId, executor.id))) await this.checkCodeScope(agent, input);
+          if (input.resultKind !== 'coordination' && await echelonsFor(this.db, { companyId: agent.companyId, turnId: await turnForNewTask(this.db, agent.companyId, parent), holderId: executor.id })) await this.checkCodeScope(agent, input);
           const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
           return { text: await this.createdTaskText(moved.task, executor), moved };
         }),

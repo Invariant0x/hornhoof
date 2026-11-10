@@ -8,7 +8,7 @@ import { createTask, report, submit, verdict } from '../src/modules/tasks/engine
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { connectNode, listen, setUpCompany, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -40,6 +40,7 @@ async function company() {
   await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
   ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  await echelonsTurn(db, companyId);
   const task = (await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id })).task;
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt));
   const jobOf = async (id: string) => (await db.select().from(jobs).where(eq(jobs.id, id)))[0]!;
@@ -252,7 +253,7 @@ describe("a turn whose program ended without the work done", () => {
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, kind: 'conversation', prompt: 'Earlier work.', timeoutMs: 60_000, status: 'done', sessionId: 'earlier-session', createdAt: ago(60), startedAt: ago(60), finishedAt: ago(55) });
-    await c.db.insert(turns).values({ companyId: c.companyId, number: 1, title: 'Checkout', goal: '', status: 'open', messages: [], createdByAgentId: orchestrator!.id, openedAt: ago(30) });
+    await c.db.update(turns).set({ title: 'Checkout', createdByAgentId: orchestrator!.id, openedAt: ago(30) }).where(eq(turns.companyId, c.companyId));
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: c.task.id, why: 'assigned' }]);
     const work = await c.nextTurn(c.bruno.id, 1);
     await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));

@@ -15,7 +15,7 @@ const HOUR = 3_600_000;
 type Res = { content: { text: string }[]; isError?: boolean };
 
 async function company() {
-  const c = await waitCompany();
+  const c = await waitCompany({ turn: false });
   const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
   /* The head holds the department's task, as a head who reports on a goal does. */
   const held = async (title = 'Dept') => (await createTask(c.ctx, { personId: ceo!.id }, { title, brief: '', body: 'Private words of the work.', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;

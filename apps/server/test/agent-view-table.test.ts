@@ -131,6 +131,7 @@ const ELSEWHERE: Record<string, string> = {
   'PUT /api/departments/:id/backlog/order': 'backlog.test.ts: a person with the department, 403 for another one',
   'DELETE /api/departments/:id/backlog/:item': 'backlog.test.ts: a person with the department and an item of it, 403 or 404 otherwise',
   'POST /api/departments/:id/backlog/schedule': 'backlog.test.ts: a person with the department and items of it, 403 or 409 otherwise',
+  'PATCH /api/turns/:number': 'turn-modes.test.ts: a person with the whole company, 403 for another one',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',

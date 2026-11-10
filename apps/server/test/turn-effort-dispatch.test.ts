@@ -9,6 +9,7 @@ import { comment, createTask, submit, verdict, type Task, type Wake } from '../s
 import { repeatedTurn } from '../src/modules/tasks/wake-state.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
+import { echelonsTurn } from './helpers.js';
 
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL = 'claude-opus-5-5';
@@ -64,6 +65,7 @@ async function company() {
     const [person] = await db.select().from(people);
     return (await openTypedTurn(ctx, BUILTIN, agentId, 'Typed words.', person!.id))!;
   };
+  await echelonsTurn(db, c.companyId);
   return { ...c, reviewer, tester, task, wake, handIn, finding, running, endTurn, levels, card, busy, typed };
 }
 

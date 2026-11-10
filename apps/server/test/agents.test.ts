@@ -9,7 +9,7 @@ import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/e
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, setUpCompany, testApp, ownPlan } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan, echelonsTurn } from './helpers.js';
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
 async function company() {
@@ -44,6 +44,7 @@ async function company() {
     const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
     return routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId);
   };
+  await echelonsTurn(db, dev!.companyId);
   return { app, db, ceo, oleg, dev: dev!, sales: sales!, teamKey, codex, brunoId, role, codeSource, snapshot };
 }
 

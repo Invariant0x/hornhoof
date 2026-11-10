@@ -19,9 +19,19 @@ A turn has:
 
 - a short title;
 - its main point;
-- one task for each goal the CEO gave it, whole, for the department that owns it.
+- one task for each goal the CEO gave it, whole, for the department that owns it;
+- the way it runs.
 
 The people's own words it came from open on a click.
+
+A turn runs in one of two ways, chosen as it starts:
+
+- In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
+- Turnkey. One employee of a sub-unit marked "Works turnkey" does the turn's work alone from start to finish. Hornhoof refuses this way while no sub-unit works turnkey.
+
+The orchestrator picks the way when he lays out a turn. When you put tasks from a department's off-turn list into the next turn, you pick it next to the button. A person who sees the whole company can change it on the Tasks tab while the turn is planned. Once the turn starts, its way stays.
+
+Work given outside any turn goes through no stages: whoever gets it does it alone from start to finish.
 
 ## What does the Tasks tab show?
 
@@ -46,7 +56,7 @@ In Development, each piece is a whole feature for one developer of the pool. Whe
 
 ## Which checks does a piece go through?
 
-Development uses one route for each executable task:
+In a turn that runs in stages, Development uses one route for each executable task:
 
 - Architecture writes the plan when the task is large. Small tasks start at Development.
 - Development produces the change and its checks.

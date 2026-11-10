@@ -3,7 +3,7 @@ import type { Org, TurnView } from '../src/types';
 import { ME, serveApi } from './api';
 
 export const HUB_TURN: TurnView = {
-  id: 'u3', number: 3, title: 'Payment rollout', goal: 'Ship payments', status: 'open', messages: [], taskId: null,
+  id: 'u3', number: 3, title: 'Payment rollout', goal: 'Ship payments', status: 'open', mode: 'echelons', messages: [], taskId: null,
   startedAt: '2026-11-04T10:00:00.000Z', openedAt: '2026-11-04T10:00:00.000Z', closedAt: null,
   tasks: { done: 3, total: 17 },
 };

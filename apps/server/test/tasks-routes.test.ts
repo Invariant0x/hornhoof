@@ -5,9 +5,10 @@ import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan, echelonsTurn } from './helpers.js';
 
-async function company() {
+/* With a turn open in echelons, unless asked for none. */
+async function company({ turn = true } = {}) {
   const { app, db } = await testApp();
   const url = await listen(app);
   const ceo = await setUpCompany(app);
@@ -30,6 +31,7 @@ async function company() {
   const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
   const post = (token: string, path: string, payload: object) => app.inject({ method: 'POST', url: path, payload, ...as(token) });
   const get = (token: string, path: string) => app.inject({ url: path, ...as(token) });
+  if (turn) await echelonsTurn(db, companyId);
   return { app, db, url, ctx: app.ctx, companyId, ceo, oleg, maria, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, hire, post, get };
 }
 
@@ -187,7 +189,7 @@ describe('tasks for people', () => {
   });
 
   it('leaves starting and closing turns to the orchestrator', async () => {
-    const { ceo, post, get } = await company();
+    const { ceo, post, get } = await company({ turn: false });
     expect((await post(ceo, '/api/turns', { goal: 'Payments' })).statusCode).toBe(404);
     expect((await get(ceo, '/api/turns')).json().turns).toEqual([]);
     expect((await get(ceo, '/api/turns/current')).json().turn).toBe(null);

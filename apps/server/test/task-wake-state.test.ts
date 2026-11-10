@@ -7,7 +7,7 @@ import { discardStaleTurn, discardStaleTurns, recordStale, repeatedTurn, repeatW
 import { agentFailureStates } from '../src/modules/tasks/failures.js';
 import { createRoute, routeOf, routeSnapshot, type Route } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { createTestDb, statements, testApp } from './helpers.js';
+import { createTestDb, echelonsTurn, statements, testApp } from './helpers.js';
 
 async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
   const db = existing ?? await createTestDb();
@@ -19,13 +19,14 @@ async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
     { companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' },
     { companyId: company!.id, kind: 'worker', name: 'Rita', model: '' },
   ]).returning();
+  const turn = await echelonsTurn(db, company!.id);
   let number = 0;
   const setRoute = async (t: Task, state: Partial<Route['state']>) => {
     const route = await routeOf(db, t);
     await db.update(taskRoutes).set({ state: { ...route.state, ...state } }).where(eq(taskRoutes.taskId, t.id));
   };
   const task = async (set: Partial<Task> = {}) => db.transaction(async tx => {
-    const [t] = await tx.insert(tasks).values({ companyId: company!.id, number: ++number, title: 'Checkout', small: true, createdByAgentId: head!.id, executorAgentId: worker!.id, assigneeAgentId: worker!.id, ...set }).returning();
+    const [t] = await tx.insert(tasks).values({ companyId: company!.id, number: ++number, title: 'Checkout', small: true, turnId: turn.id, createdByAgentId: head!.id, executorAgentId: worker!.id, assigneeAgentId: worker!.id, ...set }).returning();
     await createRoute(tx, t!, {});
     if (set.status === 'review') {
       const route = await routeOf(tx, t!);

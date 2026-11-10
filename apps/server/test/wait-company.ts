@@ -6,11 +6,13 @@ import { listEvents } from '../src/modules/events/store.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { failureCompany } from './failure-company.js';
-import { listen, mcp } from './helpers.js';
+import { echelonsTurn, listen, mcp } from './helpers.js';
 
-export async function waitCompany() {
+/* With a turn open in echelons, unless asked for none. */
+export async function waitCompany({ turn = true } = {}) {
   const c = await failureCompany();
   await listen(c.app);
+  if (turn) await echelonsTurn(c.db, c.companyId);
   c.sent.mockImplementation((_node, message) => {
     if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, true));
     return true;
