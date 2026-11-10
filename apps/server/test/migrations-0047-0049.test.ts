@@ -33,7 +33,8 @@ describe('migration 0049', () => {
     expect((await db.execute(sql`select indexname from pg_indexes where indexname in
       ('agent_events_program_history', 'agent_events_silent_job', 'tasks_turn_id', 'tasks_product_id') order by indexname`)).rows)
       .toEqual(['agent_events_program_history', 'agent_events_silent_job', 'tasks_product_id', 'tasks_turn_id'].map(indexname => ({ indexname })));
-  });
+    /* Thirty thousand rows through every migration there is, twice: the more migrations, the longer it takes. */
+  }, 60_000);
 });
 
 describe('migration 0047', () => {
