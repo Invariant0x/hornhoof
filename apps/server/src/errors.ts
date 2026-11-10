@@ -133,6 +133,10 @@ export type ErrorReason =
   | 'read_only'
   | 'not_confirmed'
   | 'already_done'
+  | 'not_keeper'
+  | 'no_machine_id'
+  | 'key_changed'
+  | 'not_a_machine'
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';

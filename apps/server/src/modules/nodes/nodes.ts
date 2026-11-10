@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, notLike, sql } from 'drizzle-orm';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions, SUBSCRIPTION_STATUSES, type NodeStatus } from '../../db/schema.js';
@@ -64,6 +64,10 @@ export async function planNodes(db: Db, subscriptionIds: string[]): Promise<Node
     .where(and(inArray(nodes.subscriptionId, subscriptionIds), liveNode))
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
 }
+
+/* A machine people see and act on: a computer someone joined. The row of the machine the server itself runs on, which its
+   keeper's certificate names, is none of those, and its key says so. */
+export const shownMachine = notLike(machines.machineKey, 'server:%');
 
 /* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
    server. The pool counts that computer once. None for a server installed before, or on a computer that never joined. */

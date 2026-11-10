@@ -11,7 +11,7 @@ import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { liveNode } from '../nodes/nodes.js';
+import { liveNode, shownMachine } from '../nodes/nodes.js';
 import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
@@ -192,7 +192,7 @@ async function companyComputers(db: Ctx['db'], companyId: string) {
     .select({ machine: machines, owner: people })
     .from(machines)
     .innerJoin(people, eq(people.id, machines.personId))
-    .where(and(eq(machines.companyId, companyId), eq(machines.kind, 'computer'), isNull(machines.revokedAt)))
+    .where(and(eq(machines.companyId, companyId), eq(machines.kind, 'computer'), isNull(machines.revokedAt), shownMachine))
     .orderBy(asc(machines.createdAt));
   /* A machine's own node and its plans' nodes; a removed plan's node is on its way out. */
   const live = await db

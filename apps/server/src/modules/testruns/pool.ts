@@ -5,7 +5,7 @@ import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { builtinMachine } from '../nodes/nodes.js';
+import { builtinMachine, shownMachine } from '../nodes/nodes.js';
 import { availableMemory } from './capacity.js';
 import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
@@ -80,7 +80,7 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): 
 export async function poolOf(ctx: Ctx, who: Person) {
   const { db, hub } = ctx;
   const whole = who.scopeKind === 'company';
-  const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt));
+  const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt), shownMachine);
   const rows = await db
     .select({ id: machines.id, name: machines.hostname, kind: machines.kind, lent: machines.lendsTests, owner: people.name })
     .from(machines)

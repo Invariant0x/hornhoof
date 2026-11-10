@@ -20,7 +20,7 @@ import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
-import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
+import { builtinMachine, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
 
@@ -156,7 +156,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { subscription } = PlanBody.parse(req.body);
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, subscription), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
@@ -173,7 +173,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/machines', async req => {
     const me = await requirePerson(req, db);
-    const live = isNull(machines.revokedAt);
+    const live = and(isNull(machines.revokedAt), shownMachine);
     const rows = await db
       .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name })
       .from(machines)
@@ -239,7 +239,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* A live machine its owner, or someone who sees the whole company, may change. */
   async function ownMachine(me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     return machine;

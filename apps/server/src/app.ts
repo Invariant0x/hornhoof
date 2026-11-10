@@ -61,6 +61,7 @@ export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
 import { handOverSession, requirePerson } from './auth/session.js';
 import { registerRequestSources } from './modules/sources/requests.js';
+import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
@@ -226,6 +227,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   harnessRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
+  networkRoutes(app, ctx);
   outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
   return app;
