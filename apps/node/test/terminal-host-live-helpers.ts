@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -72,6 +72,8 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     mkdirSync(dirname(file), { recursive: true });
     record(kind === 'codex' ? { type: 'session_meta', payload: { id: SESSION, cwd: workDir } } : { type: 'metadata' });
     if (kind !== 'codex') await hook('start', { session_id: SESSION });
+    /* The program lists its tools as it starts, as each of these does with a session, unless the test makes its calls. */
+    if (!options.connects) host['bridge']['heardList'](options.key ?? 'receipt', Date.now());
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();

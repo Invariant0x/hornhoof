@@ -29,7 +29,7 @@ type Program = {
 };
 
 /* A host with a program it started, whose screen and keys the test plays. */
-async function started(program: Program, { plain = false, remember, readyMs }: { plain?: boolean; remember?: (sessionId: string, workDir: string) => void; readyMs?: number } = {}) {
+async function started(program: Program, { plain = false, remember, readyMs, toolsMs }: { plain?: boolean; remember?: (sessionId: string, workDir: string) => void; readyMs?: number; toolsMs?: number } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'hh-lost-words-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID(), sessionId = randomUUID();
   const workDir = join(home, 'work');
@@ -60,7 +60,7 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
     if (pressed.includes('Enter')) program.onEnter();
   });
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], readyMs: readyMs ?? (plain ? 3000 : 20), pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], readyMs: readyMs ?? (plain ? 3000 : 20), toolsMs, pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const abort = new AbortController();
@@ -167,24 +167,28 @@ it('erases a copy of its words it typed again while the program was on its way t
 });
 
 /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
-   for them then, and goes without them for the rest of its session. */
-it('ends a turn of a program whose tools were turned away as it connected, and starts it anew for the next', async () => {
+   for them then, and goes without them for the rest of its session. The next turn starts it anew in its session before it
+   types, so that turn has its tools. */
+it('starts anew for the next turn a program whose tools were turned away as it connected', async () => {
   let turn = 0;
   const program = empty();
   const c = await started({ ...program, get input() { return program.input; }, onPaste: text => { program.input = text; }, onEnter: () => {
     const words = program.input;
     program.input = '';
-    if (words) c.finish(words, `turn-${++turn}`);
-  } });
+    if (!words) return;
+    /* The program lists its tools as it takes its words, as one that connected to them as it started. */
+    c.host['bridge']['heardList'](c.agentKey, Date.now());
+    c.finish(words, `turn-${++turn}`);
+  } }, { toolsMs: 100 });
   expect(await c.running).toMatchObject({ ok: true });
   await c.host.start();
+  /* No turn opens while it waits for one. */
   const connect = await fetch(c.host['bridge'].agent(c.agentKey).mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} }) });
   expect((await connect.json()).error).toMatchObject({ code: -32001 });
   const tools = { url: 'http://127.0.0.1:9/mcp', token: 'tok-turn' };
-  expect(await c.next('Look at the release.', { tools })).toMatchObject({ ok: false, failure: { kind: 'tools' } });
-  expect(c.tmux.launch).toHaveBeenCalledTimes(1);
-  expect(await c.next('Look at the checkout.', { tools })).toMatchObject({ ok: true });
+  expect(await c.next('Look at the release.', { tools })).toMatchObject({ ok: true });
   expect(c.tmux.launch).toHaveBeenCalledTimes(2);
+  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual([WORDS, 'Look at the release.']);
 });
 
 it('stops typing them after a few tries and leaves it to the operator case', async () => {
