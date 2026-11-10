@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -13,6 +13,7 @@ import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
+import { FENCED, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
@@ -37,8 +38,19 @@ type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
 async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
   migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
   const client = new PGlite({ loadDataDir: migrated });
+  /* PGlite applies no ALTER DATABASE or ALTER ROLE setting when it loads a dump, so each one says it for itself. */
+  await client.exec(`SET ${FENCED} = 'on'`);
   const db = drizzle(client, { schema });
   return { client, db };
+}
+
+type LeaseChange = { until?: string; kind?: LeaseKind; sync?: LeaseSync | null; termNumber?: number };
+const LEASE_COLUMNS: Record<keyof LeaseChange, string> = { until: 'until', kind: 'kind', sync: 'sync', termNumber: 'term_number' };
+
+/* Changes what the test database's lease says. The until is a timestamptz as text: '-infinity' or an ISO time. */
+export async function setLease(db: Db, change: LeaseChange): Promise<void> {
+  const columns = (Object.keys(change) as (keyof LeaseChange)[]).map(name => sql`${sql.identifier(LEASE_COLUMNS[name])} = ${change[name] ?? null}`);
+  await db.execute(sql`UPDATE net_local.lease SET ${sql.join(columns, sql`, `)}`);
 }
 
 /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
