@@ -365,7 +365,7 @@ async function appWithKeeper(first?: Mode) {
   if (first) say(first);
   const modeNow = async () => (await made.app.inject({ url: '/api/health' })).json().mode;
   /* How soon the poll comes is shown on the clock above, so this bound only has to outlast a loaded machine. */
-  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 15_000);
+  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode);
   return { ...made, dir, say, reaches };
 }
 
@@ -458,7 +458,7 @@ describe('the app behind a keeper', () => {
     const url = await listen(app);
     const stuck = gate();
     onTestFinished(stuck.open);
-    app.ctx.links.sync = () => stuck.opened;
+    app.ctx.links.sync = () => stuck.opened.then(() => true);
     say('lead');
     await reaches('lead');
     const node = await connectNode(url, NODE_KEY);

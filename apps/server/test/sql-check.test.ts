@@ -50,6 +50,7 @@ describe("the check on the orchestrator's SQL", () => {
     'MERGE INTO agents a USING agents b ON a.id = b.id WHEN MATCHED THEN DELETE',
     'EXPLAIN SELECT 1',
     'SELECT 1 INTO t',
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A text the check must refuse: no database runs it.
     'CREATE TABLE t (id int)',
   ];
   it.each([...notRowChanges, ...notRowChanges.map(text => `SELECT 1; ${text}`)])(

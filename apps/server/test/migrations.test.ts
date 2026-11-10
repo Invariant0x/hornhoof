@@ -5,7 +5,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import type { Db } from '../src/db/client.js';
 import { AFTER_MIGRATIONS } from '../src/db/net.js';
+import { tlsOf } from '../src/modules/tls/store.js';
 import { freshPglite, ownDatabases } from './helpers-db.js';
 import { freshInstall, migrate, migrationsUpTo } from './migrations-fixture.js';
 
@@ -419,22 +421,15 @@ describe('migration 0098, the tables of the network', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select before_host_cookie from sessions`)).rows).toEqual([{ before_host_cookie: true }]);
   });
+});
 
-  it('gives each task event of an older install its own uuid', async () => {
+describe('a database from before the link had a certificate', () => {
+  it('reads as having none, as the keeper meets it before an update migrates', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsUpTo('0097_route_abilities') });
-    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
-    const task = (await db.execute<{ id: string }>(sql`insert into tasks (company_id, number, title) values (${company}, 1, 'Task') returning id`)).rows[0]!.id;
-    await db.execute(sql`insert into task_events (company_id, task_id, kind) values (${company}, ${task}, 'comment'), (${company}, ${task}, 'comment')`);
-
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-
-    const uuids = (await db.execute<{ uuid: string }>(sql`select uuid from task_events`)).rows.map(row => row.uuid);
-    expect(uuids).toHaveLength(2);
-    expect(uuids[0]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(uuids[0]).not.toBe(uuids[1]);
+    expect(await tlsOf(db as unknown as Db, '00000000-0000-4000-8000-000000000001')).toBeNull();
   });
 });
 

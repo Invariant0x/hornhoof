@@ -804,7 +804,7 @@ describe('running on its own', () => {
     });
     w.move(60 * DAY);
     tls.start();
-    await until(() => w.seen.issues.length === 1, PASS_MS);
+    await until(() => w.seen.issues.length === 1);
     await tls.tick();
 
     w.move(60 * DAY);
@@ -812,7 +812,7 @@ describe('running on its own', () => {
     await aMoment();
     expect(w.seen.issues).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    await until(() => w.seen.issues.length === 2, PASS_MS);
+    await until(() => w.seen.issues.length === 2);
     await tls.tick();
 
     tls.stop();
@@ -832,14 +832,14 @@ describe('running on its own', () => {
 
     tls.start();
     onTestFinished(() => tls.stop());
-    await until(() => w.seen.issues.length === 1, PASS_MS);
+    await until(() => w.seen.issues.length === 1);
     await tls.tick();
     await w.app.ctx.links.set(w.companyId, 'globex');
-    await until(() => w.seen.issues.length === 2, PASS_MS);
+    await until(() => w.seen.issues.length === 2);
     expect(w.seen.issues[1]!.host).toBe(GLOBEX);
     await tls.tick();
     await w.app.ctx.links.remove(w.companyId);
-    await until(async () => (await w.row()).certPem === null, PASS_MS);
+    await until(async () => (await w.row()).certPem === null);
 
     tls.stop();
     await w.app.ctx.links.set(w.companyId, 'initech');
@@ -863,7 +863,7 @@ describe('running on its own', () => {
     await tls.tick();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'acme' } } });
     expect(res.statusCode).toBe(201);
-    await until(() => seen.issues.length === 1, PASS_MS);
+    await until(() => seen.issues.length === 1);
     expect(seen.issues).toEqual([{ host: HOST, replaces: undefined }]);
   });
 

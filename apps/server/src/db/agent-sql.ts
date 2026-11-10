@@ -21,14 +21,14 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
    outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt, a
    consent or a day's count, even from a turn of the orchestrator answering the CEO. Waits' owners, dates and policies
    too: a row written by hand could move a promise or quiet an alarm, and they name private work. The link's
-   certificate too: it holds the sealed keys, and its mode decides how the link runs. And Hornhoof's records of where
-   changes came from: a row put there would make a real retry look done. */
+   certificate too: it holds the sealed keys, and its mode decides how the link runs. And the count of failed sign-ins,
+   as a row taken out of it would give a guesser more tries. */
 const OUTBOUND = [
   'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', ...OUTBOUND];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', ...OUTBOUND];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {

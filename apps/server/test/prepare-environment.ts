@@ -39,7 +39,7 @@ function inputs(): Record<string, string> {
   return Object.fromEntries(inputPaths().map(path => [path, sha(readFileSync(join(ROOT, path)))]));
 }
 /* Every test database holds this lease and says it is fenced (helpers.ts), so the whole suite runs under fence 1. */
-const ENDLESS_LEASE = `
+export const ENDLESS_LEASE = `
   INSERT INTO net_local.state (term_number, term_machine, machine, cluster)
     SELECT 1, 'test', 'test', system_identifier::text FROM pg_control_system();
   INSERT INTO net_local.lease (term_number, term_machine, kind, until, sync) VALUES (1, 'test', 'normal', 'infinity', 'alone');`;

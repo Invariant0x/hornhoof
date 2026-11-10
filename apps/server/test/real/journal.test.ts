@@ -1,3 +1,4 @@
+/* eslint-disable hornhoof/no-ddl-on-shared-database -- These run on a Postgres database each of them makes and drops, shared with no other test. */
 import { createHash, randomBytes } from 'node:crypto';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { openAgentSql } from '../../src/db/agent-sql.js';
 import { APP_NAME, MIGRATE_NAME, MIGRATIONS, migrateDb } from '../../src/db/client.js';
 import { FENCED, JOURNAL_TRIGGER, LEASE_REFUSED } from '../../src/db/net.js';
-import { ENDLESS_LEASE } from '../global-setup.js';
+import { ENDLESS_LEASE } from '../prepare-environment.js';
 import { until } from '../helpers.js';
 import { realDatabase, sessionsWaitingOnALock, type RealDatabase } from './pg.js';
 
@@ -149,7 +150,7 @@ UPDATE notebook_notes SET text = 'Changed by the migration';`);
     await holder.query('BEGIN');
     await holder.query('LOCK TABLE sign_in_attempts');
     const migrating = migrateDb(real.url, later);
-    await until(async () => (await sessionsWaitingOnALock(real, MIGRATE_NAME)) === 1, LOCK_WAIT_LIMIT_MS);
+    await until(async () => (await sessionsWaitingOnALock(real, MIGRATE_NAME)) === 1);
 
     await expect(app.query(A_NOTE)).rejects.toMatchObject({ code: LEASE_REFUSED });
 

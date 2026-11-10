@@ -63,7 +63,9 @@ case "$1 $2" in
   'compose ps')
     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
   # The container of front holds the web port until it goes. STUB_RM_FAILS names containers that cannot be removed.
+  # A command that runs on the computer ends as its container goes.
   'rm -f')
+    [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed"
     [ "$(project_service "$3")" = front ] && rm -f "$STUB_STATE/port-holder"
     case " ${STUB_RM_FAILS:-} " in *" $3 "*) exit 1 ;; esac ;;
   'exec dbcid')
@@ -178,8 +180,6 @@ if [ -z "\${HORNHOOF_UPDATER_REV:-}" ]; then
   esac
 fi
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s HORNHOOF_UPDATER_REV=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" "\${HORNHOOF_UPDATER_REV:-}" >> "$STUB_LOG"
-# STUB_HANG names builds whose installer does not end: what it started sleeps, its output in the install log.
-case " ${STUB_HANG:-} " in *" $tag "*) sleep 60 & printf '%s' "\$!" > "$STUB_STATE/hung-child"; wait ;; esac
 # front holds the web port from a build that has it on, so a build without it cannot take the port.
 case ",$(build_services "$tag")," in
   *,front,*) touch "$STUB_STATE/port-holder" ;;

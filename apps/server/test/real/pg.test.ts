@@ -1,3 +1,4 @@
+/* eslint-disable hornhoof/no-ddl-on-shared-database -- These run on a Postgres database each of them makes and drops, shared with no other test. */
 import pg from 'pg';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole } from '../../src/db/agent-sql.js';

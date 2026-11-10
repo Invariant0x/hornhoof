@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MachineDrain, type NodeWait } from '@hornhoof/protocol';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
-import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
@@ -156,12 +155,21 @@ class NodeDrains {
   }
 }
 
-export function startNodeDrains(app: FastifyInstance, ctx: Ctx): void {
+/* What it knows of the nodes is read on any machine; its rounds change turns and runs, so they go only while the app leads. */
+export function startNodeDrains(ctx: Ctx): void {
   const drains = new NodeDrains(ctx);
   states.set(ctx.config, drains);
-  const timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  let timer: NodeJS.Timeout | null = null;
+  ctx.mode.whenLead(
+    () => {
+      timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
+      timer.unref();
+    },
+    () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+  );
 }
 
 export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx.config)?.view(node) ?? null;

@@ -11,7 +11,7 @@
 # digests too, while the old server keeps working. Only then it stops the app, so every change the app confirmed is in
 # the copy, saves the database, and runs that build's own installer, which starts exactly these images, and waits for
 # the new server to answer with the build's commit, at front when the build has it. If it does not, or the installer
-# does not end in time, the images that ran before go back, and the database goes back to the saved copy first when
+# fails, the images that ran before go back, and the database goes back to the saved copy first when
 # the new build added migrations to it, since the old build does not know them, with the public link's settings kept
 # next to the copy. Before each install, containers of services the build's compose file does not name go, so a build
 # from before front can take the web port again; after it, compose removes what is left of them. An updater stopped
@@ -62,13 +62,10 @@ UPDATER_IMAGE="${IMAGE}-updater"
 # The revision each installer hears and the note of an update keeps.
 UPDATER_REV=2
 HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
-# How long one install may take, so a migration or a database start that hangs never keeps the company in maintenance.
-INSTALL_WAIT="${HORNHOOF_INSTALL_WAIT:-900}"
 # How long this build's updater may take to say it goes on with an update it takes over.
 TAKE_OVER_WAIT="${HORNHOOF_TAKE_OVER_WAIT:-60}"
 TAKEN_OVER="This build's updater goes on with the update."
 KEEP_BACKUPS=3
-NODES_URL="${HEALTH_URL%/api/health}/api/nodes/update"
 # How often it looks whether a node is behind, and asks again after a server that gave no answer, in seconds.
 NODES_CHECK=30
 # How long it leaves the nodes alone after an installer failed or a server said it cannot wait, in seconds.
@@ -373,33 +370,11 @@ remove_unnamed() {
   done <<< "$(project_containers)"
 }
 
-# stop_installer <process> <tag>: what it starts stops first, so a compose command waiting for it ends by itself.
-stop_installer() {
-  compose stop migrate app > /dev/null 2>&1 || true
-  kill -9 -- "-$1" "$1" 2> /dev/null || true
-  wait "$1" 2> /dev/null || true
-  say "The installer of $2 did not end within $INSTALL_WAIT seconds, so it was stopped."
-}
-
-# run_installer <tag> <app> <node> <updater>: the installer of that build, for at most INSTALL_WAIT seconds. It runs in
-# a process group of its own, so stopping it stops its compose commands too, which would go on starting this build
-# while the one before goes back.
+# run_installer <tag> <app> <node> <updater>: the installer of that build. It takes as long as it takes: no clock ends it.
 run_installer() {
-  local tag=$1 dir="$WORK/$1" installer i=0
-  set -m
+  local tag=$1 dir="$WORK/$1"
   HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 &
-  installer=$!
-  set +m
-  while kill -0 "$installer" 2> /dev/null; do
-    if [ "$i" -ge "$INSTALL_WAIT" ]; then
-      stop_installer "$installer" "$tag"
-      return 1
-    fi
-    i=$((i + 1))
-    sleep 1
-  done
-  wait "$installer"
+    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1
 }
 
 # install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and
@@ -420,6 +395,13 @@ drop_orphans() {
   if names_service "$SERVER_DIR/compose.yaml" updater; then
     compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names."
   fi
+}
+
+# Where the server takes the updater's word of the nodes: the same place its health is asked.
+nodes_url() {
+  local health
+  health=$(health_url)
+  printf '%s/api/nodes/update' "${health%/api/health}"
 }
 
 # Where the build that runs now answers: at front when the compose file its installer copied here names it.
@@ -673,7 +655,7 @@ ask_nodes() {
   local body
   body=$(jq -cn --arg names "${3:-}" 'if $names == "" then {scope: "server"} else {scope: "server", nodes: ($names | split(" ") | map(select(length > 0)))} end')
   printf 'header = "Authorization: Bearer %s"\n' "$(env_value NODE_KEY)" |
-    curl -sS --max-time 10 --config - -X "$1" -H 'content-type: application/json' -d "$body" -o "$2" -w '%{http_code}' "$NODES_URL" 2> /dev/null
+    curl -sS --max-time 10 --config - -X "$1" -H 'content-type: application/json' -d "$body" -o "$2" -w '%{http_code}' "$(nodes_url)" 2> /dev/null
 }
 
 # replace_nodes [names]: these nodes are free, or all of them with no names: the installer of the build that runs replaces

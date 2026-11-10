@@ -444,7 +444,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     const client = await mcp(app, TOKEN);
     /* The tool refuses every statement here, so none changes the database this file shares. */
     // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The agent's statements are refused, and the file's end check would find one that was not.
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM applied', 'SELECT * FROM tool_calls', 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner|Hornhoof did not run this SQL/);

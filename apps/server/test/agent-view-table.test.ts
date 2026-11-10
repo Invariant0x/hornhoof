@@ -164,6 +164,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
   'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
   'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
+  'GET /robots.txt', 'GET /.well-known/acme-challenge/*',
 ];
 
 const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => c.app.inject({ method, url, ...(payload ? { payload } : {}), ...as(c.tokens[viewer]) });

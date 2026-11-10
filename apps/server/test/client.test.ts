@@ -72,7 +72,7 @@ describe('the tunnel client', () => {
   it('refuses a mode that is only a name every object inherits', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
     for (const mode of ['toString', 'constructor', '__proto__']) {
-      expect(() => clientFor(settings({}, { mode: mode as TunnelSettings['mode'] }), dir), mode).toThrow(`${mode} is not a tunnel mode`);
+      expect(() => clientFor(settings({}, { mode: mode as TunnelSettings['mode'] }), { ...IDENTITY, dir }), mode).toThrow(`${mode} is not a tunnel mode`);
     }
   });
 

@@ -1,3 +1,4 @@
+/* eslint-disable hornhoof/no-ddl-on-shared-database -- These run on a Postgres database each of them makes and drops, shared with no other test. */
 import Fastify from 'fastify';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
@@ -7,7 +8,7 @@ import { APP_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
 import { NotConfirmed, notConfirmed } from '../../src/db/confirm.js';
 import { LEASE_REFUSED } from '../../src/db/net.js';
 import { registerErrorHandling } from '../../src/errors.js';
-import { ENDLESS_LEASE } from '../global-setup.js';
+import { ENDLESS_LEASE } from '../prepare-environment.js';
 import { poolOf, realDatabase, type RealDatabase } from './pg.js';
 
 const DENIED = '42501';

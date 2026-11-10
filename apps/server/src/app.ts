@@ -193,7 +193,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);
-  startNodeDrains(app, ctx);
+  startNodeDrains(ctx);
   nodeUpdateRoutes(app, ctx);
   nodeSocket(app, ctx);
   jobRoutes(app, ctx);

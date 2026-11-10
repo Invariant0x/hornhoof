@@ -356,9 +356,9 @@ describe('.github/workflows/images.yml', () => {
   });
 
   it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
-    for (const name of ['mark', 'passed']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
+    for (const name of ['mark', 'passed', 'test-real']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
     for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
-    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test']);
+    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test', 'test-real']);
     expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
   });
 

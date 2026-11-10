@@ -3,6 +3,8 @@
 # wait only costs the test that second. STUB_WATCH: a second of the watch over a command on the computer passes once the
 # command is under way, as the docker stub runs it: still running, or ended and seen to end by the updater, which marks
 # that in a file of its own in TMPDIR. No clock decides what the watch sees.
+# STUB_DURING_SLEEP: what happens elsewhere while the updater waits a second, as a command; it runs on each wait.
+[ -z "${STUB_DURING_SLEEP:-}" ] || sh -c "$STUB_DURING_SLEEP"
 [ -n "${STUB_WATCH:-}" ] || exit 0
 until [ -e "$STUB_STATE/computer-runs" ]; do
   for mark in "$TMPDIR"/*.done; do [ ! -e "$mark" ] || exit 0; done

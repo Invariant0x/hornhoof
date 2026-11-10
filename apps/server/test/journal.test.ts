@@ -3,7 +3,10 @@ import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { FENCED, isLeaseRefused, JOURNAL_NEEDS_PUTTING_BACK, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
-import { as, createTestDb, setLease, setUpCompany, testApp } from './helpers.js';
+import { as, createTestDb, ownDatabases, setLease, setUpCompany, testApp } from './helpers.js';
+
+/* These tests change the lease, the journal's triggers and the tables themselves, which a truncate does not undo. */
+ownDatabases();
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 type JournalRow = {

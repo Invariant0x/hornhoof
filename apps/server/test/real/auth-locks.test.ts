@@ -48,7 +48,7 @@ async function holding(text: string, values: unknown[]): Promise<pg.Client> {
   return client;
 }
 
-const untilWaiting = (count: number): Promise<void> => until(async () => (await sessionsWaitingOnALock(real, APP_NAME)) >= count, LOCK_WAIT_LIMIT_MS);
+const untilWaiting = (count: number): Promise<void> => until(async () => (await sessionsWaitingOnALock(real, APP_NAME)) >= count);
 
 describe('moving a session from before the switch', () => {
   /* A new person's session, marked as the migration marks the rows of an older install. */

@@ -103,7 +103,7 @@ async function keeperOn(db: Db, env: NodeJS.ProcessEnv = {}, extra: Partial<Keep
   const ports = await keeper.start();
   onTestFinished(() => keeper.stop());
   const wordOfLink = () => readKeeperState(dir)?.link ?? null;
-  const namesCertificate = (fingerprint256: string | null) => until(() => wordOfLink()?.host === HOST && wordOfLink()?.fingerprint256 === fingerprint256, WAIT_MS);
+  const namesCertificate = (fingerprint256: string | null) => until(() => wordOfLink()?.host === HOST && wordOfLink()?.fingerprint256 === fingerprint256);
   return { keeper, dir, frpc, lines, ports, wordOfLink, namesCertificate };
 }
 
@@ -173,7 +173,7 @@ describe('the link in the keeper', () => {
   it("runs frpc with the link's client id and the network transport, pointed at itself", async () => {
     const { db } = await companyWithLink();
     const { frpc, ports } = await keeperOn(db);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     const config = frpc.config();
     expect(config).toContain(`clientID = "${CLIENT_ID}"`);
     expect(config).toContain(`metadatas.client = "${CLIENT_ID}"`);
@@ -186,7 +186,7 @@ describe('the link in the keeper', () => {
     const { db, config, companyId } = await companyWithLink();
     await holdCertificate(db, config, companyId);
     const { frpc, ports } = await keeperOn(db, CERTIFICATES_ON);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     expect(frpc.config()).toContain('type = "https"');
     expect(frpc.config()).toContain(`localPort = ${ports.linkTls}`);
     expect(frpc.config()).toContain('transport.proxyProtocolVersion = "v2"');
@@ -195,11 +195,11 @@ describe('the link in the keeper', () => {
   it("starts frpc again when the link's mode changes, and only then", async () => {
     const { db, config, companyId } = await companyWithLink();
     const { frpc } = await keeperOn(db, CERTIFICATES_ON);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     expect(frpc.config()).toContain('type = "http"');
 
     await holdCertificate(db, config, companyId);
-    await until(() => frpc.started().length === 2, WAIT_MS);
+    await until(() => frpc.started().length === 2);
     expect(frpc.config()).toContain('type = "https"');
     await sleep(200);
     expect(frpc.started()).toHaveLength(2);
@@ -211,11 +211,11 @@ describe('the link in the keeper', () => {
     const fingerprint = await holdCertificate(db, config, companyId);
     const flaky = failingDb(db, table => table === linkTls);
     const { frpc, ports, namesCertificate } = await keeperOn(flaky.db, CERTIFICATES_ON);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     await namesCertificate(fingerprint);
 
     flaky.state.on = true;
-    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE, WAIT_MS);
+    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE);
 
     expect(frpc.started()).toHaveLength(1);
     expect(frpc.alive(frpc.started()[0]!)).toBe(true);
@@ -228,11 +228,11 @@ describe('the link in the keeper', () => {
     const fingerprint = await holdCertificate(db, config, companyId);
     const flaky = failingDb(db, () => true);
     const { frpc, ports, lines, wordOfLink, namesCertificate } = await keeperOn(flaky.db, CERTIFICATES_ON);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     await namesCertificate(fingerprint);
 
     flaky.state.on = true;
-    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE, WAIT_MS);
+    await until(() => flaky.state.failed >= THROUGH_AN_OUTAGE);
 
     expect(frpc.started()).toHaveLength(1);
     expect(frpc.alive(frpc.started()[0]!)).toBe(true);
@@ -245,26 +245,26 @@ describe('the link in the keeper', () => {
   it('uses the same client id after the keeper starts again', async () => {
     const { db } = await companyWithLink();
     const first = await keeperOn(db);
-    await until(() => first.frpc.started().length === 1, WAIT_MS);
+    await until(() => first.frpc.started().length === 1);
     expect(first.frpc.config()).toContain(`clientID = "${CLIENT_ID}"`);
     await first.keeper.stop();
     expect(first.frpc.alive(first.frpc.started()[0]!)).toBe(false);
 
     const second = await keeperOn(db);
-    await until(() => second.frpc.started().length === 1, WAIT_MS);
+    await until(() => second.frpc.started().length === 1);
     expect(second.frpc.config()).toContain(`clientID = "${CLIENT_ID}"`);
   });
 
   it('stops frpc when the link goes', async () => {
     const { db } = await companyWithLink();
     const { frpc, wordOfLink, namesCertificate } = await keeperOn(db);
-    await until(() => frpc.started().length === 1, WAIT_MS);
+    await until(() => frpc.started().length === 1);
     await namesCertificate(null);
 
     await db.delete(publicLinks);
 
-    await until(() => !frpc.alive(frpc.started()[0]!), WAIT_MS);
-    await until(() => wordOfLink()?.host === null, WAIT_MS);
+    await until(() => !frpc.alive(frpc.started()[0]!));
+    await until(() => wordOfLink()?.host === null);
     expect(wordOfLink()).toEqual({ host: null, fingerprint256: null });
   });
 
@@ -321,7 +321,7 @@ describe("the link's certificate in the keeper", () => {
     const other = await selfSigned(HOST);
     const another = await selfSigned(HOST);
     await updateTls(db, companyId, { certPem: other.certPem, certKeyEnc: encryptSecret(another.keyPem, config.secret) });
-    await until(() => lines.some(line => line.includes('cannot read or serve')), WAIT_MS);
+    await until(() => lines.some(line => line.includes('cannot read or serve')));
     await sleep(200);
 
     expect(wordOfLink()).toEqual({ host: HOST, fingerprint256: fingerprint });

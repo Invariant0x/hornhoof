@@ -1,6 +1,6 @@
 {
-  "id": "d563e0f1-c86f-42e6-8e70-6bc3506e8b6b",
-  "prevId": "6ace4b38-cf4f-4814-a236-93554dfbc802",
+  "id": "b522e79c-afec-458b-acb0-8428a0fb5a40",
+  "prevId": "6f839e06-ddb3-4ecf-a6a8-12647120bdfb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -735,32 +735,6 @@
           "onDelete": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.applied": {
-      "name": "applied",
-      "schema": "",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -10587,13 +10561,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "uuid": {
-          "name": "uuid",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
         "company_id": {
           "name": "company_id",
           "type": "uuid",
@@ -10718,15 +10685,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "task_events_uuid_unique": {
-          "name": "task_events_uuid_unique",
-          "columns": [
-            "uuid"
-          ],
-          "nullsNotDistinct": false
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -12605,58 +12564,6 @@
           ]
         }
       },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.tool_calls": {
-      "name": "tool_calls",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "job_id": {
-          "name": "job_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "answer": {
-          "name": "answer",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "tool_calls_job_id_jobs_id_fk": {
-          "name": "tool_calls_job_id_jobs_id_fk",
-          "tableFrom": "tool_calls",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "tableTo": "jobs",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

@@ -23,7 +23,8 @@ const RULES: Rule[] = [
     allowedIn: LOOSE_COMMIT_ALLOWED,
     sample: 'SET LOCAL synchronous_commit = local',
   },
-  { name: 'TRUNCATE writes no journal row', matches: has(/TRUNCATE/i), sample: 'TRUNCATE tasks' },
+  { name: 'TRUNCATE writes no journal row', matches: has(/\bTRUNCATE\b/i), sample: 'TRUNCATE tasks' },
+  // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A sample of text for the lint to read: no database runs it.
   { name: 'DISABLE TRIGGER takes the journal off', matches: has(/DISABLE TRIGGER/i), sample: 'ALTER TABLE tasks DISABLE TRIGGER net_journal' },
   { name: 'PREPARE TRANSACTION commits later, past the fence', matches: has(/PREPARE TRANSACTION/i), sample: "PREPARE TRANSACTION 'x'" },
   { name: 'a pool or client opened outside the files that own them', matches: has(/new (pg\.)?(Pool|Client)\(/i), allowedIn: POOL_OWNERS, sample: 'const pool = new pg.Pool({ connectionString: url });' },

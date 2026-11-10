@@ -24,6 +24,8 @@ const publicRoutes = new Map([
   ['GET /api/version', 'public version'],
   ['GET /api/setup', 'public setup availability'],
   ['GET /install.sh', 'public installer'],
+  ['GET /robots.txt', 'public word to crawlers'],
+  ['GET /.well-known/acme-challenge/*', 'public answer to the certificate authority'],
   ['GET /mcp', 'public method rejection'],
   ['DELETE /mcp', 'public method rejection'],
 ]);

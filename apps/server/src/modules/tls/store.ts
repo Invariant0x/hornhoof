@@ -5,6 +5,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../../config.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
+import { hasCode } from '../../db/errors.js';
 import { linkTls, publicLinks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import type { LinkView } from '../link/link.js';
@@ -16,9 +17,16 @@ type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
 /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
 const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
 
+/* The keeper starts before an update migrates the database, and one from before the link had a certificate has no table
+   for it (42P01): the link then has none, which keeps it on http and the maintenance answer up meanwhile. */
 export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
-  const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
-  return row ?? null;
+  try {
+    const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
+    return row ?? null;
+  } catch (err) {
+    if (hasCode(err, '42P01')) return null;
+    throw err;
+  }
 }
 
 /* Makes the row, or changes the fields named in one made before. */

@@ -1,12 +1,11 @@
-import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { APP, ask, at, runOnce, runRev1, stand, takeOver, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 
-/* What revision 2 changes: the copy of the database, the services a build does not name, a time limit on each install,
-   where health is asked, and an update an older updater began. */
+/* What revision 2 changes: the copy of the database, the services a build does not name, where health is asked, and
+   an update an older updater began. */
 describe('updater, revision 2', () => {
   /* 0.4.1 has moved in; 0.4.0 is a build from before front. */
   const BUILDS = { STUB_BUILD_SERVICES: '0.4.1=db,app,front,keeper,migrate,node,updater 0.4.0=db,app,node,tunnel,updater' };
@@ -150,44 +149,13 @@ describe('updater, revision 2', () => {
     expect(curls(r.calls).every(c => c.includes('http://192.0.2.10:9/api/health'))).toBe(true);
   });
 
-  it('stops an installer that does not end, and goes back', async () => {
-    const s = stand();
-    const r = await runOnce(s, ask('v14'), { ...BUILDS, STUB_HANG: '0.4.1', HORNHOOF_INSTALL_WAIT: '2' });
-    expect(r.status).toMatchObject({ id: 'v14', state: 'rolled_back', step: 'finished' });
-    expect(r.status.log).toContain('The installer of 0.4.1 did not end within 2 seconds, so it was stopped.');
-    const stop = r.calls.indexOf('docker compose stop migrate app');
-    expect(stop).toBeGreaterThanOrEqual(0);
-    expect(stop).toBeLessThan(installerOf(r.calls, '0.4.0'));
-    expect(readState(s, 'running')).toBe('aaa');
-    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
-  });
-
-  /* A compose command the installer left running would go on starting the new build while the old one goes back. */
-  it('stops what a hung installer started, too', async () => {
-    const s = stand();
-    await runOnce(s, ask('v15'), { ...BUILDS, STUB_HANG: '0.4.1', HORNHOOF_INSTALL_WAIT: '1' });
-    const child = Number(readState(s, 'hung-child'));
-    expect(child).toBeGreaterThan(0);
-    expect(() => process.kill(child, 0)).toThrow(/ESRCH/);
-  });
-
-  it('says what to do by hand when the install on the way back hangs too', async () => {
-    const r = await runOnce(stand(), ask('v16'), { ...BUILDS, STUB_HANG: '0.4.1 0.4.0', HORNHOOF_INSTALL_WAIT: '1' });
-    expect(r.status).toMatchObject({ id: 'v16', state: 'failed', step: 'finished' });
-    expect(r.status.log).toContain('The installer of 0.4.0 did not end within 1 seconds, so it was stopped.');
-    expect(r.status.log).toContain('Could not go back to 0.4.0 either.');
-  });
-
-  it('goes back when the installer fails, without waiting out its time', async () => {
+  it('goes back when the installer fails', async () => {
     const s = stand();
     /* Something else holds the web port, and only the build from before takes it over. */
     writeFileSync(join(s.dir, 'port-holder'), '');
-    const started = Date.now();
-    const r = await runOnce(s, ask('v17'), { STUB_BUILD_SERVICES: '0.4.1=db,app,updater 0.4.0=db,app,front,updater', HORNHOOF_INSTALL_WAIT: '25' });
-    expect(Date.now() - started).toBeLessThan(20_000);
+    const r = await runOnce(s, ask('v17'), { STUB_BUILD_SERVICES: '0.4.1=db,app,updater 0.4.0=db,app,front,updater' });
     expect(r.status).toMatchObject({ id: 'v17', state: 'rolled_back', step: 'finished' });
     expect(r.status.log).toContain('The installer of 0.4.1 failed: Bind for 0.0.0.0:8080 failed: port is already allocated');
-    expect(r.status.log).not.toContain('did not end within');
   });
 
   it('moves in by handing over, and goes back to the old build when the new one fails', async () => {
@@ -355,8 +323,8 @@ describe('updater, revision 2', () => {
     const { s } = await handedOver('h12');
     const later = join(s.dir, 'status-later.json');
     writeFileSync(later, JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), log: `${GOES_ON}\n` }));
-    spawn('sh', ['-c', `sleep 1; mv "${later}" "${statusFile(s)}"`], { stdio: 'ignore', detached: true }).unref();
-    const t = await takeOver(s, { ...HAND_OVER, HORNHOOF_TAKE_OVER_WAIT: '10' });
+    /* The new updater says so while the helper waits its first second, not before it looks. */
+    const t = await takeOver(s, { ...HAND_OVER, HORNHOOF_TAKE_OVER_WAIT: '10', STUB_DURING_SLEEP: `[ ! -f "${later}" ] || mv "${later}" "${statusFile(s)}"` });
     expect(t.status).toMatchObject({ id: 'h12', state: 'running', step: 'install' });
     expect(t.status.log).toContain(GOES_ON);
     expect(t.status.log).not.toContain(NO_START);
