@@ -1,0 +1,19 @@
+[Unit]
+Description=The droplet's own frpc: carries what frps does not route by name on to Caddy
+After=frps.service
+Wants=frps.service
+
+[Service]
+User=frps
+Group=frps
+EnvironmentFile=/etc/hornhoof-relay/edge.env
+ExecStart=/usr/local/bin/frpc -c /etc/frp/edge-frpc.toml
+Restart=always
+RestartSec=1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

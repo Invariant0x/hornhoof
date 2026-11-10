@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/Invariant0x/hornhoof-edge/security/advisories/new
+    about: Report a security problem privately. Only the maintainers see it.

@@ -1,0 +1,45 @@
+# frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's live https
+# proxy gets the encrypted stream as it came, and everything else goes through the droplet's own frpc (client edge) to
+# Caddy on loopback. That includes a name in https mode while its tunnel is down: Caddy reads that request to answer it
+# with a 404 or 410, and keeps nothing of it. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and
+# the traffic of companies in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because
+# proxyBindAddr opens 443; both firewalls keep it closed.
+# Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600), and so is every new connection to an
+# https or stcp proxy, the edge's too; if it does not answer, frps refuses. While relay.py restarts nothing new comes in
+# on 443, and connections already open stay.
+bindAddr = "127.0.0.1"
+bindPort = 7000
+proxyBindAddr = "0.0.0.0"
+vhostHTTPPort = 8080
+vhostHTTPSPort = 443
+vhostHTTPTimeout = 60
+subDomainHost = "hornhoof.org"
+custom404Page = "/etc/frp/404.html"
+detailedErrorsToClient = true
+userConnTimeout = 10
+
+auth.method = "token"
+auth.token = ""
+
+transport.tcpMux = true
+transport.maxPoolCount = 5
+# tcpMux keepalive drops a silent client within 30 s.
+# Heartbeats, where a client still sends them, are checked by the plugin as before.
+transport.tcpMuxKeepaliveInterval = 10
+transport.heartbeatTimeout = -1
+
+log.to = "console"
+# Only errors: frps names every visitor's address at info ("get a user connection") and a refused one's at warn. Those
+# addresses are real now that frps holds port 443, and the relay keeps none of them.
+log.level = "error"
+
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "@WEB_PASSWORD@"
+
+[[httpPlugins]]
+name = "hornhoof-relay"
+addr = "127.0.0.1:7600"
+path = "/frp/handler"
+ops = ["Login", "NewProxy", "Ping", "NewUserConn"]

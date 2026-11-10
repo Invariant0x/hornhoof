@@ -1,0 +1,32 @@
+#!/bin/sh
+# Operator commands for the Hornhoof relay. Run as root on the droplet.
+#   hornhoof-relay list                       every binding, when it was made and last seen
+#   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret.
+#                                             Refused while the name's old tunnel lives or the relay cannot tell
+#   hornhoof-relay ban <name> [reason] [--cut]  a ban refuses new connections at once, and its tunnel can never log in or
+#                                             register again. Visitors get the 410 page once that tunnel is gone. Connections
+#                                             already open stay; --cut also drops open ones, with every link, by restarting frps
+#   hornhoof-relay unban <name>
+#   hornhoof-relay release <name>             free a name once its old tunnel is gone
+#   hornhoof-relay traffic                    bytes sent per month, the last 12 months
+set -eu
+# add asks frps whether a freed name's old tunnel lives, so it needs what the service reads to reach frps's dashboard.
+if [ -r /etc/hornhoof-relay.env ]; then
+  set -a
+  . /etc/hornhoof-relay.env
+  set +a
+fi
+relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+said=$(relay "$@")
+printf '%s\n' "$said"
+case "${1:-}" in
+  ban | unban)
+    relay banned-caddy > /etc/caddy/blocked.caddy.new
+    mv /etc/caddy/blocked.caddy.new /etc/caddy/blocked.caddy
+    chmod 644 /etc/caddy/blocked.caddy
+    systemctl reload caddy
+    ;;
+esac
+if [ "${1:-}" = ban ] && [ "$(printf '%s\n' "$said" | tail -n 1)" = 'restart frps' ]; then
+  systemctl restart frps
+fi

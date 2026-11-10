@@ -1,0 +1,20 @@
+# The droplet's own frpc, client edge. frps routes every connection on 443 by its TLS server name; whatever no
+# company's https proxy claims comes here and goes on to Caddy on loopback, with a PROXY v2 header that names the
+# visitor. The plugin lets this client in only with the token in /etc/hornhoof-relay/edge.env: every tunnel reaches
+# frps from Caddy on loopback, so an address proves nothing.
+serverAddr = "127.0.0.1"
+serverPort = 7000
+loginFailExit = false
+transport.protocol = "tcp"
+transport.heartbeatInterval = -1
+transport.tcpMuxKeepaliveInterval = 10
+clientID = "edge"
+metadatas.edge = "{{ .Envs.EDGE_TOKEN }}"
+
+[[proxies]]
+name = "edge"
+type = "https"
+customDomains = ["hornhoof.org", "*"]
+localIP = "127.0.0.1"
+localPort = 8443
+transport.proxyProtocolVersion = "v2"
