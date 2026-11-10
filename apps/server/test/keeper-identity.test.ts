@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +101,25 @@ describe("the machine's identity in its keeper", () => {
     expect(identity.certificate()).toBeNull();
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^Could not get this machine's certificate: /);
+  });
+});
+
+describe('a keeper that stops while its app does not answer', () => {
+  it('gives up what it asked the app at once, without waiting for the answer', async () => {
+    /* An app that takes every request and never says a word. */
+    const asked: string[] = [];
+    const silent = http.createServer(req => void asked.push(`${req.method} ${req.url}`));
+    await new Promise<void>(resolve => silent.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => {
+      silent.closeAllConnections();
+      silent.close();
+    });
+    const { identity } = identityOn(folder(), { host: '127.0.0.1', port: (silent.address() as AddressInfo).port });
+    await until(() => asked.includes('POST /api/network/certificate') && asked.includes('POST /api/network/report'));
+    let stopped = false;
+    void identity.stop().then(() => (stopped = true));
+    await until(() => stopped);
+    expect(identity.certificate()).toBeNull();
   });
 });
 

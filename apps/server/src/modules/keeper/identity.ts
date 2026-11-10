@@ -1,7 +1,7 @@
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
-import { machineKey, type MachineKey } from './machine-keys.js';
+import { machineKey, reasonOf, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 
 const KEY_RETRY_MS = 60_000;
@@ -29,7 +29,6 @@ const portOf = (value: string | undefined): number | null => (/^[1-9]\d{0,4}$/.t
 /* The ports this machine publishes, from the names compose gives the keeper. */
 export const publishedFrom = (env: NodeJS.ProcessEnv): Published => ({ web: portOf(env.HORNHOOF_PORT), peer: portOf(env.HORNHOOF_PEER_PORT) });
 
-const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /* What the machine is to the company's network, kept by its keeper: its key, the certificate the leading app gives for
    that key, and what the keeper measures of the machine and reports while the app leads. None of it holds back what the
@@ -46,6 +45,8 @@ export class MachineIdentity {
   private keyFailureSaid = false;
   private reportFailureSaidAt: number | null = null;
   private reporting: Promise<void> | null = null;
+  /* Ends what the keeper has asked its app for when it stops. */
+  private readonly stopping = new AbortController();
 
   constructor(private readonly opts: IdentityOptions) {
     this.measures = new Measures({ dir: opts.dir, sampleMs: opts.sampleMs });
@@ -61,6 +62,7 @@ export class MachineIdentity {
   /* Waits for a report on its way, so nothing of this still asks the app once it has stopped. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.stopping.abort();
     clearTimeout(this.keyTimer);
     clearInterval(this.reportTimer);
     this.certificates?.stop();
@@ -109,7 +111,7 @@ export class MachineIdentity {
   }
 
   private async ask(signKey: string): Promise<HeldCertificate> {
-    const res = await askApp(this.opts.app, 'POST', '/api/network/certificate', { signKey });
+    const res = await askApp(this.opts.app, 'POST', '/api/network/certificate', { signKey }, this.stopping.signal);
     if (!res.ok) throw new Error(`the app answered ${res.status}`);
     return res.json() as HeldCertificate;
   }
@@ -120,9 +122,10 @@ export class MachineIdentity {
     try {
       const { web, peer } = this.opts.published;
       const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
-      const res = await askApp(this.opts.app, 'POST', '/api/network/report', body);
+      const res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {
+      if (this.stopped) return;
       const now = Date.now();
       if (this.reportFailureSaidAt !== null && now - this.reportFailureSaidAt < SAY_AGAIN_MS) return;
       this.reportFailureSaidAt = now;

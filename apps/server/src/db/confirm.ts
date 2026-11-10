@@ -11,7 +11,8 @@ const LOST_CODES = ['57P01', LIMIT_ENDED_IT];
 /* What a connection that broke says. Any socket says the same, as when a call to another service breaks, so these count
    as a loss only on an error a watched query of the database threw. */
 const BREAK_CODES = ['ECONNRESET', 'EPIPE'];
-const brokeUnderQuery = new WeakSet<object>();
+/* The failures a query of the database, or a connect to it, threw. */
+const ofDatabase = new WeakSet<object>();
 /* What pg throws on a dead connection, which is what drizzle's ROLLBACK throws in place of the first error. */
 const NOT_QUERYABLE = 'Client has encountered a connection error and is not queryable';
 const CONNECTION_ENDED = 'Connection terminated';
@@ -35,15 +36,25 @@ export class NotConfirmed extends Error {
 
 const saysLost = (message: unknown): boolean => typeof message === 'string' && (message.startsWith(CONNECTION_ENDED) || message === NOT_QUERYABLE);
 
+const codeOf = (err: object): unknown => (err as { code?: unknown }).code;
+const brokeUnderQuery = (err: object): boolean => ofDatabase.has(err) && BREAK_CODES.includes(codeOf(err) as string);
+
 function isOwnLoss(err: object): boolean {
-  return err instanceof NotConfirmed || brokeUnderQuery.has(err) || saysLost((err as { message?: unknown }).message);
+  return err instanceof NotConfirmed || brokeUnderQuery(err) || saysLost((err as { message?: unknown }).message);
 }
 
-/* Marks a failure of a query as a connection that broke under it, and passes it on as it is. */
-function noteBreak(err: unknown): never {
-  const { code } = (err ?? {}) as { code?: unknown };
-  if (err && typeof err === 'object' && typeof code === 'string' && BREAK_CODES.includes(code)) brokeUnderQuery.add(err);
+/* Marks a failure as the database's own, and passes it on as it is. */
+export function noteDatabaseFailure(err: unknown): never {
+  if (err && typeof err === 'object') ofDatabase.add(err);
   throw err;
+}
+
+/* Whether a failure, or one it wraps, came from a query of the database or a connect to it. */
+export function fromDatabase(err: unknown): boolean {
+  for (let e: unknown = err; e && typeof e === 'object'; e = (e as { cause?: unknown }).cause) {
+    if (ofDatabase.has(e)) return true;
+  }
+  return false;
 }
 
 /* Whether a failed call may still have changed the data. Drizzle wraps what the driver throws, so it looks at the causes too. */
@@ -96,7 +107,7 @@ function wrapQuery(client: pg.ClientBase, around: AroundQuery): void {
   const wrapped: SendQuery = (...args) => {
     if (isSubmittable(args[0])) return send(...args);
     const { call, callback } = promiseForm(args);
-    return answerBack(around(textOf(args[0]), () => Promise.resolve(send(...call)).catch(noteBreak)), callback);
+    return answerBack(around(textOf(args[0]), () => Promise.resolve(send(...call)).catch(noteDatabaseFailure)), callback);
   };
   client.query = wrapped as typeof client.query;
 }

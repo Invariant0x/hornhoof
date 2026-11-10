@@ -136,6 +136,27 @@ describe("front's door for tool calls", () => {
     expect(JSON.parse((await post(await doorTo(closed, 40), call(9))).body)).toEqual(toolError(9, CALL_NOT_SENT));
   });
 
+  /* The agent's client gives up after a minute. The keeper holds a request for the app too, so front tells it how long is
+     left: the two holds together stay inside front's own. */
+  it('counts its hold from when the call came, and tells the keeper how long of it is left', async () => {
+    const { target, seen } = await keeperAnswering(refused(503, 'starting'));
+    const began = Date.now();
+    await post(await doorTo(target, 60), call(3));
+    expect(Date.now() - began).toBeLessThan(5000);
+    const left = seen.map(s => Number(s.headers['x-hornhoof-hold']));
+    expect(left.length).toBeGreaterThan(1);
+    expect(left[0]).toBeLessThanOrEqual(60);
+    expect(left.every(ms => Number.isInteger(ms) && ms >= 0)).toBe(true);
+    expect([...left].sort((a, b) => b - a)).toEqual(left);
+  });
+
+  it('tells the agent a call did not run when the app never took it', async () => {
+    const { target } = await keeperAnswering(refused(503, 'starting'));
+    expect(JSON.parse((await post(await doorTo(target, 40), call(9))).body)).toEqual(toolError(9, CALL_NOT_SENT));
+    const maybe = await keeperAnswering(refused(502, 'starting'));
+    expect(JSON.parse((await post(await doorTo(maybe.target, 40), call(9))).body)).toEqual(toolError(9, CALL_LOST));
+  });
+
   it('passes every other answer as it came, and tries none of them again', async () => {
     const unauthorized = await keeperAnswering((_seen, res) => void res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' }).end('{"error":{"code":"unauthorized"}}'));
     const answer = await post(await doorTo(unauthorized.target), call(1));

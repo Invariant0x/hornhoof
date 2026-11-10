@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { isAddressOf } from '../../auth/tunnel.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
-import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
+import { firstForwarded, INVOCATION, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, UUID, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
@@ -106,9 +106,6 @@ function proofNonce(req: http.IncomingMessage): string | null | undefined {
   const nonce = new URLSearchParams(query).get('nonce') ?? '';
   return NONCE.test(nonce) ? nonce : null;
 }
-
-const INVOCATION = 'x-hornhoof-invocation';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /* The id front stamped a tool call with, when the request has one. */
 function invocationOf(req: http.IncomingMessage): Record<string, string> {

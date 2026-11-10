@@ -135,7 +135,7 @@ describe('the source of a change', () => {
     const first = await listed(db, 'web:l');
     expect(first).toMatchObject({ steps: 1, first: stepOf('web:l', 0) });
     expect(first!.at).toBeInstanceOf(Date);
-    await withSource('web:other', () => touch(db, 'web:l'));
+    await withSource('web:other', () => touch(db, first!.first));
     const ops = (await db.execute<{ op: string }>(sql`select op from net.journal where tbl = 'applied' order by at`)).rows.map(row => row.op);
     expect(ops).toEqual(['insert', 'update']);
     expect(await listed(db, 'web:other')).toBeNull();

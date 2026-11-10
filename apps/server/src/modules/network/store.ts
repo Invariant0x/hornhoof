@@ -6,10 +6,10 @@ import type { Db } from '../../db/client.js';
 import { authority, certificates, companies, machines, peerSecrets, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { makeAuthority, type Authority } from './authority.js';
+import { SERVER_KEY } from '../nodes/nodes.js';
 
 /* The row of the machine the app itself runs on is no computer anyone joined: its key says so, and the screens and the
    test pool leave such rows out. */
-export const SERVER_KEY = 'server:';
 const serverRow = like(machines.machineKey, `${SERVER_KEY}%`);
 const live = isNull(machines.revokedAt);
 

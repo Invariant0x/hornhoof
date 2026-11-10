@@ -140,7 +140,9 @@ export type ErrorReason =
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
-export const ALREADY_DONE = 'This change was already made, but its answer was lost. Reload the page to see it.';
+/* A change counts as sent once any commit of it is listed. One that failed between two commits is listed too, so the
+   words promise no more than that. */
+export const ALREADY_DONE = 'This change was already sent, and Hornhoof made it or began to make it, but its answer was lost. Reload the page to see what is there.';
 
 /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {

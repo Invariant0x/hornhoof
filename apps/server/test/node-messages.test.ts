@@ -5,11 +5,12 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import WebSocket from 'ws';
 import type { Db } from '../src/db/client.js';
-import { NotConfirmed } from '../src/db/confirm.js';
+import { confirmCommits, NotConfirmed } from '../src/db/confirm.js';
 import { agentEvents, jobs } from '../src/db/schema.js';
 import { listed } from '../src/db/sources.js';
 import { ApiError } from '../src/errors.js';
 import { passing } from '../src/modules/nodes/numbered.js';
+import { FakePgClient } from './fake-pg-client.js';
 import { as, connectNode, listen, setLease, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -133,12 +134,29 @@ describe('numbered messages of a node', () => {
 
 describe('a failure that passes', () => {
   const coded = (code: string) => Object.assign(new Error('x'), { code });
+  /* The same failure as a query of the database throws it. */
+  async function ofDatabase(code: string): Promise<unknown> {
+    const client = new FakePgClient();
+    confirmCommits(client.asPg);
+    client.answer = { error: coded(code) };
+    return client.asPg.query('SELECT 1').catch((err: unknown) => err);
+  }
 
-  it('is a lease refused, a commit not confirmed, a database out of reach, busy or in conflict, or a 503 of the app', () => {
-    for (const code of ['HHF01', '40001', '40P01', '55P03', '57P03', '53300', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', '08006', '08P01']) expect(passing(coded(code)), code).toBe(true);
+  it('is a lease refused, a commit not confirmed, a database busy or in conflict, or a 503 of the app', () => {
+    for (const code of ['HHF01', '40001', '40P01', '55P03', '57P03', '53300', '08006', '08P01']) expect(passing(coded(code)), code).toBe(true);
     expect(passing(new NotConfirmed(new Error('ended')))).toBe(true);
     expect(passing(new ApiError(503, 'unavailable', 'x', 'starting'))).toBe(true);
     expect(passing(new Error('wrapped', { cause: coded('40P01') }))).toBe(true);
+  });
+
+  /* Any socket says these, so only the database's own count: a call to another service that stays down would otherwise
+     hold a node's messages back for good. */
+  it('is a database out of reach, and not the same words from anything else', async () => {
+    for (const code of ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT']) {
+      expect(passing(await ofDatabase(code)), code).toBe(true);
+      expect(passing(new Error('wrapped', { cause: await ofDatabase(code) })), code).toBe(true);
+      expect(passing(coded(code)), code).toBe(false);
+    }
   });
 
   it('is no other failure', () => {

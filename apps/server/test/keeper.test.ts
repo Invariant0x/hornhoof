@@ -315,6 +315,18 @@ describe('the keeper', () => {
     expect(lines.filter(line => line.startsWith("The keeper cannot keep this machine's key"))).toHaveLength(1);
   });
 
+  it('holds a request no longer than whoever sent it asks, and never longer than its own hold', async () => {
+    const { front } = await keeperOn(await appIsDown(), { ...FAST, holdEveryMs: 5 });
+    const asked = await send(front, { path: '/api/me', headers: { 'x-hornhoof-hold': '0' } });
+    expect(asked.status).toBe(502);
+    expect(JSON.parse(asked.body).error.reason).toBe('starting');
+    const short = await send(front, { path: '/api/me', headers: { 'x-hornhoof-hold': '30' } });
+    expect(short.status).toBe(503);
+    /* Words that are no time ask for nothing. */
+    const { front: other } = await keeperOn(await appIsDown(), { ...FAST, holdMs: 30, holdEveryMs: 5 });
+    for (const hold of ['soon', '-5', '999999999']) expect((await send(other, { path: '/api/me', headers: { 'x-hornhoof-hold': hold } })).status, hold).toBe(503);
+  });
+
   it("passes front's invocation id on, and no one else's", async () => {
     const id = '5f0c2b1e-8a43-4c1d-9e57-2b7f6a1d3c90';
     const seen = async (frontHost: string, value: string) => {

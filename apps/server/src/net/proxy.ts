@@ -15,7 +15,8 @@ export type PassOptions = {
   own?: (req: http.IncomingMessage) => Refusal | null;
   connectMs?: number;
   /* For how long a request whose connect to the target fails is held and tried again, counted from when it came. Nothing
-     of the request is read before the target connects. 0 or not given: it is answered unreachable at once. */
+     of the request is read before the target connects. 0 or not given: it is answered unreachable at once. Whoever sent
+     the request may ask for a shorter hold with the header HOLD, as a hop that holds it too does. */
   holdMs?: number;
   /* The pause between two tries of a held request. */
   holdEveryMs?: number;
@@ -44,6 +45,19 @@ const CONNECT_MS = 5000;
 export const HOLD_MS = 60_000;
 export const KEEPER_HOLD_MS = 45_000;
 const HOLD_EVERY_MS = 500;
+/* The milliseconds a hop before this one still has for the request: this hop holds it no longer than that. */
+export const HOLD = 'x-hornhoof-hold';
+/* The id front stamps a tool call with, the same on every try of that call. */
+export const INVOCATION = 'x-hornhoof-invocation';
+/* A lowercase uuid, as ids travel in Hornhoof's own headers. */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/* How long this request is held: this hop's own time, or the shorter one its sender asked for. */
+function holdOf(opts: PassOptions, req: http.IncomingMessage): number {
+  const own = opts.holdMs ?? 0;
+  const asked = String(req.headers[HOLD] ?? '');
+  return /^\d{1,9}$/.test(asked) ? Math.min(own, Number(asked)) : own;
+}
 /* A WebSocket client sends nothing until the 101, so this is room to spare, and it keeps a flood out of memory. */
 const EARLY_BYTES = 64 * 1024;
 /* What clients have today, Fastify's default. With Node's 5 s a client reusing a connection just as it closes gets a reset. */
@@ -302,8 +316,9 @@ async function pass(opts: PassOptions, req: http.IncomingMessage, asker: Asker):
   try {
     const added = await opts.headers(req);
     if (asker.side.destroyed) return;
-    if (!opts.holdMs) return asker.carry(openTarget(opts, req, added, asker));
-    const reached = await heldConnection(opts, req, asker, opts.holdMs);
+    const holdMs = holdOf(opts, req);
+    if (!holdMs) return asker.carry(openTarget(opts, req, added, asker));
+    const reached = await heldConnection(opts, req, asker, holdMs);
     if (!reached) return;
     if ('status' in reached) return asker.refuse(closing(reached));
     asker.carry(openTarget(opts, req, added, asker, reached));

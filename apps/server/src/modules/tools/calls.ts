@@ -10,11 +10,9 @@ import { isLeaseRefused } from '../../db/net.js';
 import { toolCalls } from '../../db/schema.js';
 import { listed, outsideSources, sources, toolSource, touch, withSource } from '../../db/sources.js';
 import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
+import { INVOCATION, UUID } from '../../net/proxy.js';
 
-/* The header front stamps each tool call with, the same on every try of that call. */
-export const INVOCATION = 'x-hornhoof-invocation';
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export { INVOCATION };
 
 /* The call's id, believed only from the keeper's address: the keeper passes it on only from front, so a node that reaches
    the app past them never stamps a call. */
@@ -82,8 +80,9 @@ async function answeredBefore(call: Call): Promise<Answer | null> {
     await call.db.execute(sql`UPDATE tool_calls SET at = at WHERE id = ${call.id}`);
     return (row.answer as Answer | null) ?? say(PENDING(row.at));
   }
-  if (!(await listed(call.db, toolSource(call.id)))) return null;
-  await touch(call.db, toolSource(call.id));
+  const before = await listed(call.db, toolSource(call.id));
+  if (!before) return null;
+  await touch(call.db, before.first);
   return say(ALREADY_RAN);
 }
 
@@ -119,7 +118,9 @@ async function once(call: Call, run: () => Promise<Answer>): Promise<Answer> {
   } catch (err) {
     return passing(call, err, startsFirst);
   }
-  await outsideSources(() => keep(call, answer));
+  /* The tool did its work, and the agent hears so even when the answer cannot be kept: told of a failure, it would do the
+     work again under a new id. The same id sent again still finds the call started or listed, and does not run it. */
+  await outsideSources(() => keep(call, answer)).catch(() => undefined);
   return answer;
 }
 

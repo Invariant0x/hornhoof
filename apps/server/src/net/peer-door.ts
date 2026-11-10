@@ -4,10 +4,9 @@ import type { Duplex } from 'node:stream';
 import { z } from 'zod';
 import { VIA } from '../modules/network/via.js';
 import type { Peer } from './peer-server.js';
-import { firstForwarded, passThrough, serve, startingAnswer, type Target } from './proxy.js';
+import { firstForwarded, INVOCATION, passThrough, serve, startingAnswer, type Target } from './proxy.js';
 
 const LOOPBACK = '127.0.0.1';
-const INVOCATION = 'x-hornhoof-invocation';
 const NOBODY_REGISTERED = 'No peer is registered for this connection.';
 
 /* A TCP connection, once it is up. */

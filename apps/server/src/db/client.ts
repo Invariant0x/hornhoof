@@ -6,7 +6,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import pg from 'pg';
-import { confirmCommits, keepErrors, logTimeouts } from './confirm.js';
+import { confirmCommits, keepErrors, logTimeouts, noteDatabaseFailure } from './confirm.js';
 import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS, FENCED, JOURNAL_NEEDS_PUTTING_BACK } from './net.js';
 import * as schema from './schema.js';
 import { recordSources } from './sources.js';
@@ -54,7 +54,27 @@ export function openPool(url: string, onDropped: (err: Error) => void, name: str
   });
   pool.on('error', onDropped);
   pool.on('connect', client => watchClient(client, name));
+  markConnectFailures(pool);
   return pool;
+}
+
+type ConnectCallback = (err: Error | undefined, ...rest: unknown[]) => void;
+
+/* A connect that fails says what any socket says. It is marked as the database's own, so what looks at a failure can
+   tell a database out of reach from another service that is. pg-pool connects in both of its forms. */
+function markConnectFailures(pool: pg.Pool): void {
+  const connect = pool.connect.bind(pool) as (callback?: ConnectCallback) => Promise<pg.PoolClient> | undefined;
+  const marked = (err: unknown): unknown => {
+    try {
+      return noteDatabaseFailure(err);
+    } catch {
+      return err;
+    }
+  };
+  pool.connect = ((callback?: ConnectCallback) => {
+    if (callback) return connect((err, ...rest) => callback(err ? (marked(err) as Error) : err, ...rest));
+    return (connect() as Promise<pg.PoolClient>).catch(noteDatabaseFailure);
+  }) as typeof pool.connect;
 }
 
 const warnDropped = (err: Error) => console.warn(`Lost a database connection, will open another: ${err.message}`);

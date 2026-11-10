@@ -11,10 +11,13 @@ import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
 import { NotConfirmed } from '../src/db/confirm.js';
 import { agents, companies, jobs, notebookNotes, people, subscriptions, toolCalls } from '../src/db/schema.js';
-import { listed } from '../src/db/sources.js';
+import { listed, outsideSources } from '../src/db/sources.js';
 import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
 import { ALREADY_RAN, ANSWER_MAX, currentInvocation, guardTools, ID_TAKEN, INVOCATION, MAY_HAVE_RUN, PENDING, STARTS_FIRST, TOO_LARGE } from '../src/modules/tools/calls.js';
-import { listen, setUpCompany, testApp } from './helpers.js';
+import { listen, ownDatabases, setLease, setUpCompany, testApp } from './helpers.js';
+
+/* One test ends the lease, which emptying the tables does not undo. */
+ownDatabases();
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
 
@@ -205,6 +208,20 @@ describe('a guarded tool', () => {
       throw new Error('a bug');
     });
     await expect(broken(randomUUID())).rejects.toThrow('a bug');
+  });
+
+  /* The tool did its work. Telling the agent it failed would make the agent do it again, under a new id. */
+  it('gives the agent the answer of a call that ran, even when the answer could not be kept', async () => {
+    const c = await standing();
+    const run = guarded(c.ctx, c.job.id, 'run_tests', async () => {
+      await outsideSources(() => setLease(c.db, { until: '-infinity' }));
+      return say('The run is r1.');
+    });
+    const id = randomUUID();
+    expect(await run(id)).toEqual(say('The run is r1.'));
+    await setLease(c.db, { until: 'infinity' });
+    /* The row that said it started is still there, so the same call sent again does not run again. */
+    expect((await run(id)).isError).toBe(true);
   });
 
   it('keeps a large answer as too large, after giving it whole the first time', async () => {

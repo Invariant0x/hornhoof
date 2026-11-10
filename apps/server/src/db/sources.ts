@@ -49,12 +49,12 @@ const openNow = (): Source | undefined => {
   return source?.open ? source : undefined;
 };
 
-/* Every change to a row takes a transaction id, so a transaction with one wrote. Its step goes in before its commit. */
+/* Every change to a row takes a transaction id, so a transaction with one wrote, and its step goes in before its commit,
+   in one statement. A step number is taken either way: one that is not written leaves a gap, as a failed commit does. */
 async function recordStep(tx: Db, source: Source): Promise<boolean> {
-  const answer = (await tx.execute(sql`SELECT pg_current_xact_id_if_assigned() IS NOT NULL AS wrote`)) as unknown as { rows: { wrote: boolean }[] };
-  if (!answer.rows[0]!.wrote) return false;
-  await insertStep(tx, source);
-  return true;
+  const step = stepOf(source.base, source.next++);
+  const answer = (await tx.execute(sql`INSERT INTO applied (source, base) SELECT ${step}, ${source.base} WHERE pg_current_xact_id_if_assigned() IS NOT NULL RETURNING 1`)) as unknown as { rows: unknown[] };
+  return answer.rows.length > 0;
 }
 
 async function insertStep(tx: Db, source: Source): Promise<void> {
@@ -119,8 +119,7 @@ export async function listed(db: Db, base: string): Promise<{ steps: number; fir
   return { steps: rows.length, first: rows[0].source, at: rows[0].at, next: last + 1 };
 }
 
-/* Writes the source's first step again as it is, so the journal carries it to whoever keeps a copy, and no step is taken. */
-export async function touch(db: Db, base: string): Promise<void> {
-  const first = (await listed(db, base))?.first;
-  if (first) await outsideSources(() => db.execute(sql`UPDATE applied SET at = at WHERE source = ${first}`));
+/* Writes a source's first step again as it is, so the journal carries it to whoever keeps a copy, and no step is taken. */
+export async function touch(db: Db, first: string): Promise<void> {
+  await outsideSources(() => db.execute(sql`UPDATE applied SET at = at WHERE source = ${first}`));
 }

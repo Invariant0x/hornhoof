@@ -2,6 +2,7 @@ import type { Term } from '../../db/net.js';
 import type { LeaseStore } from './lease-store.js';
 import { LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
 import type { Mode } from './state.js';
+import { reasonOf as messageOf } from './machine-keys.js';
 
 export type LeaseHolderOptions = {
   /* Null: this keeper has no database to hold a lease in, and never leads. */
@@ -16,7 +17,6 @@ export type LeaseHolderOptions = {
 const PRUNE_EVERY_MS = 60_000;
 const ENDED = 'the sessions of the app and the agents were ended, and Hornhoof only reads here until it takes a new term';
 const clocksNow = (): Clocks => ({ wall: Date.now(), mono: performance.now() });
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /* Holds this machine's lease in the database, a tick at a time, and says from it what the app may do: lead only under a
    normal lease that still stands by both clocks and with every fence seen to hold. A call to the database that fails

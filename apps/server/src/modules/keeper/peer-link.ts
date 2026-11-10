@@ -10,7 +10,7 @@ import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import type { HeldCertificate } from './certificate.js';
 import type { MachineIdentity } from './identity.js';
-import { writePrivately } from './machine-keys.js';
+import { reasonOf, writePrivately } from './machine-keys.js';
 import type { Mode } from './state.js';
 
 export const CRL_FILE = 'crl.json';
@@ -82,6 +82,7 @@ export class PeerLink {
   private opened = false;
   private stopped = false;
   private readFails = false;
+  private readonly stopping = new AbortController();
   private listening: PeerPorts | null = null;
   private readonly waiting: Array<(ports: PeerPorts) => void> = [];
 
@@ -107,7 +108,8 @@ export class PeerLink {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    /* A read on its way ends first, so nothing of this still asks the app once it has stopped. */
+    /* A read on its way is given up and ends first, so nothing of this still asks the app once it has stopped. */
+    this.stopping.abort();
     await this.reading;
     await Promise.all([this.tunnel?.stop(), this.server?.close().catch(() => undefined), this.door.stop()]);
   }
@@ -121,7 +123,7 @@ export class PeerLink {
   /* A read that fails keeps the last answer, and is said once an outage. */
   private async readOnce(): Promise<void> {
     try {
-      const res = await askApp(this.opts.app, 'GET', '/api/network/peers');
+      const res = await askApp(this.opts.app, 'GET', '/api/network/peers', undefined, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
       this.take(Answer.parse(res.json()));
       this.readFails = false;
@@ -163,7 +165,7 @@ export class PeerLink {
     try {
       writePrivately(join(this.opts.dir, CRL_FILE), JSON.stringify(crl));
     } catch (err) {
-      this.opts.log(`Could not keep the list of revoked certificates in the keeper's folder: ${err instanceof Error ? err.message : String(err)}`);
+      this.opts.log(`Could not keep the list of revoked certificates in the keeper's folder: ${reasonOf(err)}`);
     }
   }
 

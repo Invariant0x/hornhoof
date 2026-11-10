@@ -1,6 +1,7 @@
 import { DrizzleQueryError } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { confirmCommits, keepErrors, logTimeouts, NotConfirmed, notConfirmed, requestRoute } from '../src/db/confirm.js';
+import { openPool } from '../src/db/client.js';
+import { confirmCommits, fromDatabase, keepErrors, logTimeouts, NotConfirmed, notConfirmed, requestRoute } from '../src/db/confirm.js';
 import { FakePgClient } from './fake-pg-client.js';
 
 const WARNING = { severity: 'WARNING', message: 'canceling wait for synchronous replication due to user request' };
@@ -138,6 +139,29 @@ describe('notConfirmed', () => {
     ['nothing', undefined],
   ])('is false for %s', (_name, err) => {
     expect(notConfirmed(err)).toBe(false);
+  });
+});
+
+describe('fromDatabase', () => {
+  it('knows a failure of a query, and of a connect to the database, from the same failure of anything else', async () => {
+    const client = confirming();
+    client.answer = { error: withCode('ETIMEDOUT') };
+    const underQuery: unknown = await client.asPg.query('SELECT 1').catch((err: unknown) => err);
+    expect(fromDatabase(underQuery)).toBe(true);
+    expect(fromDatabase(new DrizzleQueryError('select', [], underQuery as Error))).toBe(true);
+
+    /* Nothing listens here, so the pool cannot connect, whichever way it is asked. */
+    const pool = openPool('postgres://u:p@127.0.0.1:1/d', () => {}, 'hornhoof-test');
+    const byPromise: unknown = await pool.connect().catch((err: unknown) => err);
+    const byQuery: unknown = await pool.query('SELECT 1').catch((err: unknown) => err);
+    await pool.end();
+    expect((byPromise as { code?: string }).code).toBe('ECONNREFUSED');
+    expect(fromDatabase(byPromise)).toBe(true);
+    expect(fromDatabase(byQuery)).toBe(true);
+
+    expect(fromDatabase(withCode('ECONNREFUSED'))).toBe(false);
+    expect(fromDatabase(new Error('fetch failed', { cause: withCode('ETIMEDOUT') }))).toBe(false);
+    expect(fromDatabase(undefined)).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import type { KeyObject } from 'node:crypto';
 import * as x509 from '@peculiar/x509';
 import type { MachineRole } from '../../db/schema.js';
 import { toPem } from '../tls/x509.js';
+import { UUID } from '../../net/proxy.js';
 
 export const AUTHORITY_YEARS = 20;
 export const CERT_DAYS = 30;
@@ -16,7 +17,6 @@ const SERIAL_BYTES = 16;
 const ED25519 = { name: 'Ed25519' } as const;
 const MACHINE_URN = 'URI:urn:hornhoof:machine:';
 const ROLE_URN = 'URI:urn:hornhoof:role:';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SPKI_PEM = /^\s*-----BEGIN PUBLIC KEY-----/;
 const NOT_ED25519 = 'Not an Ed25519 public key.';
 const NAMES_NO_MACHINE = 'This certificate names no machine of a company.';

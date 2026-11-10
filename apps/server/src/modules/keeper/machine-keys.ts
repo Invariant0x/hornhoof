@@ -8,6 +8,9 @@ const KEY_FILE = 'machine.key';
 
 export type MachineKey = { privatePem: string; publicPem: string };
 
+/* What a failure says of itself. */
+export const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 /* Written whole and then renamed, so a crash leaves the old file or the new one and never half of it. */
 export function writePrivately(path: string, text: string): void {
   const partial = `${path}.${process.pid}.tmp`;

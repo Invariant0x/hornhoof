@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { heldAnswer, hopHeaders, socketAddress, type Refusal, type Target } from './proxy.js';
+import { heldAnswer, HOLD, hopHeaders, INVOCATION, socketAddress, type Refusal, type Target } from './proxy.js';
 
-/* For how long front tries a call again after its first failure. It leaves the agent's MCP client, which gives up after a
-   minute, time to read front's own answer. */
+/* For how long front tries a call, counted from when the call came. It leaves the agent's MCP client, which gives up after
+   a minute, time to read front's own answer. The keeper holds a request for the app too, so each try tells it how long of
+   this is left, and the two holds together stay inside this one. */
 export const CALL_HOLD_MS = 50_000;
 /* The app's own body limit, which /mcp has. */
 export const CALL_BODY_MAX = 1024 * 1024;
@@ -12,7 +13,6 @@ export const CALL_ANSWER_MAX = 4 * 1024 * 1024;
 export const CALL_LOST = 'Hornhoof did not answer this call in time. It may have run; look at its result before you repeat it.';
 export const CALL_NOT_SENT = 'Hornhoof could not be reached in time, so this call did not run. Try it again shortly.';
 
-const INVOCATION = 'x-hornhoof-invocation';
 const EVERY_MS = 500;
 const JSON_TYPE = { 'Content-Type': 'application/json' };
 const TOO_LARGE: Refusal = { status: 413, headers: JSON_TYPE, body: JSON.stringify({ error: { code: 'validation', message: 'Request body is too large' } }) };
@@ -23,7 +23,7 @@ type Options = { keeper: Target; holdMs?: number; everyMs?: number };
 type Whole = { status: number; raw: string[]; body: Buffer };
 /* What one try came to: an answer to pass on as it is, a failure worth another try, or an answer already on its way to
    the agent because it was too long to keep. */
-type Tried = { pass: Whole } | { again: Whole | null; connected: boolean } | 'streamed';
+type Tried = { pass: Whole } | { again: Whole | null; reached: boolean } | 'streamed';
 type Parsed = { batch: boolean; call: { id: unknown } | null };
 
 function answer(res: http.ServerResponse, { status, headers, body }: Refusal): void {
@@ -56,26 +56,31 @@ function parsed(body: Buffer): Parsed {
   }
 }
 
-/* The app is starting, or a hop before it had no answer of its own. */
-function passes({ status, body }: Whole): boolean {
-  if (status === 502) return true;
-  if (status !== 503) return false;
+const reasonOf = ({ body }: Whole): string | undefined => {
   try {
-    return (JSON.parse(body.toString()) as { error?: { reason?: string } }).error?.reason === 'starting';
+    return (JSON.parse(body.toString()) as { error?: { reason?: string } }).error?.reason;
   } catch {
-    return true;
+    return undefined;
   }
-}
+};
+
+/* The app says it is starting, or the keeper held the request and the app never came: the call did not reach the app's
+   work. */
+const neverTaken = (answer: Whole): boolean => answer.status === 503 && reasonOf(answer) === 'starting';
+
+/* Worth another try: that, or a hop before the app had no answer of its own, as when the app dropped the connection. */
+const passes = (answer: Whole): boolean => answer.status === 502 || neverTaken(answer) || (answer.status === 503 && reasonOf(answer) === undefined);
 
 /* One try, on a connection of its own. An answer is read whole before anything of it goes to the agent, so one that
    breaks off can be asked for again; one too long to keep goes on as it comes. */
-function tryOnce(opts: Options, req: http.IncomingMessage, res: http.ServerResponse, body: Buffer, invocation: string | null): Promise<Tried> {
+function tryOnce(opts: Options, req: http.IncomingMessage, res: http.ServerResponse, body: Buffer, stamp: Record<string, string>): Promise<Tried> {
   return new Promise(resolve => {
-    const headers = { ...hopHeaders(req), 'x-forwarded-for': socketAddress(req), 'content-length': String(body.length), ...(invocation ? { [INVOCATION]: invocation } : {}) };
+    const headers = { ...hopHeaders(req), 'x-forwarded-for': socketAddress(req), 'content-length': String(body.length), ...stamp };
     const out = http.request({ ...opts.keeper, method: 'POST', path: req.url, headers, agent: false });
     let connected = false;
     out.once('socket', socket => socket.once('connect', () => (connected = true)));
-    out.once('error', () => resolve({ again: null, connected }));
+    /* A connection that broke after it was made may have carried the call to the app. */
+    out.once('error', () => resolve({ again: null, reached: connected }));
     const gone = () => out.destroy();
     res.once('close', gone);
     out.once('close', () => res.off('close', gone));
@@ -93,12 +98,12 @@ function tryOnce(opts: Options, req: http.IncomingMessage, res: http.ServerRespo
         up.pipe(res);
         resolve('streamed');
       });
-      up.once('error', () => resolve({ again: null, connected: true }));
-      up.once('aborted', () => resolve({ again: null, connected: true }));
+      up.once('error', () => resolve({ again: null, reached: true }));
+      up.once('aborted', () => resolve({ again: null, reached: true }));
       up.once('end', () => {
-        if (!up.complete) return resolve({ again: null, connected: true });
+        if (!up.complete) return resolve({ again: null, reached: true });
         const got = whole();
-        resolve(passes(got) ? { again: got, connected: true } : { pass: got });
+        resolve(passes(got) ? { again: got, reached: !neverTaken(got) } : { pass: got });
       });
     });
     out.end(body);
@@ -115,8 +120,8 @@ function passOn(res: http.ServerResponse, { status, raw, body }: Whole): void {
 }
 
 /* What the agent hears of a call front gave up: a tool's own error, which says whether the call may have run. */
-function gaveUp(id: unknown, everConnected: boolean): Refusal {
-  const text = everConnected ? CALL_LOST : CALL_NOT_SENT;
+function gaveUp(id: unknown, mayHaveRun: boolean): Refusal {
+  const text = mayHaveRun ? CALL_LOST : CALL_NOT_SENT;
   return { status: 200, headers: JSON_TYPE, body: JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: true } }) };
 }
 
@@ -131,21 +136,21 @@ async function carry(opts: Options, req: http.IncomingMessage, res: http.ServerR
   const invocation = call ? randomUUID() : null;
   const holdMs = opts.holdMs ?? CALL_HOLD_MS;
   const everyMs = opts.everyMs ?? EVERY_MS;
-  let firstFailedAt: number | null = null;
-  let everConnected = false;
+  const until = Date.now() + holdMs;
+  let mayHaveRun = false;
   let last: Whole | null = null;
   while (!res.destroyed) {
-    const tried = await tryOnce(opts, req, res, body, invocation);
+    const stamp = { [HOLD]: String(Math.max(0, until - Date.now())), ...(invocation ? { [INVOCATION]: invocation } : {}) };
+    const tried = await tryOnce(opts, req, res, body, stamp);
     if (tried === 'streamed' || res.destroyed) return;
     if ('pass' in tried) return passOn(res, tried.pass);
-    everConnected ||= tried.connected;
+    mayHaveRun ||= tried.reached;
     last = tried.again ?? last;
-    firstFailedAt ??= Date.now();
-    if (Date.now() - firstFailedAt + everyMs > holdMs) break;
+    if (Date.now() + everyMs > until) break;
     await pause(everyMs);
   }
   if (res.destroyed) return;
-  if (call) return answer(res, gaveUp(call.id, everConnected));
+  if (call) return answer(res, gaveUp(call.id, mayHaveRun));
   if (last) return passOn(res, last);
   answer(res, heldAnswer(req));
 }

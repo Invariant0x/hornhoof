@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { certFacts, issuedBy, needsRenewal } from '../network/authority.js';
 import type { MachineRole } from '../../db/schema.js';
-import { writePrivately } from './machine-keys.js';
+import { reasonOf, writePrivately } from './machine-keys.js';
 import type { MachineKey } from './machine-keys.js';
 
 export const CERT_FILE = 'certificate.json';
@@ -30,7 +30,6 @@ const HeldShape: z.ZodType<HeldCertificate> = z.object({
   until: z.string(),
 });
 
-const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 function fitsKey(held: HeldCertificate, key: MachineKey): boolean {
   try {
@@ -144,6 +143,7 @@ export class CertificateKeeper {
   }
 
   private sayFailure(reason: string): void {
+    if (this.stopped) return;
     if (reason !== this.lastFailure) this.opts.log(`Could not get this machine's certificate: ${reason}`);
     this.lastFailure = reason;
   }

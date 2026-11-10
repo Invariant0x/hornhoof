@@ -60,6 +60,16 @@ describe('a change the page sends with a request id', () => {
     expect(await sourcesOf(db)).toEqual([]);
   });
 
+  /* A route that acts outside the database commits a row before it acts. Nobody who is not signed in gets that far. */
+  it('writes nothing for a visitor who is not signed in, also on a route that commits before it acts', async () => {
+    const { app, db } = await company();
+    for (const [method, url] of [['POST', '/api/computer/open'], ['POST', '/api/updates'], ['DELETE', '/api/link'], ['POST', '/api/agents/00000000-0000-4000-8000-000000000000/stop']] as const) {
+      const res = await app.inject({ method, url, payload: method === 'POST' ? {} : undefined, headers: keyed(randomUUID()) });
+      expect(res.statusCode, url).toBe(401);
+    }
+    expect(await sourcesOf(db)).toEqual([]);
+  });
+
   it('answers a read as before, whatever id comes with it', async () => {
     const { app, db, ceo } = await company();
     const key = randomUUID();
@@ -76,7 +86,8 @@ describe('the source of a request', () => {
     const app = Fastify();
     onTestFinished(() => app.close());
     registerErrorHandling(app);
-    registerRequestSources(app, db);
+    /* This app of the test's own has no people: whoever asks counts as signed in. */
+    registerRequestSources(app, db, async () => undefined);
     let open!: () => void;
     const gate = new Promise<void>(done => (open = done));
     let late: Promise<unknown> = Promise.resolve();

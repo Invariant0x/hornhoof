@@ -66,8 +66,8 @@ describe('errorText', () => {
     expect(errorText(en, notConfirmed)).toBe('Hornhoof could not confirm this change. It may be saved; look before you try again.');
     expect(errorText(ru, notConfirmed)).toBe('Hornhoof не смог подтвердить это изменение. Возможно, оно сохранено: проверьте, прежде чем повторять.');
     const alreadyDone = new ApiFailure(409, 'conflict', 'x', 'already_done');
-    expect(errorText(en, alreadyDone)).toBe('This change was already made, but its answer was lost. Reload the page to see it.');
-    expect(errorText(ru, alreadyDone)).toBe('Это изменение уже сделано, но ответ на него потерялся. Обновите страницу, чтобы его увидеть.');
+    expect(errorText(en, alreadyDone)).toBe('This change was already sent, and Hornhoof made it or began to make it, but its answer was lost. Reload the page to see what is there.');
+    expect(errorText(ru, alreadyDone)).toBe('Это изменение уже было отправлено, и Hornhoof его сделал или начал делать, но ответ потерялся. Обновите страницу, чтобы увидеть, что получилось.');
   });
 
   it('words the reasons of maintenance, read-only and starting in both languages', () => {
