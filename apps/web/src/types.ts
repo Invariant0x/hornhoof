@@ -284,7 +284,7 @@ export type AgentCardView = {
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
-  /* forWork: it skips a round while no task is open and nothing failed since the last one. */
+  /* forWork: it skips a round while every open task waits on purpose and nothing failed since the last one. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
 };
 

@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, departments, jobs, requests, tasks } from '../src/db/schema.js';
 import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -132,6 +132,21 @@ describe('timers', () => {
     expect(await timerTick(app.ctx, at(30))).toBe(0);
     await db.insert(jobs).values(failed(35, 'timeout'));
     expect(await timerTick(app.ctx, at(40))).toBe(1);
+  });
+
+  it('skips the round of a timer for work while every open task waits on purpose, for a person or for what it said it waits for', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Look around.', forWork: true } });
+    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
+    const at = (minutes: number) => new Date(timerAt.getTime() + minutes * MIN);
+    const companyId = orchestrator.companyId;
+    const [asking] = await db.insert(tasks).values({ companyId, number: 1, title: 'Checkout', status: 'working' }).returning();
+    const [request] = await db.insert(requests).values({ companyId, taskId: asking!.id, agentId: orchestrator.id, kind: 'question', text: 'Is tax in scope?' }).returning();
+    await db.insert(tasks).values({ companyId, number: 2, title: 'Images', status: 'working', externalWait: { reason: 'Images on the registry', since: at(0).toISOString(), until: at(600).toISOString() } });
+    expect(await timerTick(app.ctx, at(10))).toBe(0);
+    /* The answer came: the task is to be moved again, so there is something to look at. */
+    await db.update(requests).set({ status: 'answered', answer: 'No.', answeredAt: at(15) }).where(eq(requests.id, request!.id));
+    expect(await timerTick(app.ctx, at(20))).toBe(1);
   });
 
   it("queues no round while the employee's machine is offline", async () => {

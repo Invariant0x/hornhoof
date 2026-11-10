@@ -37,7 +37,7 @@ async function wakesDue(task: Task, move: Move): Promise<Wake[]> {
 }
 
 /* Tasks waiting for other work or an answer already have a way to continue. */
-async function waitsOnPurpose(ctx: Ctx, task: Task): Promise<boolean> {
+export async function waitsOnPurpose(ctx: Ctx, task: Task): Promise<boolean> {
   if ((await openAfter(ctx.db, task)).length) return true;
   const [subtask] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   if (subtask) return true;

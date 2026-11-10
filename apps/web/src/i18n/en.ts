@@ -934,7 +934,7 @@ export const en = {
     timerOn: 'Wake on a timer',
     timerEvery: 'How often',
     timerOrder: 'What to do each time',
-    timerForWork: 'Only when there is work: a task is open or something failed since the last round',
+    timerForWork: 'Only when there is work: an open task waits for nobody, or something failed since the last round',
     timerPlaceholder: 'For example: check that every agent reported its task, and nudge the ones that are stuck.',
     saveTimer: 'Save timer',
     every: (m: number) => (m % 60 ? `Every ${m} minutes` : m === 60 ? 'Every hour' : `Every ${m / 60} hours`),

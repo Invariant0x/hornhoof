@@ -318,7 +318,7 @@ describe('AgentCard', () => {
     await user.selectOptions(often, '60');
     expect(screen.getByRole('button', { name: 'Save timer' })).toBeDisabled();
     await user.type(screen.getByRole('textbox', { name: 'What to do each time' }), 'Check that every agent reported its task.');
-    const forWork = screen.getByRole('checkbox', { name: 'Only when there is work: a task is open or something failed since the last round' });
+    const forWork = screen.getByRole('checkbox', { name: 'Only when there is work: an open task waits for nobody, or something failed since the last round' });
     expect(forWork).not.toBeChecked();
     await user.click(forWork);
     await user.click(screen.getByRole('button', { name: 'Save timer' }));

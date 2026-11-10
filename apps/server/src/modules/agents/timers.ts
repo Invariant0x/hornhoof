@@ -7,7 +7,7 @@ import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, S
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { dropOldFiles } from '../tasks/attachments.js';
-import { reconcile } from '../tasks/reconcile.js';
+import { reconcile, waitsOnPurpose } from '../tasks/reconcile.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
 import { checkWaitHealth } from '../tasks/wait-monitor.js';
 import { checkExternalWaits } from '../tasks/external-wait.js';
@@ -31,14 +31,11 @@ const due = (a: AgentRow, now: Date) => !a.timerAt || now.getTime() - a.timerAt.
 /* Still timed, on and in the company. */
 const timed = and(isNotNull(agents.timerMinutes), isNotNull(agents.subscriptionId), isNull(agents.removedAt), isNull(agents.switchedOffAt));
 
-/* What a timer for work looks at: a task still open in the company, or a turn that failed since the last round. */
+/* What a timer for work looks at: a task open in the company that waits for nobody and nothing it named, or a turn that
+   failed since the last round. A task that waits on purpose goes on by itself when what it waits for comes. */
 async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
-  const [open] = await ctx.db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['planned', 'done', 'cancelled'])))
-    .limit(1);
-  if (open) return true;
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['planned', 'done', 'cancelled'])));
+  for (const task of open) if (!task.externalWait && !(await waitsOnPurpose(ctx, task))) return true;
   const [failed] = await ctx.db
     .select({ id: jobs.id })
     .from(jobs)
