@@ -53,7 +53,7 @@ function executable(name: string, body: string): void {
 function fakePostgres(): void {
   const common = `const fs=require('node:fs'); const p=require('node:path'); const a=process.argv.slice(2); if(a.includes('--version')) { console.log(p.basename(process.argv[1])+' (PostgreSQL) 17.4'); process.exit(0); }`;
   executable('initdb', `${common} if(process.env.INIT_MARKER) fs.appendFileSync(process.env.INIT_MARKER,'init\\n'); const dir=a[a.indexOf('-D')+1]; fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(p.join(dir,'PG_VERSION'),'17'); fs.writeFileSync(p.join(dir,'pg_hba.conf'),''); fs.writeFileSync(p.join(dir,'postgresql.conf'),'');`);
-  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs[fs.existsSync(swap+'.hard')?'linkSync':'symlinkSync'](fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
+  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs[fs.existsSync(swap+'.hard')?'linkSync':'symlinkSync'](fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { if(process.env.SERVER_ARGS) fs.appendFileSync(process.env.SERVER_ARGS,JSON.stringify(a)+'\\n'); const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
   executable('pg_ctl', `${common} const dir=a[a.indexOf('-D')+1]; const file=p.join(dir,'postmaster.pid'); if(fs.existsSync(file)) process.kill(Number(fs.readFileSync(file,'utf8')),'SIGTERM');`);
   executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.SOCKET_TRACE) fs.writeFileSync(process.env.SOCKET_TRACE,process.env.PGHOST); if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
 }
@@ -291,6 +291,45 @@ describe('prepared native services', () => {
     await expect(prepareServiceArtifacts(definitions, root, { ...context, graces: { ...LASTING, stopMs: 1 }, env: { SOCKET_TRACE: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/stop|cleanup|failed/i);
     expect(existsSync(readFileSync(trace, 'utf8'))).toBe(false);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
+  });
+  /* PostgreSQL writes a checkpoint as it stops. This pg_ctl gives up at once when the checkpoint (CHECKPOINT_MS) is longer
+     than its -t allows, as the real one does when that time has passed. Otherwise it records its arguments and stops the
+     server when the test lets it, after the test's clock has run through the checkpoint. */
+  function checkpointingPgCtl(): void {
+    executable('pg_ctl', `if(process.argv.includes('--version')){console.log('pg_ctl (PostgreSQL) 17.4');process.exit(0)}const fs=require('node:fs'),p=require('node:path');const a=process.argv.slice(2);const pid=Number(fs.readFileSync(p.join(a[a.indexOf('-D')+1],'postmaster.pid'),'utf8'));if(Number(process.env.CHECKPOINT_MS)>Number(a[a.indexOf('-t')+1])*1000){console.error('pg_ctl: server does not shut down');process.exit(1)}const released=process.env.STOP_RELEASE;const stop=()=>{process.kill(pid,'SIGTERM');process.exit(0)};fs.watch(p.dirname(released),()=>{if(fs.existsSync(released))stop()});fs.writeFileSync(process.env.STOP_ARGS+'.tmp',JSON.stringify(a));fs.renameSync(process.env.STOP_ARGS+'.tmp',process.env.STOP_ARGS);`);
+  }
+  it.each([5_304, 29_999])('waits out a stop checkpoint of %i ms on the supervisor\'s own cleanup grace and publishes the template', async checkpointMs => {
+    checkpointingPgCtl();
+    const args = join(root, 'stopping'), release = join(root, 'release');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const watcher = watch(root);
+    try {
+      const stopping = new Promise<void>(resolve => watcher.on('change', () => { if (existsSync(args)) resolve(); }));
+      /* No cleanup grace is given, so the supervisor's own bounds the stop. */
+      const running = prepareServiceArtifacts(definitions, root, { ...context, graces: { stopMs: NEVER, exitMs: NEVER }, env: { CHECKPOINT_MS: String(checkpointMs), STOP_ARGS: args, STOP_RELEASE: release }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
+      void running.catch(() => {});
+      await Promise.race([stopping, running.then(() => { throw new Error('Preparation ended before PostgreSQL stopped'); })]);
+      vi.advanceTimersByTime(checkpointMs);
+      writeFileSync(release, '');
+      await running;
+    } finally { watcher.close(); vi.useRealTimers(); }
+    expect(JSON.parse(readFileSync(args, 'utf8'))).toEqual(['-D', expect.any(String), 'stop', '-m', 'fast', '-w', '-t', '30']);
+    expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(true);
+  });
+  it('publishes no template when the stop checkpoint outlasts pg_ctl', async () => {
+    checkpointingPgCtl();
+    await expect(prepareServiceArtifacts(definitions, root, { ...context, env: { CHECKPOINT_MS: String(3_600_000) }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toMatchObject({ errors: [expect.objectContaining({ message: expect.stringMatching(/does not shut down/) })] });
+    expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
+  });
+  it('starts the preparation server without fsync and the servers of attempts with it', async () => {
+    const trace = join(root, 'servers');
+    const artifacts = await prepareServiceArtifacts(definitions, root, { ...context, env: { SERVER_ARGS: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
+    const opened = await openServices(definitions, artifacts, { ...part('one'), env: { SERVER_ARGS: trace } });
+    await opened.close();
+    const settings = readFileSync(trace, 'utf8').trim().split('\n').map(line => (JSON.parse(line) as string[]).filter((_, at, all) => all[at - 1] === '-c'));
+    expect(settings).toHaveLength(2);
+    expect(settings[0]).toContain('fsync=off');
+    expect(settings[1]).not.toContain('fsync=off');
   });
   it('does not inspect unrelated processes after its own process groups have exited', async () => {
     procVisibility.readable = false;

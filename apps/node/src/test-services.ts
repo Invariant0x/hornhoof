@@ -32,7 +32,13 @@ export interface OpenedServices { env: Record<string, string>; close: () => Prom
 
 const FORMAT = 'hornhoof-services-v1';
 const PG_BIN = '/usr/lib/postgresql/17/bin';
-const GRACES = { stopMs: 2000, exitMs: 2000, cleanupMs: 7000 };
+/* PostgreSQL writes a checkpoint as it stops, which took over 5 s on a slow disk. pg_ctl waits this long for the stop, and
+   cleanup has room for that wait and for the rest of the stop. */
+const PG_STOP_SECONDS = 30;
+const GRACES = { stopMs: 2000, exitMs: 2000, cleanupMs: (PG_STOP_SECONDS + 10) * 1000 };
+/* The preparation server's writes need not survive a crash: its stopped state is copied and the copy is synced before it is
+   published. Without fsync it waits for the disk neither while it writes nor while it stops. Attempts keep the defaults. */
+const PREPARATION_SETTINGS = ['-c', 'fsync=off'];
 const preparationLeases = new WeakMap<ServiceContext, number>();
 // This literal runs as the node owner, outside the checkout. Job programs receive only descriptors 0, 1 and 2.
 const LEASE_GUARDIAN = String.raw`
@@ -323,7 +329,7 @@ async function ready(server: Running, env: Record<string, string>, cwd: string, 
 async function stopPostgres(server: Running, state: string, socket: string, context: ServiceContext, hidden: string[]): Promise<void> {
   let failure: unknown;
   try {
-    await command(join(context.postgresBin ?? PG_BIN, 'pg_ctl'), ['-D', state, 'stop', '-m', 'fast', '-w', '-t', '5'], '/tmp', {}, cleanupContext(context), hidden);
+    await command(join(context.postgresBin ?? PG_BIN, 'pg_ctl'), ['-D', state, 'stop', '-m', 'fast', '-w', '-t', String(PG_STOP_SECONDS)], '/tmp', {}, cleanupContext(context), hidden);
   } catch (error) { failure = error; }
   finally { try { await server.stop(); } finally { rmSync(socket, { recursive: true, force: true }); } }
   if (failure) throw failure;
@@ -352,7 +358,7 @@ async function postgres(service: Postgres, state: string, context: ServiceContex
   hba(state, context);
   const socket = privateSocket(context);
   const env = pgEnv(socket, fresh ? 'postgres' : service.options.database, passwords.admin);
-  const server = launch(join(bin, 'postgres'), ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256'], '/tmp', {}, context, hidden);
+  const server = launch(join(bin, 'postgres'), ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256', ...(fresh ? PREPARATION_SETTINGS : [])], '/tmp', {}, context, hidden);
   let closing: Promise<void> | undefined;
   const close = () => closing ??= stopPostgres(server, state, socket, context, hidden);
   try {
