@@ -1,4 +1,4 @@
-import type { FileDuration } from './plan.js';
+import { fileKey, lexical, type FileDuration } from './plan.js';
 import { median } from './plan-statistics.js';
 
 /* What a test file took on one computer in an earlier part. */
@@ -7,8 +7,6 @@ export type FileTime = FileDuration & { computer: string };
 export type MachinePaces = { paces: Map<string, number>; durations: FileDuration[] };
 
 const ROUNDS = 30;
-const fileKey = (time: Pick<FileDuration, 'suiteId' | 'file'>): string => JSON.stringify([time.suiteId, time.file]);
-const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 function grouped<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   const groups = new Map<string, T[]>();

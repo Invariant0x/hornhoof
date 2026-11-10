@@ -34,8 +34,8 @@ export type TestPartPlan = {
 type TimedUnit = { unit: TestUnit; ms: number; unknown: boolean };
 type Group = { key: string; units: TestUnit[]; ms: number };
 type Alternative = { parts: PlannedTestPart[]; estimate: PartEstimate };
-const fileKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => JSON.stringify([unit.suiteId, unit.file]);
-const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+export const fileKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => JSON.stringify([unit.suiteId, unit.file]);
+export const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 function nonnegative(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) throw new RangeError(`Invalid ${label}: use a finite nonnegative number.`);

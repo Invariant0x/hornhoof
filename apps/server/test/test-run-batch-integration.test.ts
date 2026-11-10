@@ -80,7 +80,7 @@ describe('persisted versioned product batches', () => {
       history: async (run, snapshot) => {
         seen.push({ stage: 'history', runId: run.id, commit: run.commitSha });
         expect(snapshot.description.commitSha).toBe(run.commitSha);
-        return { durations: snapshot.description.inventory.map(unit => ({ suiteId: unit.suiteId, file: unit.file, ms: 1 })), costs: { setupMs: 1, collectMs: 1 }, costBasis: { setup: 'historical', collection: 'historical' }, usedPartIds: ['verified-history-part'], unmatchedFiles: 0 };
+        return { durations: snapshot.description.inventory.map(unit => ({ suiteId: unit.suiteId, file: unit.file, ms: 1 })), costs: { setupMs: 1, collectMs: 1 } };
       },
       record: async (tx, run, plan) => {
         const [stored] = await tx.select().from(testRuns).where(eq(testRuns.id, run.id));

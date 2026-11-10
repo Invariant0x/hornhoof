@@ -22,7 +22,6 @@ export interface ImpactSelection {
   problems: { code: 'impact_path_invalid' | 'impact_environment_invalid' | 'new_test_unmapped' | 'changed_test_unmapped' | 'migration_check_unsupported' }[];
 }
 
-export const SUPPORTED_IMPACT_ADAPTERS: readonly ImpactAdapter[] = ['vitest-related', 'pytest'];
 interface FullRule { code: string; globs: string[]; global?: boolean }
 type ManifestRule = TestEnvironmentV1['impact']['fullPackageGlobs'][number];
 /* Why a test runs that a rule of the manifest names, beside those the graph finds. */
@@ -210,7 +209,7 @@ function validEnvironment(environment: ImpactEnvironment): boolean {
   return new Set(environment.packages.map(pkg => pkg.id)).size === environment.packages.length && environment.inventory.every(unit => owners.get(unit.suiteId) === 1);
 }
 
-/* Explicit caller port only. Environment280 and authorcheck222 integration is intentionally separate. */
+/* Called by the fingerprints (what the import graph cannot see) and by the author check; it runs and decides nothing itself. */
 export function selectAffectedTests(input: ImpactInput): ImpactSelection {
   const state: SelectionState = { environment: input.environment, inventory: new Map(input.environment.inventory.map(unit => [unitKey(unit), unit])), choices: new Map(), problems: [], migration: false };
   if (!validEnvironment(input.environment)) { addProblem(state, 'impact_environment_invalid'); return finish(state); }

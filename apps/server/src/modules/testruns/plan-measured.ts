@@ -16,17 +16,15 @@ const FALLBACK = { setupMs: 10_000, collectMs: 1000 };
 type Row = { computer: string | null; files: (typeof testPartTimings.$inferSelect)['files']; receipt: (typeof testParts.$inferSelect)['environmentReceipt']; selection: (typeof testParts.$inferSelect)['environmentSelection'] };
 
 /* What a part said a file took, for the one unit of the inventory at that path. */
-function fileTimes(rows: Row[], snapshot: EnvironmentSnapshot): { times: FileTime[]; unmatched: number } {
+function fileTimes(rows: Row[], snapshot: EnvironmentSnapshot): FileTime[] {
   const units = new Map<string, { suiteId: string; file: string }[]>();
   for (const unit of snapshot.description.inventory) units.set(unit.file, [...(units.get(unit.file) ?? []), unit]);
   const times: FileTime[] = [];
-  let unmatched = 0;
   for (const row of rows) for (const file of row.files) {
     const found = units.get(posix.join(file.package, file.file));
     if (found?.length === 1 && row.computer) times.push({ computer: row.computer, suiteId: found[0]!.suiteId, file: found[0]!.file, ms: file.totalMs });
-    else unmatched++;
   }
-  return { times, unmatched };
+  return times;
 }
 /* How long each part's command ran, for all its files. */
 function partTimes(rows: Row[]): PartTime[] {
@@ -58,7 +56,7 @@ export function measuredHistory(ctx: Pick<Ctx, 'db'>) {
       .from(testPartTimings).innerJoin(testParts, eq(testParts.id, testPartTimings.partId)).innerJoin(testRuns, eq(testRuns.id, testPartTimings.runId))
       .where(and(repository, inArray(testParts.status, ['passed', 'failed']), isNotNull(testParts.computer)))
       .orderBy(desc(testPartTimings.createdAt), desc(testPartTimings.partId)).limit(PARTS_READ);
-    const { times, unmatched } = fileTimes(rows, snapshot);
+    const times = fileTimes(rows, snapshot);
     if (!times.length) return null;
     /* The files' sizes come from what each took, the machines' paces from how long their parts ran. */
     const { paces, durations } = partPaces(partTimes(rows), machinePaces(times).durations), setupMs = setupOf(rows);
@@ -67,8 +65,7 @@ export function measuredHistory(ctx: Pick<Ctx, 'db'>) {
       .where(and(repository, eq(testParts.status, 'passed'), isNotNull(testParts.computer), sql`${testParts.environmentSelection}->'selection'->>'kind' = 'prepare'`))
       .orderBy(desc(testParts.finishedAt), desc(testParts.id)).limit(PREPARATIONS_READ);
     const preparationMs = preparationOf(preparations, paces);
-    return { durations, paces, unknownFileMs: median(durations.map(duration => duration.ms)), unmatchedFiles: unmatched, usedPartIds: [], ...(preparationMs ? { preparationMs } : {}),
-      costs: { setupMs: setupMs ?? FALLBACK.setupMs, collectMs: FALLBACK.collectMs },
-      costBasis: { setup: setupMs === null ? 'fallback' : 'historical', collection: 'fallback' } };
+    return { durations, paces, unknownFileMs: median(durations.map(duration => duration.ms)), ...(preparationMs ? { preparationMs } : {}),
+      costs: { setupMs: setupMs ?? FALLBACK.setupMs, collectMs: FALLBACK.collectMs } };
   };
 }

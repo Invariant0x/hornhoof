@@ -21,8 +21,9 @@ import { harnessPlaces } from './load.js';
 import { mayTake, placesOf, type Place } from './runs.js';
 
 /* A product's test harness as one thing for all the company's machines. A unit is built once per architecture: the first
-   machine to ask holds a lease and builds, the others wait and take its bundle through here. Every minute the machines are
-   asked to get the head of the product's branch ready, so a run on any of them finds it there. */
+   machine to ask holds a lease and builds, the others wait and take its bundle through here. Each minute the head of the
+   product's branch is read, and a machine is asked to get it ready when the head changed, when its last answer was a problem
+   a while ago, or when it never answered, so a run on any of them finds it there. */
 
 type Build = typeof harnessBuilds.$inferSelect;
 type Department = typeof departments.$inferSelect;

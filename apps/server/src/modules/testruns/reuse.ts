@@ -136,7 +136,7 @@ async function lastFullTurnOf(db: Db, run: Pick<Run, 'id' | 'companyId'>, scope:
   return last?.turn ?? null;
 }
 
-type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
+export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
   if (!fullRun) return null;

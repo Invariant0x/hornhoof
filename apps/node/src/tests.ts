@@ -112,7 +112,6 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
   }
 };
 
-/* Runs one program in a process group of its own, so a stop or the time limit ends everything it started. */
 /* What a part's commands get of the machine: its programs, its browsers and the grammars its quality tools parse with, which
    the image keeps in place so that they fetch nothing. Nothing else of the node's own environment. */
 const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
@@ -121,6 +120,7 @@ function partBase(root: string, dir: string): Record<string, string> {
   return { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools };
 }
 
+/* Runs one program in a process group of its own, so a stop or the time limit ends everything it started. */
 function runIn(bin: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; user: JobUser | null; deadline: number; signal?: AbortSignal; out: Output }): Promise<Ended> {
   return new Promise(resolve => {
     const child = spawn(bin, args, { cwd: o.cwd, env: o.env, uid: o.user?.uid, gid: o.user?.gid, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -166,7 +166,6 @@ function runIn(bin: string, args: string[], o: { cwd: string; env: NodeJS.Proces
   });
 }
 
-/* Every program of the test runs' user that outlived its group: one part runs on a node at a time. */
 /* Where every user may write, so what a part leaves there outlives its folder. */
 const SHARED = ['/tmp', '/var/tmp', '/dev/shm'];
 
@@ -194,6 +193,7 @@ export function clearShared(uid: number, places: string[]): void {
   for (const place of places) sweep(place);
 }
 
+/* Every program of the test runs' user that outlived its group: one part runs on a node at a time. */
 function killUser(uid: number, proc: string): void {
   let pids: string[] = [];
   try {

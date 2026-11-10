@@ -16,8 +16,9 @@ import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
+import { AWAY_MS, WAIT_MS } from './runs.js';
 export { productReceipt } from './receipts.js';
-import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
+import { reuseFor, runModeOf, type ReuseDecision, type RunMode } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
 export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string; profile?: string };
@@ -32,7 +33,7 @@ export function testRunMode(input: ModeInput, kind: RunKind): TestRunMode {
   return { mode: 'product', ...(input.suite === undefined ? {} : { suite: input.suite }), ...(input.profile === undefined ? {} : { profile: input.profile }) };
 }
 
-// Metadata stays bound to the authenticated connection identity; it is never a repository claim.
+/* The description request each run was last sent, by run id, so one request goes out once per node connection. */
 const sent = new WeakMap<Ctx, Map<string, string>>();
 export function repositoryScope(companyId: string, ownerId: string, url: string): RepositoryScope {
   return { companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) };
@@ -152,7 +153,6 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
     return true;
   });
 }
-type RunMode = Awaited<ReturnType<typeof runModeOf>>;
 function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequest, mode: RunMode, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): EnvironmentSnapshot {
   return supplied.candidate || !mode ? supplied : snapshotFor(supplied.description, { ...request, profile: mode.profile }, prints, base, mutation);
 }
@@ -212,7 +212,7 @@ function availableDescription(ctx: Ctx, open: Place[], target: Target): Place | 
 }
 function waitingForReconnect(ctx: Ctx, node: NodeIdentity | null): boolean {
   const away = node && ctx.hub.awaySince(node);
-  return Boolean(away && away + 3 * 60_000 > Date.now());
+  return Boolean(away && away + AWAY_MS > Date.now());
 }
 async function assignDescription(ctx: Ctx, run: Run, open: Place[], target: Target): Promise<TestEnvironmentRequest | null> {
   const request = run.environmentRequest!, place = availableDescription(ctx, open, target);
@@ -249,7 +249,7 @@ export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Pr
   planningSources.set(ctx, { open, target });
   const pending = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest} is not null`));
   for (const run of pending) {
-    const request = run.environmentRequest!, problem = request.problem ?? (Date.now() - run.createdAt.getTime() > 2 * 3_600_000 ? { code: 'timeout' as const, detail: 'No product environment was described within the queue deadline.' } : null);
+    const request = run.environmentRequest!, problem = request.problem ?? (Date.now() - run.createdAt.getTime() > WAIT_MS ? { code: 'timeout' as const, detail: 'No product environment was described within the queue deadline.' } : null);
     if (problem) { cancelDescription(ctx, request); await descriptionFailure(ctx, run, problem); await finish(run.id); continue; }
     const found = await target(run);
     if (!found?.repo || hashToken(found.repo.url) !== request.repositoryScope.repoUrlHash) {

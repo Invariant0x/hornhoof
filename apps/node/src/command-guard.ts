@@ -1,6 +1,6 @@
 /* What a command asks of this machine, told from its text before any of it runs. Whole test suites go through run_tests;
-   installs, named test files and quality stages run in the workspace. One policy for the node's own hook path and the standalone
-   hook, so it stands alone: no package of the project, nothing spawned, no network, and a script file or manifest is only ever read.
+   installs, named test files and quality stages run in the workspace. One policy for the node's own hook path, so it
+   stands alone: no package of the project, nothing spawned, no network, and a script file or manifest is only ever read.
 
    This is a finite guard of recognized shapes that keeps machines free, not a sandbox. A program it cannot see into runs with
    coverage 'opaque', which is no claim that it is light. At a recognized check or package boundary, what it cannot tell is
@@ -23,14 +23,10 @@ export type CommandDenial = { allow: false; code: 'whole_suite_local' | 'command
 export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'test_files' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 export type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 
-export type NativeProgram = 'claude' | 'codex' | 'kimi' | 'antigravity';
-export type NativeAnswer = { stdout: string; stderr: string; exitCode: number };
-
 /* stages: of one text. walked: of a whole command, with all the scripts it reaches. */
 export const COMMAND_LIMITS = { commandBytes: 65_536, nesting: 32, stages: 256, walked: 4096, resolving: 8, fileBytes: 1_048_576, fileReads: 32 };
 
 const REFUSAL = 'запусти через run_tests';
-const CALL_CHARS = 128;
 
 export const localCommandFiles: CommandFiles = {
   lstat: async path => {
@@ -1035,8 +1031,8 @@ const CHECK_TOOLS = new Map(Object.entries<Category>({
   webpack: 'build', rollup: 'build', esbuild: 'build', parcel: 'build', tsup: 'build', swc: 'build', babel: 'build', make: 'task_runner', gmake: 'task_runner', cmake: 'build', ninja: 'task_runner', bazel: 'task_runner', buck: 'task_runner', buck2: 'task_runner',
   mvn: 'task_runner', mvnw: 'task_runner', gradle: 'task_runner', gradlew: 'task_runner', ant: 'task_runner', sbt: 'task_runner', msbuild: 'build', rake: 'task_runner',
   turbo: 'task_runner', nx: 'task_runner', lerna: 'task_runner', just: 'task_runner', task: 'task_runner', 'npm-run-all': 'task_runner', 'run-s': 'task_runner', 'run-p': 'task_runner', concurrently: 'task_runner', wireit: 'task_runner',
-  mocha: 'test_scope', unittest: 'test_scope', ava: 'test_scope', tap: 'test_scope', karma: 'test_scope', rspec: 'test_scope', phpunit: 'test_scope', ctest: 'test_scope', tox: 'test_scope', nox: 'test_scope', behave: 'test_scope', nosetests: 'test_scope', jasmine: 'test_scope', tape: 'test_scope', cucumber: 'test_scope',
-  c8: 'coverage', nyc: 'coverage', coverage: 'coverage', kcov: 'coverage', gcovr: 'coverage',
+  unittest: 'test_scope', karma: 'test_scope', ctest: 'test_scope', tox: 'test_scope', nox: 'test_scope',
+  kcov: 'coverage', gcovr: 'coverage',
   crapper: 'quality', dryer: 'quality',
   mutator: 'mutation', stryker: 'mutation', mutmut: 'mutation', 'cosmic-ray': 'mutation', pitest: 'mutation', mutant: 'mutation',
   cypress: 'browser', wdio: 'browser', webdriverio: 'browser', testcafe: 'browser', nightwatch: 'browser',
@@ -1820,21 +1816,6 @@ export function refusalText(denial: CommandDenial): string {
   const why = CATEGORY_WORDS[denial.category as Category] ?? 'This check cannot run here.';
   return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A whole test suite runs through run_tests, which splits it into groups over the machines. Name the test files of your change to run them here. A refusal is not a result.`;
 }
-
-/* A hook's answer as each program's own documentation describes it, which says nothing of what an installed version does.
-   Work that goes on gets no answer: a word of consent could only widen what the program would have asked about. */
-export function encodeNativeDecision(program: NativeProgram, verdict: AgentCommandVerdict, call?: string): NativeAnswer {
-  if (verdict.allow) return { stdout: '', stderr: '', exitCode: 0 };
-  const reason = refusalText(verdict) + callLine(call);
-  const said = program === 'antigravity' ? { decision: 'deny', reason } : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
-  return { stdout: `${JSON.stringify(said)}\n`, stderr: '', exitCode: 0 };
-}
-
-/* The program's name for the call, as a reference only: it comes from the program, so nothing of it may read as words. */
-const callLine = (call = ''): string => {
-  const shown = call.replace(/[^\w.:-]+/g, '').slice(0, CALL_CHARS);
-  return shown ? `\nCall: ${shown}` : '';
-};
 
 function refusal(found: readonly Finding[], kinds: readonly ('check' | 'unavailable')[]): CommandDenial | null {
   const codes = { check: 'whole_suite_local', unavailable: 'command_guard_unavailable' } as const;

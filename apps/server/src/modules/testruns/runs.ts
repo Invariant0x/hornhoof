@@ -582,8 +582,6 @@ export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | unde
   return task;
 }
 
-/* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
-   files. Its parts go out to free machines now or wait for them. Says how it went out. */
 /* The department whose people's machines may take a run without a repository of its own. */
 const taskDepartment = async (ctx: Ctx, task: Pick<Task, 'productId' | 'departmentId'>, kind: RunKind) =>
   (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
@@ -683,6 +681,8 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
   });
 }
 
+/* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
+   files. Its parts go out to free machines now or wait for them. Says how it went out. */
 export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
   const mode = testRunMode(input, kind);
   const task = await taskFor(ctx, job, input.task, kind);
