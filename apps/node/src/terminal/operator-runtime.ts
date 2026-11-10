@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { checkSlotWaiting } from '../check-queue.js';
 import type { OperatorCheck, OperatorDelivery, OperatorInputLine, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorRecoveryState, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
-import { OperatorControl, type OperatorProgram } from './operator-control.js';
+import { OperatorControl, type OperatorProgram, type Pane } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
 import { ProgramAccess, type ProgramFacts } from './program-access.js';
 
@@ -12,7 +12,6 @@ export type OperatorOptions = { dir: string; send(frame: OperatorNodeMessage): b
 /* A look at a screen waits its turn among the keys, and the tmux behind it can hang. Neither may hold back telling of a turn. */
 const LOOK_MS = 5000;
 const NO_LOOK: OperatorCheck = { input: 'unknown', screen: null };
-type Pane = { cols: number; rows: number; cells: string };
 type Source = {
   current(key: string): Omit<OperatorProgram, keyof OperatorIdentity | 'generation'> | null;
   capture(key: string): Promise<Pane>;
@@ -26,7 +25,7 @@ type Source = {
      sent, and whether it works on a turn. */
   recovery(key: string): Promise<{ alive: boolean; input: string | null; own: boolean; busy: boolean }>;
 };
-type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; sinceWords: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
+type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; recorded: boolean; sinceWords: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 const NO_PROGRAM = { program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false } as const;
 
@@ -37,13 +36,12 @@ export function inputShown(input: string | null, own: boolean): OperatorRecovery
   return own ? 'hornhoof' : 'words';
 }
 
-/* A wait the program shows is no free prompt, however harmless it looks to whoever passes it by hand. */
 function programAt(program: ReturnType<Source['current']>): Pick<OperatorRecoveryState, 'wait' | 'runningTool' | 'retrying'> {
   const wait = program?.wait?.kind ?? null;
-  return { wait: wait === 'harmless' ? 'unknown' : wait, runningTool: Boolean(program?.runningTool), retrying: Boolean(program?.retrying) };
+  return { wait, runningTool: Boolean(program?.runningTool), retrying: Boolean(program?.retrying) };
 }
 
-/* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
+/* Runtime glue stays outside the terminal host's provider logic; evidence and a look at the program share one input lane. */
 export class OperatorRuntime {
   private readonly observer: OperatorObserver;
   private readonly access: ProgramAccess;
@@ -93,17 +91,16 @@ export class OperatorRuntime {
   private createTarget(key: string, jobId: string | null, reuse: boolean): Target {
     const identity = { agentKey: key, jobId, instance: randomUUID() };
     const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, capture: () => this.source.capture(key), lane: run => this.serial(key, run), secrets: this.source.secrets });
-    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, sinceWords: reuse, recorded: false, taken: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
+    return { identity, control, generation: 0, physical: reuse, sinceWords: reuse, recorded: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
   }
 
   private bindTarget(target: Target, jobId: string | null, metadata: OperatorDelivery | undefined): void {
     if (target.identity.jobId !== jobId || target.assignment?.id !== metadata?.id) { target.caseId = null; target.caseReason = null; target.ownerTouched = false; target.deadline = null; target.failed = null; }
-    if (target.idle) { target.pasted = false; target.started = false; target.active = false; }
     /* What the program did before these words says nothing of them: a program that goes on its session has done plenty. */
     if (target.idle || metadata) target.sinceWords = false;
     target.bound = true; target.idle = false;
     target.identity = { ...target.identity, jobId };
-    target.assignment = metadata ?? null; target.recorded = false; target.taken = false;
+    target.assignment = metadata ?? null; target.recorded = false;
     target.generation++; target.intentional = undefined;
   }
 
@@ -121,7 +118,7 @@ export class OperatorRuntime {
     const target = this.targets.get(key); if (!target) return;
     this.observer.question(target.identity, null);
     target.bound = false; target.idle = false; target.pendingActivity = false; target.pendingQuestion = null;
-    target.pasted = false; target.started = false; target.active = false; target.sinceWords = false; target.generation++;
+    target.sinceWords = false; target.generation++;
   }
 
   launch(key: string, phase: 'attempt' | 'started' | 'failed'): void {
@@ -132,14 +129,13 @@ export class OperatorRuntime {
   }
 
   changed(key: string): void { const target = this.targets.get(key); if (target) target.generation++; }
-  pasted(key: string): void { const target = this.targets.get(key); if (target) { target.pasted = true; target.generation++; } }
-  started(key: string): void { const target = this.targets.get(key); if (target) { target.started = true; target.sinceWords = true; target.generation++; } }
+  started(key: string): void { const target = this.targets.get(key); if (target) { target.sinceWords = true; target.generation++; } }
   /* What came of a session it still loads, before these words went in, says nothing of them. */
-  typed(key: string): void { const target = this.targets.get(key); if (target) target.sinceWords = false; this.pasted(key); }
+  typed(key: string): void { const target = this.targets.get(key); if (target) target.sinceWords = false; this.changed(key); }
 
   activity(key: string): void {
     const target = this.targets.get(key); if (!target) return;
-    target.active = true; target.sinceWords = true; target.generation++;
+    target.sinceWords = true; target.generation++;
     if (target.bound) this.observer.activity(target.identity, target.sourceDelivery);
     else target.pendingActivity = true;
   }
@@ -160,7 +156,7 @@ export class OperatorRuntime {
     const target = this.targets.get(key); if (!target) return;
     if (phase === 'queued' || phase === 'taken') {
       this.observer.receipt(metadata.id, phase);
-      if (target.assignment?.id === metadata.id) { target.recorded = true; target.taken ||= phase === 'taken'; }
+      if (target.assignment?.id === metadata.id) target.recorded = true;
     } else this.observer.finalize(metadata.id, phase);
     target.generation++;
   }
@@ -168,7 +164,7 @@ export class OperatorRuntime {
   live(key: string, metadata: OperatorDelivery | undefined, words: string): void {
     const target = this.targets.get(key); if (!metadata || !target) return;
     this.observer.attempt(target.identity, metadata, 'live', words);
-    this.pasted(key);
+    this.changed(key);
   }
 
   recorded(key: string): boolean { return this.targets.get(key)?.recorded ?? false; }
@@ -284,16 +280,8 @@ export class OperatorRuntime {
     void settled.then(() => { if (this.lanes.get(key) === settled) this.lanes.delete(key); });
     return result;
   }
-
-  private current(key: string): OperatorProgram | null {
-    const target = this.targets.get(key), source = this.source.current(key);
-    if (!target || !source) return null;
-    return { ...source, ...target.identity, runningTool: queueTool(source.runningTool, checkSlotWaiting(key, target.identity.jobId)), jobId: target.bound ? target.identity.jobId : null, generation: target.generation, alive: source.alive && target.physical, pasted: source.pasted || target.pasted, turnStarted: source.turnStarted || target.started, active: source.active || target.active };
-  }
 }
 
 function programWaits(source: ReturnType<Source['current']>, queued: boolean): boolean {
   return Boolean(source?.runningTool || source?.retrying || source?.wait || queued);
 }
-
-const queueTool = (running: boolean, queued: boolean): boolean => running || queued;

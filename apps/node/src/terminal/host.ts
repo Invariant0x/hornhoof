@@ -19,7 +19,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
-import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
+import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
 import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
@@ -41,7 +41,6 @@ import type { OperatorProgram } from './operator-control.js';
 import { operatorQuestion } from './operator-question.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
-/* The task workspace a program starts for. Its other fields go along unread: only these two tell one binding from another here. */
 export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
@@ -129,7 +128,6 @@ type Agent = {
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
   contextSize: number | null;
-  viewers: number;
   /* Its program runs and showed its prompt; until then its views show a loader. */
   up: boolean;
   /* Reads the log and looks at the program while it runs. */
@@ -285,7 +283,7 @@ type Options = {
 const WAITING = 'This agent starts with its next turn.';
 const TOOLS_LOST = "could not reach Hornhoof's tools when its program connected, so the program starts again in its session.";
 const STOP_WAIT_MS = 5000;
-/* How often the host presses Enter again for a prompt the program did not take. */
+/* How many Enter waits live words give Hornhoof's own prompt to be taken before they go in. */
 const ENTER_TRIES = 3;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
@@ -313,7 +311,6 @@ const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
 /* A program may change how a prompt's lines and spaces look, not its words. */
-const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 /* The prompt Hornhoof typed, whole or the part of it a program got. */
 const typedPrompt = (prompt: string, typed: string) => flat(typed).includes(flat(prompt)) || flat(prompt).includes(flat(typed));
 const heardWords = (receipt: WordReceipt) => receipt.state === 'queued' || receipt.state === 'taken';
@@ -458,7 +455,7 @@ export class TerminalHost {
     const a = this.agents.get(key); if (!a) return null;
     this.drain(a);
     const wait = a.operatorQuestion ? { id: a.operatorQuestion.id, kind: a.operatorQuestion.kind } : null;
-    return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
+    return { runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
   }
 
   private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; own: boolean; busy: boolean }> {
@@ -565,7 +562,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, binding: null, queuedTurns: 0, lastEnded: null, sinceRun: new Set(), leaving: null, tryingToLeave: false, retired: new RetiredRequests() };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, binding: null, queuedTurns: 0, lastEnded: null, sinceRun: new Set(), leaving: null, tryingToLeave: false, retired: new RetiredRequests() };
       this.agents.set(key, a);
     }
     return a;
@@ -1643,12 +1640,12 @@ export class TerminalHost {
     }
   }
 
-  /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
   /* The turn ended in the program, and the host only reads the rest of its log. */
   private overIn(a: Agent): boolean {
     return Boolean(a.turn?.ending);
   }
 
+  /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
   private stoppable(a: Agent): boolean {
     return Boolean(a.turn && (a.turn.typed || (a.busy && a.took)));
   }
@@ -2456,13 +2453,13 @@ export class TerminalHost {
     return { ...taken, jobId: pressed.jobId };
   }
 
-  /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
-     job and tool token, and what it did or how it ended so far goes out. An answer no typed turn waits for ends its job. */
   /* Hornhoof keeps words left in an input: they may leave it now. */
   inputKept(m: Msg<'agent.input_kept'>): void {
     this.leftInputs.kept(m.ref);
   }
 
+  /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
+     job and tool token, and what it did or how it ended so far goes out. An answer no typed turn waits for ends its job. */
   opened(m: Msg<'turn.opened'>): void {
     const a = this.agents.get(m.agentKey);
     const at = a ? (m.ref ? a.unopened.findIndex(t => t.ref === m.ref) : a.unopened.length ? 0 : -1) : -1;
@@ -2995,7 +2992,6 @@ export class TerminalHost {
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, history: null, out: () => {} };
     this.views.set(m.termId, view);
-    a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
     view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), text);
@@ -3005,7 +3001,6 @@ export class TerminalHost {
       view.out(view.mask.flush());
       this.views.delete(m.termId);
       this.wanted.delete(m.termId);
-      a.viewers = Math.max(0, a.viewers - 1);
       this.opts.send({ type: 'term.exit', termId: m.termId });
       void this.fit(m.agentKey);
     });

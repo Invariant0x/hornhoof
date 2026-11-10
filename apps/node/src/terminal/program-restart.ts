@@ -2,6 +2,7 @@ import { UNHEARD_MS, type ProgramState } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { contentText, isRecord } from '../providers/events.js';
+import { flat } from './left-input.js';
 import type { TermProgram } from './programs.js';
 
 export type RestartEvidence = {
@@ -41,7 +42,6 @@ export function resumeCommand(kind: TermProgram['kind'], original: string[], ses
 }
 
 
-const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 /* Claude Code keeps words pasted over several lines inside one pair of pasted_content tags, in its queue and in what it
    took. Only that outer pair goes: tags inside the words are theirs. */
 const PASTED = /^\s*<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content(?: id="\1")?>\s*$/;

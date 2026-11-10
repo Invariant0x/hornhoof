@@ -8,7 +8,7 @@ export type OwnLeft = { text: string; jobId: string | null; at: number };
 const MAX_KEPT = 64;
 /* The shortest piece of a prompt that tells it apart, when the program shows only a part of what was pasted. */
 const OWN_PIECE = 40;
-const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+export const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 /* What a program shows in place of a long paste: the words themselves are not on its screen. */
 const FOLDED = /\[Pasted (?:text|content)\b[^\]]*\]/i;
 const ONLY_FOLDED = new RegExp(`^${FOLDED.source}$`, 'i');

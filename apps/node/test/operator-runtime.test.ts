@@ -13,7 +13,7 @@ function fixture(shown: Partial<RecoverySource> = {}) {
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   let now = 0;
   const sent: OperatorNodeMessage[] = [];
-  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), facts: async () => null, paste: async () => {}, press: async () => {}, secrets: () => [], recovery: async () => ({ alive: true, input: '', own: false, busy: false }), ...shown });
+  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), facts: async () => null, paste: async () => {}, press: async () => {}, secrets: () => [], recovery: async () => ({ alive: true, input: '', own: false, busy: false }), ...shown });
   const agentKey = randomUUID(), jobId = randomUUID();
   const assignment = { id: randomUUID(), ordinal: 1 };
   runtime.begin(agentKey, jobId, assignment, 'Words.', false);
@@ -29,7 +29,7 @@ const stateOf = async (c: ReturnType<typeof fixture>, agentKey = c.identity.agen
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.recovery_state', request, agentKey, jobId: c.identity.jobId, instance: c.identity.instance });
   return c.sent.at(-1);
 };
-const program = { agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null };
+const program = { runningTool: false, retrying: false, wait: null };
 
 it('says a program is gone when it knows no such agent, or its program ended, and asks nothing of it', async () => {
   const asked: string[] = [];
@@ -46,8 +46,6 @@ it.each<[string, Partial<RecoverySource>, Record<string, unknown>]>([
   ['an input it cannot read', { recovery: async () => ({ alive: true, input: null, own: false, busy: false }) }, { input: 'unknown' }],
   ['a turn it works on', { recovery: async () => ({ alive: true, input: '', own: false, busy: true }) }, { input: 'empty', busy: true }],
   ['a protected question', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'protected' } }) }, { wait: 'protected' }],
-  ['a menu', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'menu' } }) }, { wait: 'menu' }],
-  ['a wait that looks harmless, which is no free prompt either', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'harmless' } }) }, { wait: 'unknown' }],
   ['a running tool', { current: () => ({ ...program, runningTool: true }) }, { runningTool: true }],
   ['a retry of its model', { current: () => ({ ...program, retrying: true }) }, { retrying: true }],
   ['nothing it can say of the program', { current: () => null }, { wait: null, runningTool: false, retrying: false }],

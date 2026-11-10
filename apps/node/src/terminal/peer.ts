@@ -79,7 +79,7 @@ async function ancestors(proc: string, pid: number): Promise<Set<number>> {
   return seen;
 }
 
-/* Older hook programs send no pid. Keep their kernel-backed search under the pane's descendants. */
+/* A call that sends no pid, as MCP and attach calls and older hook programs do, is searched for in the pane's descendants. */
 async function underPanes(proc: string, roots: number[], link: string): Promise<boolean> {
   if (!roots.length) return false;
   const tree = await children(proc);

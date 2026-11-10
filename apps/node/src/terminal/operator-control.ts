@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OperatorReason, type OperatorCheck, type OperatorInputLine, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OperatorReason, type OperatorCheck, type OperatorInputLine, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import { HIDDEN, redact, secretForms } from '../redact.js';
 import type { OperatorIdentity } from './operator-observer.js';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 
-export type OperatorProgram = OperatorIdentity & { generation: number; agentProgram: boolean; alive: boolean; pasted: boolean; turnStarted: boolean; active: boolean; runningTool: boolean; retrying: boolean; wait: { id: string; kind: 'harmless' | 'permission' | 'menu' | 'protected' | 'work' | 'unknown' } | null };
+export type OperatorProgram = OperatorIdentity & { generation: number; runningTool: boolean; retrying: boolean; wait: { id: string; kind: OperatorQuestion['kind'] } | null };
 type CaseCommand = Extract<OperatorServerMessage, { type: 'program.operator_case' }>;
-type Pane = { cols: number; rows: number; cells: string };
+export type Pane = { cols: number; rows: number; cells: string };
 type Options = { file: string; capture(): Promise<Pane>; lane<T>(run: () => Promise<T>): Promise<T>; secrets(): string[]; now?(): number };
 const Case = z.object({ instance: z.uuid(), agentKey: z.uuid(), jobId: z.uuid().nullable(), digest: z.string(), revision: z.number(), deadline: z.number(), revoked: z.boolean(), readOnly: z.boolean().default(false), reason: OperatorReason.nullable().default(null), questionId: z.uuid().nullable().default(null) });
 const RetiredCase = Case.pick({ instance: true, agentKey: true, jobId: true, revision: true, deadline: true, revoked: true });
@@ -113,6 +113,6 @@ export class OperatorControl {
   private save(): void { writeOperatorStore(this.options.file, this.state); }
 }
 
-function boundedPane(pane: Pane): boolean {
+export function boundedPane(pane: Pane): boolean {
   return Buffer.byteLength(pane.cells) <= OPERATOR_CELLS_BYTES && Number.isInteger(pane.cols) && pane.cols >= 1 && pane.cols <= 512 && Number.isInteger(pane.rows) && pane.rows >= 1 && pane.rows <= 256;
 }

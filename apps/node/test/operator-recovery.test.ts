@@ -14,7 +14,7 @@ function fixture() {
   const sent: OperatorNodeMessage[] = [];
   const source: Source = { runningTool: false, retrying: false, wait: null };
   const make = () => new OperatorRuntime({ dir, now: () => 0, connected: () => true, send: frame => { sent.push(frame); return true; } }, {
-    current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, ...source }),
+    current: () => ({ ...source }),
     capture: async () => ({ cols: 80, rows: 24, cells: '' }),
     facts: async () => null,
     paste: async () => {},
@@ -131,13 +131,6 @@ it.each<[string, (c: ReturnType<typeof fixture>) => void]>([
   expect(c.runtime.recovering(c.key)).toBe(false);
   c.runtime.recoveryReady(c.key, true);
   expect(c.ready()).toEqual([]);
-});
-
-it('keeps an operator away from a program with work behind it, while its words wait', async () => {
-  const c = fixture();
-  reused(c);
-  const current = c.runtime['current'](c.key);
-  expect(current).toMatchObject({ turnStarted: true, active: true });
 });
 
 it('does not say it twice after the node starts again', async () => {

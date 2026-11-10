@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { OPERATOR_CELLS_BYTES, OPERATOR_SNAPSHOT_MS, ProgramKey, type OperatorError, type OperatorQuestion, type OperatorServerMessage, type ProgramInputLine, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
-import { operatorCells } from './operator-control.js';
+import { OPERATOR_SNAPSHOT_MS, ProgramKey, type OperatorError, type OperatorQuestion, type OperatorServerMessage, type ProgramInputLine, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
+import { boundedPane, operatorCells, type Pane } from './operator-control.js';
 import { redact } from '../redact.js';
 
 type ViewCommand = Extract<OperatorServerMessage, { type: 'program.view_get' }>;
 type InputCommand = Extract<OperatorServerMessage, { type: 'program.input_send' }>;
 /* What the host knows of an agent's program that runs here now, or null when none does. */
 export type ProgramFacts = { jobId: string | null; instance: string; working: boolean; tool: string | null; question: OperatorQuestion | null; input: ProgramInputLine; undelivered: boolean };
-type Pane = { cols: number; rows: number; cells: string };
 type Source = {
   facts(key: string): Promise<ProgramFacts | null>;
   capture(key: string): Promise<Pane>;
@@ -35,7 +34,7 @@ export class ProgramAccess {
       if (!facts) return this.noView(command, 'no_program');
       let pane: Pane;
       try { pane = await this.source.capture(command.agentKey); } catch { return this.noView(command, 'node_unavailable'); }
-      if (!bounded(pane)) return this.noView(command, 'input_not_proven');
+      if (!boundedPane(pane)) return this.noView(command, 'input_not_proven');
       const snapshot = { token: randomUUID(), instance: facts.instance, at: this.source.now() };
       this.snapshots.set(command.agentKey, snapshot);
       const secrets = this.source.secrets();
@@ -85,8 +84,4 @@ export class ProgramAccess {
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
   return question ? { ...question, tool: question.tool && redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
-}
-
-function bounded(pane: Pane): boolean {
-  return Buffer.byteLength(pane.cells) <= OPERATOR_CELLS_BYTES && Number.isInteger(pane.cols) && pane.cols >= 1 && pane.cols <= 512 && Number.isInteger(pane.rows) && pane.rows >= 1 && pane.rows <= 256;
 }

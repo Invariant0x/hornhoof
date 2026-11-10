@@ -10,7 +10,7 @@ import { ToolsMemory } from './tools-memory.js';
 /* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
 const MAX_BODY = 4 * 1024 * 1024;
 const MAX_FILE = 51 * 1024 * 1024;
-/* A person's prompt waits this long for Hornhoof to open its turn. */
+/* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
@@ -98,8 +98,8 @@ export class Bridge {
     if (token) for (const go of [...(this.waiting.get(key) ?? [])]) go();
   }
 
-  /* Kimi Code connects to its tools when a person's first message starts its session, a moment before Hornhoof opens
-     that person's turn: while it connects and lists them, it waits this long for a turn's token instead of failing at
+  /* A program may connect to its tools a moment before Hornhoof opens a turn, as Kimi Code does when a person's first message
+     starts its session: while it connects and lists them, it waits this long for a turn's token instead of failing at
      once. A tool call never waits, or it would run under the next turn. */
   waitForTurns(key: string, ms: number): void {
     if (ms > 0) this.patience.set(key, ms);

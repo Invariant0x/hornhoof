@@ -2,7 +2,7 @@ import { closeSync, existsSync, fchmodSync, fsyncSync, mkdirSync, openSync, read
 import { dirname } from 'node:path';
 import type { z } from 'zod';
 
-/* Corrupted evidence or execution history fails closed instead of forgetting a possibly applied key. */
+/* A corrupted evidence outbox or case history fails closed instead of forgetting what it held. */
 export function readOperatorStore<T>(file: string, schema: z.ZodType<T>, empty: T): T {
   return existsSync(file) ? schema.parse(JSON.parse(readFileSync(file, 'utf8'))) : empty;
 }
