@@ -21,8 +21,9 @@ export interface ServiceContext {
   log: (line: string) => void; registerSecrets: (values: string[]) => void;
   env?: Record<string, string>; postgresBin?: string;
   /* How long a stopped process (stopMs) or the rest of an exited one's group (exitMs) may take before it is forced, and how
-     long cleanup may take (cleanupMs). Omitted, the supervisor's own; a test passes graces that cannot run out, or one that
-     runs out at once. */
+     long cleanup may take (cleanupMs). They bound cleanup after cancellation, the deadline or an error, and what a finished
+     command leaves behind; an ordinary stop of a service has no time of its own. Omitted, the supervisor's own; a test passes
+     graces that cannot run out, or one that runs out at once. */
   graces?: { stopMs?: number; exitMs?: number; cleanupMs?: number };
 }
 export interface ServicePrepareContext extends ServiceContext { cacheRoot: string; envKey: string; inputDigest: string }
@@ -33,12 +34,15 @@ export interface OpenedServices { env: Record<string, string>; close: () => Prom
 const FORMAT = 'hornhoof-services-v1';
 const PG_BIN = '/usr/lib/postgresql/17/bin';
 const GRACES = { stopMs: 2000, exitMs: 2000, cleanupMs: 7000 };
+/* The preparation server's writes need not survive a crash: its stopped state is copied and the copy is synced before it is
+   published. Without fsync it waits for the disk neither while it writes nor while it stops. Attempts keep the defaults. */
+const PREPARATION_SETTINGS = ['-c', 'fsync=off'];
 const preparationLeases = new WeakMap<ServiceContext, number>();
 // This literal runs as the node owner, outside the checkout. Job programs receive only descriptors 0, 1 and 2.
 const LEASE_GUARDIAN = String.raw`
 const {spawn}=require('node:child_process');
 const {readdirSync,readFileSync}=require('node:fs');
-let job, completed=false, disconnected=!process.connected, failed=false, code=1, hard, polling, exitGrace=2000;
+let job, completed=false, disconnected=!process.connected, failed=false, code=1, hard, polling, exitGrace=2000, patient=false;
 process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});
 function signal(value) {
   if(!job?.pid)return;
@@ -70,15 +74,15 @@ function disconnect() {
   signal('SIGTERM');escalation();
 }
 function control(message) {
-  if(message.graceMs!==undefined){clearTimeout(hard);hard=undefined;escalation(message.graceMs)}
-  if(job)signal(message.signal);else disconnect();
+  if(message.graceMs!==undefined){clearTimeout(hard);hard=undefined;patient=message.graceMs===null;if(!patient)escalation(message.graceMs)}
+  if(!job)disconnect();else if(message.signal)signal(message.signal);
 }
 function observeJob() {
   job.stdin.on('error',()=>{});process.stdin.pipe(job.stdin);
   job.stdout.pipe(process.stdout,{end:false});job.stderr.pipe(process.stderr,{end:false});
   job.once('error',error=>{failed=true;process.stderr.write(error.message);});
   job.once('close',()=>{if(!job.pid){failed=true;finish()}});
-  job.once('exit',value=>{code=value??1;escalation();polling=setInterval(reap,5);reap()});
+  job.once('exit',value=>{code=value??1;if(!patient)escalation();polling=setInterval(reap,5);reap()});
 }
 function start(message) {
   if(job||disconnected||!process.connected)return disconnect();
@@ -89,13 +93,21 @@ function start(message) {
 }
 process.on('disconnect',disconnect);
 process.on('SIGTERM',disconnect);process.on('SIGINT',disconnect);
-process.on('message',message=>{if(message.signal)control(message);else start(message)});
+process.on('message',message=>{if(message.program)start(message);else control(message)});
 `;
 type Postgres = Extract<ServiceDefinition, { driver: 'postgres' }>;
 interface Receipt { format: typeof FORMAT; inputDigest: string; definitions: string; runtime: string; checksums: Record<string, string> }
 interface ChildResult { code: number | null; output: string }
-interface Running { result: Promise<ChildResult>; stop: (signal?: NodeJS.Signals, graceMs?: number) => Promise<void>; assertRunning: () => void }
-interface Active extends OpenedServices { state: string }
+interface Running {
+  result: Promise<ChildResult>;
+  /* Forces the process after graceMs: cleanup after cancellation, the deadline or an error, and what a finished command leaves. */
+  stop: (signal?: NodeJS.Signals, graceMs?: number) => Promise<void>;
+  /* An ordinary stop: sends signal, when given, and waits for the process and its group with no time of its own. Only the
+     context's deadline and signal end the wait, and then the stop fails. */
+  finish: (signal?: NodeJS.Signals) => Promise<void>;
+  assertRunning: () => void;
+}
+interface Active extends OpenedServices { state: string; close: (cleanup?: boolean) => Promise<void> }
 
 function check(context: ServiceContext): void {
   checkDeadline(context, 'Service deadline exceeded');
@@ -121,8 +133,8 @@ function directory(path: string, context: ServiceContext): void {
     fchownSync(fd, context.jobUser.uid, context.jobUser.gid);
   });
 }
-function kill(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (!pid) return;
+function kill(pid: number | undefined, signal: NodeJS.Signals | undefined): void {
+  if (!pid || !signal) return;
   signalProcessGroup(pid, signal);
 }
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
@@ -159,9 +171,9 @@ function liveGroup(pid: number | undefined): boolean {
   }
   return false;
 }
-async function waitGroup(pid: number | undefined, deadline: number): Promise<void> {
+async function waitGroup(pid: number | undefined, bound: { deadline: number; signal?: AbortSignal }): Promise<void> {
   while (liveGroup(pid)) {
-    if (Date.now() >= deadline) {
+    if (Date.now() >= bound.deadline || bound.signal?.aborted) {
       kill(pid, 'SIGKILL');
       throw new Error('Service required forced stop; state cannot be published');
     }
@@ -170,6 +182,9 @@ async function waitGroup(pid: number | undefined, deadline: number): Promise<voi
 }
 function graces(context: ServiceContext): typeof GRACES {
   return { ...GRACES, ...context.graces };
+}
+function live(context: ServiceContext): boolean {
+  return !context.signal.aborted && Date.now() < context.deadline;
 }
 function isSupervisionFailure(message: unknown): boolean {
   return typeof message === 'object' && message !== null && 'supervisionFailed' in message && message.supervisionFailed === true;
@@ -183,7 +198,8 @@ function serviceProcess(program: string, args: string[], cwd: string, env: Recor
     ? spawn(program, args, { cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
     : spawn(process.execPath, ['-e', LEASE_GUARDIAN], { cwd: '/tmp', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, detached: true, stdio: ['pipe', 'pipe', 'pipe', fd, 'ipc'] });
   const send = (message: object) => { if (child.connected) child.send(message, () => { /* A completed guardian may already have closed IPC. */ }); };
-  const stopChild = (signal: NodeJS.Signals, graceMs?: number) => { if (fd === undefined) kill(child.pid, signal); else send({ signal, graceMs }); };
+  /* A grace of null asks the guardian for an ordinary stop, which forces nothing. */
+  const stopChild = (signal: NodeJS.Signals | undefined, graceMs?: number | null) => { if (fd === undefined) kill(child.pid, signal); else send({ signal, graceMs }); };
   let supervisionFailed = false;
   child.on('message', message => {
     if (isSupervisionFailure(message)) supervisionFailed = true;
@@ -192,6 +208,48 @@ function serviceProcess(program: string, args: string[], cwd: string, env: Recor
   const { stdin, stdout, stderr } = child;
   if (!stdin || !stdout || !stderr) throw new Error('Service subprocess pipes are unavailable');
   return { child, stdin, stdout, stderr, stopChild, supervisionFailed: () => supervisionFailed };
+}
+/* After its leader exits, a process's descendants may keep its output open. They are forced after exitMs, unless an ordinary
+   stop waits for them; a cancellation or the deadline in that wait forces them again. */
+function outputDrain(exitMs: number, force: () => void) {
+  let exited = false, patient = false;
+  let timer: NodeJS.Timeout | undefined;
+  const arm = () => { if (exited && !patient) timer ??= setTimeout(force, exitMs); };
+  return {
+    exit: () => { exited = true; arm(); },
+    wait: () => { patient = true; clearTimeout(timer); timer = undefined; },
+    force: () => { patient = false; arm(); },
+    clear: () => clearTimeout(timer),
+  };
+}
+interface Supervised {
+  pid: number | undefined; result: Promise<ChildResult>; drain: ReturnType<typeof outputDrain>;
+  signal: (signal: NodeJS.Signals | undefined, graceMs?: number | null) => void;
+  ended: () => boolean; interrupted: () => boolean; supervisionFailed: () => boolean;
+}
+/* The two ways a running process stops. Whichever comes first is the one it takes. */
+function stops(supervised: Supervised, context: ServiceContext, stopMs: number): Pick<Running, 'stop' | 'finish'> {
+  let closing: Promise<void> | undefined;
+  const stop = (signal: NodeJS.Signals = 'SIGTERM', graceMs = stopMs) => closing ??= (async () => {
+    let forced = false;
+    const deadline = Date.now() + graceMs;
+    supervised.signal(signal, graceMs);
+    if (!supervised.ended()) {
+      const hardStop = setTimeout(() => { forced = true; supervised.signal('SIGKILL'); }, graceMs);
+      try { await supervised.result; } catch { /* The original operation reports cancellation. */ }
+      finally { clearTimeout(hardStop); }
+    }
+    await waitGroup(supervised.pid, { deadline });
+    assertGracefulStop(forced, supervised.supervisionFailed());
+  })();
+  const finish = (signal?: NodeJS.Signals) => closing ??= (async () => {
+    supervised.drain.wait();
+    supervised.signal(signal, null);
+    try { await supervised.result; } catch { /* An interrupted stop fails below. */ }
+    await waitGroup(supervised.pid, context);
+    assertGracefulStop(supervised.interrupted(), supervised.supervisionFailed());
+  })();
+  return { stop, finish };
 }
 /* A service stays attached to its process group until close, including cancellation cleanup. SQL travels on stdin. */
 function launch(program: string, args: string[], cwd: string, env: Record<string, string>, context: ServiceContext, hidden: string[], input = ''): Running {
@@ -203,7 +261,10 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   let ended = false;
   let interrupted = false;
   let hard: NodeJS.Timeout | undefined;
-  let drain: NodeJS.Timeout | undefined;
+  const drain = outputDrain(exitMs, () => {
+    failure = new Error('Service descendants kept output open after leader exit');
+    stopChild('SIGKILL'); stdout.destroy(); stderr.destroy();
+  });
   const take = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-64 * 1024); };
   stdout.on('data', take); stderr.on('data', take);
   stdin.on('error', () => { /* A failed executable may close stdin before SQL is written. */ });
@@ -212,20 +273,16 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
     interrupted = true;
     stopChild('SIGTERM', stopMs);
     hard ??= setTimeout(() => stopChild('SIGKILL'), stopMs);
+    drain.force();
   };
   const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
   context.signal.addEventListener('abort', interrupt, { once: true });
   if (context.signal.aborted) interrupt();
   const result = new Promise<ChildResult>((resolve, reject) => {
     child.once('error', error => { failure = error; });
-    child.once('exit', () => {
-      drain = setTimeout(() => {
-        failure = new Error('Service descendants kept output open after leader exit');
-        stopChild('SIGKILL'); stdout.destroy(); stderr.destroy();
-      }, exitMs);
-    });
+    child.once('exit', drain.exit);
     child.once('close', code => {
-      ended = true; clearTimeout(timer); clearTimeout(hard); clearTimeout(drain); context.signal.removeEventListener('abort', interrupt);
+      ended = true; clearTimeout(timer); clearTimeout(hard); drain.clear(); context.signal.removeEventListener('abort', interrupt);
       const safe = redact(output, hidden);
       if (safe.trim()) context.log(safe);
       if (interrupted) reject(new Error('Service operation cancelled or deadline exceeded'));
@@ -235,20 +292,8 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   });
   /* Long-lived services can exit before readiness observes them. Keep the rejection handled until their owner awaits it. */
   void result.catch(() => undefined);
-  let closing: Promise<void> | undefined;
-  const stop = (signal: NodeJS.Signals = 'SIGTERM', graceMs = stopMs) => closing ??= (async () => {
-    let forced = false;
-    const deadline = Date.now() + graceMs;
-    stopChild(signal, graceMs);
-    if (!ended) {
-      const hardStop = setTimeout(() => { forced = true; stopChild('SIGKILL'); }, graceMs);
-      try { await result; } catch { /* The original operation reports cancellation. */ }
-      finally { clearTimeout(hardStop); }
-    }
-    await waitGroup(child.pid, deadline);
-    assertGracefulStop(forced, supervisionFailed());
-  })();
-  return { result, stop, assertRunning: () => { if (ended) throw new Error(`Service exited before readiness: ${redact(output, hidden)}`); } };
+  const supervised = { pid: child.pid, result, drain, signal: stopChild, ended: () => ended, interrupted: () => interrupted, supervisionFailed };
+  return { result, ...stops(supervised, context, stopMs), assertRunning: () => { if (ended) throw new Error(`Service exited before readiness: ${redact(output, hidden)}`); } };
 }
 async function command(program: string, args: string[], cwd: string, env: Record<string, string>, context: ServiceContext, hidden: string[], input = ''): Promise<string> {
   const child = launch(program, args, cwd, env, context, hidden, input);
@@ -320,19 +365,37 @@ async function ready(server: Running, env: Record<string, string>, cwd: string, 
     }
   }
 }
-async function stopPostgres(server: Running, state: string, socket: string, context: ServiceContext, hidden: string[]): Promise<void> {
+/* An ordinary stop asks for a fast shutdown and waits for the server however long its checkpoint takes: only the context's
+   deadline and signal end the wait. Cleanup after cancellation, the deadline or an error gives pg_ctl a short wait in a
+   context of its own and then forces the server. */
+async function stopPostgres(server: Running, state: string, socket: string, context: ServiceContext, hidden: string[], cleanup: boolean): Promise<void> {
+  try {
+    if (cleanup || !live(context)) await forcePostgres(server, state, context, hidden);
+    else await finishPostgres(server, state, context, hidden);
+  } finally { rmSync(socket, { recursive: true, force: true }); }
+  if (existsSync(join(state, 'postmaster.pid'))) throw new Error('PostgreSQL did not stop cleanly; template cannot be published');
+}
+async function finishPostgres(server: Running, state: string, context: ServiceContext, hidden: string[]): Promise<void> {
+  try { await command(join(context.postgresBin ?? PG_BIN, 'pg_ctl'), ['-D', state, 'stop', '-m', 'fast', '-W'], '/tmp', {}, context, hidden); }
+  catch (error) { await server.stop(); throw error; }
+  await server.finish();
+}
+async function forcePostgres(server: Running, state: string, context: ServiceContext, hidden: string[]): Promise<void> {
   let failure: unknown;
   try {
     await command(join(context.postgresBin ?? PG_BIN, 'pg_ctl'), ['-D', state, 'stop', '-m', 'fast', '-w', '-t', '5'], '/tmp', {}, cleanupContext(context), hidden);
   } catch (error) { failure = error; }
-  finally { try { await server.stop(); } finally { rmSync(socket, { recursive: true, force: true }); } }
+  finally { await server.stop(); }
   if (failure) throw failure;
-  if (existsSync(join(state, 'postmaster.pid'))) throw new Error('PostgreSQL did not stop cleanly; template cannot be published');
 }
 function postgresLocale(service: Postgres): string {
   const locale = service.options.locale ?? 'C.UTF-8';
   if (locale !== 'C.UTF-8') throw new Error('PostgreSQL services require the deterministic locale C.UTF-8');
   return locale;
+}
+function serverArgs(state: string, socket: string, fresh: boolean): string[] {
+  const args = ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256'];
+  return fresh ? [...args, ...PREPARATION_SETTINGS] : args;
 }
 async function postgres(service: Postgres, state: string, context: ServiceContext, hidden: string[], fresh: boolean): Promise<Active> {
   const bin = context.postgresBin ?? PG_BIN;
@@ -352,9 +415,9 @@ async function postgres(service: Postgres, state: string, context: ServiceContex
   hba(state, context);
   const socket = privateSocket(context);
   const env = pgEnv(socket, fresh ? 'postgres' : service.options.database, passwords.admin);
-  const server = launch(join(bin, 'postgres'), ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256'], '/tmp', {}, context, hidden);
+  const server = launch(join(bin, 'postgres'), serverArgs(state, socket, fresh), '/tmp', {}, context, hidden);
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= stopPostgres(server, state, socket, context, hidden);
+  const close = (cleanup = false) => closing ??= stopPostgres(server, state, socket, context, hidden, cleanup);
   try {
     await ready(server, env, state, context, hidden);
     if (fresh) {
@@ -364,7 +427,7 @@ async function postgres(service: Postgres, state: string, context: ServiceContex
     }
     return { state, env, close };
   } catch (error) {
-    try { await close(); } catch { /* Preserve the readiness error after all children settle. */ }
+    try { await close(true); } catch { /* Preserve the readiness error after all children settle. */ }
     throw error;
   }
 }
@@ -375,14 +438,16 @@ async function managedProcess(service: Extract<ServiceDefinition, { driver: 'pro
   const env = { HH_SERVICE_STATE: state, [`HH_SERVICE_STATE_${service.id.toUpperCase()}`]: state };
   const start = service.options.start;
   const server = launch(start.program, start.args, commandCwd(checkout, start.cwd), env, context, hidden);
+  /* The service's own grace bounds only a stop on cleanup; an ordinary one waits for the service to stop. */
+  const { signal, graceMs } = service.options.stop;
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= server.stop(service.options.stop.signal, service.options.stop.graceMs);
+  const close = (cleanup = false) => closing ??= (cleanup || !live(context) ? server.stop(signal, graceMs) : server.finish(signal));
   try {
     const readiness = service.options.readiness;
     await command(readiness.program, readiness.args, commandCwd(checkout, readiness.cwd), env, context, hidden);
     server.assertRunning();
     return { state, env, close };
-  } catch (error) { await close(); throw error; }
+  } catch (error) { await close(true); throw error; }
 }
 function commandCwd(checkout: string, cwd: string): string {
   return cwd === '.' ? checkout : inside(checkout, cwd);
@@ -392,8 +457,8 @@ async function start(service: ServiceDefinition, state: string, checkout: string
   if (service.driver === 'postgres') return postgres(service, state, context, hidden, fresh);
   return managedProcess(service, state, checkout, context, hidden);
 }
-async function closeAll(active: Active[]): Promise<void> {
-  const results = await Promise.allSettled(active.reverse().map(service => service.close()));
+async function closeAll(active: Active[], cleanup = false): Promise<void> {
+  const results = await Promise.allSettled(active.reverse().map(service => service.close(cleanup)));
   const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Service cleanup failed');
 }
@@ -502,7 +567,7 @@ async function buildArtifacts(definitions: ServiceDefinitions, checkout: string,
     const parent = openSync(dirname(root), 'r');
     try { fsyncSync(parent); } finally { closeSync(parent); }
   } finally {
-    try { await closeAll(active); } finally { rmSync(work, { recursive: true, force: true }); rmSync(stage, { recursive: true, force: true }); }
+    try { await closeAll(active, true); } finally { rmSync(work, { recursive: true, force: true }); rmSync(stage, { recursive: true, force: true }); }
   }
 }
 
@@ -546,7 +611,7 @@ export async function openServices(definitions: ServiceDefinitions, artifacts: S
   const state = join(partContext.attemptRoot, 'state');
   let ownsState = false;
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= (async () => { try { await closeAll(active); } finally {
+  const close = (cleanup = false) => closing ??= (async () => { try { await closeAll(active, cleanup); } finally {
     if (ownsState) withServiceDirectory(partContext.attemptRoot, false, parent => rmSync(join(parent, basename(state)), { recursive: true, force: true }));
   } })();
   try {
@@ -560,9 +625,9 @@ export async function openServices(definitions: ServiceDefinitions, artifacts: S
       copyServiceTree(artifacts.paths[service.id]!, destination, partContext.jobUser);
       active.push(await start(service, destination, partContext.checkout, partContext, hidden, false));
     }
-    return { env: Object.assign({}, ...active.map(service => service.env)) as Record<string, string>, close };
+    return { env: Object.assign({}, ...active.map(service => service.env)) as Record<string, string>, close: () => close() };
   } catch (error) {
-    try { await close(); } catch { /* Preserve the opening error after all service groups are stopped. */ }
+    try { await close(true); } catch { /* Preserve the opening error after all service groups are stopped. */ }
     throw error;
   }
 }
