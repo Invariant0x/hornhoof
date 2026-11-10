@@ -1,0 +1,50 @@
+name: Installer on the website
+
+# The website gives the command curl -fsSL https://hornhoof.org/install.sh | bash -s -- server, so its install.sh follows
+# each release. The release job of Images starts this run once it made a release, and anyone may start it by hand: it
+# puts the install.sh of the latest release on the website, whole, and checks that the website serves exactly that file.
+# The website takes it through a key it trusts for nothing else. The secret EDGE_INSTALL_KEY holds that key, the variable
+# EDGE_INSTALL_HOST names the user and host it goes to, and the variable EDGE_KNOWN_HOSTS holds the host's own key.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two releases close together send their installers one after the other, the later one last.
+concurrency:
+  group: installer-site
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    steps:
+      - name: Find the latest release
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.latest.outputs.tag }}
+          persist-credentials: false
+      - name: Put its install.sh on the website
+        env:
+          EDGE_INSTALL_KEY: ${{ secrets.EDGE_INSTALL_KEY }}
+          EDGE_INSTALL_HOST: ${{ vars.EDGE_INSTALL_HOST }}
+          EDGE_KNOWN_HOSTS: ${{ vars.EDGE_KNOWN_HOSTS }}
+          TAG: ${{ steps.latest.outputs.tag }}
+        run: |
+          if [ -z "$EDGE_INSTALL_KEY" ] || [ -z "$EDGE_INSTALL_HOST" ] || [ -z "$EDGE_KNOWN_HOSTS" ]; then
+            echo "::error::EDGE_INSTALL_KEY, EDGE_INSTALL_HOST or EDGE_KNOWN_HOSTS is not set, so hornhoof.org keeps its old install.sh."
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$EDGE_INSTALL_KEY" > "$RUNNER_TEMP/edge-key"
+          printf '%s\n' "$EDGE_KNOWN_HOSTS" > "$RUNNER_TEMP/edge-known-hosts"
+          ssh -i "$RUNNER_TEMP/edge-key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/edge-known-hosts" \
+            "$EDGE_INSTALL_HOST" < scripts/install.sh
+          rm -f "$RUNNER_TEMP/edge-key"
+          curl -fsSL https://hornhoof.org/install.sh | cmp - scripts/install.sh
+          echo "hornhoof.org/install.sh is the one of $TAG."

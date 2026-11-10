@@ -357,6 +357,7 @@ jobs:
     runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -376,3 +377,5 @@ jobs:
           fi
           node scripts/release-notes.mjs "$version" > "$RUNNER_TEMP/release-notes.md"
           gh release create "$tag" --target "$GITHUB_SHA" --title "Hornhoof $version" --notes-file "$RUNNER_TEMP/release-notes.md"
+          # The website's install.sh follows the release (installer-site.yml).
+          gh workflow run installer-site.yml --repo "$GITHUB_REPOSITORY" --ref main
