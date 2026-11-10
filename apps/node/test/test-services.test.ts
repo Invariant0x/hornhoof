@@ -11,11 +11,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openServices, prepareServiceArtifacts, type ServiceCommand, type ServiceContext, type ServiceDefinitions, type ServicePrepareContext } from '../src/test-services.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
-const procVisibility = vi.hoisted(() => ({ readable: true }));
+const procVisibility = vi.hoisted(() => ({ readable: true, ending: '', reads: 0 }));
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return { ...actual, readdirSync: new Proxy(actual.readdirSync, { apply(target, receiver, args) {
     if (args[0] === '/proc' && !procVisibility.readable) throw Object.assign(new Error('Unrelated process inventory is unavailable'), { code: 'EACCES' });
+    return Reflect.apply(target, receiver, args);
+  } }), readFileSync: new Proxy(actual.readFileSync, { apply(target, receiver, args) {
+    /* The kernel answers ESRCH to a read of a process that ended after its file in /proc was opened. */
+    if (procVisibility.ending && args[0] === procVisibility.ending) {
+      procVisibility.reads++;
+      throw Object.assign(new Error('No such process'), { code: 'ESRCH' });
+    }
     return Reflect.apply(target, receiver, args);
   } }) };
 });
@@ -53,6 +60,8 @@ function fakePostgres(): void {
 
 beforeEach(() => {
   procVisibility.readable = true;
+  procVisibility.ending = '';
+  procVisibility.reads = 0;
   root = mkdtempSync(join(tmpdir(), 'hh-services-test-'));
   roots.push(root);
   bin = join(root, 'bin'); mkdirSync(bin);
@@ -67,7 +76,7 @@ afterEach(() => { vi.restoreAllMocks(); for (const dir of roots.splice(0)) rmSyn
 
 /* Execute the node's inline guardian as its child process would, with recorded process and /proc boundaries. The timers
    belong to the test's virtual clock; no program starts and no signal reaches the machine. */
-function recordedGuardian(exitGraceMs?: number) {
+function recordedGuardian(exitGraceMs?: number, proc: Record<string, string | Error> = { 456: '456 (recorded writer) S 1 123 0' }) {
   const source = readFileSync(new URL('../src/test-services.ts', import.meta.url), 'utf8');
   const script = /const LEASE_GUARDIAN = String.raw`([\s\S]*?)`;/.exec(source)?.[1];
   if (!script) throw new Error('The inline lease guardian is missing');
@@ -91,7 +100,11 @@ function recordedGuardian(exitGraceMs?: number) {
     process: guardian, setTimeout, clearTimeout, setInterval, clearInterval,
     require(name: string) {
       if (name === 'node:child_process') return { spawn: () => job };
-      if (name === 'node:fs') return { readdirSync: () => ['456'], readFileSync: () => '456 (recorded writer) S 1 123 0' };
+      if (name === 'node:fs') return { readdirSync: () => Object.keys(proc), readFileSync: (path: string) => {
+        const stat = proc[path.split('/')[2]!]!;
+        if (stat instanceof Error) throw stat;
+        return stat;
+      } };
       throw new Error(`Unexpected guardian dependency: ${name}`);
     },
   });
@@ -119,6 +132,21 @@ describe('lease guardian after its leader exits', () => {
       expect(recorded.guardian.exitCode).toBe(1);
       expect(recorded.guardian.connected).toBe(false);
       expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('takes a process that ends while its state is read for gone, not for a failed supervision', () => {
+    vi.useFakeTimers();
+    try {
+      const ended = Object.assign(new Error('No such process'), { code: 'ESRCH' });
+      const recorded = recordedGuardian(undefined, { 455: ended, 456: '456 (recorded writer) S 1 123 0' });
+      recorded.job.emit('exit', 0);
+      vi.advanceTimersByTime(100);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([]);
+      expect(recorded.messages).toEqual([]);
+      recorded.group.alive = false;
+      vi.advanceTimersByTime(5);
+      expect(recorded.messages).toEqual([{ supervisionFailed: false }]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -330,6 +358,22 @@ describe('managed process services', () => {
     expect(readFileSync(marker, 'utf8')).toBe('yes');
     expect(existsSync(opened.env.HH_SERVICE_STATE!)).toBe(false);
   });
+  it('takes a process that ends while its state is read for gone while a descendant still writes', async () => {
+    const defs = processDefinitions();
+    const release = join(root, 'release');
+    /* The descendant stays after its leader until the test lets it go, but only in the opened run, which is ready once it is. */
+    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');const leader=process.ppid;process.on('SIGINT',()=>setInterval(()=>{if(process.ppid===leader)return;if(process.env.RELEASE&&!fs.existsSync(process.env.RELEASE))return;process.exit(0)},5));fs.writeFileSync(p.join(d,'child-ready'),'yes');if(process.env.RELEASE)fs.writeFileSync(process.env.RELEASE+'.ready','yes');setInterval(()=>{},100)";
+    executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});const t=setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){clearInterval(t);fs.writeFileSync(p.join(d,'value'),'ready')}},5);process.on('SIGINT',()=>process.exit(0));setInterval(()=>{},100);`);
+    executable('ready', "const fs=require('node:fs'),p=require('node:path');const marker=process.env.RELEASE?process.env.RELEASE+'.ready':p.join(process.env.HH_SERVICE_STATE,'data','value');setInterval(()=>{if(fs.existsSync(marker))process.exit(0)},5);");
+    const artifacts = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'e'.repeat(64) });
+    const opened = await openServices(defs, artifacts, { ...part('ending'), env: { RELEASE: release } });
+    procVisibility.ending = '/proc/1/stat';
+    const closed = opened.close().then(() => 'closed', (error: Error) => error.message);
+    await eventually(() => procVisibility.reads > 0);
+    writeFileSync(release, 'yes');
+    expect(await closed).toBe('closed');
+  });
+
   it('stops earlier services when a later readiness command fails', async () => {
     const defs = processDefinitions();
     defs.services.unshift(definitions.services[0]!);

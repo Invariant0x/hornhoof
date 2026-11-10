@@ -48,7 +48,7 @@ function alive() {
   try{process.kill(-job.pid,0)}catch(error){if(error.code==='ESRCH')return false;throw error}
   return readdirSync('/proc').filter(name=>/^\d+$/.test(name)).some(name=>{
     try{const stat=readFileSync('/proc/'+name+'/stat','utf8');const fields=stat.slice(stat.lastIndexOf(')')+2).split(' ');return fields[0]!=='Z'&&Number(fields[2])===job.pid}
-    catch(error){if(error.code==='ENOENT')return false;throw error}
+    catch(error){if(error.code==='ENOENT'||error.code==='ESRCH')return false;throw error}
   });
 }
 function finish() {
@@ -152,7 +152,9 @@ function liveGroup(pid: number | undefined): boolean {
       const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       if (fields[0] !== 'Z' && Number(fields[2]) === pid) return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      /* A process that ended as its state was read is gone: ENOENT before its file opened, ESRCH after. */
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ESRCH') throw error;
     }
   }
   return false;
