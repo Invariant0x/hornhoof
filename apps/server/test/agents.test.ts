@@ -121,11 +121,12 @@ describe('the employee card', () => {
     expect(card.changes).toMatchObject([{ field: 'hired', personName: 'Ivan' }]);
   });
 
-  it('moves an employee to another provider and resets its model', async () => {
+  it('moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default', async () => {
     const { app, db, ceo, codex, brunoId } = await company();
     const res = await patch(app, ceo, brunoId, { subscription: codex });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ model: '', subscription: { id: codex, provider: 'codex' } });
+    expect(res.json()).toMatchObject({ model: 'gpt-6.1-sol', subscription: { id: codex, provider: 'codex' } });
+    expect((await patch(app, ceo, brunoId, { model: '' })).json().model).toBe('');
     const picked = await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol' });
     expect(picked.json().model).toBe('gpt-6.1-sol');
     const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
@@ -345,6 +346,16 @@ describe('the employee card', () => {
     await patch(app, ceo, brunoId, { subscription: codex });
     await app.inject({ method: 'PATCH', url: `/api/people/${oleg!.id}`, payload: { status: 'disabled' }, ...as(ceo) });
     expect((await open(app, ceo, brunoId)).json().subscription).toBe(null);
+  });
+
+  it('names the model its role asks for when an employee gets a plan and no model comes with it', async () => {
+    const { app, ceo, teamKey, codex, brunoId } = await company();
+    /* Another program does not know the old model: the backend engineer's middle strength is the nearest the plan has. */
+    expect((await patch(app, ceo, brunoId, { subscription: codex })).json().model).toBe('gpt-6.1-sol');
+    expect((await patch(app, ceo, brunoId, { subscription: null })).json().model).toBe('');
+    expect((await patch(app, ceo, brunoId, { subscription: teamKey })).json().model).toBe('claude-sonnet-5-5');
+    expect((await patch(app, ceo, brunoId, { subscription: codex, model: '' })).json().model).toBe('');
+    expect((await patch(app, ceo, brunoId, { subscription: teamKey, model: 'claude-opus-5-5' })).json().model).toBe('claude-opus-5-5');
   });
 
   it('removes an employee that is not working', async () => {
