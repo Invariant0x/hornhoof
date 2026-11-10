@@ -13,7 +13,9 @@ export const TeamChange = z.union([Name, z.object({ id: z.uuid(), name: Name.opt
 export type TeamChange = z.infer<typeof TeamChange>;
 
 /* A department to create from a template. name only when the template is used a second time, such as "Sales Europe". */
-export const NewItem = z.object({ template: z.enum(TEMPLATE_KEYS), name: Name.optional(), checked: z.boolean(), note: Note, products: Products.optional(), teams: Products.optional() });
+/* staff: the department comes with the people of its template, each on the plan and model its role asks for, or waiting
+   for a plan when none serves it yet. */
+export const NewItem = z.object({ template: z.enum(TEMPLATE_KEYS), name: Name.optional(), checked: z.boolean(), note: Note, products: Products.optional(), teams: Products.optional(), staff: z.boolean().optional() });
 /* A change to a department that exists: products to add under it, sub-units to create, rename or remove, or its removal. */
 export const ChangeItem = z.object({ department: z.uuid(), checked: z.boolean(), note: Note, products: Products.optional(), teams: z.array(TeamChange).max(10).optional(), remove: z.boolean().optional() });
 export const Proposal = z.object({ brief: z.string().trim().min(1).max(1500), items: z.array(z.union([NewItem, ChangeItem])).min(1).max(20) });
