@@ -10,6 +10,8 @@ export type PassOptions = {
   /* The answer to a request or an upgrade the target did not take: refused, reset before an answer, or not
      connected within connectMs. */
   unreachable: (req: http.IncomingMessage) => Refusal;
+  /* What this hop answers by itself, with nothing passed on. Null: the request goes to the target. An upgrade always goes. */
+  own?: (req: http.IncomingMessage) => Refusal | null;
   connectMs?: number;
 };
 type Handlers = {
@@ -128,7 +130,13 @@ function askerOfRequest(req: http.IncomingMessage, res: http.ServerResponse): As
     headers: added => passedHeaders(req, added),
     refuse: refusal => {
       res.writeHead(refusal.status, lengthOf(refusal));
-      res.end(refusal.body);
+      if (req.complete || req.destroyed || refusal.headers.Connection === 'close') return void res.end(refusal.body);
+      /* The client still sends, and what it sends is being read. The whole answer goes out now, but ending it lets the
+         server close the connection, and a client cut while it sends sees the cut, not the answer: so the end waits
+         for the rest of what it sends. A refusal that closes is for a request nothing reads, and ends at once. */
+      res.write(refusal.body);
+      req.resume();
+      req.once('close', () => res.end());
     },
     answer: up => {
       res.writeHead(up.statusCode!, up.statusMessage, answerHeaders(up));
@@ -223,7 +231,13 @@ async function pass(opts: PassOptions, req: http.IncomingMessage, asker: Asker):
 
 export function passThrough(opts: PassOptions): Handlers {
   return {
-    request: (req, res) => void pass(opts, req, askerOfRequest(req, res)),
+    request: (req, res) => {
+      const asker = askerOfRequest(req, res);
+      const own = opts.own?.(req);
+      if (!own) return void pass(opts, req, asker);
+      req.resume();
+      asker.refuse(own);
+    },
     upgrade: (req, socket, head) => {
       /* Node takes its own error handler off a socket it hands over, and an error with no handler ends the process. Both
          this and the reading start here, before anything is awaited, so that a client gone by then is seen. */

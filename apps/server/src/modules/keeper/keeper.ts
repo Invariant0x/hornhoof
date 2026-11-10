@@ -70,6 +70,20 @@ function maintenanceAnswer(req: http.IncomingMessage): Refusal {
   return { status: 503, headers: { 'Content-Type': contentType, 'Retry-After': '10' }, body };
 }
 
+const LEASE_PATH = '/api/network/lease';
+const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
+const PROOF_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+const BAD_NONCE = JSON.stringify({ error: { code: 'validation', message: 'nonce must be 16 to 128 letters, digits, - or _.' } });
+
+/* The nonce of a request for the lease proof, undefined for any other request, null for a nonce this machine would not send. */
+function proofNonce(req: http.IncomingMessage): string | null | undefined {
+  if (req.method !== 'GET') return undefined;
+  const [path, query = ''] = String(req.url).split('?', 2);
+  if (path !== LEASE_PATH) return undefined;
+  const nonce = new URLSearchParams(query).get('nonce') ?? '';
+  return NONCE.test(nonce) ? nonce : null;
+}
+
 /* Anyone on the default network can reach the front port and write a header, so what it says counts only from front. */
 const visitorFromFront =
   (frontHost: string | null) =>
@@ -159,7 +173,7 @@ export class Keeper {
 
   constructor(private readonly opts: KeeperOptions) {
     const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
-    this.listener = new LinkListener({ server: this.door(visitorFromTls), log });
+    this.listener = new LinkListener({ server: this.door(visitorFromTls, { link: true }), log });
     this.holder = new LeaseHolder({ lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log });
   }
 
@@ -180,8 +194,8 @@ export class Keeper {
     await this.holder.tick();
     await this.holder.look();
     this.giveWord();
-    const front = await this.open(visitorFromFront(frontHost), at.front, host);
-    const linkHttp = await this.open(visitorFromLink, at.linkHttp, LINK_HOST);
+    const front = await listenOn(this.door(visitorFromFront(frontHost)), at.front, host);
+    const linkHttp = await listenOn(this.door(visitorFromLink, { link: true }), at.linkHttp, LINK_HOST);
     const linkTls = await this.listener.listen(at.linkTls);
     this.timer = setInterval(() => void tick(), everyMs);
     this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
@@ -210,14 +224,21 @@ export class Keeper {
     }
   }
 
-  private door(headers: PassOptions['headers']): http.Server {
-    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req) }));
+  /* A door of the link also answers who holds the lease here; on the front door that path is the app's, like any other. */
+  private door(headers: PassOptions['headers'], opts: { link?: boolean } = {}): http.Server {
+    const own = opts.link ? (req: http.IncomingMessage) => this.leaseProof(req) : undefined;
+    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own }));
     this.doors.push(door);
     return door;
   }
 
-  private open(headers: PassOptions['headers'], port: number, host: string): Promise<number> {
-    return listenOn(this.door(headers), port, host);
+  /* Whoever reaches this machine by the company's public name learns from the keeper itself, not from the app, which
+     machine it is and under which term it leads. The nonce comes back, so an answer kept from before proves nothing. */
+  private leaseProof(req: http.IncomingMessage): Refusal | null {
+    const nonce = proofNonce(req);
+    if (nonce === undefined) return null;
+    if (nonce === null) return { status: 400, headers: PROOF_HEADERS, body: BAD_NONCE };
+    return { status: 200, headers: PROOF_HEADERS, body: JSON.stringify({ machine: this.opts.config.machineId, term: this.term(), nonce }) };
   }
 
   private appIsDown(req: http.IncomingMessage): Refusal {

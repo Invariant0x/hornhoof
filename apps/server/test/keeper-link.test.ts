@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
@@ -151,12 +152,12 @@ const seenFingerprint = async (port: number) => {
   return fingerprint256;
 };
 
-function askOver(socket: TLSSocket, options: http.RequestOptions, body?: string): Promise<{ status: number; body: string; cookies: string[] }> {
+function askOver(socket: TLSSocket, options: http.RequestOptions, body?: string): Promise<{ status: number; body: string; cookies: string[]; headers: http.IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
     const out = http.request({ createConnection: () => socket, ...options, headers: { host: HOST, connection: 'close', ...options.headers } }, res => {
       const chunks: Buffer[] = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), cookies: (res.headers['set-cookie'] ?? []).map(cookie => cookie.split('=')[0]!) }));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), cookies: (res.headers['set-cookie'] ?? []).map(cookie => cookie.split('=')[0]!), headers: res.headers }));
     });
     out.on('error', reject);
     out.end(body);
@@ -423,6 +424,86 @@ describe("the link's TLS door", () => {
     for (let i = 0; i < 10; i++) expect((await signIn(VISITOR, 'not the password')).status).toBe(401);
     expect((await signIn(VISITOR, 'not the password')).status).toBe(429);
     expect((await signIn(OTHER_VISITOR, 'not the password')).status).toBe(401);
+  });
+});
+
+describe('the lease proof on the link', () => {
+  const NONCE = randomBytes(16).toString('base64url');
+  const LEASE = `/api/network/lease?nonce=${NONCE}`;
+  const BAD_NONCE = { error: { code: 'validation', message: 'nonce must be 16 to 128 letters, digits, - or _.' } };
+
+  /* An app that notes every request it gets, so a test sees what the keeper answered by itself. */
+  async function notingApp() {
+    const got: string[] = [];
+    const target = await listening(
+      http.createServer((req, res) => {
+        got.push(`${req.method} ${req.url}`);
+        req.resume();
+        res.end('the app');
+      }),
+    );
+    return { target, got };
+  }
+
+  const ask = (port: number, path: string, method = 'GET'): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> =>
+    new Promise((resolve, reject) => {
+      const out = http.request({ host: '127.0.0.1', port, path, method, agent: false }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), headers: res.headers }));
+      });
+      out.on('error', reject);
+      out.end();
+    });
+
+  it('answers the lease itself on both doors of the link', async () => {
+    const { db } = await companyWithLink();
+    const { target, got } = await notingApp();
+    const { ports, keeper } = await keeperOn(db, {}, { app: target });
+    const proof = { machine: MACHINE_ID, term: keeper.term(), nonce: NONCE };
+    expect(proof.term).toEqual({ number: 1, machine: 'machine-a', split: false });
+
+    const plain = await ask(ports.linkHttp, LEASE);
+    expect(plain.status).toBe(200);
+    expect(plain.headers['content-type']).toBe('application/json');
+    expect(plain.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(plain.body)).toEqual(proof);
+
+    const secure = await askOver(await overTls(ports.linkTls), { path: LEASE });
+    expect(secure.status).toBe(200);
+    expect(secure.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(secure.body)).toEqual(proof);
+    expect(got).toEqual([]);
+  });
+
+  it('answers no term while it holds no lease', async () => {
+    const { db } = await companyWithLink();
+    const lease = fakeLease({ take: () => Promise.reject(new Error('the database is away')) });
+    const { ports } = await keeperOn(db, {}, { lease });
+    expect(JSON.parse((await ask(ports.linkHttp, LEASE)).body)).toEqual({ machine: MACHINE_ID, term: null, nonce: NONCE });
+  });
+
+  it('refuses a nonce it would not send', async () => {
+    const { db } = await companyWithLink();
+    const { target, got } = await notingApp();
+    const { ports } = await keeperOn(db, {}, { app: target });
+    for (const path of ['/api/network/lease?nonce=abc', `/api/network/lease?nonce=${'a'.repeat(129)}`, '/api/network/lease', `${LEASE}!`]) {
+      const answer = await ask(ports.linkHttp, path);
+      expect(answer.status, path).toBe(400);
+      expect(answer.headers['cache-control'], path).toBe('no-store');
+      expect(JSON.parse(answer.body), path).toEqual(BAD_NONCE);
+    }
+    expect(got).toEqual([]);
+  });
+
+  it('leaves the path to the app on the front door, and every other method and path on the link', async () => {
+    const { db } = await companyWithLink();
+    const { target, got } = await notingApp();
+    const { ports } = await keeperOn(db, {}, { app: target });
+    expect((await ask(ports.front, LEASE)).body).toBe('the app');
+    expect((await ask(ports.linkHttp, LEASE, 'POST')).body).toBe('the app');
+    expect((await ask(ports.linkHttp, '/api/network/leases?nonce=x')).body).toBe('the app');
+    expect(got).toEqual([`GET ${LEASE}`, `POST ${LEASE}`, 'GET /api/network/leases?nonce=x']);
   });
 });
 
