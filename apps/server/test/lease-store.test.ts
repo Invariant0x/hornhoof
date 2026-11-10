@@ -1,10 +1,11 @@
+import net, { type AddressInfo } from 'node:net';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies } from '../src/db/schema.js';
-import { leaseStore } from '../src/modules/keeper/lease-store.js';
-import { createTestSql, ownDatabases } from './helpers.js';
+import { keeperSql, leaseStore } from '../src/modules/keeper/lease-store.js';
+import { createTestSql, ownDatabases, until } from './helpers.js';
 
 /* These tests take and end leases, switch triggers off and change roles, which a truncate does not undo. */
 ownDatabases();
@@ -104,5 +105,51 @@ describe('the lease the keeper holds in the database', () => {
   it('ends no session where the app and the agents have none', async () => {
     const s = await store();
     expect(await s.lease.endSessions()).toBe(0);
+  });
+});
+
+/* A server that takes every connection and never says a word, as a database that hangs does. */
+async function silentServer() {
+  const open = new Set<net.Socket>();
+  let opened = 0;
+  const server = net.createServer(socket => {
+    opened++;
+    open.add(socket);
+    socket.on('error', () => {});
+    socket.on('close', () => open.delete(socket));
+    /* It reads what comes, or it would never see the other end close. */
+    socket.resume();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  onTestFinished(() => {
+    for (const socket of open) socket.destroy();
+    server.close();
+  });
+  const { port } = server.address() as AddressInfo;
+  return { url: `postgres://u:p@127.0.0.1:${port}/d`, opened: () => opened, openNow: () => open.size };
+}
+
+describe("the keeper's connection", () => {
+  it('gives up on a database that never answers, and opens a new connection for the next query', async () => {
+    const silent = await silentServer();
+    const run = keeperSql(silent.url, { timeoutMs: 50 });
+    onTestFinished(() => run.close());
+    await expect(run.query('SELECT 1')).rejects.toThrow();
+    await expect(run.query('SELECT 1')).rejects.toThrow();
+    expect(silent.opened()).toBe(2);
+  });
+
+  it('sends its queries one after another, each on a connection the one before has given up', async () => {
+    const silent = await silentServer();
+    const run = keeperSql(silent.url, { timeoutMs: 50 });
+    onTestFinished(() => run.close());
+    const first = run.query('SELECT 1');
+    const rest = Promise.allSettled([run.query('SELECT 2'), run.query('SELECT 3')]);
+    await expect(first).rejects.toThrow();
+    /* The two behind it have not connected while the first one waited. */
+    expect(silent.opened()).toBe(1);
+    expect((await rest).map(answer => answer.status)).toEqual(['rejected', 'rejected']);
+    expect(silent.opened()).toBe(3);
+    await until(() => silent.openNow() === 0);
   });
 });
