@@ -156,3 +156,22 @@ test('the tests run in the parts the first job chose, and as the whole suite in 
   assert.match(chosen, /NUMBER: \$\{\{ matrix\.part \}\}\n/);
   assert.match(chosen, /npm run build -w @hornhoof\/node\n {10}node scripts\/tests-select\.mjs --run "\$NUMBER"\n/);
 });
+
+/* hornhoof.org/install.sh is the command the website gives, so it follows each release. */
+test('a new release starts the workflow that puts its installer on the website, which anyone may also run by hand', () => {
+  const step = images.release.slice(images.release.indexOf('Create the version tag and release'));
+  assert.ok(step.indexOf('gh workflow run installer-site.yml') > step.indexOf('gh release create'), step);
+  assert.match(images.release, /actions: write/);
+  assert.match(read('installer-site.yml'), /^on:\n {2}workflow_dispatch:\n/m);
+});
+
+test('the website gets the install.sh of the latest release whole, through a key it trusts for nothing else, and serves exactly that file after', () => {
+  const send = jobs(read('installer-site.yml')).send;
+  assert.match(send, /gh release view --repo "\$GITHUB_REPOSITORY" --json tagName/);
+  assert.match(send, /ref: \$\{\{ steps\.latest\.outputs\.tag \}\}/);
+  assert.match(send, /secrets\.EDGE_INSTALL_KEY/);
+  assert.match(send, /-o StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(send, /StrictHostKeyChecking=no/);
+  assert.match(send, /"\$EDGE_INSTALL_HOST" < scripts\/install\.sh\n/);
+  assert.match(send, /curl -fsSL https:\/\/hornhoof\.org\/install\.sh \| cmp - scripts\/install\.sh\n/);
+});
