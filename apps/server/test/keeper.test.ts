@@ -232,12 +232,12 @@ describe('the keeper', () => {
     expect(overFront['x-forwarded-host']).toBe('corp.hornhoof.test');
   });
 
-  it('answers maintenance while the app is down during an update, and starting otherwise', async () => {
-    const { keeper, dir, front, link } = await keeperOn(await appIsDown(), FAST);
-    const starting = await send(front, { path: '/api/me' });
-    expect(starting.status).toBe(502);
-    expect(starting.headers['retry-after']).toBe('5');
-    expect(JSON.parse(starting.body).error.reason).toBe('starting');
+  it('answers maintenance at once while the app is down during an update, and holds otherwise', async () => {
+    const { keeper, dir, front, link } = await keeperOn(await appIsDown(), { ...FAST, holdMs: 30, holdEveryMs: 5 });
+    const held = await send(front, { path: '/api/me' });
+    expect(held.status).toBe(503);
+    expect(held.headers['retry-after']).toBe('5');
+    expect(JSON.parse(held.body).error).toMatchObject({ reason: 'starting', message: 'Hornhoof did not answer for a minute. Try again in a few seconds.' });
 
     statusSays(dir, 'running', 'install');
     await until(() => keeper.mode() === 'maintenance');
@@ -259,7 +259,44 @@ describe('the keeper', () => {
 
     statusSays(dir, 'done', 'finished');
     await until(() => keeper.mode() === 'lead');
-    expect((await send(front, { path: '/tasks' })).status).toBe(502);
+    expect((await send(front, { path: '/tasks' })).status).toBe(503);
+  });
+
+  it('holds a request while the app is down, and ends the hold with maintenance once an update begins', async () => {
+    const down = await appIsDown();
+    const { keeper, dir, front } = await keeperOn(down, { ...FAST, holdEveryMs: 5 });
+    const held = send(front, { path: '/api/me' });
+    const app = http.createServer((req, res) => {
+      req.resume();
+      res.end('the app');
+    });
+    await new Promise<void>(resolve => app.listen(down.port, down.host, resolve));
+    onTestFinished(() => {
+      app.closeAllConnections();
+      app.close();
+    });
+    expect((await held).status).toBe(200);
+
+    await new Promise(resolve => {
+      app.closeAllConnections();
+      app.close(resolve);
+    });
+    const waiting = send(front, { path: '/api/me' });
+    statusSays(dir, 'running', 'install');
+    await until(() => keeper.mode() === 'maintenance');
+    expect(JSON.parse((await waiting).body).error.reason).toBe('maintenance');
+  });
+
+  it("passes front's invocation id on, and no one else's", async () => {
+    const id = '5f0c2b1e-8a43-4c1d-9e57-2b7f6a1d3c90';
+    const seen = async (frontHost: string, value: string) => {
+      const { front } = await keeperOn(await echoHeaders(), { frontHost });
+      return JSON.parse((await send(front, { headers: { 'x-hornhoof-invocation': value } })).body)['x-hornhoof-invocation'] as string | undefined;
+    };
+    expect(await seen('localhost', id)).toBe(id);
+    expect(await seen('localhost', id.toUpperCase())).toBe(id);
+    expect(await seen('localhost', 'not-a-uuid')).toBeUndefined();
+    expect(await seen('front.invalid', id)).toBeUndefined();
   });
 
   it("takes link traffic through the keeper as over the link, and front's as local", async () => {
@@ -357,6 +394,8 @@ describe('the keeper container', () => {
       console.log(JSON.stringify({ target: { host: options.host, port: options.port } }));
       return request({ ...options, host: '127.0.0.1', port: Number(process.env.KEEPER_TEST_APP) });
     };
+    const { connect } = net;
+    net.connect = () => connect(Number(process.env.KEEPER_TEST_APP), '127.0.0.1');
   `;
 
   async function container(app: Target) {

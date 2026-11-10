@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import { pipeline, type Duplex } from 'node:stream';
 
 export type Target = { host: string; port: number };
@@ -13,6 +14,15 @@ export type PassOptions = {
   /* What this hop answers by itself, with nothing passed on. Null: the request goes to the target. An upgrade always goes. */
   own?: (req: http.IncomingMessage) => Refusal | null;
   connectMs?: number;
+  /* For how long a request whose connect to the target fails is held and tried again, counted from when it came. Nothing
+     of the request is read before the target connects. 0 or not given: it is answered unreachable at once. */
+  holdMs?: number;
+  /* The pause between two tries of a held request. */
+  holdEveryMs?: number;
+  /* Asked before each new try: an answer ends the hold with it, as when the hop knows the wait will be long. */
+  holding?: (req: http.IncomingMessage) => Refusal | null;
+  /* The answer once the hold ran out; heldAnswer when not given. */
+  held?: (req: http.IncomingMessage) => Refusal;
 };
 type Handlers = {
   request: (req: http.IncomingMessage, res: http.ServerResponse) => void;
@@ -29,6 +39,11 @@ type Asker = {
 };
 
 const CONNECT_MS = 5000;
+/* How long front holds a request while the keeper is away, and the keeper while the app is: the keeper's is shorter, so
+   that its answer reaches front, and the page, inside front's minute. */
+export const HOLD_MS = 60_000;
+export const KEEPER_HOLD_MS = 45_000;
+const HOLD_EVERY_MS = 500;
 /* A WebSocket client sends nothing until the 101, so this is room to spare, and it keeps a flood out of memory. */
 const EARLY_BYTES = 64 * 1024;
 /* What clients have today, Fastify's default. With Node's 5 s a client reusing a connection just as it closes gets a reset. */
@@ -41,6 +56,8 @@ const UNDER_API_OR_MCP = /^\/(?:api\/|mcp(?:[/?]|$))/;
 const STARTING_JSON = JSON.stringify({ error: { code: 'unavailable', message: 'Hornhoof is starting.', reason: 'starting' } });
 const STARTING_TEXT =
   'Hornhoof is starting. Try again in a few seconds.\nHornhoof запускается. Попробуйте еще раз через несколько секунд.\n';
+const HELD_JSON = JSON.stringify({ error: { code: 'unavailable', message: 'Hornhoof did not answer for a minute. Try again in a few seconds.', reason: 'starting' } });
+const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\nHornhoof не ответил за минуту. Попробуйте еще раз через несколько секунд.\n';
 
 const ignore = (): void => {};
 
@@ -68,10 +85,16 @@ function framingOf(req: http.IncomingMessage): http.OutgoingHttpHeaders {
 const SIGNED_OUTSIDE: ReadonlySet<string> = new Set(['x-hornhoof-timestamp', 'x-hornhoof-signature']);
 const hornhoofsOwn = (name: string): boolean => name.startsWith('x-hornhoof-') && !SIGNED_OUTSIDE.has(name);
 
-function passedHeaders(req: http.IncomingMessage, added: Record<string, string>): http.OutgoingHttpHeaders {
+/* What of a request's headers goes on to the next hop: none that ends at this one, none that says who the request is
+   from, and none of Hornhoof's own. The framing of the body is for the caller to add. */
+export function hopHeaders(req: http.IncomingMessage): http.OutgoingHttpHeaders {
   const endsHere = hopByHop(req);
-  const kept = Object.entries(req.headers).filter(([name]) => !endsHere(name) && !FORWARDING.has(name) && !hornhoofsOwn(name));
-  return { ...Object.fromEntries(kept), ...framingOf(req), ...added };
+  const framing = (name: string): boolean => name === 'content-length';
+  return Object.fromEntries(Object.entries(req.headers).filter(([name]) => !endsHere(name) && !FORWARDING.has(name) && !hornhoofsOwn(name) && !framing(name)));
+}
+
+function passedHeaders(req: http.IncomingMessage, added: Record<string, string>): http.OutgoingHttpHeaders {
+  return { ...hopHeaders(req), ...framingOf(req), ...added };
 }
 
 function answerHeaders(up: http.IncomingMessage): string[] {
@@ -92,11 +115,67 @@ function limitConnect(out: http.ClientRequest, ms: number): void {
   out.once('close', stop);
 }
 
-/* Opens the target's end. Nothing here tries again: a request the target may have seen goes out once. */
-function openTarget(opts: PassOptions, req: http.IncomingMessage, added: Record<string, string>, asker: Asker): http.ClientRequest {
+/* A connection to the target, or null when it was refused, not found, out of reach or not made within ms. */
+function connectTo(target: Target, ms: number): Promise<net.Socket | null> {
+  return new Promise(resolve => {
+    const socket = net.connect(target.port, target.host);
+    const giveUp = setTimeout(() => socket.destroy(), ms);
+    socket.once('connect', () => {
+      clearTimeout(giveUp);
+      socket.off('close', failed);
+      resolve(socket);
+    });
+    const failed = () => {
+      clearTimeout(giveUp);
+      resolve(null);
+    };
+    socket.on('error', ignore);
+    socket.once('close', failed);
+  });
+}
+
+/* A pause between two tries, cut short when the client goes. */
+function pauseOrGone(side: Asker['side'], ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      side.off('close', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    side.once('close', done);
+  });
+}
+
+/* Tries to connect until the target takes the connection, the hold runs out, the hop says the wait is over, or the client
+   goes. A connection: the request goes out on it. A refusal: the answer. Null: nobody is left to answer. Only a connect
+   that failed is tried again, so a request the target may have seen still goes out once. */
+async function heldConnection(opts: PassOptions, req: http.IncomingMessage, asker: Asker, holdMs: number): Promise<net.Socket | Refusal | null> {
+  const until = Date.now() + holdMs;
+  const every = opts.holdEveryMs ?? HOLD_EVERY_MS;
+  for (;;) {
+    const socket = await connectTo(opts.target, opts.connectMs ?? CONNECT_MS);
+    if (asker.side.destroyed) {
+      socket?.destroy();
+      return null;
+    }
+    if (socket) return socket;
+    const over = opts.holding?.(req);
+    if (over) return over;
+    if (Date.now() + every > until) return (opts.held ?? heldAnswer)(req);
+    await pauseOrGone(asker.side, every);
+    if (asker.side.destroyed) return null;
+  }
+}
+
+/* Opens the target's end, on a connection already made when the request was held for one. Nothing here tries again: a
+   request the target may have seen goes out once. */
+function openTarget(opts: PassOptions, req: http.IncomingMessage, added: Record<string, string>, asker: Asker, socket?: net.Socket): http.ClientRequest {
   const headers = asker.headers(added);
-  const out = http.request({ ...opts.target, method: req.method, path: req.url, headers, agent: false });
-  limitConnect(out, opts.connectMs ?? CONNECT_MS);
+  /* Node uses a connection given to it only when the request has no agent at all; with one, the agent opens its own. */
+  const connection = socket ? { createConnection: () => socket } : { agent: false as const };
+  const out = http.request({ ...opts.target, method: req.method, path: req.url, headers, ...connection });
+  if (!socket) limitConnect(out, opts.connectMs ?? CONNECT_MS);
   const fail = () => asker.refuse(opts.unreachable(req));
   out.on('error', ignore);
   out.once('error', fail);
@@ -222,7 +301,12 @@ function closing(refusal: Refusal): Refusal {
 async function pass(opts: PassOptions, req: http.IncomingMessage, asker: Asker): Promise<void> {
   try {
     const added = await opts.headers(req);
-    if (!asker.side.destroyed) asker.carry(openTarget(opts, req, added, asker));
+    if (asker.side.destroyed) return;
+    if (!opts.holdMs) return asker.carry(openTarget(opts, req, added, asker));
+    const reached = await heldConnection(opts, req, asker, opts.holdMs);
+    if (!reached) return;
+    if ('status' in reached) return asker.refuse(closing(reached));
+    asker.carry(openTarget(opts, req, added, asker, reached));
   } catch {
     /* Nothing read what the client sent, and this connection serves no other request after it. */
     asker.refuse(closing(opts.unreachable(req)));
@@ -261,6 +345,14 @@ export function startingAnswer(req: http.IncomingMessage): Refusal {
   return UNDER_API_OR_MCP.test(String(req.url))
     ? { status: 502, headers: { ...headers, 'Content-Type': 'application/json' }, body: STARTING_JSON }
     : { status: 502, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: STARTING_TEXT };
+}
+
+/* What a hop answers once it held a request for as long as it holds one. */
+export function heldAnswer(req: http.IncomingMessage): Refusal {
+  const headers = { 'Retry-After': '5' };
+  return UNDER_API_OR_MCP.test(String(req.url))
+    ? { status: 503, headers: { ...headers, 'Content-Type': 'application/json' }, body: HELD_JSON }
+    : { status: 503, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, body: HELD_TEXT };
 }
 
 /* Both timeouts are given, since requestTimeout 0 alone also turns headersTimeout off on Node 22. */

@@ -41,8 +41,8 @@ async function listening(server: http.Server): Promise<Target> {
 const answering = (handler: (req: http.IncomingMessage, res: http.ServerResponse) => unknown) =>
   listening(http.createServer((req, res) => void handler(req, res)));
 
-async function front(keeper: Target): Promise<{ server: http.Server; door: Target }> {
-  const server = await startFront({ port: 0, host: '127.0.0.1', keeper });
+async function front(keeper: Target, holdMs?: number): Promise<{ server: http.Server; door: Target }> {
+  const server = await startFront({ port: 0, host: '127.0.0.1', keeper, holdMs });
   downWithTheTest(server);
   return { server, door: { host: '127.0.0.1', port: (server.address() as AddressInfo).port } };
 }
@@ -105,11 +105,30 @@ describe('startFront', () => {
     expect((await send(door)).status).toBe(200);
   });
 
-  it('says Hornhoof is starting while the keeper is down', async () => {
+  it('stamps tool calls, and holds the rest while the keeper is down', async () => {
+    const keeper = echoHeaders();
+    const target = await listening(keeper);
+    const { door } = await front(target);
+    const call = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'company', arguments: {} } });
+    const stamped = await send(door, { method: 'POST', path: '/mcp', headers: { 'content-type': 'application/json' } }, Buffer.from(call));
+    expect(JSON.parse(stamped.body)['x-hornhoof-invocation']).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.parse((await send(door, { path: '/api/x' })).body)['x-hornhoof-invocation']).toBeUndefined();
+
+    await new Promise(resolve => {
+      keeper.closeAllConnections();
+      keeper.close(resolve);
+    });
+    const held = send(door, { path: '/api/x' });
+    /* The keeper comes back on its port while the request waits for it. */
+    await new Promise<void>(resolve => keeper.listen(target.port, target.host, resolve));
+    expect((await held).status).toBe(200);
+  });
+
+  it('says Hornhoof is starting while the keeper is down, when it holds nothing', async () => {
     const keeper = http.createServer();
     const target = await listening(keeper);
     await new Promise(resolve => keeper.close(resolve));
-    const { door } = await front(target);
+    const { door } = await front(target, 0);
     const answer = await send(door, { path: '/api/x' });
     expect(answer.status).toBe(502);
     expect(answer.headers['retry-after']).toBe('5');
@@ -249,6 +268,9 @@ describe('the front container', () => {
      machine: it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
   const PRELOAD = `
     import http from 'node:http';
+    import net from 'node:net';
+    const { connect } = net;
+    net.connect = () => connect(Number(process.env.FRONT_TEST_TARGET), '127.0.0.1');
     const { listen } = http.Server.prototype;
     http.Server.prototype.listen = function (port, host, done) {
       return listen.call(this, 0, '127.0.0.1', () => {

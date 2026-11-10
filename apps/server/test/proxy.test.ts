@@ -12,6 +12,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import {
   firstForwarded,
+  heldAnswer,
   passThrough,
   serve,
   socketAddress,
@@ -72,6 +73,15 @@ async function holdsNoSocket(server: http.Server): Promise<void> {
     );
     expect(count).toBe(0);
   });
+}
+
+/* A port nothing listens on. */
+async function downTarget(): Promise<Target> {
+  const server = http.createServer();
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  await new Promise(resolve => server.close(resolve));
+  return { host: '127.0.0.1', port };
 }
 
 type Answer = { status: number; message: string; headers: http.IncomingHttpHeaders; raw: string[]; body: string };
@@ -832,14 +842,6 @@ describe('headers', () => {
 });
 
 describe('a target that is down', () => {
-  async function downTarget(): Promise<Target> {
-    const server = http.createServer();
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as AddressInfo;
-    await new Promise(resolve => server.close(resolve));
-    return { host: '127.0.0.1', port };
-  }
-
   it('answers for a target that is down', async () => {
     const proxy = await through(await downTarget());
 
@@ -1402,5 +1404,113 @@ describe('what a hop says about a request', () => {
     expect(answer.status).toBe(502);
     expect(answer.headers['Retry-After']).toBe('5');
     expect(answer.body).toBe(body);
+  });
+});
+
+describe('a request held while the target is down', () => {
+  const HELD_JSON = '{"error":{"code":"unavailable","message":"Hornhoof did not answer for a minute. Try again in a few seconds.","reason":"starting"}}';
+  const HELD_TEXT = 'Hornhoof did not answer for a minute. Try again in a few seconds.\nHornhoof не ответил за минуту. Попробуйте еще раз через несколько секунд.\n';
+
+  /* A port nothing listens on yet, and a way to bring a target up on it. */
+  async function targetToCome() {
+    const target = await downTarget();
+    const seen: Seen[] = [];
+    const server = http.createServer((req, res) => {
+      void bodyOf(req).then(body => {
+        seen.push({ method: req.method, url: req.url, headers: req.headers, raw: req.rawHeaders, body });
+        res.end('ok');
+      });
+    });
+    const comeUp = async () => {
+      onTestFinished(() => {
+        server.closeAllConnections();
+        server.close();
+      });
+      await new Promise<void>(resolve => server.listen(target.port, target.host, resolve));
+    };
+    return { target, seen, server, comeUp };
+  }
+
+  /* Counts the tries that failed, so a test knows the request is being held before it brings the target up. */
+  function holding(extra: Partial<PassOptions> = {}) {
+    let failed = 0;
+    const options: Partial<PassOptions> = { holdMs: 60_000, holdEveryMs: 5, holding: () => (failed++, null), ...extra };
+    return { options, failedTries: () => failed };
+  }
+
+  it('reaches the target once it is up, with its whole body', async () => {
+    const { target, seen, server, comeUp } = await targetToCome();
+    let connections = 0;
+    server.on('connection', () => connections++);
+    const { options, failedTries } = holding();
+    const proxy = await through(target, options);
+    const body = randomBytes(MiB);
+    const answer = send(proxy, { method: 'POST', path: '/api/x' }, body);
+    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    await comeUp();
+    expect((await answer).status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.body).toBe(body.toString());
+    /* The request went out on the connection that was held for it, and no other was opened. */
+    expect(connections).toBe(1);
+  });
+
+  it('opens a held WebSocket once the target is up', async () => {
+    const { target, server, comeUp } = await targetToCome();
+    const sockets = new WebSocketServer({ server });
+    sockets.on('connection', socket => socket.send('hello'));
+    const { options, failedTries } = holding();
+    const proxy = await through(target, options);
+    const ws = new WebSocket(`ws://${proxy.host}:${proxy.port}/socket`);
+    onTestFinished(() => ws.terminate());
+    const heard = once(ws, 'message');
+    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    await comeUp();
+    expect(String((await heard)[0])).toBe('hello');
+  });
+
+  it('answers that Hornhoof did not answer once the hold ran out', async () => {
+    const proxy = await through(await downTarget(), { holdMs: 30, holdEveryMs: 5 });
+    const api = await send(proxy, { path: '/api/x' });
+    expect(api.status).toBe(503);
+    expect(api.headers['retry-after']).toBe('5');
+    expect(api.headers['content-type']).toBe('application/json');
+    expect(api.body).toBe(HELD_JSON);
+    const page = await send(proxy, { path: '/' });
+    expect(page.status).toBe(503);
+    expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(page.body).toBe(HELD_TEXT);
+    expect(heldAnswer({ url: '/mcp' } as http.IncomingMessage).body).toBe(HELD_JSON);
+  });
+
+  it('ends a hold with the answer holding gives, or with its own held answer', async () => {
+    let asked = 0;
+    const maintenance = { status: 503, headers: { 'Content-Type': 'text/plain' }, body: 'installing' };
+    const proxy = await through(await downTarget(), { holdMs: 60_000, holdEveryMs: 5, holding: () => (++asked > 2 ? maintenance : null) });
+    const answer = await send(proxy, { path: '/api/x' });
+    expect(answer.status).toBe(503);
+    expect(answer.body).toBe('installing');
+    expect(asked).toBe(3);
+
+    const own = await through(await downTarget(), { holdMs: 30, holdEveryMs: 5, held: () => ({ status: 504, headers: {}, body: 'late' }) });
+    expect((await send(own, { path: '/api/x' })).body).toBe('late');
+  });
+
+  it('leaves no connection behind for a client that went away while it was held', async () => {
+    const { options, failedTries } = holding();
+    const { server, proxy } = await servedThrough(await downTarget(), options);
+    const socket = await connected(proxy);
+    socket.write('GET /api/x HTTP/1.1\r\nHost: h\r\n\r\n');
+    await vi.waitFor(() => expect(failedTries()).toBeGreaterThan(1));
+    socket.destroy();
+    await holdsNoSocket(server);
+    const tries = failedTries();
+    await holdsNoSocket(server);
+    await vi.waitFor(() => expect(failedTries()).toBeLessThanOrEqual(tries + 1));
+  });
+
+  it('answers 502 at once for a target that is down when it holds nothing', async () => {
+    const proxy = await through(await downTarget());
+    expect((await send(proxy, { path: '/api/x' })).status).toBe(502);
   });
 });

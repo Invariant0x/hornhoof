@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { isAddressOf } from '../../auth/tunnel.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
-import { firstForwarded, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
+import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
@@ -41,6 +41,9 @@ export type KeeperOptions = {
   lease: LeaseStore | null;
   now?: () => Clocks;
   pruneEveryMs?: number;
+  /* For how long a door holds a request while the app is away, and the pause between its tries. 0: it answers at once. */
+  holdMs?: number;
+  holdEveryMs?: number;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -84,13 +87,22 @@ function proofNonce(req: http.IncomingMessage): string | null | undefined {
   return NONCE.test(nonce) ? nonce : null;
 }
 
-/* Anyone on the default network can reach the front port and write a header, so what it says counts only from front. */
+const INVOCATION = 'x-hornhoof-invocation';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/* The id front stamped a tool call with, when the request has one. */
+function invocationOf(req: http.IncomingMessage): Record<string, string> {
+  const id = String(req.headers[INVOCATION] ?? '').toLowerCase();
+  return UUID.test(id) ? { [INVOCATION]: id } : {};
+}
+
+/* Anyone on the default network can reach the front port and write a header, so what it says counts only from front:
+   the visitor's address, and the id of a tool call. */
 const visitorFromFront =
   (frontHost: string | null) =>
   async (req: http.IncomingMessage): Promise<Record<string, string>> => {
-    const said = firstForwarded(req);
-    const believed = said !== '' && (await isAddressOf(frontHost, socketAddress(req)));
-    return { 'x-forwarded-for': believed ? said : socketAddress(req) };
+    if (!(await isAddressOf(frontHost, socketAddress(req)))) return { 'x-forwarded-for': socketAddress(req) };
+    return { 'x-forwarded-for': firstForwarded(req) || socketAddress(req), ...invocationOf(req) };
   };
 
 /* What frps wrote, its first entry being the visitor. Only link traffic is ever marked as https. */
@@ -227,7 +239,9 @@ export class Keeper {
   /* A door of the link also answers who holds the lease here; on the front door that path is the app's, like any other. */
   private door(headers: PassOptions['headers'], opts: { link?: boolean } = {}): http.Server {
     const own = opts.link ? (req: http.IncomingMessage) => this.leaseProof(req) : undefined;
-    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own }));
+    /* While the app restarts a request is held for it. An update takes minutes, so in maintenance it is answered at once. */
+    const holding = (req: http.IncomingMessage) => (this.mode() === 'maintenance' ? maintenanceAnswer(req) : null);
+    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own, holdMs: this.opts.holdMs ?? KEEPER_HOLD_MS, holdEveryMs: this.opts.holdEveryMs, holding }));
     this.doors.push(door);
     return door;
   }
