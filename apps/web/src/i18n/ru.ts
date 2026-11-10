@@ -659,6 +659,7 @@ export const ru: Messages = {
     hide: 'Скрыть',
     remove: 'Убрать',
     products: 'Продукты',
+    withPeople: 'Сразу нанять в каждый отдел сотрудников по его шаблону. Кому пока не подходит ни одна подписка, тот ждет ее.',
   },
   dept: {
     approvals: {
@@ -879,7 +880,7 @@ export const ru: Messages = {
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'включен' : 'выключен'}`,
     roleOn: (role: string) => `${role}: участвует в работе`,
     roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'все включены' : 'все выключены'}`,
-    needsSubscription: 'Чтобы работать, нужна подписка',
+    needsSubscription: 'Назначьте подписку, чтобы начать',
     gate: n => `Рубеж ${n}`,
     lastGate: 'последний рубеж',
     reportLine: 'Доклад руководителю',

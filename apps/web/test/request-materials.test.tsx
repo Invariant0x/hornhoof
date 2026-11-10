@@ -859,7 +859,7 @@ describe('separate question materials preview and explicit answering (#512)', ()
           proposalId: structId,
           materialRevision: 2,
           materialDigest: structDigest,
-          items: [{ template: 'support', note: 'Customer helpdesk' }],
+          items: [{ template: 'support', note: 'Customer helpdesk', staff: true }],
         },
       },
       {

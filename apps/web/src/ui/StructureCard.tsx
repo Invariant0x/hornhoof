@@ -96,9 +96,10 @@ function StructureRow({
   );
 }
 
-function buildStructureBody(proposal: Props['proposal'], stamp: Record<string, unknown>, chosen: StructureItem[]) {
+/* A new department comes with the people of its template when the card's tick says so, unless the item itself says. */
+function buildStructureBody(proposal: Props['proposal'], stamp: Record<string, unknown>, chosen: StructureItem[], withPeople: boolean) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip UI-only checked flag from payload items
-  const picked = chosen.map(({ checked: _checked, ...rest }) => rest);
+  const picked = chosen.map(({ checked: _checked, ...rest }) => ('template' in rest ? { ...rest, staff: rest.staff ?? withPeople } : rest));
   return proposal ? { proposalId: proposal.id, ...stamp, items: picked } : { items: picked };
 }
 
@@ -165,7 +166,8 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   const toggleRow = (index: number, nextChecked: boolean) => setTicks(prev => patchTickAt(prev, index, nextChecked));
   const rowDisabled = frozenBy(sent, locked);
   const canCreate = canSubmitStructure(sent, busy, chosen.length);
-  const create = () => void postProposal('/api/departments/build', buildStructureBody(proposal, proposalMaterials.stamp, chosen));
+  const [withPeople, setWithPeople] = useState(true);
+  const create = () => void postProposal('/api/departments/build', buildStructureBody(proposal, proposalMaterials.stamp, chosen, withPeople));
 
   return (
     <div className={sent ? 't-card done' : 't-card'}>
@@ -174,6 +176,12 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
       {items.map((item, i) => (
         <StructureRow key={i} item={item} checked={ticks[i]!} disabled={rowDisabled} departments={departments} t={t} onToggle={next => toggleRow(i, next)} />
       ))}
+      {chosen.some(isNew) && (
+        <label>
+          <input type="checkbox" checked={withPeople} disabled={rowDisabled} onChange={e => setWithPeople(e.target.checked)} />
+          <span>{t.card.withPeople}</span>
+        </label>
+      )}
       {failure !== null && (
         <p className="alert" role="alert">
           {errorText(t, failure)}
