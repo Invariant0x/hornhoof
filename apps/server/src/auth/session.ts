@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { and, eq, gt, inArray, lte, sql } from 'drizzle-orm';
 import { fastifyCookie } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -100,7 +101,7 @@ export async function endSession(req: FastifyRequest, reply: FastifyReply, db: D
    the old one lives one more minute for requests already on their way. Only a session marked as older, unexpired and of
    an active person is moved, since a plain hh_session cookie on the link could have been set by a page on another
    company's name. */
-async function moveOlderSession(db: Db, oldToken: string): Promise<{ token: string; expiresAt: Date } | null> {
+async function moveOlderSession(db: Db, config: Config, oldToken: string): Promise<{ token: string; expiresAt: Date } | null> {
   const oldHash = hashToken(oldToken);
   return db.transaction(async tx => {
     const [owner] = await tx.select({ personId: sessions.personId }).from(sessions).where(eq(sessions.tokenHash, oldHash));
@@ -119,12 +120,19 @@ async function moveOlderSession(db: Db, oldToken: string): Promise<{ token: stri
       .update(sessions)
       .set({ expiresAt: sql`least(${sessions.expiresAt}, now() + ${`${HANDOVER_GRACE_SECONDS} seconds`}::interval)` })
       .where(eq(sessions.tokenHash, oldHash));
-    const token = newToken();
-    const expiresAt = newSessionExpiry();
-    await tx.insert(sessions).values({ tokenHash: hashToken(token), personId: person.id, expiresAt, beforeHostCookie: false });
-    return { token, expiresAt };
+    /* A page asks for many things at once, each with the old cookie, and every one of them gets here within the minute
+       the old session still lives. They all get the same new session, so none is left that no browser holds. */
+    const token = movedToken(config, oldToken);
+    const tokenHash = hashToken(token);
+    await tx.insert(sessions).values({ tokenHash, personId: person.id, expiresAt: newSessionExpiry(), beforeHostCookie: false }).onConflictDoNothing();
+    const [moved] = await tx.select({ expiresAt: sessions.expiresAt }).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, person.id)));
+    return moved ? { token, expiresAt: moved.expiresAt } : null;
   });
 }
+
+/* The token of the session an older one moves to: the same for every request that brings that older token, and worked out
+   by nobody who does not hold this server's secret. */
+const movedToken = (config: Config, oldToken: string): string => createHmac('sha256', config.secret).update(`hornhoof session hand-over ${oldToken}`).digest('base64url');
 
 const needsHandOver = (req: FastifyRequest): boolean =>
   req.overLink && !!req.cookies[SESSION_COOKIE] && !req.cookies[LINK_SESSION_COOKIE] && !req.headers.upgrade;
@@ -148,7 +156,7 @@ const CLEARED_OLD_COOKIE = { path: '/', secure: true } as const;
 export async function handOverSession(req: FastifyRequest, reply: FastifyReply, db: Db, config: Config): Promise<void> {
   if (!needsHandOver(req)) return;
   const older = req.cookies[SESSION_COOKIE]!;
-  const moved = await moveOlderSession(db, older);
+  const moved = await moveOlderSession(db, config, older);
   reply.clearCookie(SESSION_COOKIE, CLEARED_OLD_COOKIE);
   const cookies = [fastifyCookie.serialize(SESSION_COOKIE, '', { ...CLEARED_OLD_COOKIE, expires: new Date(0) })];
   if (moved) {

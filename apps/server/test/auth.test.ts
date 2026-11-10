@@ -336,10 +336,31 @@ describe('moving a session from before the switch to __Host-hh_session', () => {
     expect((await app.inject({ url: '/api/me', ...withOldCookie(token) })).statusCode).toBe(401);
   });
 
-  it('lets a burst with the old cookie through', async () => {
-    const { app, token } = await olderSession();
+  it('lets a burst with the old cookie through, into one new session', async () => {
+    const { app, db, token } = await olderSession();
     const burst = await Promise.all([1, 2, 3].map(() => app.inject({ url: '/api/me', ...withOldCookie(token) })));
     expect(burst.map(r => r.statusCode)).toEqual([200, 200, 200]);
+    /* A page asks for many things at once, each with the old cookie: all of them get the same new one, and no session is
+       left that no browser holds. */
+    const fresh = burst.map(r => r.cookies.find(c => c.name === '__Host-hh_session')!.value);
+    expect(new Set(fresh).size).toBe(1);
+    expect(fresh[0]).not.toBe(token);
+    expect(await db.select().from(sessions)).toHaveLength(2);
+    const later = await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    expect(later.cookies.find(c => c.name === '__Host-hh_session')!.value).toBe(fresh[0]);
+    expect(await db.select().from(sessions)).toHaveLength(2);
+  });
+
+  it('gives each older session a new one of its own, which nobody can work out from the old one', async () => {
+    const { app, db, token } = await olderSession();
+    /* A second sign-in of the same person from before the switch. */
+    const second = sessionFrom(await app.inject({ ...login('ivan@acme.com', SETUP.password), remoteAddress: '127.0.0.1' }));
+    await db.update(sessions).set({ beforeHostCookie: true }).where(eq(sessions.tokenHash, hashToken(second)));
+    const moved = async (old: string) => (await app.inject({ url: '/api/me', ...withOldCookie(old) })).cookies.find(c => c.name === '__Host-hh_session')!.value;
+    const [first, other] = [await moved(token), await moved(second)];
+    expect(first).not.toBe(other);
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first).not.toContain(token);
   });
 
   it('moves no session made after the switch, expired or of a disabled person', async () => {
