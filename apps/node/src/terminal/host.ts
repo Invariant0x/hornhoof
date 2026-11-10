@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
-import { programDirOf, toldPlace } from '../program-folder.js';
+import { toldPlace } from '../program-folder.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
@@ -14,7 +14,7 @@ import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { machineLoad, programWorkers, type MachineLoad } from '../load.js';
-import { jobDone, tidy, type RunInput, type RunResult, type ProgramBinding } from '../runner.js';
+import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
@@ -27,7 +27,7 @@ import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './pr
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
-import { busy, enterPending, hasSettled, idleRefusal, RETIRED, RetiredRequests, stale, type IdleEvidence, type RetireIdleWorkspace, type RetireResult } from './program-retire.js';
+import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
 import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
@@ -200,19 +200,15 @@ type Agent = {
   apiError: Failure | null;
   restarting: boolean;
   launch: { job: TermJob; spec: LaunchSpec } | null;
-  /* This start of the program, new with each, and the task workspace it started for. */
+  /* This start of the program, new with each. */
   instance: string | null;
-  binding: ProgramBinding | null;
   /* Hornhoof's turns sent here and not over yet. */
   queuedTurns: number;
-  /* The last turn of this instance that ended. */
-  lastEnded: string | null;
   /* The last turn Hornhoof sent here, and the turns people typed since. */
   sinceRun: Set<string>;
   /* The agent left this node's plan after this turn: the program goes once it is idle, unless a turn comes here again. */
   leaving: string | null;
   tryingToLeave: boolean;
-  retired: RetiredRequests;
 };
 
 type Size = { cols: number; rows: number };
@@ -324,14 +320,14 @@ const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).di
 const noVersion = async (): Promise<null> => null;
 async function launchHash({ program, bin, input, version = noVersion }: TermJob, spec: LaunchSpec): Promise<string> {
   const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
-  return hashOf({ kind: program.kind, bin, version: await version(), model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs, ...(input.programDir ? { programDir: input.programDir } : {}) });
+  return hashOf({ kind: program.kind, bin, version: await version(), model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
 }
 /* An agent's state as its program starts for a turn. Kimi Code and Antigravity name a new session only once it starts,
    and what it was told from before is kept by that name. */
 function startedState({ program, home, input }: TermJob, spec: LaunchSpec): Partial<Agent> {
   const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
   return {
-    program, home, workDir: programDirOf(input), contextDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
+    program, home, workDir: input.workDir, contextDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
     oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(home) : null,
     keep: namesLater ? (input.context ?? null) : null,
     contextSize: program.kind === 'kimi' ? kimiWindow(home, input.model) : null,
@@ -562,7 +558,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, binding: null, queuedTurns: 0, lastEnded: null, sinceRun: new Set(), leaving: null, tryingToLeave: false, retired: new RetiredRequests() };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false };
       this.agents.set(key, a);
     }
     return a;
@@ -617,7 +613,7 @@ export class TerminalHost {
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
     const instructionsFile = await this.writeInstructions(job);
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: programDirOf(input), bound: Boolean(input.programDir), sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
     return { spec, urls, hash: await this.versionedHash(a, job, spec) };
   }
 
@@ -678,7 +674,6 @@ export class TerminalHost {
     this.endWords(a, turn);
     this.retainAssignment(a, job, turn.words);
     a.typing = null;
-    noteEnded(a, job.input.jobId);
     if (starting && a.starting === starting) a.starting = null;
     if (a.turn === turn) {
       this.bridge.setToken(job.key, null);
@@ -895,7 +890,7 @@ export class TerminalHost {
 
   private async prepareLaunch(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<void> {
     await this.prepare(job, urls);
-    Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID(), binding: job.input.workspaceBinding ?? null, lastEnded: null });
+    Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID() });
     if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
     a.tail = this.tailFor(a);
   }
@@ -905,7 +900,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.operator?.launch(a.key, 'attempt');
     try {
-      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: programDirOf(job.input), command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
       this.operator?.launch(a.key, 'started');
     } catch (error) {
       this.operator?.launch(a.key, 'failed');
@@ -952,10 +947,9 @@ export class TerminalHost {
      Antigravity, reaches its tools a moment before Hornhoof opens their turn. Claude Code or Codex may still connect
      after a turn called off as it started them, and the next turn opens soon after. */
   private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
-    const programDir = programDirOf(input);
-    if (program.kind === 'claude') await acceptClaudeDialogs(home, programDir, this.fs);
-    if (program.kind === 'kimi') await prepareKimi(home, programDir, urls.mcpUrl, this.fs);
-    if (program.kind === 'antigravity') await prepareAgy(programDir, urls.mcpUrl, this.fs);
+    if (program.kind === 'claude') await acceptClaudeDialogs(home, input.workDir, this.fs);
+    if (program.kind === 'kimi') await prepareKimi(home, input.workDir, urls.mcpUrl, this.fs);
+    if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
     this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : this.toolsMs);
   }
 
@@ -2474,7 +2468,6 @@ export class TerminalHost {
     turn.opened?.resolve();
     /* It ended before Hornhoof named it. */
     if (turn.over) {
-      noteEnded(a, turn.jobId);
       this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure);
     }
   }
@@ -2505,7 +2498,6 @@ export class TerminalHost {
     if (!turn?.typed) return;
     this.endWords(a, turn);
     if (a.turn === turn) { a.turn = null; this.bridge.setToken(a.key, null); }
-    noteEnded(a, turn.jobId);
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     /* Hornhoof hears the limits with the next turn it runs. */
     void this.planLimits(a);
@@ -2823,22 +2815,6 @@ export class TerminalHost {
     this.log(`Agent ${a.key}: ${left.status === 'retired' ? 'closed the program of a plan it left' : 'kept its program, which ran a later turn'}.`);
   }
 
-  /* The current start of this agent's program, if it has one. */
-  instanceOf(key: string): string | null {
-    return this.agents.get(key)?.instance ?? null;
-  }
-
-  /* Closes exactly the instance a task's workspace names, if it is idle. Asked again it answers the same and touches what runs by
-     then. Every expected state is an answer, never an exception. */
-  async retireIdleWorkspace(request: RetireIdleWorkspace): Promise<RetireResult> {
-    const a = this.agents.get(request.agentKey);
-    if (!a) return stale('no such agent here');
-    if (a.retired.has(request)) return RETIRED;
-    const result = await this.closeIdle(a, () => sameProgram(a, request), () => a.lastEnded === request.expectedJobId);
-    if (result.status === 'retired') a.retired.add(request);
-    return result;
-  }
-
   /* Checks first, so that a program at work answers at once and not after its turn. Then in the line of Hornhoof's turns: one sent
      meanwhile comes after this has answered. */
   private async closeIdle(a: Agent, same: () => boolean, last: () => boolean): Promise<RetireResult> {
@@ -2897,7 +2873,7 @@ export class TerminalHost {
     this.operator?.exited(a.key, { code: null, signal: null });
     this.unwatch(a);
     this.programIs(a, false);
-    Object.assign(a, { hash: null, instance: null, binding: null, launch: null, sessionId: null, tail: null, fresh: false, started: null, lastEnded: null });
+    Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, tail: null, fresh: false, started: null });
     return RETIRED;
   }
 
@@ -3305,12 +3281,6 @@ function canRestart(a: Agent | undefined): a is Agent & { launch: NonNullable<Ag
 }
 
 const errorWords = (error: unknown) => String(error instanceof Error ? error.message : error).slice(0, 300);
-
-const sameProgram = (a: Agent, request: RetireIdleWorkspace): boolean =>
-  a.instance === request.expectedInstance && a.binding?.workspaceId === request.workspaceId && a.binding.bindingVersion === request.bindingVersion;
-
-/* The last turn that ended in this program, as far as Hornhoof named it. */
-const noteEnded = (a: Agent, jobId: string | null | undefined): void => { a.lastEnded = jobId ?? a.lastEnded; };
 
 function typedOpen(agentKey: string, text: string, ref: Turn['ref'], queuedFrom: string | null): Extract<NodeMessage, { type: 'turn.open' }> {
   return { type: 'turn.open', agentKey, text: text.slice(0, 100_000), ref, ...(queuedFrom ? { queuedFrom } : {}) };

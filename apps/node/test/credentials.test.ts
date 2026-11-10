@@ -152,7 +152,7 @@ describe('applying a sign-in', () => {
     expect(again).not.toContain('sk-kimi-0123456789abcdef');
     expect(heldCredential(home, 'kimi_key')).toEqual(bytes('sk-kimi-fedcba9876543210'));
     expect(credentialSecrets(home)).toEqual(['sk-kimi-fedcba9876543210']);
-    dropCredential(dir, home, 'kimi_key');
+    dropCredential(home, 'kimi_key');
     expect(readFileSync(join(home, 'config.toml'), 'utf8')).not.toContain('hornhoof-key');
     expect(heldCredential(home, 'kimi_key')).toBeNull();
   });

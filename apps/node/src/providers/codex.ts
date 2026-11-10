@@ -5,7 +5,7 @@ import type { Readable, Writable } from 'node:stream';
 import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { readAccount } from '../account.js';
 import type { JobUser } from '../isolation.js';
-import { codexRootFlags, programDirOf, toldPlace } from '../program-folder.js';
+import { toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
@@ -177,10 +177,9 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
       const told = toldPlace('codex', input);
       if (input.instructions) writePrivate(told.file, told.head + input.instructions + '\n', user);
-      const root = codexRootFlags(Boolean(input.programDir));
       const args = input.sessionId
-        ? ['exec', 'resume', ...mcp, ...root, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
-        : ['exec', ...mcp, ...root, ...FLAGS, '-C', programDirOf(input), ...model, '--', input.prompt];
+        ? ['exec', 'resume', ...mcp, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
+        : ['exec', ...mcp, ...FLAGS, '-C', input.workDir, ...model, '--', input.prompt];
 
       let sessionId: string | null = input.sessionId;
       let answer = '';
@@ -190,7 +189,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         bin,
         args,
         env: { ...env(input.secret, input.tools?.token ?? null), ...input.env },
-        cwd: programDirOf(input),
+        cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         user,

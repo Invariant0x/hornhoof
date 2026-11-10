@@ -1,14 +1,14 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import { CRED_FILES, credentialSecrets } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
-import { programDirOf, toldPlace } from '../program-folder.js';
+import { toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { agentDir, childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 import { NPM_PACKAGES } from './packages.js';
 
@@ -92,10 +92,9 @@ export function kimiContextSize(config: string, model: string | null): number | 
   return Number.isInteger(size) && size > 0 ? size : null;
 }
 
-/* Kimi Code reads what it is told from the folder it works in; in a task's folder, from a file of its own there. */
+/* Kimi Code reads what it is told from the folder it works in. */
 function tellKimi(input: RunInput, instructions: string, user: JobUser | null): void {
   const { file } = toldPlace('kimi', input);
-  if (input.programDir) agentDir(dirname(file), user);
   writePrivate(file, instructions + '\n', user);
 }
 
@@ -155,7 +154,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         args,
         env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
         user,
-        cwd: programDirOf(input),
+        cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {

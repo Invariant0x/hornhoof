@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { dirname, join } from 'node:path';
 import type { AgentEvent, Limits, ModelOption } from '@hornhoof/protocol';
 import { asAgent, type JobUser } from '../isolation.js';
-import { programDirOf, toldPlace } from '../program-folder.js';
+import { toldPlace } from '../program-folder.js';
 import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { READY } from '../terminal/program-state.js';
@@ -422,16 +422,12 @@ async function setUpOnScreen(io: LoginIo, { recordingsDir, person, ...look }: Se
   if (await setupShown(look)) throw new Error('Antigravity CLI was closed before its terms were accepted.');
 }
 
-/* agy reads AGENTS.md in the folder it works in as the folder's rules, and a task's folder has a rules file of its own. */
+/* agy reads AGENTS.md in the folder it works in as the folder's rules. */
 function tellAgy(input: RunInput, instructions: string, user: JobUser | null): void {
   const whole = join(input.workDir, '.hh-instructions.md');
   const { file, head } = toldPlace('antigravity', input);
   const said = agyRules(instructions, whole, Buffer.byteLength(head));
   if (said.whole) writePrivate(whole, said.whole + '\n', user);
-  if (input.programDir) {
-    agentDir(join(input.programDir, '.agents'), user);
-    agentDir(dirname(file), user);
-  }
   writePrivate(file, head + said.rules + '\n', user);
 }
 
@@ -482,10 +478,9 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
 
       /* agy takes MCP servers from settings files only, and the token as a header in them: the folder's own file, which
          only the program's user reads, for this run alone. */
-      const programDir = programDirOf(input);
-      const mcpJson = join(programDir, '.agents', 'mcp_config.json');
+      const mcpJson = join(input.workDir, '.agents', 'mcp_config.json');
       if (input.tools) {
-        agentDir(join(programDir, '.agents'), user);
+        agentDir(join(input.workDir, '.agents'), user);
         const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       }
@@ -499,7 +494,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
         args,
         env: { ...env(), ...input.env },
         user,
-        cwd: programDir,
+        cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {

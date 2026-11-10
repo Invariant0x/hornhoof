@@ -3,7 +3,6 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
-import { programDirOf } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { credentialSecrets } from '../credentials.js';
@@ -164,7 +163,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         bin,
         args,
         env: { ...env(input.secret), ...input.env, ...compact },
-        cwd: programDirOf(input),
+        cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         user,

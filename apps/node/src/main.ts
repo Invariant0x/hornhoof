@@ -80,8 +80,6 @@ async function answerLiveWords(host: TerminalHost | null, m: Extract<ProgramServ
   emit({ type: 'agent.said', ref: m.ref, ok });
 }
 
-/* What a node says to a sign-in it cannot run: a company key's, a Kimi or GLM key's, or one with no tmux. */
-
 /* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
 const NO_RUNS = 'This node has no user of its own for runs, which it gets only when it runs as root with the rights to switch users, so it takes no part of any run.';
 
@@ -431,7 +429,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       case 'cred.drop':
         return inOrder(() => {
           if (!holdsSignIn) return;
-          dropCredential(dir, credHome, m.kind, credUser);
+          dropCredential(credHome, m.kind, credUser);
           return signedInNow();
         });
       case 'cred.seal':
@@ -931,7 +929,6 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
 }
 
-/* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
 /* What the node's updater and its machine's setup call, or the usage for anything else. */
 async function upkeepCommand(dir: string, args: string[], io: Io): Promise<number> {
   if (args[0] === 'wait-update') return waitUpdate(dir, io);
@@ -940,6 +937,7 @@ async function upkeepCommand(dir: string, args: string[], io: Io): Promise<numbe
   return 1;
 }
 
+/* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
 export async function command(args: string[], io: Io): Promise<number | { stop(): void }> {
   const dir = dataDir();
   switch (args[0]) {

@@ -30,7 +30,6 @@ function fixture(operator = true) {
   Object.assign(agent, {
     home, workDir, program: codexProgram, sessionId: 'known-session', instance: 'old-instance', hash: 'launch-hash',
     oldLogs: new Set(['old-file']), enqueuedWords: ['Held words'], retry: { attempt: 2, max: 3, nextAt: null },
-    binding: { workspaceId: randomUUID(), bindingVersion: 2 },
   });
   agent.turn = { jobId, typed: true, seq: 0, toolToken: 'turn-token', words: new TurnWords(), onEvent: () => {} };
   agent.busy = agent.took = true;
@@ -65,7 +64,7 @@ afterEach(() => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0)
 describe('resuming a known session after a program restart', () => {
   it.each([true, false])('keeps launch settings and turn identity with operator enabled: %s', async operator => {
     const c = fixture(operator);
-    const turn = c.agent.turn, binding = c.agent.binding;
+    const turn = c.agent.turn;
     const resuming = c.host['resumeSession'](c.agent, c.job, c.spec, c.job.input.jobId!);
     await vi.advanceTimersByTimeAsync(500);
     await resuming;
@@ -80,7 +79,6 @@ describe('resuming a known session after a program restart', () => {
     expect(c.agent.instance).not.toBe('old-instance');
     expect(c.agent.turn).toBe(turn);
     expect(c.agent.turn!.toolToken).toBe('turn-token');
-    expect(c.agent.binding).toBe(binding);
     expect(c.agent.busy).toBe(true);
     expect(c.agent.took).toBe(true);
     expect(c.agent.oldLogs).toBeNull();

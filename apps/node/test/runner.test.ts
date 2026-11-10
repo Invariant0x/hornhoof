@@ -1,12 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ownFs } from '../src/agent-fs.js';
-import { jobDone, runJob, type ProgramWorkspace, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
+import { jobDone, runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import type { Worktree } from '../src/tests.js';
-import { readSessions, rememberSession } from '../src/state.js';
+import { readSessions } from '../src/state.js';
 import { deferred } from '../../../test-support/deferred.mjs';
 import { eventually } from '../../../test-support/eventually.mjs';
 
@@ -327,130 +327,6 @@ describe('jobDone', () => {
     expect(jobDone('j1', ended(), [])).not.toHaveProperty('exit');
   });
 });
-
-describe('a turn in a task\'s folder', () => {
-  const workspace = (dir: string, more: Partial<ProgramWorkspace> = {}): ProgramWorkspace => {
-    const programDir = join(dir, 'task-workspaces', 'one', 'repo');
-    mkdirSync(programDir, { recursive: true });
-    return { programDir, binding: { workspaceId: 'w-1', bindingVersion: 1 }, ...more };
-  };
-  const agentJob = (over: Partial<Extract<ServerMessage, { type: 'job.run' }>> = {}) => job({ workspace: { key: 'agent-1', repo: null }, ...over });
-
-  it('hands the program both folders and the binding, and keeps the context folder as its own', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const place = workspace(dir);
-    await runJob(adapter, agentJob(), dir, { workspace: place });
-    expect(adapter.inputs[0]).toMatchObject({ workDir: dirname(place.programDir), programDir: place.programDir, workspaceBinding: place.binding });
-    expect(readSessions(dir)['sess-1']).toBe(place.programDir);
-  });
-
-  it('takes no folder from the message', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    await runJob(adapter, { ...agentJob(), programDir: '/somewhere/else', workspaceBinding: { workspaceId: 'x', bindingVersion: 9 } } as ReturnType<typeof agentJob>, dir);
-    expect(adapter.inputs[0]!.programDir).toBeUndefined();
-    expect(adapter.inputs[0]!.workspaceBinding).toBeUndefined();
-    expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'agents', 'agent-1'));
-  });
-
-  it('gives a job with no agent no folder of a task', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    await runJob(adapter, job(), dir, { workspace: workspace(dir) });
-    expect(adapter.inputs[0]!.programDir).toBeUndefined();
-  });
-
-  it('goes on with the session it saved in that folder, saying nothing', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const place = workspace(dir);
-    const events: AgentEvent[] = [];
-    rememberSession(dir, 'sess-1', place.programDir);
-    await runJob(adapter, agentJob({ sessionId: 'sess-1' }), dir, { workspace: place, onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.sessionId).toBe('sess-1');
-    expect(events).toEqual([]);
-  });
-
-  it('starts anew from a session saved in another folder, and says so with its catch-up', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok({ sessionId: 'sess-2' }));
-    const place = workspace(dir, { catchUp: 'The task is about the checkout page.' });
-    const events: AgentEvent[] = [];
-    rememberSession(dir, 'sess-1', join(dir, 'work', 'agents', 'agent-1'));
-    await runJob(adapter, agentJob({ sessionId: 'sess-1' }), dir, { workspace: place, onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.sessionId).toBeNull();
-    expect(adapter.inputs[0]!.context).toContain('The task is about the checkout page.');
-    expect(events).toEqual([{ kind: 'text', text: expect.stringContaining('new session') }]);
-    expect(readSessions(dir)).toEqual({ 'sess-1': join(dir, 'work', 'agents', 'agent-1'), 'sess-2': place.programDir });
-  });
-
-  it('starts anew from a session this node does not know, and says so', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const events: AgentEvent[] = [];
-    await runJob(adapter, agentJob({ sessionId: 'from-another-machine' }), dir, { workspace: workspace(dir), onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.sessionId).toBeNull();
-    expect(events).toEqual([{ kind: 'text', text: expect.stringContaining('No catch-up') }]);
-  });
-
-  it('says nothing for a turn Hornhoof started with no session', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const events: AgentEvent[] = [];
-    await runJob(adapter, agentJob({ context: 'From before.' }), dir, { workspace: workspace(dir), onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.context).toBe('From before.');
-    expect(events).toEqual([]);
-  });
-
-  it('keeps a session in another folder only for a program a live check named', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const events: AgentEvent[] = [];
-    rememberSession(dir, 'sess-1', join(dir, 'work', 'agents', 'agent-1'));
-    await runJob(adapter, agentJob({ sessionId: 'sess-1' }), dir, { workspace: workspace(dir), carries: new Set(['claude']), onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.sessionId).toBe('sess-1');
-    expect(events).toEqual([]);
-  });
-
-  it('does not carry a session this node never saved, even for such a program', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    await runJob(adapter, agentJob({ sessionId: 'from-another-machine' }), dir, { workspace: workspace(dir), carries: new Set(['claude']) });
-    expect(adapter.inputs[0]!.sessionId).toBeNull();
-  });
-
-  it('ends the turn when something of the repository stands where the program needs a file', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const place = workspace(dir);
-    mkdirSync(join(place.programDir, '.kimi-code'), { recursive: true });
-    writeFileSync(join(place.programDir, '.kimi-code', 'mcp.json'), 'theirs');
-    const done = await runJob(adapter, agentJob({ provider: 'kimi' }), dir, { workspace: place });
-    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
-    expect(done.tail).toContain('.kimi-code/mcp.json');
-    expect(adapter.inputs).toEqual([]);
-  });
-
-  it("puts the dependencies in the task's worktree, where its program checks its change", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const place = workspace(dir);
-    const asked: Worktree[] = [];
-    const adapter = { ...fakeAdapter(async () => ok()), owner: { user: me, home: dir, prepare: () => {}, fs: ownFs } };
-    await runJob(adapter, agentJob({ workspace: { key: 'agent-1', repo: SHOP, repositoryScope: SCOPE } }), dir, { workspace: place, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: async tree => (asked.push(tree), null) });
-    expect(asked).toMatchObject([{ checkout: place.programDir, commitSha: HEAD }]);
-  });
-
-  it('keeps the old folder rule for a turn with no task\'s folder', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(async () => ok());
-    const events: AgentEvent[] = [];
-    await runJob(adapter, agentJob({ sessionId: 'from-another-machine' }), dir, { onEvent: event => events.push(event) });
-    expect(adapter.inputs[0]!.sessionId).toBeNull();
-    expect(events).toEqual([]);
-  });
-});
-
 
 const HEAD = 'c'.repeat(40);
 const SHOP = { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop0123' };

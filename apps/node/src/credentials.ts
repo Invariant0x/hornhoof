@@ -30,7 +30,7 @@ export function takeLease(dir: string): void {
 export function giveUpLease(dir: string, home: string, user: JobUser | null = null): void {
   rmSync(join(dir, LEASE_FILE), { force: true });
   writePrivate(join(dir, SPARE_FILE), '', null);
-  dropCredential(dir, home, 'codex_auth', user);
+  dropCredential(home, 'codex_auth', user);
 }
 
 /* The agents own the plan's home, so the node reads nothing there through a link. */
@@ -54,8 +54,7 @@ export function applyCredential(dir: string, home: string, kind: CredKind, plain
   return true;
 }
 
-export function dropCredential(dir: string, home: string, kind: CredKind, user: JobUser | null = null): void {
-  void dir;
+export function dropCredential(home: string, kind: CredKind, user: JobUser | null = null): void {
   rmSync(join(home, CRED_FILES[kind]), { force: true });
   const config = kind === 'kimi_key' ? read(join(home, 'config.toml')) : null;
   if (config !== null) writePrivate(join(home, 'config.toml'), withoutKimiKey(config), user);
