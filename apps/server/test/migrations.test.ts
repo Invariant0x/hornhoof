@@ -559,3 +559,55 @@ describe("migration 0102, the tables of the company's network", () => {
     await db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('app', 's'), ('data', 's')`);
   });
 });
+
+describe('migration 0103, what joined machines need', () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return { client, db };
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds its tables, journaled and closed, and what a machine says of its link and its update', async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(
+      expect.arrayContaining(['addresses', 'path', 'direct_fails', 'renew_at', 'update_commit', 'update_state', 'go_commit', 'go_at', 'failed_commit', 'failed_at', 'owner_pin']),
+    );
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('machine_tickets', 'machine_online', 'person_keys') order by 1`);
+    expect(tables.rows).toEqual(['machine_online', 'machine_tickets', 'person_keys'].map(relname => ({ relname, closed: true, journaled: true })));
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key) values (gen_random_uuid(), gen_random_uuid(), 'a')`);
+    expect((await db.execute(sql`select addresses, direct_fails, path from machines`)).rows).toEqual([{ addresses: [], direct_fails: false, path: null }]);
+    await db.execute(sql`insert into node_codes (code_hash, company_id, person_id, subscription_ids, expires_at) values ('h', gen_random_uuid(), gen_random_uuid(), '{}', now())`);
+    expect((await db.execute(sql`select core from node_codes`)).rows).toEqual([{ core: false }]);
+  });
+
+  it('takes only the paths, update states, kinds and amounts there are', async () => {
+    const { db } = await fullyMigrated();
+    const machine = (key: string, column: string, value: string | null) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key, ${column}) values (gen_random_uuid(), gen_random_uuid(), '${key}', ${value === null ? 'null' : `'${value}'`})`));
+    for (const [key, path] of [['a', 'direct'], ['b', 'relay'], ['c', null]] as const) await machine(key, 'path', path);
+    expect(await codeOf(machine('d', 'path', 'lan'))).toBe('23514');
+    for (const [key, state] of [['e', 'ready'], ['f', 'installing'], ['g', 'failed']] as const) await machine(key, 'update_state', state);
+    expect(await codeOf(machine('h', 'update_state', 'done'))).toBe('23514');
+
+    const id = (await db.execute<{ id: string }>(sql`select id from machines limit 1`)).rows[0]!.id;
+    await db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-10', 86400)`);
+    expect(await codeOf(db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-11', 86401)`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-10', 5)`))).toBe('23505');
+
+    const key = (iterations: number) => db.execute(sql`insert into person_keys (person_id, company_id, public_key, wrapped, salt, iv, iterations) values (gen_random_uuid(), gen_random_uuid(), 'p', 'w', 's', 'i', ${iterations})`);
+    await key(600000);
+    expect(await codeOf(key(599999))).toBe('23514');
+
+    await db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('visit', 's')`);
+    expect(await codeOf(db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('x', 's')`))).toBe('23514');
+  });
+});

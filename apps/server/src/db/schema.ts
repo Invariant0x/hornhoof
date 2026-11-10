@@ -223,6 +223,13 @@ export const TARGET_KINDS = ['orchestrator', 'department', 'team', 'any'] as con
 export const MACHINE_ROLES = ['data', 'worker'] as const;
 export type MachineRole = (typeof MACHINE_ROLES)[number];
 
+/* How a worker reaches the company's server: on the local network, or through hornhoof.org. */
+export const LINK_PATHS = ['direct', 'relay'] as const;
+export type LinkPath = (typeof LINK_PATHS)[number];
+/* Where a worker stands with the server's build: it has it downloaded, it installs it, or its install failed. */
+export const UPDATE_STATES = ['ready', 'installing', 'failed'] as const;
+export type UpdateState = (typeof UPDATE_STATES)[number];
+
 export const machines = pgTable(
   'machines',
   {
@@ -252,8 +259,30 @@ export const machines = pgTable(
     fsyncP99Ms: real('fsync_p99_ms'),
     diskFree: bigint('disk_free', { mode: 'number' }),
     reportAt: timestamp('report_at', { withTimezone: true }),
+    /* The private addresses its keeper reported, and how the machine reaches the server now: none when it does not.
+       directFails: an address on a network it shares with the server did not take its connection. */
+    addresses: text('addresses').array().notNull().default(sql`'{}'::text[]`),
+    path: text('path', { enum: LINK_PATHS }),
+    directFails: boolean('direct_fails').notNull().default(false),
+    /* When its last signed request for a new certificate was made, so the same one is taken once. */
+    renewAt: timestamp('renew_at', { withTimezone: true }),
+    /* Following the server's build: the commit it downloaded or installs, the commit the server last let it install and
+       when, and the last commit whose install failed or ran out there. */
+    updateCommit: text('update_commit'),
+    updateState: text('update_state', { enum: UPDATE_STATES }),
+    goCommit: text('go_commit'),
+    goAt: timestamp('go_at', { withTimezone: true }),
+    failedCommit: text('failed_commit'),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+    /* The print of its owner's key as its keeper pinned it from the command the owner ran there. */
+    ownerPin: text('owner_pin'),
   },
-  t => [unique('machines_person_key').on(t.personId, t.machineKey), check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`)],
+  t => [
+    unique('machines_person_key').on(t.personId, t.machineKey),
+    check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
+    check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
+    check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
+  ],
 );
 
 /* A one-time code inside an install command. Only its hash is stored. No subscriptions: the machine joins alone. A code
@@ -271,6 +300,8 @@ export const nodeCodes = pgTable('node_codes', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true }),
   createdAt: createdAt(),
+  /* A command that brings the company's core to its machine. */
+  core: boolean('core').notNull().default(false),
 }, t => [index('node_codes_active_owner').on(t.personId).where(sql`${t.usedAt} is null`)]);
 
 /* needs_setup: signed in, but its program waits for a first setup only the plan's owner may pass on the machine. */
@@ -2093,7 +2124,8 @@ export const certificates = pgTable('certificates', {
   createdAt: createdAt(),
 }).enableRLS();
 
-export const PEER_SECRET_KINDS = ['data', 'app'] as const;
+/* visit: the relay's key for a visitor of the link, with the link's name, as JSON. */
+export const PEER_SECRET_KINDS = ['data', 'app', 'visit'] as const;
 
 /* The secrets of the two services a machine offers its peers through the relay, sealed with the server's secret. */
 export const peerSecrets = pgTable(
@@ -2103,5 +2135,49 @@ export const peerSecrets = pgTable(
     secretEnc: text('secret_enc').notNull(),
     createdAt: createdAt(),
   },
-  () => [check('peer_secrets_kind', sql`kind IN ('data', 'app')`)],
+  () => [check('peer_secrets_kind', sql`kind IN ('data', 'app', 'visit')`)],
+).enableRLS();
+
+/* A ticket a joining machine's keeper redeems once for its first certificate. Only its hash is kept. */
+export const machineTickets = pgTable('machine_tickets', {
+  ticketHash: text('ticket_hash').primaryKey(),
+  machineId: uuid('machine_id')
+    .notNull()
+    .references(() => machines.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}).enableRLS();
+
+/* How long a machine was online on each day, in UTC, by its keeper's reports. */
+export const machineOnline = pgTable(
+  'machine_online',
+  {
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id),
+    day: date('day', { mode: 'string' }).notNull(),
+    seconds: integer('seconds').notNull().default(0),
+  },
+  t => [primaryKey({ columns: [t.machineId, t.day] }), check('machine_online_seconds', sql`seconds BETWEEN 0 AND 86400`)],
+).enableRLS();
+
+/* Each person's own key, made in their browser. The server keeps the public half, and the private half only wrapped by a
+   key made from the person's password, which the server never keeps. */
+export const personKeys = pgTable(
+  'person_keys',
+  {
+    personId: uuid('person_id')
+      .primaryKey()
+      .references(() => people.id),
+    companyId: companyId(),
+    /* SPKI DER, base64url. */
+    publicKey: text('public_key').notNull(),
+    wrapped: text('wrapped').notNull(),
+    salt: text('salt').notNull(),
+    iv: text('iv').notNull(),
+    iterations: integer('iterations').notNull(),
+    createdAt: createdAt(),
+  },
+  () => [check('person_keys_iterations', sql`iterations >= 600000`)],
 ).enableRLS();

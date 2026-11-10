@@ -36,6 +36,26 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM peer_secrets`))).toEqual([{ n: 1 }]);
   });
 
+  it('keeps the orchestrator out of the tables of joined machines too, even when it is granted them', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const rows = async (text: string) => (await agentSql.run(text, 'write'))[0]!;
+    await rows('SELECT 1');
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'mac-0001-abcd' }).returning();
+    await db.execute(sql`INSERT INTO machine_tickets (ticket_hash, machine_id, expires_at) VALUES ('h', ${machine!.id}, now() + interval '1 day')`);
+    await db.execute(sql`INSERT INTO machine_online (machine_id, day, seconds) VALUES (${machine!.id}, '2026-11-10', 20)`);
+    await db.execute(sql`INSERT INTO person_keys (person_id, company_id, public_key, wrapped, salt, iv, iterations) VALUES (${owner!.id}, ${company!.id}, 'p', 'w', 's', 'i', 600000)`);
+    await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON machine_tickets, machine_online, person_keys TO "${agentRole('postgres')}"`));
+    for (const table of ['machine_tickets', 'machine_online', 'person_keys']) {
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
+    }
+    await expect(rows(`INSERT INTO machine_online (machine_id, day, seconds) VALUES ('${machine!.id}', '2026-11-11', 20)`)).rejects.toMatchObject({ code: '42501' });
+  });
+
   it('lets the orchestrator read what a machine is in the network, and change none of it', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
