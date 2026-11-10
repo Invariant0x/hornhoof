@@ -624,6 +624,24 @@ describe('waking agents for their tasks', () => {
     expect((await read()).status).toBe('open');
   });
 
+  it('blocks the task for its head once after five turns on it in a row failed, however long each ran', async () => {
+    const { ctx, db, head, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const late = () => db.update(jobs).set({ error: 'agent_failed', startedAt: new Date(Date.now() - 10 * 60_000), tail: 'Error: the stream ended' }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    const read = async () => (await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!;
+    for (let i = 0; i < 4; i++) await finish(bruno.id, late, 'failed');
+    expect((await read()).status).toBe('open');
+    await finish(bruno.id, late, 'failed');
+    expect((await read()).status).toBe('blocked');
+    const [note] = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);
+    expect(note!.kind).toBe('blocked');
+    expect(note!.text).toContain('5 turns of Bruno in a row on');
+    expect(note!.text).toContain('the stream ended');
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+    expect((await turnsOf(head.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+  });
+
   it("does not block the task when its turns ended on Kimi's quota running out", async () => {
     const { ctx, db, bruno, memberTask, finish } = await company();
     const task = await memberTask();

@@ -435,37 +435,54 @@ export const QUICK_CRASHES = 3;
 
 type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | 'finishedAt' | 'result' | 'tail' | 'failure'>;
 
-/* A turn that broke as it started: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
-const crashed = (j: Ended) =>
+/* Turns that failed, this many in a row on one task and however long each ran, stop it too: going on did not help. */
+export const FAILED_TURNS = 5;
+
+/* A turn that failed by itself: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
+const failedByItself = (j: Ended) =>
   j.status === 'failed' &&
-  (!j.failure || j.failure.kind === 'crash') &&
   !['timeout', 'cancelled', 'removed', 'switched_off', 'handed_on', 'waiting'].includes(j.error ?? '') &&
+  !refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
+
+/* A turn that broke as it started. */
+const crashed = (j: Ended) =>
+  failedByItself(j) &&
+  (!j.failure || j.failure.kind === 'crash') &&
   !!j.startedAt &&
   !!j.finishedAt &&
-  j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS &&
-  !refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
+  j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS;
+
+/* A machine that started again has a retry of its own, so its turns do not count here. */
+const failedAgain = (j: Ended) => failedByItself(j) && j.error !== 'machine_restarted';
 
 /* A turn its plan refused for its limit as it started: it did no work. */
 const refusedAtStart = (j: Ended) =>
   !!j.startedAt && !!j.finishedAt && j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS && !!refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
 
-/* How many of the agent's last turns on the task broke as they started, in a row, of those that ended since the task last moved. */
-async function crashesInRow(ctx: Ctx, agentId: string, task: Task): Promise<number> {
+/* How many of the agent's last turns on the task broke that way, in a row, of those that ended since the task last moved. */
+async function inRow(ctx: Ctx, agentId: string, task: Task, most: number, broke: (j: Ended) => boolean): Promise<number> {
   const moved = await lastMove(ctx.db, task.id);
   const rows = await ctx.db
     .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail, failure: jobs.failure })
     .from(jobs)
     .where(and(conversationOf(agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt), inArray(jobs.status, ['done', 'failed']), moved ? gt(jobs.finishedAt, moved.createdAt) : undefined))
     .orderBy(desc(jobs.startedAt))
-    .limit(QUICK_CRASHES);
-  const n = rows.findIndex(j => !crashed(j));
+    .limit(most);
+  const n = rows.findIndex(j => !broke(j));
   return n === -1 ? rows.length : n;
 }
 
+/* Whether this turn was the last of QUICK_CRASHES in a row that broke as they started, or of FAILED_TURNS that failed. */
+async function keptBreaking(ctx: Ctx, agentId: string, task: Task, job: Ended): Promise<'at_once' | 'again' | null> {
+  if (crashed(job) && (await inRow(ctx, agentId, task, QUICK_CRASHES, crashed)) >= QUICK_CRASHES) return 'at_once';
+  return failedAgain(job) && (await inRow(ctx, agentId, task, FAILED_TURNS, failedAgain)) >= FAILED_TURNS ? 'again' : null;
+}
+
 /* What Hornhoof notes on a task whose turns kept breaking: how, and the end of what the program said last. */
-function crashNote(job: Ended & { agentName: string }, task: Task): string {
+function crashNote(job: Ended & { agentName: string }, task: Task, quick: boolean): string {
   const said = (job.tail || job.result || '').trim().slice(-600);
-  return `${QUICK_CRASHES} turns of ${job.agentName} in a row on #${task.number} broke within ${QUICK_CRASH_MS / 60_000} minutes of starting, so Hornhoof stopped waking it there. The last one ended with ${job.error ?? 'an error'}${said ? `:\n\n${said}` : '.'}`;
+  const how = quick ? `${QUICK_CRASHES} turns of ${job.agentName} in a row on #${task.number} broke within ${QUICK_CRASH_MS / 60_000} minutes of starting` : `${FAILED_TURNS} turns of ${job.agentName} in a row on #${task.number} failed`;
+  return `${how}, so Hornhoof stopped waking it there. The last one ended with ${job.error ?? 'an error'}${said ? `:\n\n${said}` : '.'}`;
 }
 
 const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', anthropic_api: 'an Anthropic key', openai_api: 'an OpenAI key' };
@@ -620,18 +637,17 @@ async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: He
 async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boolean> {
   const { agentId } = job;
   const unsent = UNSENT.includes(job.error ?? '');
-  const broke = unsent || (crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES);
-  if (!broke) return false;
-  const text = await brokenTurnText(ctx, job, task, unsent);
+  const how = unsent ? null : await keptBreaking(ctx, agentId, task, job);
+  if (!unsent && !how) return false;
+  const text = unsent ? job.result ?? job.error! : await brokenTurnText(ctx, job, task, how === 'at_once');
   const moved = await brokeDown(ctx, agentId, task, text).catch((err: { reason?: string }) => err.reason === 'task_changed' ? null : Promise.reject(err));
   if (moved) await wakeAll(ctx, moved.wakes);
   return true;
 }
 
-async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, unsent: boolean): Promise<string> {
-  if (unsent) return job.result ?? job.error!;
+async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, quick: boolean): Promise<string> {
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
-  return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task);
+  return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task, quick);
 }
 
 async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): Promise<void> {
@@ -644,10 +660,11 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
      or the agent goes on once the limit starts over. */
   const until = await planLimitUntil(db, job.subscriptionId);
   if (until) return resumeAtPlanLimit(ctx, agentId, task, until);
-  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. So does a
-     turn that did not go out for the length of its instructions, at once, as every next one would not either. */
+  /* Turns that keep breaking as they start would only break again, and so would turns that keep failing later on: whoever
+     gave the task out hears of it, once. So does a turn that did not go out for the length of its instructions, at once,
+     as every next one would not either. */
   if (await wakeBrokenTurn(ctx, job, task)) return;
-  /* A failure still goes on where the existing failure path says so, but never advances either stuck counter. */
+  /* A failure before that still goes on where the existing failure path says so, and advances neither stuck counter. */
   if (job.status === 'failed' && job.error !== 'timeout') return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
   if (!worked) return;
   await continueWorkedTurn(ctx, agentId, task, job);
@@ -698,11 +715,11 @@ async function afterTaskTurn(ctx: Ctx, jobId: string, job: Parameters<typeof car
   if (ended !== 'called') await checkLiveness(ctx, jobId, await carriedTasks(ctx, job));
 }
 
-/* The turn broke as it started, the last of QUICK_CRASHES in a row on its task: going on would only break again, so the
-   task stops for whoever gave it out instead. */
+/* The turn broke as it started, the last of QUICK_CRASHES in a row on its task, or failed as the last of FAILED_TURNS:
+   going on would only break again, so the task stops for whoever gave it out instead. */
 async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
   const [row] = await ctx.db.select({ job: jobs, task: tasks }).from(jobs).innerJoin(tasks, eq(tasks.id, jobs.taskId)).where(eq(jobs.id, jobId));
-  return Boolean(row?.job.agentId && crashed(row.job) && (await crashesInRow(ctx, row.job.agentId, row.task)) >= QUICK_CRASHES);
+  return Boolean(row?.job.agentId && await keptBreaking(ctx, row.job.agentId, row.task, row.job));
 }
 
 /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
