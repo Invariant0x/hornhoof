@@ -219,6 +219,10 @@ export type Provider = (typeof PROVIDERS)[number];
 export const TARGET_KINDS = ['orchestrator', 'department', 'team', 'any'] as const;
 
 /* A computer a person ran the installer on. One per person and machine key, so running it again reuses the row. */
+/* A data machine keeps the company's database and may lead; a worker runs agents and keeps none of it. */
+export const MACHINE_ROLES = ['data', 'worker'] as const;
+export type MachineRole = (typeof MACHINE_ROLES)[number];
+
 export const machines = pgTable(
   'machines',
   {
@@ -235,8 +239,21 @@ export const machines = pgTable(
     lendsTests: boolean('lends_tests').notNull().default(true),
     createdAt: createdAt(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /* What the machine is in the company's network. networkId: the id its keeper runs under; none without a keeper.
+       role: none while no keeper of the company runs there. signKey: the Ed25519 public key its certificates name. */
+    networkId: text('network_id').unique(),
+    role: text('role', { enum: MACHINE_ROLES }),
+    signKey: text('sign_key'),
+    /* What its keeper last reported: the ports it publishes, its build, and how the machine does. */
+    webPort: integer('web_port'),
+    peerPort: integer('peer_port'),
+    commit: text('commit'),
+    uptimeS: integer('uptime_s'),
+    fsyncP99Ms: real('fsync_p99_ms'),
+    diskFree: bigint('disk_free', { mode: 'number' }),
+    reportAt: timestamp('report_at', { withTimezone: true }),
   },
-  t => [unique('machines_person_key').on(t.personId, t.machineKey)],
+  t => [unique('machines_person_key').on(t.personId, t.machineKey), check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`)],
 );
 
 /* A one-time code inside an install command. Only its hash is stored. No subscriptions: the machine joins alone. A code
@@ -2053,3 +2070,38 @@ export const toolCalls = pgTable(
   },
   t => [index('tool_calls_at').on(t.at)],
 );
+
+/* The company's own certificate authority, made once by the app that leads. Its key is kept sealed with the server's
+   secret, as the link's key is, and only the leading app signs with it. The three tables below keep their rows to their
+   owner, whatever a role is granted. */
+export const authority = pgTable('authority', {
+  singleton: boolean('singleton').primaryKey().default(true),
+  certPem: text('cert_pem').notNull(),
+  keyEnc: text('key_enc').notNull(),
+  createdAt: createdAt(),
+}).enableRLS();
+
+/* Every certificate the authority issued, until it expires, so that all of a machine's can be revoked. */
+export const certificates = pgTable('certificates', {
+  /* Lowercase hex. */
+  serial: text('serial').primaryKey(),
+  machineId: uuid('machine_id')
+    .notNull()
+    .references(() => machines.id),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}).enableRLS();
+
+export const PEER_SECRET_KINDS = ['data', 'app'] as const;
+
+/* The secrets of the two services a machine offers its peers through the relay, sealed with the server's secret. */
+export const peerSecrets = pgTable(
+  'peer_secrets',
+  {
+    kind: text('kind', { enum: PEER_SECRET_KINDS }).primaryKey(),
+    secretEnc: text('secret_enc').notNull(),
+    createdAt: createdAt(),
+  },
+  () => [check('peer_secrets_kind', sql`kind IN ('data', 'app')`)],
+).enableRLS();

@@ -1,0 +1,49 @@
+import { sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { agentRole } from '../src/db/agent-sql.js';
+import { companies, machines, people } from '../src/db/schema.js';
+import { ownDatabases, setUpCompany, testApp } from './helpers.js';
+
+/* The test grants a role rights on tables, which emptying the tables does not undo. */
+ownDatabases();
+
+const rowsOf = <T>(answer: unknown): T[] => (answer as { rows: T[] }).rows;
+
+describe("the network's tables and the orchestrator's SQL", () => {
+  /* A build from before these tables grants the orchestrator every table of public it does not hide, as after a way back
+     to it. The tables keep their rows to their owner whatever is granted. */
+  it("keeps the orchestrator out of them even when it is granted them", async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const rows = async (text: string) => (await agentSql.run(text, 'write'))[0]!;
+    /* The first call makes the roles. */
+    await rows('SELECT 1');
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'server:test' }).returning();
+    await db.execute(sql`INSERT INTO authority (cert_pem, key_enc) VALUES ('cert', 'key')`);
+    await db.execute(sql`INSERT INTO certificates (serial, machine_id, until) VALUES ('0a', ${machine!.id}, now() + interval '1 day')`);
+    await db.execute(sql`INSERT INTO peer_secrets (kind, secret_enc) VALUES ('app', 'secret')`);
+    await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON authority, certificates, peer_secrets TO "${agentRole('postgres')}"`));
+
+    for (const table of ['authority', 'certificates', 'peer_secrets']) {
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
+    }
+    expect((await rows(`UPDATE peer_secrets SET secret_enc = 'x'`)).changed).toBe(0);
+    await expect(rows(`INSERT INTO peer_secrets (kind, secret_enc) VALUES ('data', 'x')`)).rejects.toMatchObject({ code: '42501' });
+    expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM peer_secrets`))).toEqual([{ n: 1 }]);
+  });
+
+  it('lets the orchestrator read what a machine is in the network, and change none of it', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'server:test', networkId: 'a1b2c3d4'.repeat(4), role: 'data', webPort: 8080 });
+    expect((await agentSql.run('SELECT role, network_id, web_port FROM machines', 'write'))[0]!.rows).toEqual([{ role: 'data', network_id: 'a1b2c3d4'.repeat(4), web_port: 8080 }]);
+    await expect(agentSql.run(`UPDATE machines SET role = 'worker'`, 'write')).rejects.toMatchObject({ code: '42501' });
+  });
+});

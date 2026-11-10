@@ -522,3 +522,40 @@ describe('migrations 0100 and 0101, where each change came from', () => {
     expect((await db.execute(sql`select source, base from applied`)).rows).toEqual([{ source: `tool:${INVOCATION}:0`, base: `tool:${INVOCATION}` }]);
   });
 });
+
+describe("migration 0102, the tables of the company's network", () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    return { client, db };
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds what a machine is in the network, and the authority's tables, journaled and closed", async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(expect.arrayContaining(['network_id', 'role', 'sign_key', 'web_port', 'peer_port', 'commit', 'uptime_s', 'fsync_p99_ms', 'disk_free', 'report_at']));
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('authority', 'certificates', 'peer_secrets') order by 1`);
+    expect(tables.rows).toEqual(['authority', 'certificates', 'peer_secrets'].map(relname => ({ relname, closed: true, journaled: true })));
+  });
+
+  it('keeps one row to a network id, and only the roles and kinds there are', async () => {
+    const { client, db } = await fullyMigrated();
+    /* No company or person stands behind these machines, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    const machine = (key: string, more: string, values: string) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key${more}) values (gen_random_uuid(), gen_random_uuid(), '${key}'${values})`));
+    await machine('a', ', network_id, role', `, 'n1', 'data'`);
+    await machine('b', ', role', `, 'worker'`);
+    await machine('c', '', '');
+    expect(await codeOf(machine('d', ', network_id', `, 'n1'`))).toBe('23505');
+    expect(await codeOf(machine('e', ', role', `, 'copy'`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('x', 's')`))).toBe('23514');
+    await db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('app', 's'), ('data', 's')`);
+  });
+});

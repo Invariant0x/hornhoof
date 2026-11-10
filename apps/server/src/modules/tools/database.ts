@@ -17,7 +17,8 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 
 const SECRETS = Object.values(SECRET).flat().join(', ');
 /* The closed tables but the first, which each text below starts in its own way. */
-const CLOSED_AFTER_SIGN_INS = "invites, install codes, sealed plan sign-ins, the public link and Hornhoof's records of where changes came from";
+const CLOSED_AFTER_SIGN_INS =
+  "invites, install codes, sealed plan sign-ins, the public link, Hornhoof's records of where changes came from, the company's certificate authority, its machines' certificates and the peer secrets";
 const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 /* The orchestrator's in a turn that answers nobody who takes the CEO's decisions. */
