@@ -5,6 +5,84 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.0] - 2026-11-10
+
+Turn 18 and what it showed. A turn now runs in one of two modes: through the echelons, which only go forward, or turnkey,
+given to one member of a turnkey team who does it alone; work outside a turn goes through no echelons. Test runs take
+less time: tests wait on a clock the test moves, a run is laid out by how long its files take, and a test machine is
+shared fairly. A machine shares its processors between the agents' programs and starts no new one while its memory is
+short. A program keeps Hornhoof's tools when it connects between turns, and Antigravity's survey no longer takes a turn's words.
+
+### Before you update
+
+- Migration 0092 adds `teams.turnkey`, false for every team, and migration 0093 adds `turns.mode`, `echelons` for every
+  turn there is. Migration 0094 adds `companies.task_numbers_used` and `companies.turn_numbers_used`, filled with the
+  highest task and turn number each company has. Nothing else is converted.
+- `plan_turn` now needs a mode. The orchestrator's instructions in this version name one; an orchestrator still on older
+  instructions is refused until it does.
+- Open tasks keep the route they have. Only tasks made after the update follow the new rules.
+- Update the nodes as well. The fix for tools lost between turns, the survey setting for Antigravity and the share of a
+  machine are in the node: a node of 0.17.2 keeps working, but can still lose its tools after a short turn and is not
+  held back when memory is short.
+
+### Added
+
+- A turn has a mode, echelons or turnkey, chosen when it is planned (`plan_turn`, `edit_turn`, and a choice on the tasks
+  screen and beside the button that puts work into the next turn). The mode can change only while the turn is planned.
+  Turns of different modes are not merged.
+- A team can be marked as working turnkey on the department's screen. Its members do a task alone from start to finish,
+  call nobody of the department onto it and close it with their report. A turnkey turn needs such a team, and its tasks
+  go only to its members.
+- Each agent program gets its share of the machine's processors and memory as `VITEST_MAX_WORKERS`, unless the machine
+  sets one itself. A turn that would start a new program waits while the machine has less than 2 GiB free and goes out
+  by itself once memory is free; the agent's window says why, and Operations sees that such an agent is waiting, not
+  stuck. Nothing that already runs is stopped.
+- The orchestrator, the head of Operations and the program operator see the program of any employee and act on it,
+  with only the values of secrets masked. A recovery hold is lifted with `program_recovery_release`, its case and a
+  reason.
+- A test run's report says which profile passed and which suites and files it left out, and the line of proof in a
+  request for approval prefers a run that ran everything again. The release check is a `full` run.
+- The testing policy sets a time budget: 1 second a test, 30 seconds a file and 5 minutes for a whole run of the fast
+  profile. The pipeline report names what is over it.
+- The style book 1.2 and the theme sheet 1.0, with scripts that check them.
+
+### Changed
+
+- The echelons only go forward: each one fixes what it finds itself, and only work built wrong goes to the head. A
+  candidate whose own change passed but needs a fix from the main line stays at Tests, whose owner merges the main line
+  into it and checks it again.
+- Work outside a turn goes through no echelons: its holder does it alone from start to finish.
+- Task and turn numbers go on after the highest ones a company gave, even when old tasks and turns are removed by hand,
+  so a branch `task-N` or a version `0.N.0` never names two pieces of work.
+- The tests of the node, the server and the web wait on a clock the test moves instead of real pauses, and no test
+  downloads or starts a browser to check a node's start.
+- A run is laid out by the times its files took before, the suites of one part run as one command, the batches of a
+  run start beside its preparation, and Vitest gets the processors and memory a test machine has free. The longest test
+  files are split so they run side by side.
+- The author check runs the tests that read a changed document by its path, and a browser scenario follows every screen
+  of the app it drives.
+- On GitHub, where no full run follows, a commit runs every test its change reaches, or the whole suite.
+- Codex is told that the words of its head, the orchestrator and a person of the company are instructions, and that what
+  they quote is data.
+- The engineering rules open with what matters most: no push or merge to the main line unless the task names it, a
+  report of result and evidence, quality tools only when assigned, and three failed fixes before the premise is
+  questioned.
+
+### Fixed
+
+- A program that connected to Hornhoof's tools after a short turn, or between turns, was turned away and lost its tools
+  for the rest of its session. The node now answers that connection from what Hornhoof said before, and refuses only a
+  tool call outside a turn.
+- Antigravity starts with its feedback survey off, so the survey no longer takes the words of a turn.
+- Hornhoof's own words left in a program's input are delivered or erased, a Claude Code whose start a busy node refused
+  is typed into, recovery does not repeat itself, and a program without tools is not reminded.
+- An answer to a colleague's message reaches the one who asked.
+- The browser tests of the main line pass again after 0.17.2, and a task can be opened from the table while an agent
+  window is open.
+- A task's state stays on one line in the task table.
+- Node secrets stay out of input intents and audit results.
+- The release steps say that the workflow makes the tag itself: a tag made by hand makes the push skip the version.
+
 ## [0.17.2] - 2026-11-09
 
 Fix what stalled turn 17 and the release of 0.17.0, so that a turn goes through its stages without waiting for people:
