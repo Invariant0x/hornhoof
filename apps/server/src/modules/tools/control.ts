@@ -120,7 +120,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'build_structure',
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
-      'Each item is a new department { template, name?, note?, products?, teams? } (name only when a template is used a second time) or a change { department, note?, products?, teams?, remove? }: ' +
+      'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; staff true brings the people of its template with it, each on the plan and model its role asks for, or waiting for a plan) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
       'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
     BuildBody.shape,

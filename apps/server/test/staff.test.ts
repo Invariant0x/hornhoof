@@ -257,6 +257,49 @@ describe('staffing', () => {
     expect(Object.fromEntries(hired.map(a => [a.role, a.model]))).toEqual({ 'DEV-SEC': 'claude-fable-5-1', 'DEV-ENG': 'claude-sonnet-5-5', 'DEV-REV': 'claude-fable-5-1', 'DEV-DOCS': '' });
   });
 
+  it('creates a department with the people of its template when asked, each on the model its role asks for', async () => {
+    const c = await company();
+    const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'marketing', staff: true }, { template: 'support' }] }, ...as(c.ceo) });
+    expect(built.statusCode).toBe(201);
+    const [marketing] = await c.db.select().from(departments).where(eq(departments.templateKey, 'marketing'));
+    const [support] = await c.db.select().from(departments).where(eq(departments.templateKey, 'support'));
+    const staff = await c.db.select().from(agents).where(eq(agents.departmentId, marketing!.id)).orderBy(asc(agents.roleKey));
+    expect(staff.map(a => [a.roleKey, a.kind, a.model, a.subscriptionId])).toEqual([
+      ['MKT-HEAD', 'head', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
+      ['MKT-SEO', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
+      ['MKT-SOCIAL', 'worker', 'claude-haiku-5-5', c.orchestrator.subscriptionId],
+      ['MKT-WRITE', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
+    ]);
+    expect(built.json().hired).toEqual(expect.arrayContaining(staff.map(a => a.id)));
+    expect(built.json().hired).toHaveLength(4);
+    /* A department that was not asked for its people comes empty, as before. */
+    expect(await c.db.select().from(agents).where(eq(agents.departmentId, support!.id))).toEqual([]);
+  });
+
+  it('creates the people of a template with no plan to run on when the company has none that serves them: they wait for one', async () => {
+    const c = await company();
+    await c.db.update(subscriptions).set({ removedAt: new Date() });
+    const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'finance', staff: true }] }, ...as(c.ceo) });
+    expect(built.statusCode).toBe(201);
+    const [finance] = await c.db.select().from(departments).where(eq(departments.templateKey, 'finance'));
+    const staff = await c.db.select().from(agents).where(eq(agents.departmentId, finance!.id)).orderBy(asc(agents.roleKey));
+    expect(staff.map(a => [a.roleKey, a.model, a.subscriptionId])).toEqual([['FIN-AUDIT', '', null], ['FIN-BOOK', '', null], ['FIN-FPA', '', null], ['FIN-HEAD', '', null]]);
+  });
+
+  it('tells the orchestrator who came with a new department, and to staff only the ones that came without people', async () => {
+    const c = await company();
+    const builtin: FakeNode = await connectNode(c.url, NODE_KEY);
+    builtin.send({ type: 'hello', version: '0.4.0', loggedIn: true, running: [] });
+    await until(async () => (await c.app.inject({ url: '/api/agents/orchestrator/events', ...as(c.ceo) })).json().state.ready);
+    const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'household', staff: true }] }, ...as(c.ceo) });
+    expect(built.statusCode).toBe(201);
+    let run = await builtin.next();
+    while (run.type !== 'job.run') run = await builtin.next();
+    expect(run.prompt).toContain('Hired with their departments, by the templates: Head of household (Head of household), ');
+    expect(run.prompt).toContain('offer to staff the departments that came without people');
+    expect(run.prompt).not.toContain('wait for one');
+  });
+
   it('tells the orchestrator who was hired', async () => {
     const c = await company();
     const builtin: FakeNode = await connectNode(c.url, NODE_KEY);

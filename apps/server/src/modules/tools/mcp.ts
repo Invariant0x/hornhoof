@@ -74,8 +74,8 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     {
       description:
         'Shows the CEO a card with departments to create or change and returns at once. The CEO decides with one click; wait for their answer. ' +
-        'brief: two to five sentences about the company. Each item is a new department { template, name?, checked, note, products? } ' +
-        '(name only when a template is used a second time) or a change { department, checked, note, products?, remove? }. A newer card replaces the older one.',
+        'brief: two to five sentences about the company. Each item is a new department { template, name?, checked, note, products?, staff? } ' +
+        '(name only when a template is used a second time; staff true brings the people of its template with it, each on the plan and model its role asks for, or waiting for a plan) or a change { department, checked, note, products?, remove? }. A newer card replaces the older one.',
       inputSchema: Proposal.shape,
     },
     async ({ brief, items }) => {

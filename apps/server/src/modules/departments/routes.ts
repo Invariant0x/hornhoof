@@ -19,8 +19,8 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
-import { modelOnPlan } from '../agents/role-model.js';
-import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
+import { planFor, rosterOf, templateRoster } from './roster.js';
+import { checkStaff, departmentOf, HireLine, requiredState, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
@@ -72,11 +72,15 @@ const listed = (d: { name: string | null; template: TemplateKey | null; products
 };
 
 /* What he reads after the click, so he goes on from there. */
-function builtNote(created: Created[], removed: Removed[]): string {
+function builtNote(created: Created[], removed: Removed[], hired: Hired[], waiting: string[]): string {
   const lines = ['Hornhoof applied the CEO\'s click.'];
   if (created.length) lines.push(`Created: ${created.map(listed).join('; ')}.`);
   if (removed.length) lines.push(`Removed: ${removed.map(listed).join('; ')}.`);
-  lines.push('Continue in the CEO\'s language: say what is there now in a line or two, then offer to staff the new departments, one department at a time.');
+  if (hired.length) lines.push(`Hired with their departments, by the templates: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.`);
+  if (waiting.length) lines.push(`No subscription serves these yet, so they wait for one: ${waiting.join(', ')}.`);
+  lines.push(hired.length
+    ? 'Continue in the CEO\'s language: say what is there now and who was hired in a line or two, then offer to staff the departments that came without people, one department at a time.'
+    : 'Continue in the CEO\'s language: say what is there now in a line or two, then offer to staff the new departments, one department at a time.');
   return lines.join('\n');
 }
 
@@ -231,6 +235,16 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const removed: Removed[] = [];
       const fresh: string[] = [];
       const freed: string[] = [];
+      const hired: Hired[] = [];
+      const waiting: string[] = [];
+      /* A new department asked for with its people gets those of its template, as the staff card would start with. */
+      const hireTemplate = async (inside: Tx, dept: typeof departments.$inferSelect): Promise<Hired[]> => {
+        const { lines } = await linesToHire(ctx, inside, dept, await rosterOf({ db: inside, templates: ctx.templates }, me.companyId, dept), false);
+        const out: Hired[] = [];
+        for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+        waiting.push(...lines.filter(line => !line.subscription).map(line => line.name));
+        return out;
+      };
       const addProducts = async (parent: { id: string; roleCode: string }, names: string[]) => {
         for (const name of names) {
           await tx.insert(departments).values({ companyId: me.companyId, name, parentId: parent.id, roleCode: parent.roleCode, position: position++ });
@@ -245,6 +259,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .returning();
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
+          if (item.staff) hired.push(...(await hireTemplate(tx, dept!)));
           created.push({ id: dept!.id, template: item.template, name: dept!.name, products: item.products ?? [] });
           fresh.push(dept!.id);
           continue;
@@ -277,9 +292,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         freed.push(...(await applyTeams(tx, me, dept.id, item.teams)));
       }
       if (brief) await tx.update(companies).set({ brief }).where(eq(companies.id, me.companyId));
-      return { created, removed, fresh, freed, agentId };
+      return { created, removed, fresh, freed, agentId, hired, waiting };
     }));
     await wakeFreed(ctx, me, result.freed);
+    if (result.hired.length) await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;
@@ -298,11 +314,11 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     for (const id of result.fresh) ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id } });
     /* The orchestrator that built it reads the outcome in its tool's answer. */
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      const message = await notificationMessage(ctx, me.companyId, 'structure', builtNote(result.created, result.removed), { actor: { personId: me.id } });
+      const message = await notificationMessage(ctx, me.companyId, 'structure', builtNote(result.created, result.removed, result.hired, result.waiting), { actor: { personId: me.id } });
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: message.text, createdBy: null, message });
     }
     reply.code(201);
-    return { created: result.fresh, removed: result.removed.map(r => r.id) };
+    return { created: result.fresh, removed: result.removed.map(r => r.id), hired: result.hired.map(h => h.id) };
   });
 
   /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
@@ -366,17 +382,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       perProduct: role.perProduct,
       inDefault: role.inDefault,
       skills: role.skills.filter(s => s.on).map(s => s.id),
-      subscription: serving.find(s => runsTier(s.provider, role.tier))?.id ?? null,
+      subscription: planFor(serving, role)?.id ?? null,
       ...state(role.id),
     }));
-    const people: HireLine[] = [];
-    for (const role of roles.filter(r => r.inDefault)) {
-      const plan = serving.find(s => s.id === role.subscription);
-      const line = { role: role.id, model: plan ? modelOnPlan(role.tier, plan) : '', subscription: role.subscription, skills: role.skills };
-      if (role.perProduct && products.length) for (const p of products) people.push({ ...line, name: `${role.title.en} (${deptName(p)})`, product: p.id });
-      else people.push({ ...line, name: role.title.en, product: null });
-    }
-    return { people, roles, products: products.map(p => ({ id: p.id, name: deptName(p) })), subscriptions: serving };
+    return { people: await templateRoster(ctx, dept, serving), roles, products: products.map(p => ({ id: p.id, name: deptName(p) })), subscriptions: serving };
   });
 
   /* The CEO's click on a staff card, or the orchestrator's hire. */
