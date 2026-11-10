@@ -225,6 +225,8 @@ export type OrchestratorState = {
   held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
   /* Its machine gets ready for an update; new turns wait for it, and people may still write. */
   machineDrain?: MachineDrain | null;
+  /* Its machine is short of free memory for its program to start; its turns wait and go on by themselves after. */
+  memoryWait?: boolean;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   browserError?: string | null;
   busy: boolean;

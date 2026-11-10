@@ -136,3 +136,17 @@ export function machineLoad({
     ...hostFacts(read, env, cores, busy, rawFree, rawTotal),
   };
 }
+
+/* A Vitest worker of the product's tests takes up to about a gigabyte, and Vitest itself about as much again. So does an
+   agent program with the tools it runs, its helpers inside it. */
+export const WORKER_BYTES = 2 ** 30;
+export const PROGRAM_BYTES = 2 ** 30;
+
+/* The Vitest workers for the tests of one of the agent programs that run on a machine: the program's share of the
+   processors, and no more than its share of the memory holds once the program and Vitest itself have theirs. At least one,
+   for tests must run. Its helpers inherit the number, and each of their runs takes as many. */
+export function programWorkers({ cpus, memTotal }: Pick<MachineLoad, 'cpus' | 'memTotal'>, programs: number): number {
+  const sharing = Math.max(1, programs);
+  const memory = Math.floor((memTotal / sharing - PROGRAM_BYTES - WORKER_BYTES) / WORKER_BYTES);
+  return Math.max(1, Math.min(Math.floor(cpus / sharing), memory));
+}

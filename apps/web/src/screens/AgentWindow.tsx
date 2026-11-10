@@ -269,6 +269,7 @@ function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: bo
       {state.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {!state.limitUntil && state.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
       {state.machineDrain && state.machineDrain.state !== 'postponed' && <p className="t-why">{t.window.machineDrain}</p>}
+      {state.memoryWait && <p className="t-why">{t.window.memoryWait}</p>}
     </>
   );
 }

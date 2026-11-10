@@ -224,6 +224,18 @@ describe('AgentWindow', () => {
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
+  it('says that turns wait while the machine is low on free memory, and he can still be written to', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, memoryWait: true } }] });
+    expect(await screen.findByText('The machine is low on free memory. Turns wait to start and go on by themselves once memory frees up. Nothing that already runs there is stopped.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeEnabled();
+  });
+
+  it('says nothing of the memory while the machine has enough', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, memoryWait: false } }] });
+    await screen.findByRole('textbox');
+    expect(screen.queryByText(/free memory/)).not.toBeInTheDocument();
+  });
+
   it('says nothing of the machine when its update was put off, since turns go out then', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
     await screen.findByRole('textbox');

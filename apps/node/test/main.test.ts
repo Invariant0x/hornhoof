@@ -1115,7 +1115,23 @@ describe('runNode', () => {
     await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
     expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
+    /* It runs no programs in terminals, so it names none. */
+    expect(server.received.filter(m => m.type === 'hello' || m.type === 'load').every(m => !('live' in m))).toBe(true);
     server.send({ type: 'job.cancel', jobId: 'j1' });
+  });
+
+  it('names the agents whose programs run in its terminals in hello and with each load', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const agent = '7f1c2a9e-0b1d-4c55-9d1e-3f0a8b6c2d11';
+    const tmux = new Tmux({ socket: `hh-live-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const live = vi.spyOn(tmux, 'livePrograms').mockResolvedValue([agent]);
+    const node = await runNode({ dir, adapter, log: () => {}, loadMs: 40, terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received.find(m => m.type === 'hello')).toMatchObject({ live: [agent] });
+    live.mockResolvedValue([]);
+    await server.wait(() => server.received.some(m => m.type === 'load' && Array.isArray(m.live) && m.live.length === 0));
   });
 
   it('removes the folder older nodes ran their parts in as it comes up', async () => {

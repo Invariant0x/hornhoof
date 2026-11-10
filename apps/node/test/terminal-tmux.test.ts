@@ -140,6 +140,14 @@ describe('reading a program in tmux', () => {
     expect(end!.output).toContain('boom');
   });
 
+  it("names the agents whose programs run, from one answer of tmux, and none when tmux runs no server", async () => {
+    const panes = 'a-7f1c2a9e-0b1d-4c55-9d1e-3f0a8b6c2d11 0\na-0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b 1\na-receipt 0\nother 0\n';
+    const { tmux, calls } = recorded(args => (args[0] === 'list-panes' ? panes : ''));
+    expect(await tmux.livePrograms()).toEqual(['7f1c2a9e-0b1d-4c55-9d1e-3f0a8b6c2d11', 'receipt']);
+    expect(named(calls, 'list-panes')).toEqual([{ args: ['list-panes', '-a', '-F', '#{session_name} #{pane_dead}'] }]);
+    expect(await recorded(() => new Error('no server running on /tmp/tmux-501/hh-test')).tmux.livePrograms()).toEqual([]);
+  });
+
   it('reads the pid of a live program only', async () => {
     const { tmux } = recorded(args => (args.includes('#{pane_dead}') ? (args.includes('live') ? '0' : '1') : '4242\n'));
     expect(await tmux.programPid('live')).toBe(4242);

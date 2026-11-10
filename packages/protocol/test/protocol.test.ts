@@ -184,6 +184,15 @@ describe('test runs', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpus: 0 }))).toBeNull();
   });
 
+  it('name the agents whose programs run on a node that says so, and leave a list that is not one out instead of refusing the frame', () => {
+    const live = ['7f1c2a9e-0b1d-4c55-9d1e-3f0a8b6c2d11', 'receipt'];
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.17.3', loggedIn: true, running: [], load: LOAD, live }))).toMatchObject({ live });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, live }))).toEqual({ type: 'load', ...LOAD, live });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, live: [] }))).toEqual({ type: 'load', ...LOAD, live: [] });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, live: ['a b'] }))).toEqual({ type: 'load', ...LOAD });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, live: Array.from({ length: 201 }, (_, i) => `a${i}`) }))).toEqual({ type: 'load', ...LOAD });
+  });
+
   it("carry what the node can use of its machine's processor and disk, and what the machine has, from newer nodes only", () => {
     const MACHINE = { cpuModel: 'Apple M2 Pro', diskFree: 120e9, diskTotal: 460e9, host: 'host-a', hostCpus: 10, hostLoad: 2.5, hostMemFree: 20e9, hostMemory: 32e9 };
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, ...MACHINE }))).toEqual({ type: 'load', ...LOAD, ...MACHINE });

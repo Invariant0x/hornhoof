@@ -363,6 +363,9 @@ const Load = z.object({
 });
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
+/* The agents whose programs run on a node now, which a node that runs them in terminals names with its hello and each load:
+   Hornhoof starts no new program on a machine short of free memory. A list that is not one counts as none said. */
+const Live = z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(200).optional().catch(undefined);
 
 /* Installed agent programs and an update in progress on the connected node. */
 export const ProgramInfo = z.object({
@@ -460,6 +463,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* Why the Playwright browsers could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
+    live: Live,
     tests: z.array(z.string()).max(100).optional(),
     skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
@@ -475,7 +479,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
-  z.object({ type: z.literal('load'), ...Load.shape }),
+  z.object({ type: z.literal('load'), ...Load.shape, live: Live }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */

@@ -6,7 +6,7 @@ import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, t
 import { said } from '../conversation/live.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
-import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
+import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
@@ -24,6 +24,7 @@ import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
+import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 
@@ -241,6 +242,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
+      /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
+      programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
@@ -271,11 +274,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     case 'load': {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
-      const { type: _, ...load } = msg;
+      const { type: _, live, ...load } = msg;
       ctx.hub.report(id, load);
       await checkQueueLoad(ctx, id);
-      /* A machine that freed up takes a part that waits. */
+      /* A machine that freed up takes a part that waits, and starts the programs that waited for its memory. */
       await pumpTests(ctx);
+      for (const agentId of programsLive(ctx, id, live)) await pump(ctx, agentId);
       return;
     }
 
