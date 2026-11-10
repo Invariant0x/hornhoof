@@ -673,6 +673,13 @@
       "when": 1794305863501,
       "tag": "0096_drop_tables_without_code",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1794313434406,
+      "tag": "0097_route_abilities",
+      "breakpoints": true
     }
   ]
 }

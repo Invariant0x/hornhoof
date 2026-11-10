@@ -36,6 +36,7 @@ Development authors write a failing test before the change, run only affected te
 | `roles/business_development/BIZ-ANALYST.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/business_development/BIZ-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/business_development/BIZ-PARTNER.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/business_development/BIZ-REV.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/design/DSN-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/design/DSN-QA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/design/DSN-SYS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -61,6 +62,7 @@ Development authors write a failing test before the change, run only affected te
 | `roles/marketing/MKT-SEO.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/marketing/MKT-SOCIAL.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/marketing/MKT-WRITE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/marketing/MKT-EDIT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-ACCT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-BUGS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-FIX.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources; project-owned test-environment responsibilities | Hornhoof |
@@ -71,11 +73,13 @@ Development authors write a failing test before the change, run only affected te
 | `roles/sales/SAL-AE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/sales/SAL-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/sales/SAL-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/sales/SAL-REV.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/sales/SAL-SDR.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/support/SUP-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/support/SUP-KB.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/support/SUP-T1.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/support/SUP-T2.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/support/SUP-QA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `skills/biz-business-strategy.md` | Written for Hornhoof | msitarzewski/agency-agents specialized/business-strategist.md | Hornhoof |
 | `skills/biz-channel-economics.md` | Written for Hornhoof | alirezarezvani/claude-skills commercial/skills | Hornhoof |
 | `skills/biz-competitive-landscape.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/market-researcher/skills/competitive-analysis/SKILL.md; wshobson/agents plugins/startup-business-analyst | Hornhoof |
@@ -157,6 +161,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/fin-variance-analysis.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance; anthropics/financial-services plugins/agent-plugins/month-end-closer/skills/variance-commentary/SKILL.md | Hornhoof |
 | `skills/fin-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-ask-dont-guess.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
+| `skills/hh-check-work.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-break-down.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md; wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md; addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md | Hornhoof |
 | `skills/hh-brief-members.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
 | `skills/hh-fix-loop.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
@@ -271,3 +276,13 @@ Development authors write a failing test before the change, run only affected te
 | `teams/operations/OPS-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/home_devices/HOM-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
 | `teams/household/HHD-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `echelons/development.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/operations.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/marketing.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/sales.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/business_development.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/design.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/support.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/finance.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/home_devices.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |
+| `echelons/household.md` | Written for Hornhoof | Hornhoof's own echelons: the stages a department's work goes through in a turn | Hornhoof |

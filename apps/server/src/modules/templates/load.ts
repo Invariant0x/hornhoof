@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '@hornhoof/protocol';
+import { ECHELON_STAGES, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
@@ -56,7 +57,15 @@ export type Role = {
 /* A sub-unit a department's template brings with it: its members by role, and whether each of them does a task whole,
    with no stage after it. */
 export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; description: Lang; turnkey: boolean; urgentOnly: boolean; members: { role: string; count: number }[] };
-export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; teams: Map<string, TeamTemplate>; roster(key: TemplateKey): Role[]; teamsOf(key: TemplateKey): TeamTemplate[] };
+/* The stages a department's work goes through in a turn run in echelons, in their order, and the skill whoever checks
+   at a stage must carry. */
+export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null }[] };
+export type Templates = {
+  roles: Map<string, Role>; skills: Map<string, Skill>; teams: Map<string, TeamTemplate>; echelons: Map<TemplateKey, StageRoute>;
+  roster(key: TemplateKey): Role[]; teamsOf(key: TemplateKey): TeamTemplate[];
+  /* A department made from no template works as Development does. */
+  stagesOf(key: TemplateKey | null): StageRoute;
+};
 
 /* Every employee has these, locked on: what working in Hornhoof takes, whatever the department. */
 export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope', 'hh-run-checks'] as const;
@@ -234,6 +243,40 @@ function loadTeams(dir: string, roles: ReadonlyMap<string, Role>): Map<string, T
   return teams;
 }
 
+const RouteHead = z
+  .object({
+    department: z.enum(TEMPLATE_KEYS),
+    stages: z.array(z.object({ stage: z.enum(ECHELON_STAGES), ability: z.string().optional() }).strict()).min(1),
+  })
+  .strict();
+/* Whoever works at these stages makes the result; at every other stage somebody else checks it. */
+const MAKING: readonly EchelonStage[] = ['architecture', 'development'];
+
+/* Stages keep the one order every route has. Work is always among them, and a checking stage names the skill of its checker. */
+function parseRouteFile(file: string, key: TemplateKey, skills: ReadonlyMap<string, Skill>): StageRoute {
+  const route = parsed(RouteHead, file, readParts(file).head);
+  if (route.department !== key) throw new Error(`${file} is for ${key} but says ${route.department}.`);
+  const places = route.stages.map(step => ECHELON_STAGES.indexOf(step.stage));
+  if (places.some((place, i) => i > 0 && place <= places[i - 1]!)) throw new Error(`${file}: stages go in the order ${ECHELON_STAGES.join(', ')}, each once.`);
+  if (!route.stages.some(step => step.stage === 'development')) throw new Error(`${file}: a route needs the development stage.`);
+  for (const step of route.stages) {
+    if (MAKING.includes(step.stage) ? step.ability !== undefined : !step.ability) throw new Error(`${file}: ${step.stage} ${MAKING.includes(step.stage) ? 'takes no ability' : 'needs the ability of its checker'}.`);
+    if (step.ability && !skills.has(step.ability)) throw new Error(`${file} names the skill ${step.ability}, which does not exist.`);
+  }
+  return { department: key, stages: route.stages.map(step => ({ stage: step.stage, ability: step.ability ?? null })) };
+}
+
+function loadRoutes(dir: string, skills: ReadonlyMap<string, Skill>): Map<TemplateKey, StageRoute> {
+  const routes = new Map<TemplateKey, StageRoute>();
+  for (const f of markdown(join(dir, 'echelons'))) {
+    const key = TEMPLATE_KEYS.find(k => `${k}.md` === f);
+    if (!key) throw new Error(`${join(dir, 'echelons', f)} is named after no department template.`);
+    routes.set(key, parseRouteFile(join(dir, 'echelons', f), key, skills));
+  }
+  if (!routes.has('development')) throw new Error(`${join(dir, 'echelons', 'development.md')} is missing: it is the route of every department without one of its own.`);
+  return routes;
+}
+
 /* The head first, then default members, then optional ones, each by its order. */
 const roleRank = (r: Role): number => (r.kind === 'head' ? 0 : r.inDefault ? 1 : 2);
 
@@ -246,8 +289,13 @@ function sortDepartmentRoster(roles: Iterable<Role>, order: ReadonlyMap<string, 
 /* The order of the roles of each roster as their files give it, kept for copies of the templates. */
 const orders = new WeakMap<Templates, ReadonlyMap<string, number>>();
 
-function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams: Map<string, TeamTemplate>, order: ReadonlyMap<string, number>): Templates {
-  const templates: Templates = { roles, skills, teams, roster: key => sortDepartmentRoster(roles.values(), order, key), teamsOf: key => [...teams.values()].filter(team => team.department === key) };
+function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams: Map<string, TeamTemplate>, echelons: Map<TemplateKey, StageRoute>, order: ReadonlyMap<string, number>): Templates {
+  const templates: Templates = {
+    roles, skills, teams, echelons,
+    roster: key => sortDepartmentRoster(roles.values(), order, key),
+    teamsOf: key => [...teams.values()].filter(team => team.department === key),
+    stagesOf: key => (key && echelons.get(key)) || echelons.get('development')!,
+  };
   orders.set(templates, order);
   return templates;
 }
@@ -255,11 +303,11 @@ function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams
 export function loadTemplates(dir: string): Templates {
   const skills = loadSkills(dir);
   const { roles, order } = loadRoles(dir, skills);
-  return templatesOf(roles, skills, loadTeams(dir, roles), order);
+  return templatesOf(roles, skills, loadTeams(dir, roles), loadRoutes(dir, skills), order);
 }
 
 /* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the
    templates it came from do not see. A test file reads the templates once for all the servers it builds. */
 export function copyTemplates(templates: Templates): Templates {
-  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), structuredClone(templates.teams), orders.get(templates)!);
+  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), structuredClone(templates.teams), structuredClone(templates.echelons), orders.get(templates)!);
 }

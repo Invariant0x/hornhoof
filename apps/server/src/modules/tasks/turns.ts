@@ -1,4 +1,4 @@
-import { createRoute } from './echelons-store.js';
+import { createCoordinationRoute } from './echelons-store.js';
 import { lastTaskNumber, lastTurnNumber } from './numbers.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -147,7 +147,7 @@ async function insertPlanned(tx: Tx, companyId: string, planner: Planner, turnId
         updatedAt: new Date(),
       })
       .returning();
-    await createRoute(tx, row!, { resultKind: 'coordination' });
+    await createCoordinationRoute(tx, row!);
     const actor = personId ? { personId } : { agentId };
     await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { planned: true, ...(item.from ? { backlog: item.from.item } : {}), ...(improvement ? { improvement } : {}) } });
     rows.push(row!);

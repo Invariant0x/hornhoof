@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, taskRoutes, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { departmentPipeline, pipelineReport, turnFacts } from '../src/modules/tasks/pipeline-report.js';
 import { settle } from '../src/modules/tasks/turns.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, ownDatabases } from './helpers.js';
@@ -44,7 +45,7 @@ async function company() {
     const closed = ['done', 'cancelled'].includes(over.status ?? 'done');
     const [row] = await db.insert(tasks).values({ companyId, number, turnId, title: `Task ${number}`, departmentId: dev!.id, executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'done', createdAt: at(0), closedAt: at(30), updatedAt: at(30), ...over, ...(closed ? { assigneeAgentId: null } : {}) }).returning();
     await db.transaction(async tx => {
-      await createRoute(tx, row!, {});
+      await createRoute(tx, row!, {}, developmentStages());
       if (!closed) return;
       const route = await routeOf(tx, row!);
       /* Historical metrics do not fabricate a completed checker or candidate. */

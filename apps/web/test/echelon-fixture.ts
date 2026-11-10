@@ -3,7 +3,7 @@ import { DEV_ORG, TASK_DETAIL } from './api-mock';
 
 export const ECHELON_WORKFLOW: EchelonsSnapshot = {
   kind: 'development_echelons', version: 1, resultKind: 'code', revision: 3, stage: 'review', phase: 'active', ownerAgentId: 'reviewer',
-  candidateId: 'candidate-1', assignment: null, security: { required: false, reason: null, addedBy: null },
+  candidateId: 'candidate-1', assignment: null, abilities: {}, security: { required: false, reason: null, addedBy: null },
   stages: [
     { stage: 'architecture', ownerAgentId: null, inputCandidateId: null, candidateId: null, status: 'skipped', reason: 'Small task' },
     { stage: 'development', ownerAgentId: 'b1', inputCandidateId: null, candidateId: 'candidate-1', status: 'complete', reason: null },

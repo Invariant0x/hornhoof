@@ -7,6 +7,7 @@ import { agentState, insertTurn, onAgent } from '../src/modules/conversation/que
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { discardStaleTurn, taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
@@ -260,7 +261,7 @@ describe('timers', () => {
       .insert(tasks)
       .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
       .returning();
-    await db.transaction(tx => createRoute(tx, task!, {}));
+    await db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     const startedAt = new Date();
     const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
     await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));
@@ -376,7 +377,7 @@ describe('timers', () => {
       .insert(tasks)
       .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
       .returning();
-    await db.transaction(tx => createRoute(tx, task!, {}));
+    await db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     const startedAt = new Date();
     const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
     await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));

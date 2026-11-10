@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks } from '../src/db/schema.js';
-import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { submit } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 import { as, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
@@ -16,7 +16,7 @@ async function company() {
   const [employee] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: department!.id, productId: product!.id, subscriptionId: orchestrator!.subscriptionId, model: '' }).returning();
   const insertTask = (value: typeof tasks.$inferInsert) => db.transaction(async tx => {
     const rows = await tx.insert(tasks).values(value).returning();
-    await createRoute(tx, rows[0]!, { resultKind: 'coordination' });
+    await createCoordinationRoute(tx, rows[0]!);
     return rows;
   });
   return { app, db, ceo, insertTask, companyId, orchestrator: orchestrator!, department: department!, product: product!, employee: employee! };

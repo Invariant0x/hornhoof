@@ -8,6 +8,7 @@ import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { resumeOperatorProcess } from '../src/modules/program-operator/recovery.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { stuckPrograms } from './program-operator-incident.js';
 
@@ -17,7 +18,7 @@ const say = (c: Company, agentId: string, text = letter) =>
   enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, from: 'agent', by: c.head.id, name: c.head.name } });
 const taskOf = async (c: Company, agentId: string, number: number, status: 'open' | 'working' = 'working') => c.db.transaction(async tx => {
   const [task] = await tx.insert(tasks).values({ companyId: c.companyId, number, title: `Task ${number}`, body: 'Do it.', small: true, status, departmentId: c.dev.id, assigneeAgentId: agentId, executorAgentId: agentId }).returning();
-  await createRoute(tx, task!, {});
+  await createRoute(tx, task!, {}, developmentStages());
   return task!;
 });
 const taskState = async (c: Company, task: typeof tasks.$inferSelect) => taskWakeOf(task, { why: 'assigned' }, routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId));

@@ -8,6 +8,7 @@ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { Grant } from '../src/modules/templates/load.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 import { until } from './helpers-basic.js';
@@ -24,7 +25,7 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
   await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, c.agent.id));
   const task = await c.db.transaction(async tx => {
     const [row] = await tx.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', small: true, status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
-    await createRoute(tx, row!, {});
+    await createRoute(tx, row!, {}, developmentStages());
     return row!;
   });
   const taskWake = taskWakeOf(task, { why: 'assigned' }, routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId));

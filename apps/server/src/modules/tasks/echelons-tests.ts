@@ -202,6 +202,11 @@ function matchesTestsReport(proof: z.infer<typeof Verified>, eventAgent: string 
   return eventAgent === tester && proof.candidateId === candidate.id && proof.commit === candidate.commit && proof.routeRevision === revision && proof.evidence.every(run => run.commit === candidate.commit);
 }
 
+/* What Tests proved of the candidate; nothing where the route of its department has no Tests. */
+export async function testedEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
+  return route.state.stages.some(step => step.stage === 'tests') ? verifiedCandidateEvidence(db, task, route, candidate, verifiedRevision) : [];
+}
+
 export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
     .where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`${taskEvents.data} ? 'verifiedCandidate'`)).orderBy(desc(taskEvents.id)).limit(1);

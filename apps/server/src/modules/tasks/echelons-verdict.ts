@@ -25,6 +25,7 @@ function verdictState(route: Route, verdict: Verdict, agentId: string): Route['s
   const state = route.state;
   if (verdict.security === undefined) return state;
   if (state.stage !== 'review' || !verdict.security.trim()) throw refuse(400, 'task_invalid', 'Only Review adds Security with a concrete risk.');
+  if (!state.stages.some(step => step.stage === 'security')) throw refuse(409, 'task_invalid', 'The route of this department has no Security stage. Escalate the risk to the head.');
   return { ...state, security: { required: true, reason: verdict.security.trim(), addedBy: agentId },
     stages: state.stages.map(step => step.stage === 'security' ? { ...step, status: 'pending', reason: null } : step),
   };

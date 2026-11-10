@@ -6,6 +6,7 @@ import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
@@ -19,7 +20,7 @@ async function company() {
 /* A working task with its required route, and a turn that carries the wake state a real assignment leaves. */
 async function taskTurn(c: Awaited<ReturnType<typeof company>>) {
   const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
-  await c.db.transaction(tx => createRoute(tx, task!, {}));
+  await c.db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
   const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
   const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null, message: { personId: null, text: 'Work', taskWake } });
   return { task, id };

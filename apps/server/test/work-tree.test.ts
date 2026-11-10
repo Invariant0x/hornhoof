@@ -14,7 +14,7 @@ function taskFact(input: TaskInput): TreeFacts['tasks'][number] {
   const stage = input.executorAgentId ? (input.status === 'review' ? 'review' : 'development') : null;
   const ownerAgentId = closed ? null : input.assigneeAgentId ?? input.executorAgentId;
   const echelons: EchelonsSnapshot = { kind: 'development_echelons', version: 1, revision: 1, resultKind: stage ? 'code' : 'coordination', stage,
-    phase: closed ? 'done' : 'active', ownerAgentId, candidateId: null, assignment: null,
+    phase: closed ? 'done' : 'active', ownerAgentId, candidateId: null, assignment: null, abilities: {},
     security: { required: false, reason: null, addedBy: null }, stages: stage ? [
       { stage: 'architecture', status: 'skipped', ownerAgentId: null, inputCandidateId: null, candidateId: null, reason: 'small_task' },
       { stage: 'development', status: closed || stage === 'review' ? 'complete' : 'active', ownerAgentId: input.executorAgentId, inputCandidateId: null, candidateId: null, reason: null },

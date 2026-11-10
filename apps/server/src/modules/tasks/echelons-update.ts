@@ -18,6 +18,7 @@ export function withCleanup(route: Route, enabled: boolean): Route['state'] {
   const review = route.state.stages.findIndex(step => step.stage === 'review');
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   if (at > review) throw refuse(409, 'task_invalid', 'Cleanup must be decided before Review hands this result forward.');
+  if (enabled && !route.state.abilities.cleanup) throw refuse(409, 'task_invalid', 'The route of this department has no Cleanup stage.');
   const stages = route.state.stages.filter(step => step.stage !== 'cleanup');
   if (enabled) stages.splice(review + 1, 0, { stage: 'cleanup', status: 'pending', ownerAgentId: null, reason: 'requested_by_head', inputCandidateId: null, candidateId: null });
   return { ...route.state, stages };
@@ -59,7 +60,7 @@ function requireProducerChange(state: Route['state'], executor: TaskChange['exec
 }
 
 function withRisk(state: Route['state'], agentId: string, risk: TaskChange['riskClass']): Route['state'] {
-  if (risk && risk !== 'none' && state.resultKind === 'code') {
+  if (risk && risk !== 'none' && state.resultKind === 'code' && state.stages.some(step => step.stage === 'security')) {
     if (['tests', 'security'].includes(state.stage ?? '') && !state.security.required) throw refuse(409, 'task_invalid', 'A newly discovered risk must be resolved before this result proceeds.');
     return { ...state, security: { required: true, reason: risk, addedBy: agentId }, stages: state.stages.map(step => step.stage === 'security' && step.status === 'skipped' ? { ...step, status: 'pending', reason: null } : step) };
   }
@@ -75,8 +76,7 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
   await requireAvailableOwner(ctx, task, ownerId);
   const team = await turnkeyTeamOf(ctx.db, task.companyId, ownerId);
   if (team) throw refuse(409, 'task_invalid', `The new owner is in ${team.name}, a turnkey team, whose members take only work of their own and never enter the echelons.`);
-  const abilities: Partial<Record<NonNullable<Route['state']['stage']>, string>> = { review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment' };
-  const ability = state.stage ? abilities[state.stage] : undefined;
+  const ability = state.stage ? state.abilities[state.stage] : undefined;
   const assignment = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, await currentCandidate(ctx.db, task, route)), ability, ownerId) : null;
   if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
   const next: Route['state'] = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };

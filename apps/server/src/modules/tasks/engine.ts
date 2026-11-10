@@ -5,11 +5,12 @@ import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity, checkerFor, checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
-import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
+import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork } from './turnkey.js';
-import { createRoute, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { createRoute, departmentStages, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
@@ -381,7 +382,7 @@ async function checkIndependentExecutor(db: Db, departmentId: string | null, par
   if (agent.departmentId !== departmentId) throw refuse(403, 'task_not_yours', `${agent.name} does not work in this department.`);
 }
 
-async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor): Promise<{ child: Task; wake: Wake }> {
+async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, plan: StageRoute): Promise<{ child: Task; wake: Wake }> {
   const last = await lastTaskNumber(tx, parent.companyId);
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
@@ -404,7 +405,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     updatedAt: new Date(),
   }).returning();
   /* A part of the same work may touch what its whole may, as the head approved it there. */
-  await createRoute(tx, child!, { paths: (await routeOf(tx, parent)).paths });
+  await createRoute(tx, child!, { paths: (await routeOf(tx, parent)).paths }, plan);
   const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
@@ -418,7 +419,7 @@ function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task
   return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, [input.assigneeAgentId, ...part]);
 }
 
-type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null };
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
 
 function checkNewTaskFields(input: NewTask): void {
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
@@ -435,7 +436,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  return { assignee, parent, declaration };
+  return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId) };
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -511,7 +512,7 @@ async function afterForNewTask(tx: Tx, companyId: string, turnId: string | null,
 }
 
 async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTaskSetup): Promise<CreatedTask> {
-  const { assignee, parent, declaration } = setup;
+  const { assignee, parent, declaration, plan } = setup;
   let independent: Task | null = null;
   const wakes: Wake[] = [];
   /* Numbers go up one by one per company, so creating tasks waits on the company row. */
@@ -530,7 +531,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .insert(tasks)
     .values(newTaskValues(actor, input, setup, { urgent, turnId, number: last + 1 }))
     .returning();
-  await createRoute(tx, row!, input);
+  await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
     assignee: assignee.id,
     after: row!.after,
@@ -538,7 +539,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   } });
   await bindAfter(tx, row!, after, input.afterPlans, actor);
   if (declaration?.kind === 'part') {
-    const made = await insertIndependent(tx, row!, declaration.part, actor);
+    const made = await insertIndependent(tx, row!, declaration.part, actor, plan);
     independent = made.child;
     wakes.push(made.wake);
   }
@@ -817,7 +818,7 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
 
 async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
   if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
-  const ability = CHECK_ABILITIES[route.state.stage];
+  const ability = route.state.abilities[route.state.stage];
   if (!ability) return null;
   return checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, null);
 }
@@ -919,19 +920,19 @@ function changesIndependence(change: TaskChange): boolean {
   return change.after !== undefined || change.independentPart !== undefined || change.independentNone !== undefined;
 }
 
-type IndependentChange = { declaration: IndependentDeclaration | null; createsIndependent: boolean; partOwner: string | null };
+type IndependentChange = { declaration: IndependentDeclaration | null; createsIndependent: boolean; partOwner: string | null; plan: StageRoute | null };
 
-function independentAddition(declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): Omit<IndependentChange, 'declaration'> {
+function independentAddition(declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): Omit<IndependentChange, 'declaration' | 'plan'> {
   if (declaration?.kind !== 'part' || existing?.kind === 'part') return { createsIndependent: false, partOwner: null };
   return { createsIndependent: true, partOwner: declaration.part.executor };
 }
 
 async function prepareIndependentChange(ctx: Ctx, task: Task, change: TaskChange): Promise<IndependentChange> {
-  if (!changesIndependence(change)) return { declaration: null, createsIndependent: false, partOwner: null };
+  if (!changesIndependence(change)) return { declaration: null, createsIndependent: false, partOwner: null, plan: null };
   const existing = await currentIndependent(ctx.db, task.id);
   const declaration = checkIndependent(change.after ?? task.after, change.independentPart, change.independentNone, existing);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  return { declaration, ...independentAddition(declaration, existing) };
+  return { declaration, ...independentAddition(declaration, existing), plan: await departmentStages(ctx, task.departmentId) };
 }
 
 async function requireChangeUrgency(ctx: Ctx, agentId: string, task: Task, set: Partial<Task>, partOwner: string | null): Promise<void> {
@@ -940,8 +941,8 @@ async function requireChangeUrgency(ctx: Ctx, agentId: string, task: Task, set: 
 }
 
 async function insertIndependentChange(tx: Tx, row: Task, agentId: string, change: IndependentChange, wakes: Wake[]): Promise<Task | null> {
-  if (!change.createsIndependent || change.declaration?.kind !== 'part') return null;
-  const made = await insertIndependent(tx, row, change.declaration.part, { agentId });
+  if (!change.createsIndependent || change.declaration?.kind !== 'part' || !change.plan) return null;
+  const made = await insertIndependent(tx, row, change.declaration.part, { agentId }, change.plan);
   wakes.push(made.wake);
   return made.child;
 }

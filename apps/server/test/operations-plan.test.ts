@@ -5,6 +5,7 @@ import { agentChanges, agents, companies, departments, jobs, people, subscriptio
 import { ensureOperations, placeOperator } from '../src/modules/operations/ensure.js';
 import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations, ownDatabases } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 
 ownDatabases();
 
@@ -221,7 +222,7 @@ describe("the program operator's plan", () => {
     const c = await company();
     const me = await operator(c.db);
     const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, title: 'Look at a screen', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: me.id, status: 'open' }).returning();
-    await c.db.transaction(tx => createRoute(tx, task!, {}));
+    await c.db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     expect(await c.db.select().from(jobs).where(eq(jobs.agentId, me.id))).toEqual([]);
     const key = await addKey(c);
     const turns = await c.db.select().from(jobs).where(eq(jobs.agentId, me.id));

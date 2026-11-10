@@ -1,10 +1,12 @@
 import { turnCleanupDefault } from './echelons-update.js';
 import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { taskRoutes } from '../../db/schema.js';
+import type { Ctx } from '../../app.js';
+import { departments, taskRoutes } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
-import type { Task, Tx } from './engine.js';
+import type { StageRoute } from '../templates/load.js';
+import { refuse, type Task, type Tx } from './engine.js';
 import { throughEchelons } from './turnkey.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
@@ -27,35 +29,58 @@ function securityState(task: Task, input: RouteInput, current: EchelonStep['stag
   return { step, security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null } };
 }
 
-function codeState(task: Task, input: RouteInput, cleanup: boolean): Route['state'] {
-  const stage = task.small ? 'development' : 'architecture';
-  const { step: security, security: policy } = securityState(task, input, stage);
-  return { kind: 'development_echelons', version: 1, resultKind: 'code', stage, phase: 'active', candidateId: null, assignment: null,
-    stages: [architectureStep(task, stage), routeStep('development', stage, task.executorAgentId ?? task.assigneeAgentId), routeStep('review', stage, input.reviewerAgentId ?? null),
-      ...(cleanup ? [routeStep('cleanup', stage)] : []), security, routeStep('tests', stage, input.testsAgentId ?? null)], security: policy,
-  };
+const NO_SECURITY: Route['state']['security'] = { required: false, reason: null, addedBy: null };
+
+/* A stage the route of the department lacks takes no owner, and Cleanup cannot be asked for where there is none. */
+function requireStages(task: Task, plan: StageRoute, input: RouteInput, cleanup: boolean): void {
+  const asked: [EchelonStep['stage'], unknown][] = [['review', input.reviewerAgentId], ['security', input.securityAgentId], ['tests', input.testsAgentId], ['cleanup', cleanup]];
+  const missing = asked.find(([stage, wanted]) => wanted && !plan.stages.some(step => step.stage === stage));
+  if (missing) throw refuse(409, 'task_invalid', `The route of this department has no ${missing[0]} stage for #${task.number}.`);
 }
 
-const NO_SECURITY: Route['state']['security'] = { required: false, reason: null, addedBy: null };
+function codeState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute): Route['state'] {
+  requireStages(task, plan, input, cleanup);
+  const has = (name: EchelonStep['stage']) => plan.stages.some(step => step.stage === name);
+  const stage = has('architecture') && !task.small ? 'architecture' : 'development';
+  const { step: security, security: policy } = securityState(task, input, stage);
+  const steps: Record<EchelonStep['stage'], EchelonStep | null> = {
+    architecture: architectureStep(task, stage), development: routeStep('development', stage, task.executorAgentId ?? task.assigneeAgentId),
+    review: routeStep('review', stage, input.reviewerAgentId ?? null), cleanup: cleanup ? routeStep('cleanup', stage) : null,
+    security, tests: routeStep('tests', stage, input.testsAgentId ?? null),
+  };
+  return { kind: 'development_echelons', version: 1, resultKind: 'code', stage, phase: 'active', candidateId: null, assignment: null,
+    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : [])),
+    security: has('security') ? policy : NO_SECURITY,
+  };
+}
 
 /* Work done end to end by its holder alone: no stage, no candidate and nobody else called onto it, even when checkers are named. */
 async function turnkeyRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
-    kind: 'development_echelons', version: 1, resultKind: 'turnkey', stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], security: NO_SECURITY,
+    kind: 'development_echelons', version: 1, resultKind: 'turnkey', stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], abilities: {}, security: NO_SECURITY,
   } });
 }
 
-export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
+/* The stages the work of a department goes through, as its template lays them out. */
+export async function departmentStages(ctx: Pick<Ctx, 'db' | 'templates'>, departmentId: string | null): Promise<StageRoute> {
+  const [department] = departmentId ? await ctx.db.select({ key: departments.templateKey }).from(departments).where(eq(departments.id, departmentId)) : [];
+  return ctx.templates.stagesOf(department?.key ?? null);
+}
+
+/* A result made of the accepted results under it: no stage and no candidate of its own. */
+export async function createCoordinationRoute(tx: Tx, task: Task): Promise<void> {
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: {
+    kind: 'development_echelons', version: 1, resultKind: 'coordination', stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], abilities: {}, security: NO_SECURITY,
+  } });
+}
+
+export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: StageRoute): Promise<void> {
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
-  if (resultKind === 'coordination') {
-    await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: {
-      kind: 'development_echelons', version: 1, resultKind, stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], security: NO_SECURITY,
-    } });
-    return;
-  }
+  if (resultKind === 'coordination') return createCoordinationRoute(tx, task);
   if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input);
-  const cleanup = input.cleanup ?? await turnCleanupDefault(tx, task);
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: codeState(task, input, cleanup) });
+  /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
+  const cleanup = input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: codeState(task, input, cleanup, plan) });
 }
 
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {

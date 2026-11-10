@@ -9,7 +9,7 @@ const GONE = '9b1f6d2e-3c4a-4e5f-8a6b-7c8d9e0f1a2b';
 const step = (stage: EchelonStep['stage'], status: EchelonStep['status'], reason: string | null, ownerAgentId: string | null = null): EchelonStep =>
   ({ stage, status, reason, ownerAgentId, inputCandidateId: null, candidateId: null });
 const workflow = (stages: EchelonStep[], phase: EchelonsSnapshot['phase'] = 'escalated'): EchelonsSnapshot => ({
-  kind: 'development_echelons', version: 1, resultKind: 'code', revision: 3, stage: 'tests', phase, ownerAgentId: null, stages, candidateId: null, assignment: null,
+  kind: 'development_echelons', version: 1, resultKind: 'code', revision: 3, stage: 'tests', phase, ownerAgentId: null, stages, abilities: {}, candidateId: null, assignment: null,
   security: { required: false, reason: null, addedBy: null },
 });
 
