@@ -93,7 +93,7 @@ describe('the node hub', () => {
     expect(hub.awaySince(other)).toBe(asked);
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.awaySince(node)).toBeNull();
-    hub.stop();
+    void hub.stop();
   });
 
   it('keeps the build a node said in its hello, and says none for a node it does not know', () => {
@@ -104,7 +104,7 @@ describe('the node hub', () => {
     hub.greet(node, true, true, false, null, 'c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf(node)).toBe('c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf({ kind: 'node', nodeId: 'n2' })).toBeNull();
-    hub.stop();
+    void hub.stop();
   });
 
   it('evicts a closed socket immediately, leaves a newer key hash open and drops frames from a closed or replaced socket', async () => {
@@ -222,7 +222,7 @@ describe('live program metadata in the hub', () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(terminate).toHaveBeenCalledOnce();
     } finally {
-      hub.stop();
+      await hub.stop();
       vi.useRealTimers();
     }
   });
@@ -282,5 +282,121 @@ describe('live program metadata in the hub', () => {
     expect(hub.browserErrorOf(node)).toBeNull();
     expect(hub.browserHoldOf(node)).toBeNull();
     expect(hub.loadOf(node)).toBeNull();
+  });
+});
+
+describe('numbered messages in the hub', () => {
+  const STREAM = '5f0c2b1e-8a43-4c1d-9e57-2b7f6a1d3c90';
+  const NODE = { kind: 'node' as const, nodeId: 'numbered-node' };
+  type Numbered = { stream: string; type: string; n: number };
+
+  function fakeSocket() {
+    const sent: { type: string; upto?: number }[] = [];
+    const closes: [number, string][] = [];
+    const socket = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      send: (text: string) => void sent.push(JSON.parse(text) as { type: string; upto?: number }),
+      close: (code: number, reason: string) => void closes.push([code, reason]),
+      ping() {},
+    });
+    const says = (msg: object) => socket.emit('message', JSON.stringify(msg));
+    return { socket, sent, closes, says };
+  }
+
+  /* A hub whose numbered messages are taken, or not, as the test says for each one. */
+  function hubTaking(take: (msg: Numbered) => Promise<boolean> | boolean) {
+    const numbered: Numbered[] = [];
+    const plain: string[] = [];
+    const hub = new NodeHub({
+      pingMs: NO_PING_MS,
+      onClose: async () => {},
+      onMessage: async (_id, msg) => void plain.push(msg.type),
+      onNumbered: async (_id, stream, msg) => {
+        const got = { stream, type: msg.type, n: msg.n };
+        numbered.push(got);
+        return take(got);
+      },
+    });
+    onTestFinished(() => hub.stop());
+    const attach = () => {
+      const node = fakeSocket();
+      hub.attach(NODE, node.socket as unknown as WebSocket);
+      return node;
+    };
+    return { hub, numbered, plain, attach };
+  }
+
+  const hello = (stream?: string) => ({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], ...(stream ? { stream } : {}) });
+  const started = (n?: number) => ({ type: 'job.started', jobId: 'j1', ...(n === undefined ? {} : { n }) });
+
+  it('confirms each numbered message on its own socket once it is taken, in the order they came', async () => {
+    const { numbered, plain, attach } = hubTaking(() => true);
+    const node = attach();
+    node.says(hello(STREAM));
+    node.says(started(1));
+    node.says({ type: 'status', loggedIn: true, limits: null });
+    node.says(started(2));
+    await until(() => node.sent.length === 2);
+    expect(node.sent).toEqual([{ type: 'ack', upto: 1 }, { type: 'ack', upto: 2 }]);
+    expect(numbered).toEqual([{ stream: STREAM, type: 'job.started', n: 1 }, { stream: STREAM, type: 'job.started', n: 2 }]);
+    expect(plain).toEqual(['hello', 'status']);
+  });
+
+  it('closes a socket whose message it could not take, confirms nothing, and runs nothing that waited behind it', async () => {
+    const { numbered, plain, attach } = hubTaking(msg => msg.n !== 2);
+    const node = attach();
+    node.says(hello(STREAM));
+    node.says(started(1));
+    node.says(started(2));
+    node.says(started(3));
+    node.says({ type: 'status', loggedIn: true, limits: null });
+    await until(() => node.closes.length === 1);
+    expect(node.closes).toEqual([[1013, 'Hornhoof could not take this now; send it again.']]);
+    expect(node.sent).toEqual([{ type: 'ack', upto: 1 }]);
+    expect(numbered.map(msg => msg.n)).toEqual([1, 2]);
+    expect(plain).toEqual(['hello']);
+  });
+
+  it('takes a message without a number, or from a node that named no stream, as it always did', async () => {
+    const { numbered, plain, attach } = hubTaking(() => true);
+    const old = attach();
+    old.says(hello());
+    old.says(started(1));
+    await until(() => plain.length === 2);
+    const node = attach();
+    node.says(hello(STREAM));
+    node.says(started());
+    await until(() => plain.length === 4);
+    expect(plain).toEqual(['hello', 'job.started', 'hello', 'job.started']);
+    expect(numbered).toEqual([]);
+    expect([...old.sent, ...node.sent]).toEqual([]);
+  });
+
+  it('keeps the stream of the first hello that names one', async () => {
+    const { numbered, attach } = hubTaking(() => true);
+    const node = attach();
+    node.says(hello(STREAM));
+    node.says(hello('00000000-0000-4000-8000-000000000001'));
+    node.says(started(1));
+    await until(() => node.sent.length === 1);
+    expect(numbered).toEqual([{ stream: STREAM, type: 'job.started', n: 1 }]);
+  });
+
+  it('lets what a socket already sent finish before it stops, and takes nothing after', async () => {
+    let finish!: () => void;
+    const working = new Promise<void>(done => (finish = done));
+    const { hub, numbered, attach } = hubTaking(async () => (await working, true));
+    const node = attach();
+    node.says(hello(STREAM));
+    node.says(started(1));
+    await until(() => numbered.length === 1);
+    const stopped = hub.stop();
+    node.says(started(2));
+    expect(node.closes).toEqual([]);
+    finish();
+    await stopped;
+    expect(node.sent).toEqual([{ type: 'ack', upto: 1 }]);
+    expect(node.closes).toEqual([[1001, 'Server is stopping.']]);
+    expect(numbered.map(msg => msg.n)).toEqual([1]);
   });
 });

@@ -39,6 +39,9 @@ export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf
 const MISSED_PINGS = 3;
 
 const REPLACED = 'Replaced by a newer connection.';
+const NOT_TAKEN = 'Hornhoof could not take this now; send it again.';
+/* Docker waits 10 s after its stop signal. What the sockets already sent gets half of that to finish. */
+const STOP_GRACE_MS = 5000;
 const DISCONNECTED = 'Disconnected in Hornhoof.';
 /* What a close says when no close frame came: the socket was cut. */
 const NO_CLOSE_FRAME = 1006;
@@ -52,8 +55,10 @@ export type LinkEnd = { link: string; at: Date; cause: ConnectionEnd; code: numb
    it takes no part of any run. browserError: why Playwright's browser failed to start on the node. build: the node build its
    image is, none from a node built by hand or from before. link: this connection in the node's history. chain: what this
    socket has to do one after another, as job.started is stored before job.done. ending: what the server knows of why the
-   socket is closing. ended: the end of the connection is on its way to the history. */
-type Entry = { programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
+   socket is closing. ended: the end of the connection is on its way to the history. stream: the node's numbering of its
+   messages, from the socket's first hello that names one. refused: a message of this socket could not be taken, so
+   nothing that waits behind it runs, and the node sends it all again on its next socket. */
+type Entry = { stream: string | null; refused: boolean; programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -72,12 +77,23 @@ const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' ||
 
 const closeReason = (reason?: Buffer) => (reason?.length ? reason.toString() : null);
 
+/* A message that carries its number in the node's stream. */
+export type NumberedMessage = ProgramNodeMessage & { n: number };
+
+const numberOf = (msg: ProgramNodeMessage): number | null => {
+  const { n } = msg as { n?: unknown };
+  return typeof n === 'number' ? n : null;
+};
+
 /* Provenance created by the server for the socket, never a field of its frames. */
 export type NodeTransport = Readonly<{ linkId: string }>;
 
 type HubOptions = {
   pingMs: number;
   onMessage(id: NodeIdentity, msg: ProgramNodeMessage, transport: NodeTransport): Promise<void>;
+  /* A message the node numbered, within the stream it named. True: it is applied, was applied before, or failed for
+     good, so the node may forget it. False: it could not be taken now. Without this, numbered messages go to onMessage. */
+  onNumbered?(id: NodeIdentity, stream: string, msg: NumberedMessage, transport: NodeTransport): Promise<boolean>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
   onClose(id: NodeIdentity): Promise<void>;
@@ -113,7 +129,7 @@ export class NodeHub {
     const report = (err: unknown) => this.opts.onError?.(err);
     const link = randomUUID();
     const started = this.opts.onConnected?.(id, link, at).catch(report) ?? Promise.resolve();
-    const entry: Entry = { link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
+    const entry: Entry = { stream: null, refused: false, link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     socket.on('pong', () => {
@@ -158,21 +174,38 @@ export class NodeHub {
   }
 
   private onFrame(id: NodeIdentity, key: string, entry: Entry, raw: string, chain: Promise<void>): Promise<void> {
-    if (this.sockets.get(key) !== entry) return chain;
+    if (this.leaving || this.sockets.get(key) !== entry) return chain;
     const msg = parseOperatorNodeMessage(raw);
     if (!msg) return chain;
     this.capturePrograms(entry, msg);
+    if (msg.type === 'hello') entry.stream ??= msg.stream ?? null;
     if (isTerminalFrame(msg)) {
       this.forwardTerminal(id, msg);
       return chain;
     }
-    const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg, { linkId: entry.link }) : Promise.resolve());
+    const current = () => this.sockets.get(key) === entry && !entry.refused;
+    const deliver = () => (current() ? this.opts.onMessage(id, msg, { linkId: entry.link }) : Promise.resolve());
     const report = (err: unknown) => this.opts.onError?.(err);
     if (isAwaitedFrame(msg)) {
       void deliver().catch(report);
       return chain;
     }
-    return chain.then(deliver).catch(report);
+    /* With the stream the socket had when the message came. */
+    const { stream } = entry;
+    const n = numberOf(msg);
+    if (n === null || stream === null || !this.opts.onNumbered) return chain.then(deliver).catch(report);
+    return chain.then(() => (current() ? this.takeNumbered(id, entry, stream, msg as NumberedMessage) : undefined)).catch(report);
+  }
+
+  /* The confirmation goes on the socket the message came on: a newer socket of the node has numbers of its own to hear of. */
+  private async takeNumbered(id: NodeIdentity, entry: Entry, stream: string, msg: NumberedMessage): Promise<void> {
+    if (await this.opts.onNumbered!(id, stream, msg, { linkId: entry.link })) {
+      if (entry.socket.readyState === 1) entry.socket.send(JSON.stringify({ type: 'ack', upto: msg.n }));
+      return;
+    }
+    entry.refused = true;
+    entry.ending ??= { cause: 'not_taken', at: new Date(), error: null };
+    entry.socket.close(1013, NOT_TAKEN);
   }
 
   isOnline(id: NodeIdentity): boolean {
@@ -336,9 +369,15 @@ export class NodeHub {
     this.leaving = true;
   }
 
-  stop(): void {
+  /* Takes no more messages, lets what the sockets already sent finish, so a restart cuts no handling in half, and then
+     closes them. */
+  async stop(): Promise<void> {
     this.stopping();
     clearInterval(this.timer);
+    let giveUp!: NodeJS.Timeout;
+    const grace = new Promise<void>(done => (giveUp = setTimeout(done, STOP_GRACE_MS)));
+    await Promise.race([Promise.all([...this.sockets.values()].map(entry => entry.chain)), grace]);
+    clearTimeout(giveUp);
     for (const { socket } of this.sockets.values()) socket.close(1001, 'Server is stopping.');
     this.sockets.clear();
   }

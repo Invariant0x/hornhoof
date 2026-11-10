@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { ACKS_HEADER } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -27,10 +28,16 @@ export async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdent
   return node ? { kind: 'node', nodeId: node.id, keyHash } : null;
 }
 
+const SOCKET_PATH = '/api/nodes/socket';
+
 export function nodeSocket(app: FastifyInstance, ctx: Ctx): void {
   const identities = new WeakMap<FastifyRequest, NodeIdentity>();
+  /* A node keeps each numbered message until it is confirmed only when the server says here that it confirms. */
+  app.websocketServer.on('headers', (headers: string[], req: { url?: string }) => {
+    if (req.url?.split('?')[0] === SOCKET_PATH) headers.push(`${ACKS_HEADER}: 1`);
+  });
   app.get(
-    '/api/nodes/socket',
+    SOCKET_PATH,
     {
       websocket: true,
       preValidation: async (req, reply) => {

@@ -142,6 +142,8 @@ export type FakeNode = {
   /* The next message other than a confirmation of a finished job, which lands in acks. */
   next(): Promise<ServerMessage>;
   acks: string[];
+  /* Up to which number each confirmation of numbered messages went, in the order they came. */
+  upto: number[];
   /* Messages that arrived and nobody took yet. */
   queued(): number;
   closed: Promise<number>;
@@ -167,9 +169,11 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
     const queue: ServerMessage[] = [];
     const waiters: ((m: ServerMessage) => void)[] = [];
     const acks: string[] = [];
+    const upto: number[] = [];
     ws.on('message', data => {
       const msg = JSON.parse(String(data)) as ServerMessage;
       if (msg.type === 'job.ack') return void acks.push(msg.jobId);
+      if (msg.type === 'ack') return void upto.push(msg.upto);
       const waiter = waiters.shift();
       if (waiter) waiter(msg);
       else queue.push(msg);
@@ -183,6 +187,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
         send: msg => ws.send(JSON.stringify(withSkillFiles(msg))),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
         acks,
+        upto,
         queued: () => queue.length,
         closed,
         close: () => ws.close(),

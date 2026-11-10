@@ -107,7 +107,7 @@ describe('the source of a change', () => {
       await outsideSources(() => setLease(db, { until: 'infinity' }));
       await db.transaction(tx => rename(tx, id, 'Kept'));
     });
-    expect(await listed(db, 'web:c')).toMatchObject({ steps: 1, first: 'web:c:1' });
+    expect(await listed(db, 'web:c')).toMatchObject({ steps: 1, first: 'web:c:1', next: 2 });
   });
 
   it('gives two transactions at once two steps', async () => {

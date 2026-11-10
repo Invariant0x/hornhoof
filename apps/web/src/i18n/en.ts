@@ -450,6 +450,7 @@ export const en = {
         replaced: 'the machine connected again before the old connection ended',
         server_stopped: 'the server restarted',
         disconnected: 'it was taken off the machine in Hornhoof',
+        not_taken: 'the server could not take what the machine sent, and asked it to send it again',
         watchdog_timeout: 'the machine stopped hearing the server',
         server_close: 'the server closed the connection',
         dns_error: "the server's address could not be found",

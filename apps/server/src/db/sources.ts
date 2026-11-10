@@ -110,10 +110,13 @@ export async function recordNow(db: Db): Promise<void> {
   source.wrote = true;
 }
 
-/* The steps of a source that committed: how many, and the first one's name and time. Null when none did. */
-export async function listed(db: Db, base: string): Promise<{ steps: number; first: string; at: Date } | null> {
+/* The steps of a source that committed: how many, the first one's name and time, and the step its next commit takes,
+   above every one it has. Null when none did. */
+export async function listed(db: Db, base: string): Promise<{ steps: number; first: string; at: Date; next: number } | null> {
   const rows = await db.select({ source: applied.source, at: applied.at }).from(applied).where(eq(applied.base, base)).orderBy(asc(applied.at), asc(applied.source));
-  return rows[0] ? { steps: rows.length, first: rows[0].source, at: rows[0].at } : null;
+  if (!rows[0]) return null;
+  const last = Math.max(...rows.map(row => Number(row.source.slice(base.length + 1))));
+  return { steps: rows.length, first: rows[0].source, at: rows[0].at, next: last + 1 };
 }
 
 /* Writes the source's first step again as it is, so the journal carries it to whoever keeps a copy, and no step is taken. */

@@ -25,6 +25,7 @@ import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
+import { handleNumbered } from './modules/nodes/numbered.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { startOperationsCheck } from './modules/operations/ensure.js';
@@ -142,6 +143,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
     onMessage: whileLeading(ctx.mode, (id, msg, transport) => receiveNodeMessage(ctx, id, msg, transport)),
+    /* Outside lead nothing handles a message, so nothing is confirmed, and the node sends it again. */
+    onNumbered: async (id, stream, msg, transport) => ctx.mode.current() === 'lead' && (await handleNumbered(ctx, id, stream, msg, transport)),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: whileLeading(ctx.mode, id => handleNodeClose(ctx, id)),
     onConnected: whileLeading(ctx.mode, (id, link, at) => nodeConnected(ctx, id, link, at)),
@@ -149,8 +152,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
-  app.addHook('preClose', async () => serverStopping(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Writing that the server stopped into the history of node connections failed.')));
-  app.addHook('onClose', async () => { closeCheckQueue(ctx); ctx.hub.stop(); });
+  app.addHook('preClose', async () => {
+    await serverStopping(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Writing that the server stopped into the history of node connections failed.'));
+    /* What the nodes already sent finishes here, before their sockets close and before the database does. */
+    await ctx.hub.stop();
+  });
+  app.addHook('onClose', async () => { closeCheckQueue(ctx); await ctx.hub.stop(); });
   app.addHook('onClose', async () => ctx.agentSql?.close());
   const { config } = deps;
   ctx.updates = new UpdateCheck({
