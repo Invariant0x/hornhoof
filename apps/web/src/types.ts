@@ -302,7 +302,8 @@ export type StaffLine = { role: string; name?: string; product?: string | null; 
 export type Roster = { people: StaffLine[]; roles: RoleOption[]; products: { id: string; name: string }[]; subscriptions: Serving[] };
 
 /* An item of the orchestrator's card: a department to create from a template, or a change to one that exists. */
-export type NewItem = { template: TemplateKey; name?: string; checked: boolean; note: string; products?: string[] };
+/* staff: the department comes with the people of its template. */
+export type NewItem = { template: TemplateKey; name?: string; checked: boolean; note: string; products?: string[]; staff?: boolean };
 export type ChangeItem = { department: string; checked: boolean; note: string; products?: string[]; remove?: boolean };
 export type StructureItem = NewItem | ChangeItem;
 

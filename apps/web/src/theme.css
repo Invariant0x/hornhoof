@@ -876,6 +876,10 @@ button.shead:focus-visible, button.schip:focus-visible { outline: 2px solid var(
 .frame > .sw { position: absolute; top: 20px; right: 22px; width: 14px; height: 14px; margin: 0; accent-color: var(--cyan-ink); cursor: pointer; }
 .fh.has-sw .fn { padding-right: 24px; }
 .sslot.off > .schip, .sslot.off > .shead { opacity: 0.55; }
+/* An employee that waits for a subscription: grey, with the line that asks for one left readable. */
+.sslot.no-plan > .schip { filter: grayscale(1); }
+.sslot.no-plan > .schip .r1, .sslot.no-plan > .schip .r2 { opacity: 0.55; }
+.sslot.no-plan > .schip .r3 { color: var(--amber-ink); }
 @keyframes eflash { 0% { background: var(--cyan); } }
 .far .schip .r2, .far .schip .r3, .far .schip .st { visibility: hidden; }
 .far .schip.s-w .edge-in { background: color-mix(in srgb, var(--cyan) 18%, var(--surface)); }

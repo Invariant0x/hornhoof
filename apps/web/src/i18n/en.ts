@@ -631,6 +631,7 @@ export const en = {
     hide: 'Hide',
     remove: 'Remove',
     products: 'Products',
+    withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
     approvals: {
@@ -852,7 +853,7 @@ export const en = {
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'on' : 'switched off'}`,
     roleOn: (role: string) => `${role} takes part in the work`,
     roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'everyone on' : 'everyone switched off'}`,
-    needsSubscription: 'Needs a subscription to work',
+    needsSubscription: 'Assign a subscription to start',
     gate: (n: number) => `Gate ${n}`,
     lastGate: 'last gate',
     reportLine: 'Report to the head',

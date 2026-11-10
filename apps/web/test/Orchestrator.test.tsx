@@ -212,7 +212,8 @@ describe('AgentWindow', () => {
     expect(await screen.findByText('Waiting for the Anthropic login')).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).toBeDisabled();
     expect(screen.getByText('Company structure')).toBeInTheDocument();
-    expect(screen.getAllByRole('checkbox')).toHaveLength(10);
+    /* Ten departments to tick, and the tick that brings their people. */
+    expect(screen.getAllByRole('checkbox')).toHaveLength(11);
   });
 
   it.each([

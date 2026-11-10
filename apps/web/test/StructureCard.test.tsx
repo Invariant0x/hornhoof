@@ -33,12 +33,23 @@ describe('StructureCard', () => {
     expect(calls[0]!.body).toEqual({
       proposalId: 'pr1',
       items: [
-        { template: 'operations', note: 'Tools and accounts' },
-        { template: 'development', note: 'Builds both products', products: ['Mascot', 'Characters'] },
-        { template: 'marketing', note: 'Schools need to hear of it' },
-        { template: 'sales', note: 'Sells to schools' },
+        { template: 'operations', note: 'Tools and accounts', staff: true },
+        { template: 'development', note: 'Builds both products', products: ['Mascot', 'Characters'], staff: true },
+        { template: 'marketing', note: 'Schools need to hear of it', staff: true },
+        { template: 'sales', note: 'Sells to schools', staff: true },
       ],
     });
+  });
+
+  it('creates new departments with the people of their templates unless that is unticked', async () => {
+    const calls = mockApi({ 'POST /api/departments/build': [201, { created: ['a'], removed: [], hired: [] }] });
+    render(<StructureCard manual={{ existing: ['operations', 'sales', 'marketing', 'business_development'] }} departments={[]} onCorrect={noop} />);
+    const withPeople = screen.getByRole('checkbox', { name: /Hire the people of each template/ }) as HTMLInputElement;
+    expect(withPeople.checked).toBe(true);
+    fireEvent.click(withPeople);
+    fireEvent.click(screen.getByRole('button', { name: 'Create departments (1)' }));
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toEqual({ items: [{ template: 'development', note: '', staff: false }] });
   });
 
   it('starts at five and keeps Operations ticked', () => {
@@ -52,12 +63,12 @@ describe('StructureCard', () => {
   it('offers the missing templates with the default ticks when building by hand', async () => {
     const calls = mockApi({ 'POST /api/departments/build': [201, { created: [], removed: [] }] });
     render(<StructureCard manual={{ existing: ['operations', 'sales'] }} departments={[]} onCorrect={noop} />);
-    expect(screen.getAllByRole('checkbox')).toHaveLength(8);
-    const ticked = screen.getAllByRole('checkbox').filter(b => (b as HTMLInputElement).checked).map(b => b.getAttribute('data-template'));
+    expect(screen.getAllByRole('checkbox').filter(b => b.hasAttribute('data-template'))).toHaveLength(8);
+    const ticked = screen.getAllByRole('checkbox').filter(b => b.hasAttribute('data-template') && (b as HTMLInputElement).checked).map(b => b.getAttribute('data-template'));
     expect(ticked).toEqual(['development', 'marketing', 'business_development']);
     fireEvent.click(screen.getByRole('button', { name: 'Create departments (3)' }));
     await vi.waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]!.body).toEqual({ items: [{ template: 'development', note: '' }, { template: 'marketing', note: '' }, { template: 'business_development', note: '' }] });
+    expect(calls[0]!.body).toEqual({ items: [{ template: 'development', note: '', staff: true }, { template: 'marketing', note: '', staff: true }, { template: 'business_development', note: '', staff: true }] });
   });
 
   it('shows a change to an existing department by its name', () => {
