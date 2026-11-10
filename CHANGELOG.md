@@ -5,6 +5,44 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.3] - 2026-11-10
+
+Department templates come with their people, their turnkey team and their own route of checks, and a hire runs the
+model its role asks for. Preparing a test environment no longer fails because a machine is slow to stop a service.
+
+### Before you update
+
+- Migration 0097 adds to every task route the skill each of its checks needs. Routes made before it went through the
+  stages of Development and get their skills; nothing else is converted.
+- Every employee now carries the skill on whom to ask, from its next turn.
+- Employees already hired keep their models and skills. The new model rules and team skills apply to new hires, to a
+  department built with its people, and to an employee that gets a plan of another program.
+
+### Added
+
+- A department can be created with the people of its template: a tick on the structure card, on by default, brings one
+  of each default role, each on a plan that serves it with the model its role's strength asks for. An employee waiting
+  for a subscription is drawn grey and says to assign one.
+- Every department template has a turnkey team. Its members carry the skills of every check of their department and
+  ask for the strongest model. The turnkey team of Development brings the skills of every echelon.
+- Every department template has its own route of checks in `templates/echelons`. A department without a repository
+  hands its work in as a document, checked by someone of the department who carries the checking skill; where nobody
+  does, its work goes as before. Marketing, Sales, Support and Business development get a checker role.
+- A fourth strength of role, top, asks for the strongest model. The architect and the security engineer use it.
+
+### Changed
+
+- A hire that names no model runs the model of its role's strength on its plan, by name, instead of the program's
+  default, and so does an employee that gets a plan of another program.
+- The architect and the test engineer join the default roster of Development, so each echelon has its own employee.
+
+### Fixed
+
+- Preparing a test environment failed when PostgreSQL took longer than 5 seconds to stop on a slow disk. An ordinary
+  stop of a service now waits for it however long it takes, bounded only by the preparation's own deadline and
+  cancellation; the short graces only finish processes off after a cancellation or an error. The server that prepares
+  a template runs without fsync, since its state is synced before the template is published.
+
 ## [0.18.2] - 2026-11-10
 
 Code work outside a turn and quick fixes go to a turnkey team, not to the members of the echelons.
