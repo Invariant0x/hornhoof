@@ -993,6 +993,8 @@ export const en = {
       findings: { heading: 'Findings by stage', unique: (n: number) => `Unique findings: ${n}`, reported: (n: number) => `Reported: ${n}`, confirmed: (n: number) => `Confirmed: ${n}` },
       heading: 'Task workflow',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
+      documentStages: { architecture: 'Plan', development: 'Work', review: 'Check', security: 'Risk check' },
+      documentReady: 'Checked, waits for the head to accept it',
       phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed', cancelled: 'Cancelled' },
       statuses: { pending: 'Pending', active: 'In progress', complete: 'Completed', skipped: 'Skipped' },
       reasons: { small_task: 'Small task', no_declared_risk: 'Not required', eligible_owner_required: 'An eligible owner is needed', requested_by_head: 'The head asked for it', wrong_goal: 'Not what the task asked for', tests_failed: 'The tests failed' },

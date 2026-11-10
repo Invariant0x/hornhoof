@@ -42,6 +42,11 @@ export async function echelonsFor(db: Db | Tx, at: Placement): Promise<boolean> 
   return mode === 'echelons' && !team;
 }
 
+/* The same asked while it is still decided what kind of task to make, when no refusal is due. */
+export async function wouldGoThroughEchelons(db: Db | Tx, at: Placement): Promise<boolean> {
+  return await turnMode(db, at) === 'echelons' && !(await turnkeyTeamOf(db, at.companyId, at.holderId));
+}
+
 export const throughEchelons = (db: Db | Tx, task: Pick<Task, 'companyId' | 'turnId' | 'executorAgentId' | 'assigneeAgentId'>) =>
   echelonsFor(db, { companyId: task.companyId, turnId: task.turnId, holderId: task.executorAgentId ?? task.assigneeAgentId });
 

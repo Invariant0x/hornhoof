@@ -15,8 +15,9 @@ export type EchelonStep = {
 export type EchelonsSnapshot = {
   kind: 'development_echelons';
   version: 1;
-  /* turnkey: its holder does it end to end alone, with no echelons. */
-  resultKind: 'code' | 'coordination' | 'turnkey';
+  /* document: goes through its stages as code does, handed in as text and files where its department keeps no
+     repository. turnkey: its holder does it end to end alone, with no echelons. */
+  resultKind: 'code' | 'document' | 'coordination' | 'turnkey';
   revision: number;
   stage: EchelonStage | null;
   phase: EchelonPhase;
@@ -37,6 +38,15 @@ export const EchelonCandidate = z.object({
   paths: z.array(z.string()), producedBy: EchelonModel.extend({ stage: z.enum(ECHELON_STAGES) }),
 }).strict();
 export type EchelonCandidate = z.infer<typeof EchelonCandidate>;
+/* What is handed in where there is no repository: the digest of the words of the hand-in and of the files on its task. */
+export const DocumentCandidate = z.object({
+  id: z.uuid(), parentId: z.uuid().nullable(), revision: z.number().int().positive(),
+  digest: z.string().regex(/^[a-f0-9]{64}$/), producedBy: EchelonModel.extend({ stage: z.enum(ECHELON_STAGES) }),
+}).strict();
+export type DocumentCandidate = z.infer<typeof DocumentCandidate>;
+/* Either of them, as the stages pass it on. */
+export type HandedCandidate = Pick<EchelonCandidate, 'id' | 'parentId' | 'revision' | 'producedBy'>;
+export const isStaged = (kind: EchelonsSnapshot['resultKind']): boolean => kind === 'code' || kind === 'document';
 
 export type EchelonFindingView = {
   findingId: string; revision: string; candidateId: string; stage: 'review' | 'security' | 'cleanup';

@@ -117,6 +117,26 @@ Cleanup is optional and off by default. When the head enables it for a task or t
 
 A department's sub-unit can be marked "Works turnkey" on the department's screen. Each of its members then does a task alone from start to finish: code, checks, tests, merge and release. Such a task goes through no stages, and nobody else in the department checks it, whatever its text says. The mark holds for tasks given from then on.
 
+## How is work checked in the other departments?
+
+Every department has a route of its own: the stages its work goes through in a turn that runs in stages. Development has the longest one. In Marketing, Sales, Support, Business development, Design and Finance a task is done by one employee and checked by another before the head accepts it. In Operations a fix is checked by another engineer and then run in the test environment, where the department keeps code. Home devices and Household have no check: one helper does the work, and anything that acts on the real world waits for a person.
+
+| Department | Who checks |
+| --- | --- |
+| Marketing | Editor |
+| Sales | Sales reviewer |
+| Support | Support quality reviewer |
+| Business development | Research reviewer |
+| Design | Design QA |
+| Finance | Finance auditor |
+| Operations | Reliability engineer and Integrations engineer, each the other's work |
+
+The one who checks carries the skill "Checking a colleague's result" and runs a model at least as strong as the author's. It corrects what it finds itself and passes the result on, or sends work that answers the wrong question to the head.
+
+A department that keeps its work in a repository hands in a commit, as Development does. A department with no repository hands in a document: what the employee wrote in the hand-in and the files attached to the task. The task shows its stages as "Work" and "Check", and once the check passed it waits for the head to accept it.
+
+A department where nobody carries the checking skill works as before: the employee does the task and reports it done. To have work checked there, hire the role from the table or switch the skill on for an employee. Outside a turn, and in a turn that runs turnkey, there are no stages in any department.
+
 ## How hard does an employee think?
 
 Hornhoof picks the configured level when a turn starts. It stays until that turn ends.

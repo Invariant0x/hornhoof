@@ -2,7 +2,8 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { checkerFor } from './echelons-assign.js';
-import { checkedProducer, currentCandidate } from './echelons-candidates.js';
+import { checkedProducer, currentHanded } from './echelons-candidates.js';
+import { isStaged } from '@hornhoof/protocol/echelons';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { RepoPath } from './review-schema.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
@@ -60,7 +61,7 @@ function requireProducerChange(state: Route['state'], executor: TaskChange['exec
 }
 
 function withRisk(state: Route['state'], agentId: string, risk: TaskChange['riskClass']): Route['state'] {
-  if (risk && risk !== 'none' && state.resultKind === 'code' && state.stages.some(step => step.stage === 'security')) {
+  if (risk && risk !== 'none' && isStaged(state.resultKind) && state.stages.some(step => step.stage === 'security')) {
     if (['tests', 'security'].includes(state.stage ?? '') && !state.security.required) throw refuse(409, 'task_invalid', 'A newly discovered risk must be resolved before this result proceeds.');
     return { ...state, security: { required: true, reason: risk, addedBy: agentId }, stages: state.stages.map(step => step.stage === 'security' && step.status === 'skipped' ? { ...step, status: 'pending', reason: null } : step) };
   }
@@ -77,7 +78,7 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
   const team = await turnkeyTeamOf(ctx.db, task.companyId, ownerId);
   if (team) throw refuse(409, 'task_invalid', `The new owner is in ${team.name}, a turnkey team, whose members take only work of their own and never enter the echelons.`);
   const ability = state.stage ? state.abilities[state.stage] : undefined;
-  const assignment = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, await currentCandidate(ctx.db, task, route)), ability, ownerId) : null;
+  const assignment = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)), ability, ownerId) : null;
   if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
   const next: Route['state'] = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };
   const set: Partial<Task> = { assigneeAgentId: ownerId, status: ability && state.stage !== 'tests' ? 'review' : 'open', silent: 0 };

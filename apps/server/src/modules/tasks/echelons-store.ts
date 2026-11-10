@@ -10,7 +10,7 @@ import { refuse, type Task, type Tx } from './engine.js';
 import { throughEchelons } from './turnkey.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-export type RouteInput = { resultKind?: 'code' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 function routeStep(name: EchelonStep['stage'], current: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep {
   return { stage: name, status: name === current ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null };
@@ -38,7 +38,12 @@ function requireStages(task: Task, plan: StageRoute, input: RouteInput, cleanup:
   if (missing) throw refuse(409, 'task_invalid', `The route of this department has no ${missing[0]} stage for #${task.number}.`);
 }
 
-function codeState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute): Route['state'] {
+/* A document has no commit to run or to tidy, so Tests and Cleanup are not among its stages. */
+const documentStages = (plan: StageRoute): StageRoute => ({ ...plan, stages: plan.stages.filter(step => step.stage !== 'tests' && step.stage !== 'cleanup') });
+/* The skill of the first check a document meets in a department, or null where its route checks none. */
+export const documentCheck = (plan: StageRoute): string | null => documentStages(plan).stages.find(step => step.ability)?.ability ?? null;
+
+function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute, resultKind: 'code' | 'document'): Route['state'] {
   requireStages(task, plan, input, cleanup);
   const has = (name: EchelonStep['stage']) => plan.stages.some(step => step.stage === name);
   const stage = has('architecture') && !task.small ? 'architecture' : 'development';
@@ -48,7 +53,7 @@ function codeState(task: Task, input: RouteInput, cleanup: boolean, plan: StageR
     review: routeStep('review', stage, input.reviewerAgentId ?? null), cleanup: cleanup ? routeStep('cleanup', stage) : null,
     security, tests: routeStep('tests', stage, input.testsAgentId ?? null),
   };
-  return { kind: 'development_echelons', version: 1, resultKind: 'code', stage, phase: 'active', candidateId: null, assignment: null,
+  return { kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
     stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : [])),
     security: has('security') ? policy : NO_SECURITY,
   };
@@ -78,9 +83,13 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: S
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
   if (resultKind === 'coordination') return createCoordinationRoute(tx, task);
   if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input);
+  if (resultKind === 'document') {
+    await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: stagedState(task, input, input.cleanup ?? false, documentStages(plan), 'document') });
+    return;
+  }
   /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
   const cleanup = input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: codeState(task, input, cleanup, plan) });
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: stagedState(task, input, cleanup, plan, 'code') });
 }
 
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {

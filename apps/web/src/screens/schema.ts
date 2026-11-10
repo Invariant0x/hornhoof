@@ -1,3 +1,4 @@
+import { isStaged } from '@hornhoof/protocol/echelons';
 import type { Department, DeptRole, Employee, Team } from '../types';
 import type { Point } from '../ui/wires';
 
@@ -88,7 +89,7 @@ function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[])
 }
 
 /* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
-export const leadsStage = (e: Employee): boolean => Boolean(e.task && e.task.echelons.resultKind === 'code' && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
+export const leadsStage = (e: Employee): boolean => Boolean(e.task && isStaged(e.task.echelons.resultKind) && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
 
 /* Observers sit beside the pipeline and connect directly to the head, like sub-unit frames. */
 function observerFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {

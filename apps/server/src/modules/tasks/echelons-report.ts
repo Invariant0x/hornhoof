@@ -4,6 +4,7 @@ import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { testedEvidence } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
+import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
 import { requiredStagesComplete } from './echelons-accept.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
@@ -30,11 +31,12 @@ export async function architectureReport(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
-type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true };
+type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
 const ChildReference: z.ZodType<AcceptedChild> = z.lazy(() => z.union([
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string() })) }),
   z.object({ taskId: z.uuid(), children: z.array(ChildReference) }),
   z.object({ taskId: z.uuid(), turnkey: z.literal(true) }),
+  z.object({ taskId: z.uuid(), candidateId: z.uuid(), digest: z.string() }),
 ]));
 
 async function acceptedUnder(tx: Tx, task: Task, ancestors = new Set<string>()): Promise<AcceptedChild[]> {
@@ -58,6 +60,7 @@ async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<Ac
   const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
   /* Turnkey work has no candidate and no stages: its holder closed it alone, and nobody checks it after. */
   if (route.state.resultKind === 'turnkey') return { taskId: child.id, turnkey: true };
+  if (route.state.resultKind === 'document') return acceptedDocument(tx, child, route, report?.data);
   return route.state.resultKind === 'coordination' ? acceptedAggregate(tx, child, route, report?.data, path) : acceptedCode(tx, child, route, report?.data);
 }
 

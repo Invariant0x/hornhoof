@@ -1,7 +1,7 @@
 import { matchesGlob } from 'node:path';
 import { RepoPath } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
-import { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { DocumentCandidate, EchelonCandidate, type HandedCandidate } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import type { Ctx } from '../../app.js';
@@ -23,21 +23,26 @@ export function producedCandidate(route: Route, producer: CheckerIdentity, revie
   });
 }
 
-async function candidateOf(db: Db | Tx, task: Task, id: string | null): Promise<EchelonCandidate> {
+async function handedOf<T extends HandedCandidate>(db: Db | Tx, task: Task, id: string | null, shape: { safeParse(value: unknown): { success: true; data: T } | { success: false } }): Promise<T> {
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'submitted'),
     sql`${taskEvents.data}->'candidate'->>'id' = ${id}`)).orderBy(desc(taskEvents.id)).limit(1);
-  const parsed = EchelonCandidate.safeParse(event?.data.candidate);
+  const parsed = shape.safeParse(event?.data.candidate);
   if (!parsed.success || event?.agentId !== parsed.data.producedBy.agentId) throw refuse(409, 'task_invalid', 'The current candidate has no immutable producer submission.');
   return parsed.data;
 }
 
-export const currentCandidate = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> => candidateOf(db, task, route.state.candidateId);
+export const currentCandidate = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> => handedOf(db, task, route.state.candidateId, EchelonCandidate);
+export const currentDocument = (db: Db | Tx, task: Task, route: Route): Promise<DocumentCandidate> => handedOf(db, task, route.state.candidateId, DocumentCandidate);
+/* What the current stage holds, a commit or a document as the route of the task hands it in. */
+export const currentHanded = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate | DocumentCandidate> =>
+  route.state.resultKind === 'document' ? currentDocument(db, task, route) : currentCandidate(db, task, route);
 
 /* Whose work the current stage checks: the producer of what it received, also once Tests took the main line into it. */
-export async function checkedProducer(db: Db | Tx, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+export async function checkedProducer(db: Db | Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   if (candidate.producedBy.stage !== route.state.stage) return candidate.producedBy;
   const input = route.state.stages.find(step => step.stage === route.state.stage)?.inputCandidateId ?? null;
-  return (await candidateOf(db, task, input)).producedBy;
+  const received = route.state.resultKind === 'document' ? await handedOf(db, task, input, DocumentCandidate) : await handedOf(db, task, input, EchelonCandidate);
+  return received.producedBy;
 }
 
 /* A repair extends the assigned branch while keeping the full change relative to the original base. */

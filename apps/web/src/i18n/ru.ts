@@ -1028,6 +1028,8 @@ export const ru: Messages = {
       findings: { heading: 'Находки по этапам', unique: n => `Уникальных находок: ${n}`, reported: n => `Найдено: ${n}`, confirmed: n => `Подтверждено: ${n}` },
       heading: 'Маршрут задачи',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
+      documentStages: { architecture: 'План', development: 'Работа', review: 'Проверка', security: 'Проверка риска' },
+      documentReady: 'Проверено, ждет приемки руководителя',
       phases: { active: 'В работе', waiting: 'Нужен исполнитель', escalated: 'У руководителя для решения', ready: 'Готово к слиянию', done: 'Завершено', cancelled: 'Отменено' },
       statuses: { pending: 'Ожидает', active: 'В работе', complete: 'Завершено', skipped: 'Пропущено' },
       reasons: { small_task: 'Малая задача', no_declared_risk: 'Не требуется', eligible_owner_required: 'Нужен подходящий исполнитель', requested_by_head: 'Попросил руководитель', wrong_goal: 'Не то, что просила задача', tests_failed: 'Тесты не прошли' },

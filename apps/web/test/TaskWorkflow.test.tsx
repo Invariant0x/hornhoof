@@ -31,6 +31,14 @@ describe('task workflow', () => {
     expect(screen.getByRole('heading').textContent).toBe('No stages: the employee does it alone from start to finish');
   });
 
+  it('names the stages of a document in plain words, and says it waits for the head once they passed', () => {
+    render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={{ ...workflow([step('development', 'complete', null), step('review', 'complete', null)], 'ready'), resultKind: 'document', stage: 'review' }} /></LanguageProvider>);
+    expect(screen.getByText('Work')).toBeTruthy();
+    expect(screen.getByText('Check')).toBeTruthy();
+    expect(screen.queryByText('Development')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('Checked, waits for the head to accept it');
+  });
+
   it('shows the phase of a cancelled task as cancelled', () => {
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={workflow([step('review', 'pending', null)], 'cancelled')} /></LanguageProvider>);
     expect(screen.getByRole('status').textContent).toBe('Cancelled');
