@@ -14,6 +14,7 @@ import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
 
 const RETRY_MINUTES = [1, 2, 5, 10];
+const UNHEARD_MAX_MINUTES = 240;
 type Job = typeof jobs.$inferSelect;
 type TaskTurn = Parameters<typeof turnAgain>[1];
 export type LastFailure = { kind: Failure['kind']; text: string; at: number; tail: string };
@@ -164,14 +165,15 @@ async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, task
 const unheardNote = (why: string, words: string) => `${why}. Your program did not record these words, so here they are again:\n\n${words}`;
 
 /* The program never recorded these words, so nothing was lost but time: they go on, whatever the node said of retrying, and
-   a turn on a task says them again, for its program knows nothing of them. The wait grows, and a program that stays stuck
-   costs a try now and then. A turn of a task that no longer waits for it was stopped before this. */
+   a turn on a task says them again, for its program knows nothing of them. The wait grows, twice as long after the last
+   listed one and up to UNHEARD_MAX_MINUTES, so a program that stays stuck costs a try now and then. A turn of a task that
+   no longer waits for it was stopped before this. */
 async function retryUnheardWords(ctx: Ctx, job: Job, failure: Failure): Promise<boolean> {
   if (passing(failure) || HELD.has(failure.kind)) return false;
   const unheard = await unheardWords(ctx, job);
   if (!unheard) return false;
   const attempt = await passingAttempts(ctx, job, undefined, f => !passing(f));
-  const minutes = RETRY_MINUTES[Math.min(attempt, RETRY_MINUTES.length) - 1]!;
+  const minutes = RETRY_MINUTES[attempt - 1] ?? Math.min(UNHEARD_MAX_MINUTES, RETRY_MINUTES.at(-1)! * 2 ** (attempt - RETRY_MINUTES.length));
   const at = new Date(+(job.finishedAt ?? new Date()) + minutes * 60_000);
   const why = failedWhy(job);
   const kept = { operatorDelivery: { id: unheard.delivery.id, ordinal: unheard.delivery.ordinal }, operatorRecovery: unheard.incident.id };

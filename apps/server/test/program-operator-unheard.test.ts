@@ -97,11 +97,11 @@ it('the retry names the first words, so a program that recorded them after all d
   expect(c.runOf(second!.id)!.operatorSourceDelivery).toEqual(delivery);
 });
 
-it('waits longer each time, and goes on trying', async () => {
+it('waits longer each time, twice as long after the fourth try and never more than four hours, and goes on trying', { timeout: 120_000 }, async () => {
   const c = await stuckPrograms();
   await say(c, c.orchestrator.id);
   const waits: number[] = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 11; i++) {
     const running = await c.runningOf(c.orchestrator.id);
     await c.unrecorded(c.orchestrator.id, running!.id);
     const at = new Date();
@@ -110,7 +110,7 @@ it('waits longer each time, and goes on trying', async () => {
     waits.push(Math.round((+next!.notBefore! - +at) / 60000));
     await c.retryDue(c.orchestrator.id);
   }
-  expect(waits).toEqual([1, 2, 5, 10, 10, 10]);
+  expect(waits).toEqual([1, 2, 5, 10, 20, 40, 80, 160, 240, 240, 240]);
 });
 
 it('a report on a task keeps its words: the retry says what the turn was woken for', async () => {
