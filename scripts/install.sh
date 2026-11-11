@@ -396,6 +396,8 @@ host_facts() {
     if [ -n "$FROM_UPDATER" ] && [ -n "${1:-}" ]; then
       "${DOCKER[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2> /dev/null | grep -E '^HORNHOOF_HOST_(CPU|CPUS|MEMORY)=' || true
     fi
+    # On Windows install.ps1 runs this script in a container, and hands over what the computer has in the same words.
+    if [ -z "$FROM_UPDATER" ]; then env | grep -E '^HORNHOOF_HOST_(CPU=[A-Za-z0-9 ()@.,_-]{1,200}|CPUS=[0-9]+|MEMORY=[0-9]+)$' || true; fi
     return 0
   fi
   cpu=$(sysctl -n machdep.cpu.brand_string 2> /dev/null | tr -cd 'A-Za-z0-9 ()@.,_-' | cut -c1-200 || true)

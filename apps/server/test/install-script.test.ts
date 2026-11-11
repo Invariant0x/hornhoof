@@ -145,6 +145,22 @@ describe('install.sh', () => {
     expect(r.calls.filter(c => c.startsWith('docker run -d')).some(c => c.includes('HORNHOOF_HOST'))).toBe(false);
   });
 
+  it("tells each node the Windows computer's processor, cores and memory that install.ps1 hands over, and nothing malformed", () => {
+    const memory = String(64 * 1024 ** 3);
+    const facts = { HORNHOOF_HOST_CPU: 'Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz', HORNHOOF_HOST_CPUS: '8', HORNHOOF_HOST_MEMORY: memory };
+    const r = install({ env: facts });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs).toHaveLength(2);
+    for (const run of runs) for (const [name, value] of Object.entries(facts)) expect(run).toContain(` -e ${name}=${value} `);
+    const odd = install({ env: { HORNHOOF_HOST_CPU: 'Intel; rm -rf /', HORNHOOF_HOST_CPUS: 'eight', HORNHOOF_HOST_MEMORY: memory } });
+    expect(odd.code).toBe(0);
+    for (const run of odd.calls.filter(c => c.startsWith('docker run -d'))) {
+      expect(run).toContain(`-e HORNHOOF_HOST_MEMORY=${memory} `);
+      expect(run).not.toMatch(/HORNHOOF_HOST_CPUS?=/);
+    }
+  });
+
   it('leaves the processors and memory of a Colima set up before as they are', () => {
     const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_COLIMA_LIST: '{"name":"work","status":"Stopped","cpus":4}' } });
     expect(r.code).toBe(0);

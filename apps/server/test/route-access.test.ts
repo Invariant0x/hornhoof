@@ -24,6 +24,7 @@ const publicRoutes = new Map([
   ['GET /api/version', 'public version'],
   ['GET /api/setup', 'public setup availability'],
   ['GET /install.sh', 'public installer'],
+  ['GET /install.ps1', 'public installer for Windows'],
   ['GET /mcp', 'public method rejection'],
   ['DELETE /mcp', 'public method rejection'],
 ]);
