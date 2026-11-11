@@ -260,3 +260,20 @@ describe('work tree words', () => {
     }
   });
 });
+
+describe('the words of copies', () => {
+  /* Every string of a copy's part, each function called with words of its own. */
+  const said = (dict: typeof en): Record<string, string> =>
+    Object.fromEntries(Object.entries(dict.machines.copy).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c') : value]));
+
+  it('words copies in both languages', () => {
+    const [english, russian] = [said(en), said(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+  });
+});

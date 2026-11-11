@@ -7,6 +7,7 @@ import type { BuiltinView, Me } from '../src/types';
 import { makeKey } from '../src/owner-key';
 import { keyDefaults } from '../src/owner-key-store';
 import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
+import { clock } from '../src/ui/subscription';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -562,6 +563,97 @@ describe('Machines', () => {
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
+  });
+
+  const shown = (language: string, machines: unknown[], more: object = {}) => {
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines, builtin: null, ...more }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+  };
+  const held = (over: object) => ({ number: null, why: null, unfit: null, copy: null, leftAt: null, ...over });
+
+  it.each([['en', 'Copy: being made, 40%'], ['ru', 'Копия: создается, 40%']])("writes a copy's line in %s", async (language, line) => {
+    shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).getByText(line)).toBeInTheDocument();
+    /* Its place stands before the line. */
+    expect(within(mac).getByText(line).closest('p')).toHaveTextContent(`2${line}`);
+  });
+
+  it("writes every state of a copy, and a machine's place without one", async () => {
+    const lines: [object, string][] = [
+      [{ number: 2, copy: { line: 'remaking', progress: 10 } }, 'Copy: being made again, 10%'],
+      [{ number: 2, copy: { line: 'ready' } }, 'Copy: up to date'],
+      [{ number: 3, copy: { line: 'behind', minutes: 4 } }, 'Copy: 4 min behind'],
+      [{ number: 2, copy: { line: 'catching_up' } }, 'Copy: catching up'],
+      [{ number: 2, copy: { line: 'asleep', since: null } }, 'Copy: asleep'],
+      [{ number: 3, copy: { line: 'asleep', since: '2026-11-10T09:30:00.000Z' } }, `Copy: asleep since ${clock('en', '2026-11-10T09:30:00.000Z')}`],
+      [{ number: 2, copy: { line: 'stopped', why: null } }, 'Copy: stopped'],
+      [{ number: 2, copy: { line: 'stopped', why: 'disk_full' } }, 'Copy: stopped: disk full'],
+      [{ number: 2, copy: { line: 'stopped', why: 'setup' } }, "Copy: stopped: the company's settings cannot be written here"],
+      [{ number: 4, why: 'next' }, 'Gets a copy if one of the first three leaves.'],
+      [{ number: 1, why: 'server' }, 'The company server runs here.'],
+    ];
+    shown('en', lines.map(([data], n) => ({ ...MACHINES[0]!, id: `c${n}`, hostname: `host-${n}`, data: held(data) })));
+    await screen.findByRole('table');
+    for (const [n, [, line]] of lines.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Holds no copy: Docker has 3.2 GB of memory here; a copy needs 4 GB.'],
+    ['ru', 'Не хранит копию: Docker получает здесь 3,2 ГБ памяти; копии нужно 4 ГБ.'],
+  ])('says why a machine holds no copy in %s', async (language, line) => {
+    shown(language, [{ ...MACHINES[0]!, data: held({ unfit: { why: 'memory', memory: 3.2 * GIB } }) }]);
+    expect(within(await openCard('ivan-mbp')).getByText(line)).toBeInTheDocument();
+  });
+
+  it('words every reason a machine holds no copy', async () => {
+    const reasons: [object, string][] = [
+      [{ why: 'phone' }, 'Holds no copy: it is a phone.'],
+      [{ why: 'no_core' }, 'Holds no copy: Hornhoof runs here without Docker.'],
+      [{ why: 'scope', person: 'Anna' }, 'Holds no copy: Anna does not see the whole company.'],
+      [{ why: 'no_link' }, 'Holds no copy: the company has no link at hornhoof.org; turn it on in Settings.'],
+      [{ why: 'measuring' }, 'Holds no copy: measuring this machine.'],
+      [{ why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, 'Holds no copy: 12 GB free; a copy needs 40.5 GB.'],
+      [{ why: 'fsync', p99: 72.4 }, 'Holds no copy: the disk saves slowly (72.4 ms); a copy needs under 50 ms.'],
+    ];
+    shown('en', reasons.map(([unfit], n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
+    await screen.findByRole('table');
+    for (const [n, [, line]] of reasons.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`],
+    ['ru', (date: string) => `Перестала хранить данные компании ${date}. Если она может быть в чужих руках, смените секрет компании и API-ключи.`],
+  ])('tells the CEO a machine left in %s', async (language, line) => {
+    const leftAt = '2026-11-10T09:30:00.000Z';
+    shown(language, [{ ...MACHINES[0]!, data: held({ leftAt }) }]);
+    expect(within(await openCard('ivan-mbp')).getByText(line(new Date(leftAt).toLocaleDateString(language)))).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'rack-01 leads. mac keeps a copy and takes over if rack-01 stops.', 'rack-01 leads. mac and deb keep copies; deb takes over if rack-01 stops.', (time: string) => `Only rack-01 holds changes since ${time}.`],
+    ['ru', 'rack-01 ведет компанию. mac хранит копию и возьмет сервер, если rack-01 остановится.', 'rack-01 ведет компанию. mac и deb хранят копии; deb возьмет сервер, если rack-01 остановится.', (time: string) => `Только rack-01 хранит изменения с ${time}.`],
+  ])('says who holds the company in %s', async (language, one, two, only) => {
+    const since = '2026-11-10T09:30:00.000Z';
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, copies: { leader: 'rack-01', copies: [{ hostname: 'mac', sync: false }], onlySince: null } }] });
+    const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(one)).toBeInTheDocument();
+    view.unmount();
+    /* Two copies: both are named, and the one commits wait for takes over; with none up to date, since when. */
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, copies: { leader: 'rack-01', copies: [{ hostname: 'mac', sync: false }, { hostname: 'deb', sync: true }], onlySince: since } }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(two)).toBeInTheDocument();
+    expect(screen.getByText(only(clock(language as 'en' | 'ru', since)!))).toBeInTheDocument();
+  });
+
+  it('says nothing of copies where the server tells none', async () => {
+    shown('en', [MACHINES[0]!]);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).queryByText(/^Copy: /)).not.toBeInTheDocument();
+    expect(within(mac).queryByText(/^Holds no copy: /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ leads\. /)).not.toBeInTheDocument();
   });
 
   it('says in Russian that the server runs on a machine that joined', async () => {

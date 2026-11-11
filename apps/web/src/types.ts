@@ -640,7 +640,33 @@ export type MachineView = {
      omit them. */
   keepsBackups?: boolean | null;
   heldBackups?: number | null;
+  /* Its part in holding the company's data, for those who see the whole company. Older servers omit it. */
+  data?: DataView | null;
 };
+
+/* Why a machine holds no copy of the company's data. */
+export type Unfit =
+  | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' }
+  | { why: 'scope'; person: string }
+  | { why: 'memory'; memory: number }
+  | { why: 'disk'; free: number; need: number }
+  | { why: 'fsync'; p99: number };
+
+/* How a machine's copy of the company's data does. */
+export type CopyLine =
+  | { line: 'making' | 'remaking'; progress: number }
+  | { line: 'ready' | 'catching_up' }
+  | { line: 'behind'; minutes: number }
+  | { line: 'asleep'; since: string | null }
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+
+/* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, and when it
+   stopped holding the data. */
+export type DataView = { number: number | null; why: 'server' | 'next' | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
+
+/* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
+   when only the leader holds the changes. */
+export type CopiesView = { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
    runs it takes, of tests or of other work. */

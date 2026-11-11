@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, ComputerAccessView, MachineView, Me, SubView, TlsView } from '../types';
+import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -309,6 +309,79 @@ function NetworkPlace({ row }: { row: MachineRow }) {
   </>;
 }
 
+const tenths = (language: Language, n: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round(n * 10) / 10);
+
+/* Why a machine holds no copy, in the words of its card. */
+function unfitText(t: Messages, language: Language, unfit: Unfit): string {
+  const c = t.machines.copy;
+  switch (unfit.why) {
+    case 'phone': return c.phone;
+    case 'no_core': return c.noCore;
+    case 'scope': return c.scope(unfit.person);
+    case 'no_link': return c.noLink;
+    case 'measuring': return c.measuring;
+    case 'memory': return c.memory(gigabytes(language, unfit.memory));
+    case 'disk': return c.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
+    case 'fsync': return c.fsync(tenths(language, unfit.p99));
+  }
+}
+
+function copyText(t: Messages, language: Language, copy: NonNullable<DataView['copy']>): string {
+  const c = t.machines.copy;
+  switch (copy.line) {
+    case 'making': return c.making(copy.progress);
+    case 'remaking': return c.remaking(copy.progress);
+    case 'ready': return c.ready;
+    case 'catching_up': return c.catchingUp;
+    case 'behind': return c.behind(copy.minutes);
+    case 'asleep': return c.asleep(clock(language, copy.since));
+    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : c.stopped;
+  }
+}
+
+/* What the card says of the machine's part in holding the company's data, a line each: why it has its place, then how
+   its copy does or why it holds none, then when it stopped holding the data. */
+function dataLines(t: Messages, language: Language, data: DataView): string[] {
+  const c = t.machines.copy;
+  return [
+    data.why === 'server' ? c.server : data.why === 'next' ? c.next : null,
+    data.copy ? copyText(t, language, data.copy) : data.unfit ? c.none(unfitText(t, language, data.unfit)) : null,
+    data.leftAt ? c.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
+  ].filter((line): line is string => line !== null);
+}
+
+/* The machine's place in the order, with the first line beside it and the others below. A machine with no place and
+   nothing to say has no such part. */
+function DataPlace({ data }: { data: DataView }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const lines = dataLines(t, language, data);
+  if (data.number === null && lines.length === 0) return null;
+  const [first, ...rest] = data.number === null ? [null, ...lines] : lines;
+  return (
+    <Part title={t.cards.priority}>
+      {data.number !== null && <p className="server-priority"><b>{data.number}</b><span>{first ?? ''}</span></p>}
+      {rest.map(line => <p key={line} className="machine-note">{line}</p>)}
+    </Part>
+  );
+}
+
+/* Who holds the company, under the tab's intro: the leader, the machines that keep a copy and the one that takes over,
+   and since when only the leader holds the changes. */
+function CopiesLine({ copies }: { copies: CopiesView }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const c = t.machines.copy;
+  const names = copies.copies.map(copy => copy.hostname);
+  const next = copies.copies.find(copy => copy.sync)?.hostname ?? names[0];
+  if (next === undefined) return null;
+  const since = clock(language, copies.onlySince);
+  return <>
+    <p className="muted">{names.length === 1 ? c.one(copies.leader, next) : c.many(copies.leader, new Intl.ListFormat(language, { type: 'conjunction' }).format(names), next)}</p>
+    {since && <p className="muted">{c.onlySince(copies.leader, since)}</p>}
+  </>;
+}
+
 /* Computer access to the machine: that it is open, for everyone who sees the card, and the buttons for who may press
    them. Its owner opens it for a day, with what their key signs where the machine holds that key; closed, it says
    nothing to anyone else. */
@@ -361,7 +434,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
         {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
-        {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
+        {m?.data ? <DataPlace data={m.data} /> : m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
         {row.access && <MachineAccess view={row.access} controls={controls} />}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
@@ -383,6 +456,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const certificateEnds = endingSoon(useLinkTls(me), now);
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
+  const [copies, setCopies] = useState<CopiesView | null>(null);
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
@@ -402,13 +476,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const load = useCallback(async () => {
     try {
       const [hosts, list] = await Promise.all([
-        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines'),
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
         loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
       ]);
       if (!live.current) return;
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
+      setCopies(hosts.copies ?? null);
       setSubs(list.subscriptions);
     } catch (err) {
       setFailure(err);
@@ -508,6 +583,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <div>
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
+          {copies && <CopiesLine copies={copies} />}
         </div>
         {!activeCommand && (
           <div className="head-actions">

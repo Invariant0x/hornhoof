@@ -16,6 +16,7 @@ import { linkOf, publicUrl } from '../link/link.js';
 import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
+import { holding } from '../copies/view.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
@@ -268,6 +269,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
     const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
+    /* Who holds the company's data, and each machine's part in it: for those who see the whole company. The card of
+       the computer the server itself runs on says what the server's own row says. */
+    const held = me.scopeKind === 'company' ? await holding(ctx) : null;
+    const dataOf = (machineId: string) => held?.views.get(serverMachine?.id === machineId && ownRow ? ownRow.id : machineId) ?? null;
     /* Each machine's computer access as this person sees it; the server's card carries its own machine's. */
     const access = await seenAccess(ctx, me);
     const accessOf = (machineId: string | undefined) => access.find(view => view.machine.id === machineId) ?? null;
@@ -321,12 +326,14 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
         needsCore: needsCore(m),
         access: accessOf(m.id),
+        ...(held ? { data: dataOf(m.id) } : {}),
         /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
         keepsBackups: m.networkId ? m.keepsBackups : null,
         heldBackups: m.networkId ? m.heldBackups.length : null,
         drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),
+      ...(held ? { copies: held.copies } : {}),
     };
   });
 
