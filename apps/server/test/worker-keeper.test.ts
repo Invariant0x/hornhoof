@@ -1,203 +1,28 @@
 import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { availableParallelism, tmpdir, totalmem } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { companies, computerRuns, machines, people, personKeys } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
-import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
 import { PIN_FILE, readPin } from '../src/modules/keeper/owner-pin.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
-import { PEERS_FILE, TICKET_FILE, WorkerKeeper, type WorkerKeeperOptions, type WorkerStatus } from '../src/modules/keeper/worker.js';
+import { PEERS_FILE, TICKET_FILE } from '../src/modules/keeper/worker.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
 import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
-import { fakeLease } from './fake-lease.js';
-import { as, SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { as, SETUP, TEST_SECRET, testApp, until } from './helpers.js';
 
-/* The computer the server runs on, and a computer that joins the company. */
-const hostIdOf = (machineKey: string) => hashToken(`hornhoof-host:${machineKey}`);
-const HOST_ID = hostIdOf('host-0000-abcd');
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-const DAY_MS = 86_400_000;
-/* A stand-in for an frpc child: it sleeps until it is stopped. */
-const SLEEPER = { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
-
-function folder(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-worker-keeper-'));
-  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-type Answer = { status: number; headers: http.IncomingHttpHeaders; body: string; json: () => unknown };
-
-function ask(port: number, options: http.RequestOptions = {}, body?: unknown): Promise<Answer> {
-  return new Promise((resolve, reject) => {
-    const text = body === undefined ? undefined : JSON.stringify(body);
-    const headers = { ...(text ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(text)) } : {}), ...options.headers };
-    const req = http.request({ host: '127.0.0.1', port, agent: false, ...options, headers }, res => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
-      res.on('end', () => {
-        const answer = Buffer.concat(chunks).toString();
-        resolve({ status: res.statusCode!, headers: res.headers, body: answer, json: () => JSON.parse(answer) as unknown });
-      });
-    });
-    req.on('error', reject);
-    req.end(text);
-  });
-}
-
-/* What a request to the app is answered with in the app's place, as a status; null lets it through. */
-type Intercept = (asked: { method: string; url: string; via: string; body: unknown }) => number | null;
-
-/* A door before the app, as an app of another build would answer some of what it is asked: the rest goes on to it. */
-async function doorBefore(appPort: number, intercept: Intercept): Promise<number> {
-  const server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks);
-      let body: unknown = null;
-      try {
-        body = raw.length > 0 ? JSON.parse(raw.toString()) : null;
-      } catch {
-        /* No JSON: the test's answer does not go by it. */
-      }
-      const status = intercept({ method: req.method ?? '', url: req.url ?? '', via: String(req.headers['x-hornhoof-via'] ?? ''), body });
-      if (status) return void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { code: status === 404 ? 'not_found' : 'validation', message: 'An older build.' } }));
-      const out = http.request({ host: '127.0.0.1', port: appPort, method: req.method, path: req.url, headers: req.headers, agent: false }, answer => {
-        res.writeHead(answer.statusCode ?? 502, answer.headers);
-        answer.pipe(res);
-      });
-      out.on('error', () => void res.writeHead(502).end());
-      out.end(raw);
-    });
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  onTestFinished(() => {
-    server.closeAllConnections();
-    server.close();
-  });
-  return (server.address() as AddressInfo).port;
-}
-
-/* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
-   reports the test's own address as the place to dial it at. */
-async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept) {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
-  const ceo = await setUpCompany(app);
-  await app.listen({ host: '127.0.0.1', port: 0 });
-  const appPort = (app.server.address() as AddressInfo).port;
-  /* Where the keeper finds its app: the app itself, unless the test answers some of it in the app's place. */
-  const keeperApp = intercept ? await doorBefore(appPort, intercept) : appPort;
-  const lines: string[] = [];
-  let peerPort = 1;
-  /* The folder the server's keeper shares with its updater. */
-  const control = folder();
-  const keeper = new Keeper({
-    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: control, HORNHOOF_MACHINE_ID: HOST_ID, ACME_DIRECTORY: 'off', ...keeperEnv }),
-    db,
-    lease: fakeLease(),
-    app: { host: '127.0.0.1', port: keeperApp },
-    frontHost: null,
-    log: line => lines.push(line),
-    host: '127.0.0.1',
-    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
-    everyMs: 20,
-    linkEveryMs: 50,
-    peerEveryMs: 20,
-    reportEveryMs: 30,
-    backupsEveryMs: 20,
-    dir: folder(),
-    clientFor: () => SLEEPER,
-    peerClientFor: () => SLEEPER,
-    reportAs: () => ({ addresses: ['127.0.0.1'], peerPort, webPort: appPort }),
-    computer: { openEveryMs: 10, closedEveryMs: 20 },
-    ...extra,
-  });
-  await keeper.start();
-  let stopped = false;
-  const stop = async () => {
-    if (stopped) return;
-    stopped = true;
-    await keeper.stop();
-    await app.close();
-  };
-  onTestFinished(stop);
-  peerPort = (await keeper.peerPorts()).peer;
-  const serverRow = async () => (await db.select().from(machines).where(eq(machines.networkId, HOST_ID)))[0];
-  if (!extra.addresses) await until(async () => (await serverRow())?.peerPort === peerPort);
-  const rowOf = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
-  /* A computer joined with the Machines tab's command, by the installer that asks for the core. */
-  const joined = async () => {
-    const command = ((await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json() as { command: string }).command;
-    const said = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], ...MAC, core: true } })).json() as { machine: { id: string }; core: { ticket: string } };
-    return { machine: said.machine.id, ticket: said.core.ticket };
-  };
-  return { app, db, config, ceo, appPort, peerPort, keeper, lines, stop, serverRow, rowOf, joined, control };
-}
-
-type Company = Awaited<ReturnType<typeof company>>;
-
-/* A worker's keeper on folders of its own. Every pace is short, so no test waits for a real one. */
-async function workerOn(c: Company, config: WorkerConfig, over: Partial<WorkerKeeperOptions> = {}) {
-  const lines: string[] = [];
-  const keeper = new WorkerKeeper({
-    config,
-    frontHost: null,
-    host: '127.0.0.1',
-    ports: { front: 0 },
-    log: line => lines.push(line),
-    visitClientFor: () => SLEEPER,
-    lookEveryMs: 10,
-    viewEveryMs: 30,
-    reportEveryMs: 30,
-    renewAfterMs: 50,
-    renewEveryMs: 100,
-    holdMs: 400,
-    holdEveryMs: 10,
-    noLeaderPageMs: 50,
-    certificate: { retryMs: 20 },
-    sessions: { everyMs: 10, helloMs: 10, connectMs: 1000, directEveryMs: 50, pingMs: 60_000 },
-    computer: { openEveryMs: 10, closedEveryMs: 20 },
-    ...over,
-  });
-  const { front } = await keeper.start();
-  let stopped = false;
-  const stop = async () => {
-    if (stopped) return;
-    stopped = true;
-    await keeper.stop();
-  };
-  onTestFinished(stop);
-  const status = () => keeper.status();
-  return { keeper, front, lines, stop, status };
-}
-
-async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}, more: Partial<WorkerConfig> = {}) {
-  const { machine, ticket } = await c.joined();
-  const config: WorkerConfig = {
-    machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(),
-    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'], ownerKey: null, hostOs: 'linux', survivorMs: 600_000, ...more,
-  };
-  return { machine, config, ...(await workerOn(c, config, over)) };
-}
-
-const hasLeader = (status: WorkerStatus) => status.certificate && status.leader?.path === 'direct';
-const heldIn = (dir: string) => JSON.parse(readFileSync(join(dir, CERT_FILE), 'utf8')) as HeldCertificate;
+import { type Company, DAY_MS, MAC, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -263,6 +88,33 @@ describe("a worker's keeper", () => {
     expect(request.secrets).toEqual({ HORNHOOF_SECRET: TEST_SECRET, NODE_KEY: '', RELAY_URL: c.config.relayUrl });
     expect(statSync(file('role.json')).mode & 0o777).toBe(0o600);
     for (const line of w.lines) expect(line).not.toContain(TEST_SECRET);
+  });
+
+  it('says when it could not become a data machine', async () => {
+    const c = await company();
+    const w = await worker(c);
+    await until(async () => (await c.rowOf(w.machine)).ageKey !== null);
+    /* The updater could not write the settings: it took the request and the marker away and left its line. */
+    writeFileSync(join(w.config.controlDir, 'role.failed'), "The company's settings cannot be written here, so this machine stays a worker.\n");
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    await until(async () => (await c.rowOf(w.machine)).copyState === 'stopped');
+    expect(await c.rowOf(w.machine)).toMatchObject({ copyState: 'stopped', copyError: 'setup', copyName: null, copyProgress: null });
+    /* It asks for nothing more for an hour. */
+    expect(existsSync(join(w.config.controlDir, 'role.json'))).toBe(false);
+    expect(existsSync(join(w.config.controlDir, 'role.failed'))).toBe(false);
+  });
+
+  it('shows its parts', async () => {
+    const c = await company();
+    const w = await worker(c);
+    await until(() => hasLeader(w.status()));
+    const [first, second] = [w.keeper.parts(), w.keeper.parts()];
+    expect(first.link).toBe(second.link);
+    expect(first.certificates).toBe(second.certificates);
+    /* They are the ones it works with: the session to the leader, and the certificate it holds. */
+    expect(first.link.leader()?.machine).toBe(w.status().leader!.machine);
+    expect(first.certificates.current()?.machine).toBe(w.machine);
+    expect(w.status().role).toBe('worker');
   });
 
   /* The test in the updater's place on the server: it answers every request for a dump, until the test ends. */

@@ -12,6 +12,7 @@ import { visitClientFor, VISIT_FIRST_PORT, type VisitSettings } from '../link/vi
 import { keyPrint } from '../computer/owner-key.js';
 import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
+import type { CopyOrder, CopyReport } from './copy.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
 import { ownAddresses } from './addresses.js';
 import { ageKey } from './age-key.js';
@@ -36,7 +37,7 @@ export const TICKET_FILE = 'ticket.json';
 export const NO_LEADER_PAGE_MS = 60_000;
 
 export type WorkerStatus = {
-  role: 'worker';
+  role: MachineRole;
   commit: string;
   machine: string | null;
   certificate: boolean;
@@ -76,9 +77,23 @@ export type WorkerKeeperOptions = {
   /* How often the keeper asks which of the company's backups to hold, and tries again for its key for backups. */
   holderEveryMs?: number;
   backupKeyRetryMs?: number;
+  /* What the keeper of a machine that keeps a copy changes in the worker's keeper it runs inside it. role: what it
+     says it is; a worker's keeper alone takes the steps that make its machine a data machine. visitKind: which service
+     of the data machines its visitor reaches through the relay: the one with the way to the data. ownApp: this
+     machine's own app, which the front door passes to once no leader was in reach for afterMs: it reads. extraReport:
+     what goes into each report besides. onView: called with each view of the leader's. */
+  role?: MachineRole;
+  visitKind?: 'app' | 'data';
+  ownApp?: { target: Target; afterMs: number };
+  extraReport?: () => object;
+  onView?: (view: KeeperView) => void;
 };
 
-type View = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link: WorkerLink | null };
+/* What a keeper knows of the network from the leader's answers. copy: what the leader says of this machine's copy.
+   crlPem: the authority's list of revoked certificates, which a machine that serves a peer link of its own shows. */
+export type KeeperView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; crlPem: string | null; data: DataMachine[]; link: WorkerLink | null; copy: CopyOrder | null };
+
+type View = KeeperView;
 type Visit = { link: VisitSettings; targets: string[] };
 type RenewAsk = { machine: string; serial: string; at: string };
 
@@ -100,7 +115,15 @@ const CUT_OFF = 'This machine was disconnected from the company. The keeper asks
 const TICKET_SPENT = 'its join ticket was used or has expired; get a new command in Hornhoof under Machines and run it here';
 const MACHINE_TAKEN = "this computer is in the company under another person's row; it joins once that one is disconnected";
 
-const Data = z.object({ machine: z.string(), networkId: z.string(), hostname: z.string().nullable(), addresses: z.array(z.string()), peerPort: z.number().nullable(), webPort: z.number().nullable() });
+const Data = z.object({
+  machine: z.string(), networkId: z.string(), hostname: z.string().nullable(), addresses: z.array(z.string()), peerPort: z.number().nullable(), webPort: z.number().nullable(),
+  /* A server of the build before names neither. */
+  number: z.number().nullable().default(null), copyName: z.string().nullable().default(null),
+});
+const Copy = z.object({
+  slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
+  old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'wipe']).nullable().default(null),
+});
 /* dataSecret: a server of the build before says none, which reads as none. */
 const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
 /* A view as an answer gives it, each field by itself: one the answer lacks, or gives as a server of another version
@@ -112,6 +135,8 @@ const Answer = z.object({
   revoked: z.array(z.string()).optional().catch(undefined),
   data: z.array(Data).optional().catch(undefined),
   link: Link.nullable().optional().catch(undefined),
+  crlPem: z.string().nullable().optional().catch(undefined),
+  copy: Copy.nullable().optional().catch(undefined),
 });
 /* The server's build and this machine's turn to install it, as the leader's view names them; none when it names none. */
 const Build = z.object({ version: z.string(), tag: z.string(), digest: z.string(), nodeDigest: z.string(), updaterDigest: z.string(), commit: z.string() });
@@ -155,6 +180,9 @@ export class WorkerKeeper {
   /* Where the door to the leader's app listens. The front door reads it at each request, so a door that had to take
      another port is found there. */
   private readonly doorTarget: Target = { host: LOOPBACK, port: 0 };
+  /* Where the front door passes what comes in: the door to the leader, or this machine's own app while no leader was in
+     reach for long enough, on a machine that has one. */
+  private readonly frontTarget: Target = { host: LOOPBACK, port: 0 };
   private doorWork: Promise<unknown> = Promise.resolve();
   private doorOpen = false;
   private front: http.Server | null = null;
@@ -262,7 +290,7 @@ export class WorkerKeeper {
     const leader = this.leader();
     const hostname = leader ? (this.view?.data.find(machine => machine.machine === leader.machine)?.hostname ?? null) : null;
     return {
-      role: 'worker',
+      role: this.opts.role ?? 'worker',
       commit: this.opts.config.commit,
       machine: held?.machine ?? null,
       certificate: Boolean(held),
@@ -322,8 +350,11 @@ export class WorkerKeeper {
   private targets(): DialTarget[] {
     if (this.disconnected || !this.view) return [];
     const first = this.opts.visitPort ?? VISIT_FIRST_PORT;
-    const { data, link } = this.view;
-    return data.map((machine, i) => ({ machine: machine.machine, networkId: machine.networkId, addresses: machine.addresses, peerPort: machine.peerPort, relayPort: link ? first + i : null }));
+    const { link } = this.view;
+    /* A machine that keeps a copy is among the data machines itself, and dials the others. */
+    const data = this.view.data.filter(machine => machine.networkId !== this.opts.config.machineId);
+    const through = this.opts.visitKind === 'data' ? Boolean(link?.dataSecret) : Boolean(link);
+    return data.map((machine, i) => ({ machine: machine.machine, networkId: machine.networkId, addresses: machine.addresses, peerPort: machine.peerPort, relayPort: through ? first + i : null }));
   }
 
   /* An answer is merged into what the keeper has field by field, and the list of revoked certificates never shrinks:
@@ -334,8 +365,10 @@ export class WorkerKeeper {
     const given = Object.fromEntries(Object.entries(said.data).filter(([, value]) => value !== undefined)) as Partial<View>;
     if (Object.keys(given).length === 0) return;
     for (const serial of given.revoked ?? []) this.revoked.add(serial);
-    const before: View = this.view ?? { machine: '', role: 'worker', authorityPem: null, revoked: [], data: [], link: null };
-    this.view = { ...before, ...given, revoked: [...this.revoked] };
+    const before: View = this.view ?? { machine: '', role: 'worker', authorityPem: null, revoked: [], crlPem: null, data: [], link: null, copy: null };
+    /* A list of revoked certificates that is signed stays until a newer one comes: an answer of a server that does not
+       lead says none. */
+    this.view = { ...before, ...given, crlPem: given.crlPem ?? before.crlPem, revoked: [...this.revoked] };
     if (!keep) return;
     try {
       writePrivately(join(this.opts.config.dir, PEERS_FILE), JSON.stringify(this.view));
@@ -351,13 +384,19 @@ export class WorkerKeeper {
     if (!this.view) return undefined;
     const { link, data } = this.view;
     if (!link || data.length === 0) return null;
-    const { name, serverAddr, serverPort, visitorKey, appSecret } = link;
+    const { name, serverAddr, serverPort, visitorKey, appSecret, dataSecret } = link;
+    /* A machine that keeps a copy visits the service with the way to the data, and never itself. */
+    if (this.opts.visitKind === 'data') {
+      const others = data.filter(machine => machine.networkId !== this.opts.config.machineId);
+      if (!dataSecret || others.length === 0) return null;
+      return { link: { name, serverAddr, serverPort, visitorKey, appSecret, dataSecret }, targets: others.map(machine => machine.networkId) };
+    }
     return { link: { name, serverAddr, serverPort, visitorKey, appSecret }, targets: data.map(machine => machine.networkId) };
   }
 
   private visitClient({ link, targets }: Visit): Client {
     const { machineId, dir } = this.opts.config;
-    return this.opts.visitClientFor?.(link, machineId, targets) ?? visitClientFor(link, { machineId, targets, dir });
+    return this.opts.visitClientFor?.(link, machineId, targets) ?? visitClientFor(link, { machineId, targets, dir, kind: this.opts.visitKind ?? 'app' });
   }
 
   private unredeemed(): string | null {
@@ -449,11 +488,25 @@ export class WorkerKeeper {
     const has = Boolean(this.leader());
     this.noLeaderSince = has ? null : (this.noLeaderSince ?? now);
     this.setDoor(has);
+    this.aimFront();
     /* A leader just found is asked at once for the view and told where this machine is, once the door to it is open. */
     if (has && !this.hadLeader) void this.doorWork.then(() => this.readView()).then(() => this.report());
     this.hadLeader = has;
     if (this.renewDue(now)) void this.renew();
     if (this.owed) this.settle(this.owed);
+  }
+
+  /* The front door leads to the leader; on a machine with an app of its own, to that app once no leader was in reach
+     for long enough, so the company can still be read there. */
+  private aimFront(): void {
+    const own = this.opts.ownApp;
+    const alone = own && !this.disconnected && this.noLeaderSince !== null && this.clock() - this.noLeaderSince >= own.afterMs;
+    Object.assign(this.frontTarget, alone ? own.target : this.doorTarget);
+  }
+
+  /* The session keeper and the certificate keeper this keeper runs, the same on every call after its start. */
+  parts(): { link: PeerSessions; certificates: CertificateKeeper } {
+    return { link: this.sessions, certificates: this.certificates };
   }
 
   /* One change of the door after another. A door that could not open is tried again at the next look. */
@@ -462,7 +515,10 @@ export class WorkerKeeper {
     this.doorOpen = open;
     this.doorWork = this.doorWork
       .then(() => (open ? this.door.open() : this.door.shut()))
-      .then(() => void (this.doorTarget.port = this.door.port()))
+      .then(() => {
+        this.doorTarget.port = this.door.port();
+        this.aimFront();
+      })
       .catch((err: unknown) => {
         this.doorOpen = false;
         this.sayHourly('door', `The keeper's door to the company server could not open: ${reasonOf(err)}`);
@@ -588,7 +644,11 @@ export class WorkerKeeper {
     this.mergeView(answer);
     const follow = Follow.safeParse(answer);
     if (follow.success) this.following.heard(follow.data.build, follow.data.go);
-    void this.become();
+    if (this.view) this.opts.onView?.(this.view);
+    if ((this.opts.role ?? 'worker') === 'worker') void this.become();
+    /* A keeper that keeps a copy needs the certificate that says so: with a worker's, no data machine opens its
+       database to it. */
+    else if (this.view?.role === 'data' && this.certificates.current()?.role === 'worker') this.certificates.renewNow();
   }
 
   /* With each view of the leader's: when it says this machine holds the data now, the next step toward that. */
@@ -638,7 +698,10 @@ export class WorkerKeeper {
         pin: this.pinPrint(),
         ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
       };
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported() };
+      /* What only a build that knows copies takes: a machine that could not become a data machine says so as a copy
+         that stopped, and a keeper that keeps a copy says how it does. */
+      const setup: CopyReport = { state: 'stopped', progress: null, error: 'setup', at: null, name: null, old: null };
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.() };
       let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
       /* A leader an update took back to the build before refuses words it does not know: the report goes again at once
          without them. */
@@ -680,7 +743,7 @@ export class WorkerKeeper {
   private frontDoor(): http.Server {
     return serve(
       passThrough({
-        target: this.doorTarget,
+        target: this.frontTarget,
         headers: visitorFromFront(this.opts.frontHost),
         unreachable: req => this.away(req),
         own: req => this.ownAnswer(req),

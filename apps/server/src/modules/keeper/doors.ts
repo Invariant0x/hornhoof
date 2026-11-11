@@ -5,8 +5,9 @@ import { firstForwarded, INVOCATION, socketAddress, startingAnswer, UUID, type R
 
 /* What every keeper's doors share, the keeper of a machine that keeps data and a worker's alike. */
 
-/* peerApp: what the relay's service for the app alone reaches, on this machine only. */
-export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081 } as const;
+/* peerApp: what the relay's service for the app alone reaches, on this machine only. db: the door through which the
+   database of a machine that keeps a copy reaches the leader's. */
+export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081, db: 7432 } as const;
 
 const MAINTENANCE_JSON = JSON.stringify({
   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },

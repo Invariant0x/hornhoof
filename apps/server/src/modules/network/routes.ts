@@ -3,11 +3,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
-import { agents, companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
+import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
 import { holdsData } from '../copies/holds.js';
+import { copyOrder } from '../copies/slots.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
@@ -50,6 +51,17 @@ const ReportBody = z.object({
   heldBackups: z.array(z.uuid()).max(REPORT_MAX).optional(),
   /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
+  /* Its copy of the company's database, from a machine that keeps one. */
+  copy: z
+    .object({
+      state: z.enum(COPY_STATES),
+      progress: z.number().int().min(0).max(99).nullable(),
+      error: z.enum(COPY_ERRORS).nullable(),
+      at: z.iso.datetime().nullable(),
+      name: z.string().regex(/^copy_[0-9a-f]{16}_[1-9][0-9]{0,8}$/).nullable(),
+      old: z.object({ attempt: z.number().int().min(1) }).nullable(),
+    })
+    .optional(),
 });
 
 /* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */
@@ -78,7 +90,7 @@ const ComputerAnswer = z.object({ exit: z.number().int().min(0).max(255), output
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
-type Holder = { id: string; role: MachineRole; personId: string | null };
+type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null };
 
 /* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
    machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
@@ -125,11 +137,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function machineOf(who: Asker): Promise<Holder | null> {
     if (who.own) {
       const mine = await findThisMachine(db, config);
-      return mine ? { id: mine.id, role: 'data', personId: null } : null;
+      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null } : null;
     }
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
-    return { id: row.id, role: row.role!, personId: row.personId };
+    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName };
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
@@ -162,18 +174,20 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const peer = !who.own && machine ? machine : null;
     const copy = peer?.role === 'data' && peer.personId !== null && (await holdsData(db, peer.personId));
     const link = peer ? await workerLink(ctx, copy) : await linkOf(machine, data.length > 1);
-    /* A worker also hears of the server's build, and when it may install it. */
-    const follow = peer?.role === 'worker' ? await followOf(ctx, peer.id) : {};
+    /* A machine that joined also hears of the server's build, and when it may install it. */
+    const follow = peer ? await followOf(ctx, peer.id) : {};
     /* The machine's own keeper also hears which copies' databases a merge is to read, and opens a door to each. */
     const doors = who.own ? { doors: await ctx.doorsWanted() } : {};
-    return { machine: machine?.id ?? null, ...(peer ? { role: peer.role } : {}), authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
+    /* A machine that keeps a copy hears of its slot here, and how far the leader's database has grown. */
+    const told = peer ? { role: peer.role, copy: peer.role === 'data' ? await copyOrder(ctx, peer) : null } : {};
+    return { machine: machine?.id ?? null, ...told, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, update, pin, ...said } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, pin, copy, ...said } = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
     if (!machine) return reply.code(204).send();
     const installed = await db.transaction(async tx => {
@@ -189,7 +203,12 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const follows = update === undefined ? {} : { updateCommit: update?.commit ?? null, updateState: update?.state ?? null, ...failed };
       /* A report that says nothing of the pin keeps the one the machine said before. */
       const pinned = pin === undefined ? {} : { ownerPin: pin };
-      const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* Only a machine the server gave the data says anything of a copy; and never the one that leads. */
+      const copied =
+        copy === undefined || who.own || row?.role !== 'data'
+          ? {}
+          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name, copyOld: copy.old?.attempt ?? null };
+      const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* The server's own keeper names another build than its row held: a new build leads, and the other machines close. */
       const newBuild = who.own && said.commit !== undefined && Boolean(row?.commit) && row?.commit !== said.commit;
       if (newBuild) await ctx.computer.newBuild(tx, machine.id);

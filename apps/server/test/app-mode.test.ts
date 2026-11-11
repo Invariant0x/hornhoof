@@ -7,7 +7,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket from 'ws';
 import { agents, nodes, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
+import type { AgentSql } from '../src/db/agent-sql.js';
+import { agentSqlFollowsMode, AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
 import { NODE_STALE_MS } from '../src/modules/nodes/nodes.js';
 import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { as, connectNode, listen, setUpCompany, testApp, TUNNEL, until, viaLink } from './helpers.js';
@@ -239,6 +240,57 @@ describe('AppMode', () => {
     expect(left).toEqual(['first', 'second']);
     slow.open();
     await mode.settled();
+  });
+
+  it('tells its hooks of every change, in the order they were registered', async () => {
+    const dir = folder();
+    const { mode, lines } = modeIn(dir);
+    const heard: string[] = [];
+    mode.onChange((from, to) => void heard.push(`first ${from} ${to}`));
+    mode.onChange(() => { throw new Error('boom'); });
+    mode.onChange((from, to) => void heard.push(`third ${from} ${to}`));
+    /* Work of lead mode starts after them. */
+    mode.whenLead(() => void heard.push('lead work'), () => void heard.push('lead work ends'));
+    for (const next of ['read', 'lead', 'lead', 'off'] as const) {
+      writeKeeperState(dir, stateOf(next));
+      await mode.check();
+    }
+    expect(heard).toEqual(['first off read', 'third off read', 'first read lead', 'third read lead', 'lead work', 'first lead off', 'third lead off', 'lead work ends']);
+    /* The one that throws is a line each time, and stops neither the next hook nor the change. */
+    expect(lines.filter(line => line.includes('boom'))).toHaveLength(3);
+    expect(mode.current()).toBe('off');
+  });
+
+  it('grants once the keeper speaks', async () => {
+    const dir = folder();
+    const { mode } = modeIn(dir);
+    const opened: { closed: boolean }[] = [];
+    const holder: { agentSql?: AgentSql | null; agentSqlPending?: boolean } = {};
+    const open = async (): Promise<AgentSql> => {
+      const mine = { closed: false };
+      opened.push(mine);
+      return { run: async () => [], close: async () => void (mine.closed = true) } as unknown as AgentSql;
+    };
+    agentSqlFollowsMode({ mode, holder, open });
+    /* Until the keeper's first word nothing is granted: the database may still be empty. */
+    expect([opened.length, holder.agentSqlPending, holder.agentSql]).toEqual([0, true, null]);
+    writeKeeperState(dir, stateOf('read'));
+    await mode.check();
+    expect([opened.length, holder.agentSqlPending]).toEqual([1, false]);
+    const first = holder.agentSql;
+    expect(first).not.toBeNull();
+    /* A change between other modes grants nothing anew. */
+    writeKeeperState(dir, stateOf('lead'));
+    await mode.check();
+    expect(opened.length).toBe(1);
+    /* Off and back: the database may be another one now, so the roles get their rights again, and the old pools go. */
+    writeKeeperState(dir, stateOf('off'));
+    await mode.check();
+    expect([opened.length, holder.agentSql === first]).toEqual([1, true]);
+    writeKeeperState(dir, stateOf('read'));
+    await mode.check();
+    expect(opened.map(one => one.closed)).toEqual([true, false]);
+    expect(holder.agentSql).not.toBe(first);
   });
 
   it('lets the next hook run when one throws, and says so in one log line', async () => {

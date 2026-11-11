@@ -10,7 +10,7 @@ import { certificates, companies, machineOnline, machines, machineTickets, nodeC
 import { rank } from '../src/modules/copies/order.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
-import { companyFolder, issueTicket, onlineShare, renewedMessage, renewMessage, visitorKeyOf, type WorkerView } from '../src/modules/network/join.js';
+import { companyFolder, issueTicket, onlineShare, renewedMessage, renewMessage, visitorKeyOf, workerView, type WorkerView } from '../src/modules/network/join.js';
 import { peerSecret } from '../src/modules/network/store.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp, TEST_SECRET, until } from './helpers.js';
@@ -402,6 +402,32 @@ describe('joining the company as a machine', () => {
     expect(((await c.peers(keeperOf(w.machine))).json() as Said).link.dataSecret).toBeNull();
     /* The server's own keeper is told no role: it is the one that leads. */
     expect((await c.peers()).json()).not.toHaveProperty('role');
+  });
+
+  it('tells a copy about its slot', async () => {
+    const c = await company({ HORNHOOF_KEEPER: 'on' });
+    await c.link('acme');
+    await c.serverCertificate();
+    const w = await c.worker();
+    type Said = { copy?: { slot: string | null; leaderSize: number | null; migrations: number | null; old: string | null; upload: string | null } | null };
+    /* A worker hears of no copy. */
+    expect(((await c.peers(keeperOf(w.machine))).json() as Said).copy).toBeNull();
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    let slots: { name: string; pid: number | null; walStatus: string | null; confirmed: string | null }[] = [];
+    c.app.ctx.replication = { slots: async () => slots, end: async () => undefined, drop: async () => undefined };
+    const told = async () => ((await c.peers(keeperOf(w.machine))).json() as Said).copy!;
+    /* It named no copy yet. */
+    expect(await told()).toMatchObject({ slot: null, old: null, upload: null });
+    expect((await told()).leaderSize).toBeGreaterThan(0);
+    expect((await told()).migrations).toBeGreaterThan(100);
+    await c.db.update(machines).set({ copyName: 'copy_0f0f0f0f0f0f0f0f_1' }).where(eq(machines.id, w.machine));
+    expect((await told()).slot).toBe('missing');
+    slots = [{ name: 'copy_0f0f0f0f0f0f0f0f_1', pid: 7, walStatus: 'reserved', confirmed: '0/3000000' }];
+    expect((await told()).slot).toBe('ok');
+    slots = [{ name: 'copy_0f0f0f0f0f0f0f0f_1', pid: null, walStatus: 'lost', confirmed: '0/3000000' }];
+    expect((await told()).slot).toBe('lost');
+    /* The view a join or a renewal carries says the same. */
+    expect((await workerView(c.app.ctx, w.machine)).copy).toMatchObject({ slot: 'lost' });
   });
 
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {

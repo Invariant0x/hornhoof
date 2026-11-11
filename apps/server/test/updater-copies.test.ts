@@ -151,4 +151,65 @@ describe('the updater of a worker that is given the data', () => {
     const kept = existsSync(join(s.server, 'backups')) ? readdirSync(join(s.server, 'backups')) : [];
     expect(kept.filter(name => name.endsWith('.sql.gz'))).toEqual([]);
   });
+
+  it("loads a copy's schema", async () => {
+    const copy = `${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\n`;
+    const password = 'the-replica-password';
+    const request = (s: Stand, over: object = {}) => {
+      writeFileSync(join(s.control, 'replica.json'), '{}');
+      writeFileSync(join(s.control, 'schema.json'), JSON.stringify({ attempt: 1, database: 'hornhoof', port: 7432, password, ...over }), { mode: 0o600 });
+    };
+    const env = { ...WORKER, HORNHOOF_ROLE: 'data' };
+    const s = stand(copy);
+    request(s);
+    const r = await runOnce(s, null, env);
+    /* The leader's schema and its count of migrations, read through the keeper's door as the role that only reads. */
+    const dumps = r.calls.filter(c => c.includes(' pg_dump '));
+    expect(dumps).toEqual([
+      'docker exec -e PGPASSWORD dbcid pg_dump -h keeper -p 7432 -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof',
+      'docker exec -e PGPASSWORD dbcid pg_dump -h keeper -p 7432 -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof',
+    ]);
+    expect(r.calls.filter(c => c === 'pg_dump had its password')).toHaveLength(2);
+    const load = r.calls.findIndex(c => c === 'docker exec -i dbcid psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d hornhoof');
+    expect(load).toBeGreaterThan(r.calls.indexOf(dumps[1]!));
+    expect(readFileSync(join(s.dir, 'loaded'), 'utf8')).toBe('-- the schema of hornhoof\n-- the rows of drizzle.__drizzle_migrations\n');
+    /* The password the copy's subscription reads goes into the database's own folder, on standard input. */
+    expect(readFileSync(join(s.dir, 'passfile'), 'utf8')).toBe(`*:*:*:hornhoof_replica:${password}\n`);
+    expect(has(s, 'schema/1.done')).toBe(true);
+    expect(statSync(join(s.control, 'schema')).mode & 0o777).toBe(0o700);
+    expect(has(s, 'schema.json')).toBe(false);
+    expect(readdirSync(join(s.control, 'schema'))).toEqual(['1.done']);
+    expect([r.out, ...r.calls].join('\n').includes(password)).toBe(false);
+    /* The same request again changes nothing: its answer is there. */
+    request(s);
+    const again = await runOnce(s, null, env);
+    expect(again.calls.filter(c => c.includes(' pg_dump '))).toHaveLength(2);
+    expect(has(s, 'schema.json')).toBe(false);
+
+    /* A database that holds tables already is left as it is. */
+    const full = stand(copy);
+    request(full);
+    const refused = await runOnce(full, null, { ...env, STUB_PUBLIC_TABLES: '3' });
+    expect(readFileSync(join(full.control, 'schema', '1.failed'), 'utf8').trim()).toBe('The database is not empty.');
+    expect(refused.calls.some(c => c.includes('pg_dump') || c.includes('ON_ERROR_STOP'))).toBe(false);
+    expect(has(full, 'schema.json')).toBe(false);
+
+    /* A schema that cannot be read or loaded leaves a line, and nothing of the dump. */
+    for (const [fails, line] of [[{ STUB_SCHEMA: 'fail' }, "The company server's schema could not be read."], [{ STUB_RESTORE: 'fail' }, 'The schema could not be loaded into the database.']] as const) {
+      const broken = stand(copy);
+      request(broken, { attempt: 2 });
+      await runOnce(broken, null, { ...env, ...fails });
+      expect(readFileSync(join(broken.control, 'schema', '2.failed'), 'utf8').trim()).toBe(line);
+      expect(readdirSync(join(broken.control, 'schema'))).toEqual(['2.failed']);
+    }
+
+    /* A request that names what no database or port is called is dropped, and nothing is asked. */
+    for (const bad of [{ database: 'hornhoof; DROP' }, { port: '7432 -h evil' }, { attempt: '1/../x' }]) {
+      const odd = stand(copy);
+      request(odd, bad);
+      const dropped = await runOnce(odd, null, env);
+      expect(dropped.calls.some(c => c.includes('pg_dump') || c.includes('ON_ERROR_STOP')), JSON.stringify(bad)).toBe(false);
+      expect(has(odd, 'schema.json'), JSON.stringify(bad)).toBe(false);
+    }
+  });
 });

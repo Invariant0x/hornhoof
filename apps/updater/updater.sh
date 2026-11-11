@@ -1080,6 +1080,67 @@ finish_become() {
   rm -f "$SERVER_DIR/.env.before-data"
 }
 
+# A name of a database, and a count from 1, as a request of the keeper may hold them: nothing else goes on a command line.
+plain_database() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]
+}
+plain_count() {
+  [[ "$1" =~ ^[1-9][0-9]{0,8}$ ]]
+}
+
+# load_schema <attempt> <database> <port>: the leader's schema, and the count of its migrations, read through the
+# keeper's door as the role that only reads, and loaded into that database here in one piece. It prints why it could
+# not. The password is read from the request into this one command's environment: it stands on no command line and in
+# no line said, and goes on into the file the copy's subscription reads it from, in the database's own folder.
+load_schema() {
+  local attempt=$1 database=$2 port=$3 request="$CONTROL/schema.json" db tables dump
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || { printf "This machine's database does not run."; return 1; }
+  tables=$(docker exec "$db" psql -U hornhoof -d "$database" -At -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2> /dev/null) ||
+    { printf "This machine's database could not be asked."; return 1; }
+  [ "$tables" = 0 ] || { printf 'The database is not empty.'; return 1; }
+  dump="$CONTROL/schema/$attempt.sql"
+  (
+    umask 077
+    PGPASSWORD=$(jq -r '.password // empty' "$request" 2> /dev/null) || exit 1
+    export PGPASSWORD
+    docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof > "$dump" 2> /dev/null &&
+      docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null
+  ) || { rm -f "$dump"; printf "The company server's schema could not be read."; return 1; }
+  docker exec -i "$db" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$database" < "$dump" > /dev/null 2>&1 ||
+    { rm -f "$dump"; printf 'The schema could not be loaded into the database.'; return 1; }
+  rm -f "$dump"
+  # shellcheck disable=SC2016 # PGDATA is the database container's own, read there.
+  jq -r '"*:*:*:hornhoof_replica:" + (.password // "")' "$request" 2> /dev/null |
+    docker exec -i -u postgres "$db" sh -c 'umask 077 && cat > "$PGDATA/replica.pgpass"' > /dev/null 2>&1 ||
+    { printf "The password file of the copy could not be written."; return 1; }
+}
+
+# The keeper of a machine that keeps a copy asks, with schema.json {attempt, database, port, password}, for the leader's
+# schema in a database of this machine: the copy then fills it by itself. This answers in schema/<attempt>.done, or
+# .failed with a line, and removes the request. A request that names what no database, port or attempt is called is
+# dropped.
+schema_request() {
+  local request="$CONTROL/schema.json" attempt database port reason
+  [ -f "$request" ] || return 0
+  [ -n "$SERVER_DIR" ] || return 0
+  attempt=$(jq -r '.attempt // empty | tostring' "$request" 2> /dev/null || true)
+  database=$(jq -r '.database // empty | tostring' "$request" 2> /dev/null || true)
+  port=$(jq -r '.port // empty | tostring' "$request" 2> /dev/null || true)
+  if ! plain_count "$attempt" || ! plain_database "$database" || ! plain_count "$port" || [ -f "$CONTROL/schema/$attempt.done" ] || [ -f "$CONTROL/schema/$attempt.failed" ]; then
+    rm -f "$request"
+    return 0
+  fi
+  mkdir -p "$CONTROL/schema" && owned "$CONTROL/schema" 700 || return 0
+  if reason=$(load_schema "$attempt" "$database" "$port"); then
+    (umask 077 && : > "$CONTROL/schema/$attempt.done") && owned "$CONTROL/schema/$attempt.done" 600 || true
+  else
+    (umask 077 && printf '%s\n' "$reason" > "$CONTROL/schema/$attempt.failed") && owned "$CONTROL/schema/$attempt.failed" 600 || true
+    say "Could not load the company's schema for a copy: $reason"
+  fi
+  rm -f "$request"
+}
+
 # An updater whose own role is not the one the settings name replaces itself, so the next one is started with it. One
 # try a minute, so a swap that did not take is tried again. A server's settings name no role, and nothing happens there.
 ROLE_SWAP_AT=0
@@ -1766,6 +1827,7 @@ if [ "${1:-}" = --once ]; then
   handle_request
   become_data
   match_role
+  schema_request
   sweep_dumps
   dump_request
   restore_request
@@ -1794,6 +1856,7 @@ while true; do
   handle_request
   become_data
   match_role
+  schema_request
   sweep_dumps
   dump_request
   restore_request

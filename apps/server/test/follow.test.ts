@@ -112,6 +112,26 @@ describe("following the server's build", () => {
     expect((await c.view(w2)).go).toMatchObject({ commit: COMMIT });
   });
 
+  it('gives a machine that keeps a copy its turn as it gives a worker one', async () => {
+    const c = await company();
+    const [copy, w] = [await c.worker('copy', { role: 'data', copyState: 'ready' }), await c.worker('two')];
+    expect(await c.view(copy)).toMatchObject({ build: B, go: null });
+    await c.ready(copy);
+    await c.ready(w);
+    /* One machine at a time, whichever kind: the worker waits for the copy. */
+    expect((await c.view(copy)).go).toMatchObject({ commit: COMMIT });
+    expect((await c.view(w)).go).toBeNull();
+    expect([...(await installingMachines(c.db))]).toEqual([copy]);
+    await c.report(copy, { commit: COMMIT, update: null });
+    expect(await c.view(copy)).toMatchObject({ build: null, go: null });
+    expect((await c.view(w)).go).toMatchObject({ commit: COMMIT });
+    /* The machine the server itself runs on follows nobody. */
+    await c.app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: newKey() }, remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } });
+    const [server] = await c.db.select().from(machines).where(eq(machines.networkId, HOST_ID));
+    await c.db.update(machines).set({ commit: OLD, updateCommit: COMMIT, updateState: 'ready' }).where(eq(machines.id, server!.id));
+    expect(await followOf(c.ctx, server!.id)).toEqual({ build: null, go: null });
+  });
+
   it('never extends a grant, and remembers a failure', async () => {
     const c = await company();
     const [w1, w2] = [await c.worker('one'), await c.worker('two')];

@@ -154,7 +154,7 @@ async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: Too
 export function registerDatabaseTool(server: McpServer, ctx: Ctx, job: ToolJob, mode: SqlMode): void {
   server.registerTool('database', { description: DESCRIBED[mode], inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
     const agentSql = ctx.agentSql;
-    if (!agentSql) return say("This Hornhoof's database does not let Hornhoof make the role this tool runs as.", true);
+    if (!agentSql) return say(ctx.agentSqlPending ? 'Hornhoof is starting.' : "This Hornhoof's database does not let Hornhoof make the role this tool runs as.", true);
     const run = () => runSql(ctx, agentSql, job, sql, mode);
     return mode === 'write' ? withInputLock(ctx, job.agentId, run) : run();
   });

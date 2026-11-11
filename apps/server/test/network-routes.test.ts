@@ -226,6 +226,29 @@ describe('the network routes the keeper calls', () => {
     expect((await c.peers(from(worker.id))).json()).not.toHaveProperty('doors');
   });
 
+  it("keeps the copy's report", async () => {
+    const c = await company();
+    const copy = await c.joined('data', newKey());
+    const worker = await c.joined('worker', newKey());
+    const report = (payload: object, machine: string) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(machine) });
+    const rowOf = async (id: string) => (await c.db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    const said = { state: 'making', progress: 40, error: null, at: null, name: 'copy_0f0f0f0f0f0f0f0f_2', old: null };
+    expect((await report({ copy: said }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'making', copyProgress: 40, copyError: null, copyAt: null, copyName: 'copy_0f0f0f0f0f0f0f0f_2', copyOld: null });
+    const ready = { state: 'ready', progress: null, error: null, at: '2026-11-11T12:00:00.000Z', name: 'copy_0f0f0f0f0f0f0f0f_2', old: { attempt: 1 } };
+    expect((await report({ copy: ready }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyProgress: null, copyAt: new Date('2026-11-11T12:00:00.000Z'), copyOld: 1 });
+    /* A report that says nothing of the copy keeps what the row has. */
+    expect((await report({ uptimeS: 3 }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyName: 'copy_0f0f0f0f0f0f0f0f_2' });
+    /* A worker holds no copy, whatever it says. */
+    expect((await report({ copy: said }, worker.id)).statusCode).toBe(204);
+    expect(await rowOf(worker.id)).toMatchObject({ copyState: null, copyProgress: null, copyName: null });
+    for (const bad of [{ ...said, progress: 100 }, { ...said, state: 'other' }, { ...said, error: 'other' }, { ...said, name: 'x'.repeat(64) }, { ...said, old: { attempt: 0 } }]) {
+      expect((await report({ copy: bad }, copy.id)).statusCode, JSON.stringify(bad)).toBe(400);
+    }
+  });
+
   it('stores memory and cores', async () => {
     const c = await company();
     const worker = await c.joined('worker', newKey());

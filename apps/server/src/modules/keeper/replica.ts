@@ -36,8 +36,9 @@ export async function replicaReady(sql: Sql): Promise<boolean> {
 }
 
 /* One statement that makes the role or sets it right, and lets it read every table of the company's schemas, now and
-   later. It reads through row level security, since the tables the app hides keep it with no policy and a copy would
-   else get them empty. It writes nothing and makes nothing. */
+   later, and where their sequences stand, which a dump of a table's rows reads too. It reads through row level
+   security, since the tables the app hides keep it with no policy and a copy would else get them empty. It writes
+   nothing, makes nothing and moves no sequence. */
 const replicaStatement = (verifier: string): string => `DO $replica$
 DECLARE
   verifier text := '${verifier}';
@@ -53,7 +54,9 @@ BEGIN
     IF EXISTS (SELECT FROM pg_catalog.pg_namespace WHERE nspname = wanted) THEN
       EXECUTE format('GRANT USAGE ON SCHEMA %I TO ${REPLICA_ROLE}', wanted);
       EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO ${REPLICA_ROLE}', wanted);
+      EXECUTE format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA %I TO ${REPLICA_ROLE}', wanted);
       EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT ON TABLES TO ${REPLICA_ROLE}', owner, wanted);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT ON SEQUENCES TO ${REPLICA_ROLE}', owner, wanted);
     END IF;
   END LOOP;
 END $replica$`;

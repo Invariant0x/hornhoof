@@ -30,6 +30,7 @@ export class AppMode {
   private mode: Mode = 'off';
   private readonly hooks: Hook[] = [];
   private readonly atLeaving: (() => unknown)[] = [];
+  private readonly atChange: ((from: Mode, to: Mode) => unknown)[] = [];
   private stay: LeadStay = { entered: [], over: true };
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
@@ -92,6 +93,12 @@ export class AppMode {
     if (this.mode === 'lead') this.enterAfterPending(this.stay, [hook]);
   }
 
+  /* For what follows every change of mode, whichever: each hook hears the mode before and the mode now, in the order they
+     were registered and ahead of the work of lead mode. One that throws costs one log line. */
+  onChange(hook: (from: Mode, to: Mode) => unknown): void {
+    this.atChange.push(hook);
+  }
+
   /* For what must not wait behind a slow hook: it runs in the very call that leaves lead, however that stay in lead went. */
   whenLeaving(now: () => unknown): void {
     this.atLeaving.push(now);
@@ -102,6 +109,7 @@ export class AppMode {
     if (was === next) return;
     this.mode = next;
     this.opts.log(`Hornhoof now runs in ${next} mode.`);
+    for (const hook of this.atChange) this.pending = this.pending.then(() => this.attempt('change', () => hook(was, next)));
     if (next === 'lead') this.beginStay();
     else if (was === 'lead') this.endStay();
   }
@@ -136,13 +144,33 @@ export class AppMode {
   }
 
   /* A hook that throws costs one log line and stops neither the others nor the change. */
-  private async attempt(which: 'enter' | 'leave' | 'leaving', work: () => unknown): Promise<void> {
+  private async attempt(which: 'enter' | 'leave' | 'leaving' | 'change', work: () => unknown): Promise<void> {
     try {
       await work();
     } catch (err) {
-      this.opts.log(`A hook of lead mode failed on ${which}: ${String(loggable(err).message)}`);
+      const what = which === 'change' ? 'A hook of a change of mode failed' : `A hook of lead mode failed on ${which}`;
+      this.opts.log(`${what}: ${String(loggable(err).message)}`);
     }
   }
+}
+
+type AgentAccess = { close(): Promise<void> };
+
+/* Where a keeper runs, the agents' database roles get their rights each time the app comes out of off, not when its
+   process starts: a machine that keeps a copy starts on an empty database, and its tables and their rights come later,
+   and again each time the copy is made anew. Until the first time, holder.agentSqlPending says the roles are on their
+   way. The pools of the time before are closed once the new ones are there. */
+export function agentSqlFollowsMode<A extends AgentAccess>(opts: { mode: AppMode; holder: { agentSql?: A | null; agentSqlPending?: boolean }; open: () => Promise<A | null> }): void {
+  const { mode, holder, open } = opts;
+  holder.agentSql = null;
+  holder.agentSqlPending = true;
+  mode.onChange(async (from, to) => {
+    if (from !== 'off' || to === 'off') return;
+    const before = holder.agentSql;
+    holder.agentSql = await open();
+    holder.agentSqlPending = false;
+    await before?.close().catch(() => undefined);
+  });
 }
 
 type Asked = Pick<FastifyRequest, 'method' | 'url' | 'headers'>;

@@ -40,12 +40,13 @@ beforeEach(async () => {
     INSERT INTO departments (id, company_id, name, role_code) VALUES ('${DEPARTMENT}', '${COMPANY}', 'Development', 'DEV');
     INSERT INTO agents (id, company_id, kind, name, model, department_id, subscription_id) VALUES ('${AGENT}', '${COMPANY}', 'worker', 'Ana', '', '${DEPARTMENT}', '${PLAN}');
     INSERT INTO tasks (id, company_id, number, title, department_id) VALUES ('${TASKS[0]}', '${COMPANY}', 1, 'One', '${DEPARTMENT}'), ('${TASKS[1]}', '${COMPANY}', 2, 'Two', '${DEPARTMENT}')`);
-});
+  // A database of its own with every migration takes as long as the machine needs, so neither hook has a time limit.
+}, 0);
 
 afterEach(async () => {
   for (const client of open) await client.end().catch(() => undefined);
   await onRealServer(made.map(name => `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`));
-});
+}, 0);
 
 /* Statements on one database as the admin, on a connection of their own that ends with them. */
 async function run<T extends pg.QueryResultRow = pg.QueryResultRow>(database: string, text: string, params?: unknown[]): Promise<T[]> {

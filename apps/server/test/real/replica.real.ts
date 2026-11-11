@@ -64,6 +64,9 @@ describe("the role a copy reads another machine's database with", () => {
     expect(await asReplica(real.url, PASSWORD, 'SELECT cert_pem FROM authority')).toEqual([{ cert_pem: 'cert' }]);
     expect(await asReplica(real.url, PASSWORD, `INSERT INTO companies (name) VALUES ('Other')`)).toBe('42501');
     expect(await asReplica(real.url, PASSWORD, 'CREATE TABLE public.mine (id int)')).toBe('42501');
+    /* It reads where a sequence stands, as a dump of a table's rows does, and moves none. */
+    expect(await asReplica(real.url, PASSWORD, 'SELECT last_value >= 0 AS read FROM drizzle.__drizzle_migrations_id_seq')).toEqual([{ read: true }]);
+    expect(await asReplica(real.url, PASSWORD, `SELECT nextval('drizzle.__drizzle_migrations_id_seq')`)).toBe('42501');
     const { rows } = await real.admin.query(`SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, left(rolpassword, 19) AS kept FROM pg_authid WHERE rolname = $1`, [REPLICA_ROLE]);
     expect(rows).toEqual([{ rolsuper: false, rolcreaterole: false, rolcreatedb: false, rolreplication: true, rolbypassrls: true, kept: 'SCRAM-SHA-256$4096:' }]);
     /* A table made later is read too. */

@@ -133,7 +133,7 @@ const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 
    .env lacks them. A server that got one empty says what to do about it. */
 const emptyIn = (name: string, what: string): Error => new Error(`${name} is empty. Put the company's ${what} into .env, or run the install command again.`);
 
-function secretOf(env: NodeJS.ProcessEnv): Buffer {
+export function secretOf(env: NodeJS.ProcessEnv): Buffer {
   const raw = env.HORNHOOF_SECRET;
   if (raw === '') throw emptyIn('HORNHOOF_SECRET', 'secret');
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');

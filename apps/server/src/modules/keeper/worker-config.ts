@@ -33,7 +33,7 @@ function survivorMsOf(value: string | undefined): number {
   return seconds >= 10 && seconds <= 3600 ? seconds * 1000 : SURVIVOR_MS;
 }
 
-const RUN_AGAIN = 'Run the join command from Hornhoof on this machine again.';
+export const RUN_AGAIN = 'Run the join command from Hornhoof on this machine again.';
 const NO_PIN = `HORNHOOF_OWNER_KEY is not a key, so this machine pins no owner. ${RUN_AGAIN}`;
 
 function joinServerOf(value: string | undefined): string {

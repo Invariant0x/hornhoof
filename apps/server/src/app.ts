@@ -109,6 +109,9 @@ export type Ctx = Deps & {
   ranking: Ranking;
   /* The slots of the copies in this server's Postgres. */
   replication: Replication;
+  /* True while the agents' database roles are still on their way: where a keeper runs they get their rights once the
+     app comes out of off, and until then the database tool says the server is starting. */
+  agentSqlPending?: boolean;
   /* The network ids of the machines whose database a merge is to read: the keeper opens a door to each. */
   doorsWanted: () => Promise<string[]>;
   computer: Computers;

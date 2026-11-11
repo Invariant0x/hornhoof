@@ -1,9 +1,10 @@
-import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, notLike, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { ON_NODE } from '../jobs/dispatch.js';
+import { SERVER_KEY } from '../nodes/nodes.js';
 import { FULL_SHA } from '../updates/registry.js';
 import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, type Go, type LeaderBuild } from './build.js';
 
@@ -89,6 +90,12 @@ export function installs(row: Reported, now: Date): boolean {
   return row.updateState === 'installing' && row.reportAt !== null && now.getTime() - row.reportAt.getTime() < INSTALLING_SAID_MS;
 }
 
+/* A machine that joined the company follows the server's build, whichever it is now: a worker, or one that keeps a copy
+   of the data, whose schema is the server's and which installs as a worker does. The row of the machine the server
+   itself runs on is neither. */
+const joined = and(isNotNull(machines.role), notLike(machines.machineKey, `${SERVER_KEY}%`));
+const isJoined = (row: { role: string | null; machineKey: string }): boolean => row.role !== null && !row.machineKey.startsWith(SERVER_KEY);
+
 const within = (at: Date | null, ms: number, now: Date): boolean => at !== null && now.getTime() - at.getTime() < ms;
 
 /* Tells the machine to install the build, when it may: it downloaded the build, no other worker installs now, its last
@@ -97,12 +104,12 @@ const within = (at: Date | null, ms: number, now: Date): boolean => at !== null 
 export async function tryGrant(tx: Db, machineId: string, build: LeaderBuild, now: Date): Promise<boolean> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${FOLLOW_LOCK}::bigint)`);
   const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
-  if (!row || row.revokedAt || row.role !== 'worker') return false;
+  if (!row || row.revokedAt || !isJoined(row)) return false;
   if (row.updateCommit !== build.commit || row.updateState !== 'ready') return false;
   /* A grant that ran out counts as a try that failed. */
   if (row.goCommit === build.commit && within(row.goAt, FOLLOW_RETRY_MS, now)) return false;
   if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
-  const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'worker'), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+  const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), joined, or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   if (others.some(other => installs(other, now))) return false;
   const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
   const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
@@ -138,7 +145,7 @@ export async function releaseHeld(ctx: Ctx): Promise<void> {
    moment it was given and is never made longer. */
 export async function followOf(ctx: Ctx, machineId: string, now = new Date()): Promise<{ build: LeaderBuild | null; go: Go | null }> {
   const build = leaderBuild(ctx);
-  const [row] = build ? await ctx.db.select().from(machines).where(and(eq(machines.id, machineId), isNull(machines.revokedAt), eq(machines.role, 'worker'))) : [];
+  const [row] = build ? await ctx.db.select().from(machines).where(and(eq(machines.id, machineId), isNull(machines.revokedAt), joined)) : [];
   if (!build || !row || row.commit === build.commit) return { build: null, go: null };
   if (row.goCommit === build.commit && goodGrant(row, now)) return { build, go: goOf(row, now) };
   /* Only a server that leads and does not install an update itself lets a worker begin. */

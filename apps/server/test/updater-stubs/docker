@@ -144,6 +144,8 @@ case "$1 $2" in
         cat "$(db_file "$of")" ;;
       # Whether the session that reads the old database of a restore is on it.
       *'FROM pg_stat_activity'*) if [ -f "$STUB_STATE/cutover-open" ]; then echo 1; else echo 0; fi ;;
+      # STUB_PUBLIC_TABLES: how many tables the database a copy is made in holds already; none unless a test says.
+      *"FROM pg_tables WHERE schemaname = 'public'"*) printf '%s\n' "${STUB_PUBLIC_TABLES:-0}" ;;
       *"SELECT oid FROM pg_database WHERE datname = 'hornhoof'"*) oid_of hornhoof || true ;;
       # The name the database with that number goes by now; nothing when there is none.
       *'FROM pg_database WHERE oid = '*)
@@ -165,8 +167,23 @@ case "$1 $2" in
           shift
         done ;;
     esac ;;
+  # The leader's schema, read through the keeper's door for a copy: the password comes by the environment and stands in
+  # no argument. STUB_SCHEMA=fail: the leader cannot be read.
+  'exec -e')
+    [ -z "${PGPASSWORD:-}" ] || printf 'pg_dump had its password\n' >> "$STUB_LOG"
+    [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
+    case " $* " in
+      *' --schema-only '*) printf -- '-- the schema of %s\n' "${!#}" ;;
+      *' --data-only '*) printf -- '-- the rows of drizzle.__drizzle_migrations\n' ;;
+    esac ;;
   'exec -i')
     case " $* " in
+      # The password file of a copy's subscription, written in the database's own folder from standard input.
+      *' -u postgres '*replica.pgpass*) cat > "$STUB_STATE/passfile" ;;
+      # The leader's schema going into the database of a copy. STUB_RESTORE=fail: it does not load.
+      *' -1 -v ON_ERROR_STOP=1 '*)
+        [ "${STUB_RESTORE:-ok}" = fail ] && { cat > /dev/null; echo 'psql: error: out of disk space' >&2; exit 3; }
+        cat > "$STUB_STATE/loaded" ;;
       # The session that stays on the database a restore closes. It answers once the connections are off: the term,
       # machine and cluster of that database, and STUB_CARRY when it was asked who may get in. STUB_CUTOVER=fail: it
       # never gets onto the database; left: another session would not end.
