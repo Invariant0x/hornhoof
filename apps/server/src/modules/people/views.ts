@@ -11,7 +11,7 @@ export type AccessView = { whole: boolean; departments: { id: string; name: stri
 export type PersonView = {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   title: string;
   status: Person['status'];
   isOwner: boolean;

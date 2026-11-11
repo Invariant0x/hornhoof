@@ -27,7 +27,7 @@ export type Person = {
   id: string;
   companyId: string;
   name: string;
-  email: string;
+  email: string | null;
   title: string;
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
