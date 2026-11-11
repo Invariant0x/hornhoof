@@ -98,7 +98,12 @@ describe('the lab, merges', () => {
 
     /* 4. Once more, and this time the owner leaves out what came after: nothing of it comes back, and the database
        from before is saved and removed all the same. */
-    const again = await bundleAfter(new Date(), file.recipient);
+    /* A recovery file saved anew soon has a backup it opens, of the company as it is now, with what came back in it. */
+    expect(await signIn(m1, server.url, PASSWORD)).toBe(200);
+    const since = new Date();
+    const renewed = await http(m1, 'POST', `${server.url}/api/backups/recovery`);
+    expect(renewed.status, renewed.body).toBe(200);
+    const again = await bundleAfter(since, (JSON.parse(renewed.json<{ text: string }>().text.split('\n')[1]!) as { recipient: string }).recipient);
     await sql(m1, `INSERT INTO departments (company_id, name, role_code) SELECT id, 'Second', 'SEC' FROM companies`);
     const second = await restored(server, again.id, false);
     await within(5, 'the second database from before is saved and removed', async () => {

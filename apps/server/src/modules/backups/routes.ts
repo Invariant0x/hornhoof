@@ -65,8 +65,9 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
     const data = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.ageKey)));
     const recovery = company ? await activeRecovery(db, config) : null;
-    /* The last backup of the database in use: a database set aside before a merge is none of it. */
-    const [last] = await bundleRows(db, { limit: 1, forks: 'none' });
+    /* The last backup of the database in use as it is now: a database set aside before a merge is none of it, and
+       neither is a backup made before the company was last restored, whose record a merge may have brought back. */
+    const [last] = await bundleRows(db, { limit: 1, forks: 'none', sinceRestore: true });
     const held = await namedBundles(db);
     return {
       company: company?.id ?? null,
