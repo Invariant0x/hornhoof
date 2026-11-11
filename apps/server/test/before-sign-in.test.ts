@@ -34,6 +34,9 @@ const PUBLIC: Record<string, Origin[]> = {
   'POST /api/auth/logout': EVERYWHERE,
   'GET /install.sh': EVERYWHERE,
   'HEAD /install.sh': EVERYWHERE,
+  /* The same installer for Windows: it carries the server's address and nothing of the company. */
+  'GET /install.ps1': EVERYWHERE,
+  'HEAD /install.ps1': EVERYWHERE,
 };
 
 function fakeDist(): string {
