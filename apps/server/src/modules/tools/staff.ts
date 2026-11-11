@@ -122,6 +122,11 @@ export function orchestratorServing(ctx: Pick<Ctx, 'db'>, companyId: string): Pr
   return connected(ctx.db, companyId, (sub, owner) => servesWholeCompany(sub, owner.scopeKind));
 }
 
+/* What Hornhoof may put the orchestrator on by itself, oldest first, a plan still waiting for its machine too. */
+export function placeableForOrchestrator(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Serving[]> {
+  return connected(ctx.db, companyId, (sub, owner) => servesWholeCompany(sub, owner.scopeKind), SUBSCRIPTION_STATUSES);
+}
+
 type Line = { role: string; product?: string | null; team?: string | null; model?: string; subscription?: string | null; skills: { on: string[]; off: string[] } | string[] };
 
 function checkLineTeam(role: Role, teamId: string | null | undefined, deptTeams: Set<string>, dept: Dept): string | null {

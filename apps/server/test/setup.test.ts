@@ -52,7 +52,7 @@ describe('GET /api/setup/names/:name', () => {
 });
 
 describe('POST /api/setup with a company template', () => {
-  it('creates the template departments and products with the company, and staffs none', async () => {
+  it('creates the template departments and products with the company, and their people', async () => {
     const { app, db } = await fresh();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'studio' } });
     expect(res.statusCode).toBe(201);
@@ -64,9 +64,10 @@ describe('POST /api/setup with a company template', () => {
     expect(top.map(d => d.templateKey).sort()).toEqual(['development', 'operations']);
     const dev = top.find(d => d.templateKey === 'development')!;
     expect(depts.filter(d => d.parentId === dev.id).map(d => d.name).sort()).toEqual(['Product 1', 'Product 2', 'Product 3']);
-    /* A template hires no one of its own: only the orchestrator and the four Operations always has. */
+    /* The studio's people: five in Operations, seven in development, all in the department itself. */
     const staff = await db.select().from(agents).where(eq(agents.companyId, company!.id));
-    expect(staff.map(a => a.roleKey ?? a.kind).sort()).toEqual(['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH', 'orchestrator']);
+    expect(staff.map(a => a.roleKey ?? a.kind).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'DEV-REV', 'DEV-SEC', 'OPS-BUGS', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PROGRAM', 'OPS-WATCH', 'orchestrator']);
+    expect(staff.filter(a => a.kind !== 'orchestrator').every(a => a.departmentId !== null && a.productId === null)).toBe(true);
   });
 
   it('starts with only Operations and stores no template when none is picked', async () => {

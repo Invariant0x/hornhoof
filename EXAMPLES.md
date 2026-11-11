@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 
 ## Templates to start from
 
-Setup offers these. A template creates its departments right away, and the orchestrator then offers people for them. You can change everything later.
+Setup offers these. A template creates its departments and their employees right away, and they start working as soon as you connect a subscription. You can change everything later.
 
 ![Setting up a company](.github/assets/setup.gif)
 

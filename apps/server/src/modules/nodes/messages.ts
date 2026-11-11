@@ -27,6 +27,7 @@ import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-s
 import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
+import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -175,6 +176,18 @@ async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessa
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
 }
 
+const planState = async (ctx: Ctx, id: string) =>
+  (await ctx.db.select({ status: subscriptions.status, companyId: subscriptions.companyId }).from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt))))[0];
+
+/* A plan's state from its nodes. One that begins to work takes whoever waits for a plan, as a new plan does. */
+async function settleAndPlace(ctx: Ctx, plan: string | null): Promise<void> {
+  if (!plan) return;
+  const before = await planState(ctx, plan);
+  await settlePlans(ctx.db, [plan]);
+  const after = await planState(ctx, plan);
+  if (after?.status === 'ready' && before?.status !== 'ready') await tryPlaceWaiting(ctx, after.companyId, [plan]);
+}
+
 async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<boolean> {
   const status = statusOf(msg);
   const [node] = await ctx.db
@@ -184,7 +197,7 @@ async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessa
     .returning({ plan: nodes.subscriptionId });
   if (!node?.plan) return false;
   await savePlanMetadata(ctx, node.plan, msg, now);
-  await settlePlans(ctx.db, [node.plan]);
+  await settleAndPlace(ctx, node.plan);
   return status === 'ready';
 }
 
@@ -235,7 +248,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         await db.update(nodes).set(helloRow(msg, now)).where(and(eq(nodes.id, id.nodeId), liveNode));
         const plan = row.node.subscriptionId;
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
-        await settlePlans(db, [plan]);
+        await settleAndPlace(ctx, plan);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);

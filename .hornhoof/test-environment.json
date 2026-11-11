@@ -646,6 +646,7 @@
           "apps/server/test/prompt.test.ts",
           "apps/server/test/release-improvement-templates.test.ts",
           "apps/server/test/role-levels-guide.test.ts",
+          "apps/server/test/setup-turnkey.test.ts",
           "apps/server/test/skill-independence.test.ts",
           "apps/server/test/staff.test.ts",
           "apps/server/test/stuck-policy.test.ts",

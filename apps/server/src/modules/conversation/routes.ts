@@ -1,10 +1,10 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { maskEvent, viewerOf } from '../../auth/agent-view.js';
-import { companies, departments, jobs } from '../../db/schema.js';
+import { agents, companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
@@ -13,7 +13,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt, type Standing } from './prompt.js';
+import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, type Standing } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -108,6 +108,13 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { jobId };
   });
 
+  /* A template brings its people, so he says only a subscription is left; a company set up before it did, with a
+     department nobody works in, is offered its staff. */
+  async function templateGreeting(top: string[]): Promise<string> {
+    const staffed = new Set((await db.select({ id: agents.departmentId }).from(agents).where(and(inArray(agents.departmentId, top), isNull(agents.removedAt)))).map(a => a.id));
+    return top.every(id => staffed.has(id)) ? FIRST_TURN_STAFFED : FIRST_TURN_TEMPLATE;
+  }
+
   /* The orchestrator's greeting, once: on an empty company whose conversation never began. Employees wait to be written to. */
   app.post('/api/agents/:id/start', async req => {
     const { me, agent } = await agentFor(ctx, req);
@@ -118,11 +125,11 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
       const [company] = await db.select({ template: companies.template }).from(companies).where(eq(companies.id, me.companyId)).limit(1);
-      const depts = await db.select({ templateKey: departments.templateKey, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, me.companyId));
-      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he
-         offers to staff it. The Operations every company starts with is no building. */
+      const depts = await db.select({ id: departments.id, templateKey: departments.templateKey, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, me.companyId));
+      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted. The
+         Operations every company starts with is no building. */
       if (depts.some(d => !isOperations(d)) && !company?.template) return false;
-      const greeting = company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN;
+      const greeting = company?.template ? await templateGreeting(depts.filter(d => !d.parentId).map(d => d.id)) : FIRST_TURN;
       await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: greeting, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });

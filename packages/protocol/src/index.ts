@@ -228,9 +228,9 @@ export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
-   and the people to staff them with (role code and how many). The names and descriptions live in the web dictionaries;
+   and the people setup hires into them (role code and how many). The names and descriptions live in the web dictionaries;
    the mini scheme on the card is drawn from these departments. "Start empty" is not here: it is the default on the card,
-   and creates nothing. Staffing is only offered afterwards, so a template brings no subscriptions. */
+   and creates nothing. The people take a subscription the company has that may serve them, or wait for one. */
 export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab', 'home'] as const;
 export type CompanyTemplateKey = (typeof COMPANY_TEMPLATE_KEYS)[number];
 export type CompanyTemplateStaff = { role: string; count: number };

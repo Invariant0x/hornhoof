@@ -1,3 +1,4 @@
+import type { CompanyTemplateStaff } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments } from '../../db/schema.js';
@@ -38,6 +39,18 @@ export function teamRoster(ctx: Pick<Ctx, 'templates'>, team: TeamTemplate, team
     const skills = [...new Set([...role.skills.filter(s => s.on).map(s => s.id), ...team.skills])];
     const line = { role: role.id, team: teamId, product: null, model: plan ? modelOnPlan(tier, plan) : '', subscription: plan?.id ?? null, skills };
     return Array.from({ length: count }, (_, i) => ({ ...line, name: `${role.title.en}${count > 1 ? ` ${i + 1}` : ''} (${team.title.en})` }));
+  });
+}
+
+/* The people a ready-made company starts a department with: as many of each role as the company's template says, with the
+   role's skills, each on the first plan that may serve the department and runs the role's tier, or waiting for one.
+   Several of one role are numbered. */
+export function companyRoster(ctx: Pick<Ctx, 'templates'>, staff: readonly CompanyTemplateStaff[], serving: readonly Plan[]): HireLine[] {
+  return staff.flatMap(({ role: id, count }) => {
+    const role = ctx.templates.roles.get(id)!;
+    const plan = planFor(serving, role);
+    const line = { role: role.id, product: null, model: plan ? modelOnPlan(role.tier, plan) : '', subscription: plan?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
+    return Array.from({ length: count }, (_, i) => ({ ...line, name: `${role.title.en}${count > 1 ? ` ${i + 1}` : ''}` }));
   });
 }
 

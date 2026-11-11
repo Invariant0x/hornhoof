@@ -45,6 +45,8 @@ describe('Setup', () => {
   it('offers the company templates and starts empty by default', async () => {
     render(<Setup onDone={() => {}} />);
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
+    /* A template brings its people, who wait only for a subscription. */
+    expect(screen.getByText(/departments and their employees right away/)).toBeInTheDocument();
     /* The eight ready-made companies, named by the template, not by the scheme picture. */
     expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
     /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */
