@@ -19,7 +19,8 @@ import { departmentNames, visibleDecisions, type Decisions } from './decisions.j
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
-import { delegationOf, lockedFor } from '../conversation/decision-context.js';
+import { delegationOf, lockedFor, ON_ASSISTANT_WORD, onAssistantWord } from '../conversation/decision-context.js';
+import { administers } from '../../auth/decision-owner.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { departmentOf } from '../tools/staff.js';
@@ -403,8 +404,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
     if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
     if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-    /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
+    /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept, and
+       what administers the company never on their assistant's word. */
     const on = delegationOf(me);
+    if (on && administers(found.decisionTopic) && (await onAssistantWord(db, on.jobId))) throw new ApiError(403, 'forbidden', ON_ASSISTANT_WORD, 'assistant_not_allowed');
     requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
     const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on));
     await wakeAll(ctx, done.wakes);

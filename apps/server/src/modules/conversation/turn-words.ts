@@ -33,13 +33,16 @@ const computerClick = (data: unknown): boolean => Boolean((data as { computerCli
 export const byPerson = (w: { personId: string | null; kind: string; data: unknown }): boolean =>
   w.personId !== null || (w.kind === 'typed' && !computerClick(w.data));
 
+/* Words a person's assistant wrote for them: their own for work, never for administering the company. */
+export const byAssistant = (data: unknown): boolean => (data as { channel?: unknown } | null)?.channel === 'assistant';
+
 /* Whom a turn answers: the last person who wrote or typed into it; whoever started it when nothing came into it yet. */
 export function answeredWords<T extends { seq: number; personId: string | null; kind: string; data: unknown }>(
   createdBy: string | null,
   said: readonly T[],
-): { personId: string; sourceSeq: number | null } | null {
+): { personId: string; sourceSeq: number | null; byAssistant?: true } | null {
   const last = said.find(byPerson);
-  if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
+  if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq, ...(byAssistant(last.data) ? { byAssistant: true as const } : {}) } : null;
   return said.length === 0 && createdBy ? { personId: createdBy, sourceSeq: null } : null;
 }
 
