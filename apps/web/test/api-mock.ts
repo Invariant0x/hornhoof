@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from './task-route';
 import { onTestFinished, vi } from 'vitest';
-import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AccessMachine, AgentCardView, AgentTime, ComputerAccessView, Decisions, DepartmentTree, IdleStretch, MachineView, Me, Org, PersonView, Roster, RunningAgent, SegmentKind, Serving, SubView, TaskDetail, TaskLine, TreeAgent, TreeLine, TreeSegment, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -274,11 +274,22 @@ export const REQUESTS: WaitingRequest[] = [
   { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV }, ownerPersonId: 'p1', canAnswer: true },
 ];
 
-/* What GET /api/requests answers: the requests, the orchestrator's cards and his request for the computer, counted per
+/* Computer access to a machine as the server shows it to its owner: with its core answering, and opened on the server's
+   word unless the test says the machine holds a key. Its id is m-<name>, its network id n-<name>. */
+export function accessView(name: string, over: Partial<Omit<ComputerAccessView, 'machine'>> & { machine?: Partial<AccessMachine> } = {}): ComputerAccessView {
+  const { machine, ...rest } = over;
+  return {
+    machine: { id: `m-${name}`, networkId: `n-${name}`, name, hostname: name, personId: 'p1', role: 'worker', os: 'linux', data: false, ...machine },
+    reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
+    ...rest,
+  };
+}
+
+/* What GET /api/requests answers: the requests, the orchestrator's cards and his requests for machines, counted per
    owner and per asking agent as the server counts them. */
 export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'computerAccess'>> = {}): Decisions {
-  const all = { proposals: [], computerAccess: null, ...more };
-  const items = [...requests, ...all.proposals, ...(all.computerAccess ? [all.computerAccess] : [])];
+  const all = { proposals: [], computerAccess: [], ...more };
+  const items = [...requests, ...all.proposals, ...all.computerAccess];
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const i of items) {

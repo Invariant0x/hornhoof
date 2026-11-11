@@ -35,7 +35,7 @@ async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: [machine], builtin: null } }));
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: plans } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
-  await page.route('**/api/computer', route => route.fulfill({ json: { available: false, until: null, asked: null, machine: null, canAnswer: false } }));
+  await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [] } }));
   await page.route('**/api/agents/orchestrator/start', route => route.fulfill({ json: { started: false } }));
   await page.route('**/api/agents/orchestrator/events*', route => route.fulfill({ json: {
     events: [],

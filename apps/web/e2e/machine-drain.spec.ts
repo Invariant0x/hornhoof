@@ -33,7 +33,7 @@ async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: [machine], builtin: null } }));
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
-  await page.route('**/api/computer', route => route.fulfill({ json: { available: false, until: null, asked: null, machine: null, canAnswer: false } }));
+  await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [] } }));
   await page.route('**/api/version', route => route.fulfill({ json: { version: VERSION.version, commit: VERSION.commit } }));
   await page.route('**/api/updates', route => route.request().method() === 'POST'
     ? route.fulfill({ status: 409, json: { error: { code: 'conflict', reason: 'turns_would_stop', message: 'Running turns would stop.', details: { turns: 3 } } } })

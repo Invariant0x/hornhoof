@@ -108,7 +108,7 @@ async function serveOutbound(page: Page, decided: { approved: boolean }[]) {
             task: { id: 't1', number: 1, title: 'Checkout step 1', department: { id: 'd2', name: 'Development' }, product: null },
             ownerPersonId: 'p1', canAnswer: true, decidedBy: SALES_DECIDED_BY,
           }],
-          proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: decided.length ? 0 : 1 },
+          proposals: [], computerAccess: [], counts: { byPerson: {}, byAgent: {}, total: decided.length ? 0 : 1 },
         },
       });
     }

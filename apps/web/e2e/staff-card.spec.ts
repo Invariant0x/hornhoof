@@ -28,7 +28,7 @@ const decisions = (name: string): Decisions => ({
     id: 'pr1', kind: 'staff', brief: 'Someone to fix what breaks.', department: { ...OPS, name }, ownerPersonId: 'p1', canAnswer: true,
     items: [{ role: 'OPS-WATCH', checked: true }, { role: 'OPS-FIX', checked: true }, { role: 'OPS-INTEG', checked: false }],
   } as ProposalDecision],
-  computerAccess: null,
+  computerAccess: [],
   counts: { byPerson: { p1: 1 }, byAgent: {}, total: 1 },
 });
 

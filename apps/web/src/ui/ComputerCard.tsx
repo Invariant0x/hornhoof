@@ -1,37 +1,63 @@
-import { api } from '../api';
-import { useT } from '../i18n';
-import type { ComputerView } from '../types';
-import { CEO_DECIDES, DecidedByNote } from './DecidedBy';
+import { useLanguage, useT } from '../i18n';
+import type { ComputerAccessView } from '../types';
+import { cannotOpen, decidesAccess, givesLines, isOpen, machineName, useAccess } from './access';
+import { DecidedByNote } from './DecidedBy';
+import { clock } from './subscription';
 
-export type ComputerAnswer = 'open' | 'close' | 'decline';
-export const answerComputer = (action: ComputerAnswer) => api.post<ComputerView>(`/api/computer/${action}`);
-
-/* The orchestrator's request for the computer the server runs on, among what waits for a person, with one click of the CEO
-   or the delegate to open it for a day. People of the whole company read it without them. */
-export function ComputerCard({ view, onChange, onFailure }: { view: ComputerView; onChange(next: ComputerView): void; onFailure(err: unknown): void }) {
+/* Computer access to one machine, among what waits for a person: the orchestrator's request with one click of the
+   machine's owner to open it for a day, or that it is open, with the click that closes it. Whoever sees it without the
+   right reads who takes it. */
+export function ComputerCard({ view, onChange, onFailure }: { view: ComputerAccessView; onChange(next: ComputerAccessView): void; onFailure(err: unknown): void }) {
   const t = useT();
-  const machine = view.machine ?? t.window.computerServer;
-  const act = (action: ComputerAnswer) => answerComputer(action).then(onChange, onFailure);
-  /* An older server shows it to the CEO alone. */
-  const decides = view.canAnswer ?? true;
+  const { language } = useLanguage();
+  const { answer, prompt } = useAccess(onChange, onFailure);
+  const machine = machineName(t, view.machine);
 
+  if (isOpen(view)) {
+    return (
+      <section className="t-card" aria-label={t.window.computerAccess(machine)}>
+        <h4>{t.window.computerAccess(machine)}</h4>
+        <p className="t-card-brief">{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
+        {view.canClose && (
+          <div className="f">
+            <button className="btn ghost" type="button" onClick={() => void answer(view, 'close')}>
+              {t.window.computerClose}
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  }
   if (!view.asked) return null;
+  const blocked = cannotOpen(t, view);
   return (
     <section className="t-card" aria-label={t.window.computerAsks(machine)}>
       <h4>{t.window.computerAsks(machine)}</h4>
       <p className="t-card-brief">{view.asked.reason}</p>
       <p className="t-card-brief">{t.window.computerWhat(machine)}</p>
-      {decides ? (
-        <div className="f">
-          <button className="btn" type="button" onClick={() => void act('open')}>
-            {t.window.computerOpen}
-          </button>
-          <button className="btn ghost" type="button" onClick={() => void act('decline')}>
-            {t.window.computerNotNow}
-          </button>
-        </div>
+      {givesLines(t, view).map(line => (
+        <p key={line} className="t-card-brief">
+          {line}
+        </p>
+      ))}
+      {!view.canOpen ? (
+        <DecidedByNote by={decidesAccess(view)} />
       ) : (
-        <DecidedByNote by={CEO_DECIDES} />
+        (prompt ?? (
+          <>
+            {blocked && <p className="muted">{blocked}</p>}
+            <div className="f">
+              {!blocked && (
+                <button className="btn" type="button" onClick={() => void answer(view, 'open')}>
+                  {t.window.computerOpenFor(machine)}
+                </button>
+              )}
+              <button className="btn ghost" type="button" onClick={() => void answer(view, 'decline')}>
+                {t.window.computerNotNow}
+              </button>
+            </div>
+          </>
+        ))
       )}
     </section>
   );

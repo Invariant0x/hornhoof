@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
-import { fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
+import { makeKey } from '../src/owner-key';
+import { keyDefaults } from '../src/owner-key-store';
+import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -775,5 +777,78 @@ describe("each machine's place in the company's network", () => {
     render(<Machines me={ME} />);
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect a machine' }));
     expect(await screen.findByText(/^If the company server runs on a Mac with its firewall on, the Mac may ask once whether Docker/)).toBeInTheDocument();
+  });
+});
+
+describe("computer access on a machine's card", () => {
+  const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
+  /* Ivan's Mac with the company's core, which holds his key, and the server on a machine of his that told its name. */
+  const mac = (over: Parameters<typeof accessView>[1] = {}) => ({ ...MACHINES[0]!, core: { webPort: 8081, path: 'direct' as const }, access: accessView('ivan-mbp', { key: 'held', ...over, machine: { id: 'm1', os: 'darwin', ...over.machine } }) });
+  const box = () => ({ ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true });
+  const server = (over: Parameters<typeof accessView>[1] = {}): BuiltinView => ({ ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, access: accessView('debian', { ...over, machine: { id: 'm-server', role: 'data', data: true, ...over.machine } }) });
+  const show = (machines: ReturnType<typeof mac>[], builtin: BuiltinView, extra: Parameters<typeof mockApi>[0] = {}) => {
+    const calls = lists({ 'GET /api/machines': [200, { machines: [...machines, box()], builtin }], ...extra });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    return calls;
+  };
+
+  it("opens the server's own machine on a click, and says what that gives", async () => {
+    const calls = show([mac()], server(), { 'POST /api/machines/m-server/access/open': [200, accessView('debian', { until: UNTIL })] });
+    const card_ = await openCard('debian');
+    expect(within(card_).getByText("Open access lets the orchestrator change anything on debian, the company's data included.")).toBeInTheDocument();
+    await userEvent.setup().click(within(card_).getByRole('button', { name: 'Open access to debian for a day' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} }));
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  });
+
+  it("opens a machine that holds its owner's key with what the owner signs", async () => {
+    /* Their key as the server keeps it, made on another device with this password. */
+    const made = mockApi({ 'GET /api/me/key': [200, { key: null }] });
+    await makeKey('right');
+    const sent = made.find(call => call.method === 'PUT')!.body as { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };
+    await keyDefaults.store.clear();
+    const stored = { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations };
+    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('ivan-mbp', { until: UNTIL })] });
+    const card_ = await openCard('ivan-mbp');
+    /* On a Mac the access reaches Docker's own system. */
+    expect(within(card_).getByText("On a Mac this reaches Docker's Linux system, not macOS itself.")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(card_).getByRole('button', { name: 'Open access to ivan-mbp for a day' }));
+    await user.type(await within(card_).findByLabelText('Password'), 'right{Enter}');
+    await vi.waitFor(() => expect(calls.some(call => call.path === '/api/machines/m1/access/open')).toBe(true));
+    const body = calls.find(call => call.path === '/api/machines/m1/access/open')!.body as { grant: { payload: string } };
+    expect(JSON.parse(body.grant.payload)).toMatchObject({ v: 1, machine: 'n-ivan-mbp' });
+  });
+
+  it('says until when a machine is open to everyone who sees its card, and lets only who may close it', async () => {
+    const calls = show([mac({ until: UNTIL, canOpen: false, canClose: false })], server({ until: UNTIL }), { 'POST /api/machines/m-server/access/close': [200, accessView('debian')] });
+    const others = await openCard('ivan-mbp');
+    expect(within(others).getByText(/^Access to ivan-mbp is open until .+\.$/)).toBeInTheDocument();
+    expect(within(others).queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
+    const own = card('debian');
+    await userEvent.setup().click(within(own).getByRole('button', { name: 'Close access' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined }));
+  });
+
+  it('gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs', async () => {
+    show([mac({ canOpen: false, canClose: false })], server({ reachable: false }));
+    const others = await openCard('ivan-mbp');
+    expect(within(others).queryByText('Computer access')).not.toBeInTheDocument();
+    expect(within(others).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
+    const own = card('debian');
+    expect(within(own).getByText('Hornhoof cannot reach debian now.')).toBeInTheDocument();
+    expect(within(own).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
+  });
+
+  it('tells its owner in Russian what stands in the way, and what opening gives', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    show([mac({ key: 'not_held' })], server({ machine: { os: null } }));
+    const mine = await openCard('ivan-mbp');
+    expect(within(mine).getByText('Машина ivan-mbp пока не хранит ваш ключ. Выполните на ней новую команду из «Подключить машину»: ключ она берет только оттуда.')).toBeInTheDocument();
+    expect(within(mine).queryByRole('button', { name: /Открыть доступ/ })).not.toBeInTheDocument();
+    const own = card('debian');
+    expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();
+    expect(within(own).getByText('Открытый доступ позволяет оркестратору изменить на машине debian что угодно, включая данные компании.')).toBeInTheDocument();
+    expect(within(own).getByText('Если на машине debian стоит macOS, этот доступ открывает только Linux внутри Docker, а не саму macOS.')).toBeInTheDocument();
   });
 });

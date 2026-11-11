@@ -36,7 +36,9 @@ const CLOSED_EXIT = 126;
 
 export type Asked = { reason: string; at: string };
 /* A machine of the company that has the company's core, and so can have its computer opened. */
-export type AccessMachine = { id: string; networkId: string; name: string; personId: string; role: MachineRole | null; os: 'linux' | 'darwin' | null; data: boolean };
+/* name: what it is called in the log and to the orchestrator. hostname: the name its computer told, or none, for a
+   screen that names an unnamed machine in the reader's own language. */
+export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: MachineRole | null; os: 'linux' | 'darwin' | null; data: boolean };
 /* not_needed: the server's own machine while its keeper holds no key, which takes the app's word. held: the machine
    holds the key its owner has now. not_held: it holds none, or another, so nothing its owner signs opens it. */
 export type KeyState = 'not_needed' | 'held' | 'not_held';
@@ -120,7 +122,7 @@ export class Computers {
 
   private machineOf(row: Row): AccessMachine {
     const os = row.os === 'linux' || row.os === 'darwin' ? row.os : null;
-    return { id: row.id, networkId: row.networkId!, name: this.nameOf(row), personId: row.personId, role: row.role, os, data: row.role === 'data' };
+    return { id: row.id, networkId: row.networkId!, name: this.nameOf(row), hostname: row.hostname, personId: row.personId, role: row.role, os, data: row.role === 'data' };
   }
 
   private keyOf(row: Pick<Row, 'networkId' | 'ownerPin'>, ownerKey: string | undefined): KeyState {

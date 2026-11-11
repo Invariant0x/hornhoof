@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
-import { CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
+import { accessView, CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 import { taskRoute } from './task-route';
 
@@ -278,7 +278,8 @@ const counted = (counts: Record<string, number>): Org => ({
 });
 const AT = '2026-11-02T12:00:00.000Z';
 const STRUCTURE: ProposalDecision = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: 'Add Support.', items: [{ template: 'support', checked: true, note: 'Answers customers.' }], at: AT, ownerPersonId: 'p1', canAnswer: true };
-const COMPUTER: ComputerAccessDecision = { kind: 'computer_access', id: 'server', agent: { id: 'a1', name: 'Orchestrator' }, ownerPersonId: 'p1', canAnswer: true, at: AT, view: { available: true, until: null, asked: { reason: 'Inspect disk space.', at: AT }, machine: null } };
+const SERVER_ACCESS = accessView('the company server', { asked: { reason: 'Inspect disk space.', at: AT }, machine: { id: 'm-server', hostname: '', role: 'data', data: true } });
+const COMPUTER: ComputerAccessDecision = { kind: 'computer_access', id: 'm-server', agent: { id: 'a1', name: 'Orchestrator' }, ownerPersonId: 'p1', canAnswer: true, at: AT, view: SERVER_ACCESS };
 
 describe('the decisions of one person', () => {
   it("open from that person's card on the map, with a filter one can see and take off", async () => {
@@ -311,10 +312,10 @@ describe('the decisions of one person', () => {
     const user = userEvent.setup();
     let asked = true;
     const calls = shell({
-      'GET /api/requests': () => [200, decisions(REQUESTS, { proposals: [STRUCTURE], computerAccess: asked ? COMPUTER : null })],
-      'POST /api/computer/open': () => {
+      'GET /api/requests': () => [200, decisions(REQUESTS, { proposals: [STRUCTURE], computerAccess: asked ? [COMPUTER] : [] })],
+      'POST /api/machines/m-server/access/open': () => {
         asked = false;
-        return [200, { available: true, until: '2099-11-03T12:00:00.000Z', asked: null, machine: null }];
+        return [200, { ...SERVER_ACCESS, until: '2099-11-03T12:00:00.000Z', asked: null }];
       },
     });
     expect(await screen.findByRole('button', { name: 'Tasks, 4 waiting for you' })).toBeInTheDocument();
@@ -324,31 +325,51 @@ describe('the decisions of one person', () => {
     expect(within(waiting).getByRole('button', { name: 'Create departments (1)' })).toBeInTheDocument();
     const computer = within(waiting).getByRole('region', { name: "The orchestrator asks for access to the server's computer" });
     expect(computer).toHaveTextContent('Inspect disk space.');
-    await user.click(within(computer).getByRole('button', { name: 'Open for a day' }));
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/computer/open')).toBe(true);
+    /* What opening gives stands under the request: here the company's data, on a system the server did not name. */
+    expect(computer).toHaveTextContent("Open access lets the orchestrator change anything on the server's computer, the company's data included.");
+    await user.click(within(computer).getByRole('button', { name: "Open access to the server's computer for a day" }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} });
     expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
+  });
+
+  it('show a card for each machine the orchestrator asks for, and answer each on its own machine', async () => {
+    const user = userEvent.setup();
+    const mac = accessView('marat-mac', { asked: { reason: 'Clean Docker images.', at: AT }, machine: { os: 'darwin' } });
+    const calls = shell({
+      'GET /api/requests': [200, decisions([], { computerAccess: [COMPUTER, { ...COMPUTER, id: 'm-marat-mac', view: mac }] })],
+      'POST /api/machines/m-marat-mac/access/decline': [200, { ...mac, asked: null }],
+    });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toHaveTextContent('Inspect disk space.');
+    const second = within(waiting).getByRole('region', { name: 'The orchestrator asks for access to marat-mac' });
+    expect(second).toHaveTextContent('Clean Docker images.');
+    expect(second).toHaveTextContent("On a Mac this reaches Docker's Linux system, not macOS itself.");
+    await user.click(within(second).getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-marat-mac/access/decline', body: undefined }));
+    expect(calls.some(call => call.path.startsWith('/api/machines/m-server/access'))).toBe(false);
   });
 
   it("show a card to hire into a department under the department's name, and say why the computer could not be opened", async () => {
     const user = userEvent.setup();
     const staff: ProposalDecision = { ...STRUCTURE, id: 'pr2', kind: 'staff', department: { id: 'd2', name: 'development' }, brief: 'Hire a reviewer.', items: [{ role: 'DEV-BE', name: 'Reviewer' }] };
     shell({
-      'GET /api/requests': [200, decisions([], { proposals: [staff], computerAccess: COMPUTER })],
+      'GET /api/requests': [200, decisions([], { proposals: [staff], computerAccess: [COMPUTER] })],
       'GET /api/departments/d2/roster': [200, ROSTER],
-      'POST /api/computer/open': [409, { error: { code: 'conflict', message: 'Hornhoof cannot reach this computer.', reason: 'updater_missing' } }],
+      'POST /api/machines/m-server/access/open': [409, { error: { code: 'conflict', message: "Hornhoof cannot reach the server's computer now: its core has not answered for a minute.", reason: 'machine_unreachable' } }],
     });
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
     expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
-    await user.click(within(waiting).getByRole('button', { name: 'Open for a day' }));
-    expect(await within(waiting).findByRole('alert')).toHaveTextContent('The updater is not running.');
+    await user.click(within(waiting).getByRole('button', { name: "Open access to the server's computer for a day" }));
+    expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof cannot reach this machine now: its core has not answered for a minute.');
   });
 
   it("show the CEO's own filter with the computer, and another person's without it", async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/org': [200, counted({ p1: 3, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!], { proposals: [STRUCTURE], computerAccess: COMPUTER })] });
+    shell({ 'GET /api/org': [200, counted({ p1: 3, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!], { proposals: [STRUCTURE], computerAccess: [COMPUTER] })] });
     await user.click(await screen.findByRole('button', { name: 'Ivan: 3 decisions wait' }));
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#10 Payments']);

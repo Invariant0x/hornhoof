@@ -4,7 +4,8 @@ import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
 import { currentTheme, setTheme, type Theme } from '../theme';
-import type { Me, Org } from '../types';
+import type { ComputerAccessView, Me, Org } from '../types';
+import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
 import { Outbound } from '../ui/Outbound';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -59,6 +60,38 @@ function AccountDialog({ active, me, updates, onRenamed, onClose, onHome }: { ac
     profile: <Profile me={me} onRenamed={onRenamed} onClose={onClose} />,
     settings: <Settings me={me} onClose={onClose} onHome={onHome} />,
   }[active];
+}
+
+/* For a person who sits at a machine of the company that is theirs to open and closed: one line of the menu that gives
+   the orchestrator access to it for a day. Opened, the menu closes. Elsewhere, or on a machine they cannot open now,
+   nothing shows. */
+function AccessHere({ onDone }: { onDone: () => void }) {
+  const t = useT();
+  const [view, setView] = useState<ComputerAccessView | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
+  const { answer, prompt } = useAccess(onDone, setFailure);
+  useEffect(() => {
+    let live = true;
+    /* A server from before machines had access of their own knows no such route: then there is nothing to offer. */
+    api.get<{ view: ComputerAccessView | null }>('/api/machines/here').then(
+      res => live && setView(res.view),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!view || !view.canOpen || isOpen(view) || cannotOpen(t, view)) return null;
+  return (
+    <>
+      {prompt ?? (
+        <button className="btn small ghost" type="button" onClick={() => void answer(view, 'open')}>
+          {t.window.computerHere(machineName(t, view.machine))}
+        </button>
+      )}
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </>
+  );
 }
 
 /* onImprovements, onVersions and onSettings: only for people who see the whole company. */
@@ -122,6 +155,7 @@ function AccountMenu({
         </div>
       </div>
       {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+      <AccessHere onDone={onClose} />
       <button
         className="btn small ghost"
         type="button"

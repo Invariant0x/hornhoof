@@ -26,7 +26,7 @@ const ORG: Org = {
   ],
 };
 
-const DECISIONS: Decisions = { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } };
+const DECISIONS: Decisions = { requests: [], proposals: [], computerAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
 
 const TURN: TurnView = {
   id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', mode: 'echelons', messages: [], taskId: null,
@@ -65,7 +65,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/org': ORG,
   '/api/requests': DECISIONS,
   '/api/nodes/commands': { commands: [] },
-  '/api/computer': { available: false, until: null, asked: null },
+  '/api/machines/access': { views: [] },
+  '/api/machines/here': { machine: null, view: null },
   '/api/turns': { turns: [TURN] },
   '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
   '/api/tasks?status=all&department=d2': { tasks: TASKS },

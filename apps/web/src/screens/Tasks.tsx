@@ -200,13 +200,12 @@ function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: s
 
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
-  if (!decisions) return { requests: [], proposals: [], computerAccess: null, machinesAway: [] };
+  if (!decisions) return { requests: [], proposals: [], computerAccess: [], machinesAway: [] };
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  const computer = decisions.computerAccess ? theirs([decisions.computerAccess]) : [];
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), computerAccess: computer[0] ?? null, machinesAway: decisions.machinesAway ?? [] };
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), computerAccess: theirs(decisions.computerAccess ?? []), machinesAway: decisions.machinesAway ?? [] };
 }
 
-const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess && !s.machinesAway.some(m => !m.back);
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess.length && !s.machinesAway.some(m => !m.back);
 
 /* The person whose decisions show, with a cross that shows everyone's again. */
 function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
@@ -254,7 +253,9 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
       {proposals.map(c => (
         <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} />
       ))}
-      {computerAccess && <ComputerCard view={computerAccess.view} onChange={onDecisionsChanged} onFailure={onFailure} />}
+      {computerAccess.map(card => (
+        <ComputerCard key={card.id} view={card.view} onChange={onDecisionsChanged} onFailure={onFailure} />
+      ))}
     </>
   );
 }

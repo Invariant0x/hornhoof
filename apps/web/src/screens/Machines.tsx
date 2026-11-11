@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, MachineView, Me, SubView, TlsView } from '../types';
+import type { BuiltinView, ComputerAccessView, MachineView, Me, SubView, TlsView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -13,7 +13,8 @@ import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
-import { planStateOnMachine, subName } from '../ui/subscription';
+import { clock, planStateOnMachine, subName } from '../ui/subscription';
+import { cannotOpen, givesLines, isOpen, machineName, useAccess } from '../ui/access';
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
@@ -223,6 +224,7 @@ type MachineControls = {
   lend: (machine: MachineView, value: boolean) => unknown;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
+  fail: (err: unknown) => void;
 };
 
 function LendSetting({ machine, editable, onChange }: { machine: MachineView; editable: boolean; onChange: (value: boolean) => void }) {
@@ -294,6 +296,32 @@ function NetworkPlace({ row }: { row: MachineRow }) {
   </>;
 }
 
+/* Computer access to the machine: that it is open, for everyone who sees the card, and the buttons for who may press
+   them. Its owner opens it for a day, with what their key signs where the machine holds that key; closed, it says
+   nothing to anyone else. */
+function MachineAccess({ view, controls }: { view: ComputerAccessView; controls: MachineControls }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const { answer, prompt } = useAccess(() => void controls.refresh(), controls.fail);
+  const machine = machineName(t, view.machine);
+  if (isOpen(view)) {
+    return (
+      <Part title={t.machines.access}>
+        <p className="machine-note">{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
+        {view.canClose && <button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button>}
+      </Part>
+    );
+  }
+  if (!view.canOpen) return null;
+  const blocked = cannotOpen(t, view);
+  return (
+    <Part title={t.machines.access}>
+      {prompt ?? (blocked ? <p className="machine-note">{blocked}</p> : <button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button>)}
+      {!blocked && givesLines(t, view).map(line => <p key={line} className="machine-note">{line}</p>)}
+    </Part>
+  );
+}
+
 function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
@@ -321,6 +349,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
         {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
+        {row.access && <MachineAccess view={row.access} controls={controls} />}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
@@ -495,7 +524,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, disconnect, refresh: load,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )}

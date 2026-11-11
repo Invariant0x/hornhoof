@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { keyDefaults } from '../src/owner-key';
 import { Shell } from '../src/screens/Shell';
-import { MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
+import { accessView, MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
 import { decl, px } from './css';
 
 function renderShell() {
@@ -101,6 +101,47 @@ describe('Shell', () => {
     await user.click(screen.getByRole('button', { name: 'Log out' }));
     await waitFor(() => expect(keptAtSignOut).toBeNull());
     expect(await keyDefaults.store.get()).toBeNull();
+  });
+
+  describe('at a machine of the company', () => {
+    const closed = accessView('ivan-mbp', { machine: { id: 'm1' } });
+    const menu = async (here: object | null, extra: Parameters<typeof mockApi>[0] = {}) => {
+      const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/machines/here': [200, here ?? { machine: null, view: null }], ...extra });
+      const user = userEvent.setup();
+      render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
+      await user.click(screen.getByRole('button', { name: /^(Account|Аккаунт)$/ }));
+      await waitFor(() => expect(calls.some(call => call.path === '/api/machines/here')).toBe(true));
+      return { calls, user };
+    };
+
+    it('offers its owner to give the orchestrator access to it, and closes the menu once it is open', async () => {
+      const { calls, user } = await menu({ machine: closed.machine, view: closed }, { 'POST /api/machines/m1/access/open': [200, { ...closed, until: '2099-01-01T00:00:00.000Z' }] });
+      await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (ivan-mbp)' }));
+      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: {} }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument());
+    });
+
+    it.each([
+      ['a machine that is not theirs to open', { ...closed, canOpen: false }],
+      ['a machine that is open already', { ...closed, until: '2099-01-01T00:00:00.000Z' }],
+      ['a machine that does not hold their key', { ...closed, key: 'not_held' }],
+      ['a machine Hornhoof cannot reach', { ...closed, reachable: false }],
+    ])('offers nothing at %s', async (_name, view) => {
+      await menu({ machine: view.machine, view });
+      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Give the orchestrator access/ })).not.toBeInTheDocument();
+    });
+
+    it('offers nothing elsewhere, or on a server that knows no such thing', async () => {
+      await menu(null);
+      expect(screen.queryByRole('button', { name: /Give the orchestrator access/ })).not.toBeInTheDocument();
+    });
+
+    it('offers it in Russian', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      await menu({ machine: closed.machine, view: closed });
+      expect(await screen.findByRole('button', { name: 'Дать оркестратору доступ к этой машине (ivan-mbp)' })).toBeInTheDocument();
+    });
   });
 
   it('shows the version and build in the account menu', async () => {

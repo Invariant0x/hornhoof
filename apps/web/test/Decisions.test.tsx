@@ -4,12 +4,12 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { People } from '../src/screens/People';
-import type { AccessInput, AccessView, ComputerView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
+import type { AccessInput, AccessView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
 import { ComputerCard } from '../src/ui/ComputerCard';
 import { Requests } from '../src/ui/Requests';
 import { StaffCard } from '../src/ui/StaffCard';
 import { StructureCard } from '../src/ui/StructureCard';
-import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, REQUESTS, ROSTER, WHOLE } from './api-mock';
+import { accessView, ME, mockApi, ORG_WITH_TEAMS, PEOPLE, REQUESTS, ROSTER, WHOLE } from './api-mock';
 
 const noop = () => {};
 const DEV = { id: 'd2', name: 'Development' };
@@ -64,7 +64,7 @@ describe('a decision for someone who may not take it', () => {
   it('shows the cards and the computer without their buttons', async () => {
     mockApi({ 'GET /api/departments/d2/roster': [200, ROSTER] });
     const items: StructureItem[] = [{ template: 'design', checked: true, note: 'Screens' }];
-    const asked: ComputerView = { available: true, until: null, asked: { reason: 'Clean Docker images.', at: '2026-11-03T04:00:00.000Z' }, machine: null, canAnswer: false };
+    const asked = accessView('the company server', { asked: { reason: 'Clean Docker images.', at: '2026-11-03T04:00:00.000Z' }, canOpen: false, canClose: false, machine: { hostname: '', role: 'data', data: true } });
     render(
       <>
         <StructureCard proposal={{ id: 'pr1', brief: '', items }} departments={[]} onCorrect={noop} locked={ceo} />
@@ -74,7 +74,7 @@ describe('a decision for someone who may not take it', () => {
     );
     expect(await screen.findAllByText('Decided by the CEO or the CEO delegate.')).toHaveLength(3);
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
-    for (const name of [/Create departments/, /Hire/, 'Correct in words', 'Open for a day', 'Not now']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    for (const name of [/Create departments/, /Hire/, 'Correct in words', /^Open access to/, 'Not now']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     expect(screen.getByText('Clean Docker images.')).toBeInTheDocument();
   });
 });

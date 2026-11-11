@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Language, type Messages }
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
+import type { AgentCardView, ComputerAccessView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
 import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
@@ -139,18 +139,18 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
 }
 
 /* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
-   are the CEO's alone. Access to the computer the server runs on: the orchestrator asks, people of the whole company
-   see it, and the CEO's or the delegate's screen opens or closes it. */
-const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator && me.person.scopeKind === 'company' });
+   are the CEO's alone. Computer access to the company's machines: the orchestrator asks for one, its owner's screen opens
+   it, and the server answers each person with the machines that are theirs to see. */
+const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator });
 
 /* Loads them; null for what this person does not get, or what did not load. */
 const loadCards = (ownsCommands: boolean, seesComputer: boolean) =>
   Promise.all([
     ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
-    seesComputer ? api.get<ComputerView>('/api/computer').catch(() => null) : null,
+    seesComputer ? api.get<{ views: ComputerAccessView[] }>('/api/machines/access').catch(() => null) : null,
   ]);
 
-/* The request for the computer changed, here or on another of the CEO's screens: what the window shows of it loads again. */
+/* Computer access changed, here or on another screen: what the window shows of it loads again. */
 function useComputerChanges(load: () => Promise<void>): void {
   useStream(m => {
     if (m.type === 'computer') void load();
@@ -295,7 +295,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
   const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
-  const [computer, setComputer] = useState<ComputerView | null>(null);
+  const [computer, setComputer] = useState<ComputerAccessView[]>([]);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -341,7 +341,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     const [res, access] = await loadCards(ownsCommands, seesComputer);
     if (!mounted.current) return;
     if (res) setCommands(res.commands.filter(commandBlockOpen));
-    if (access) setComputer(access);
+    if (access) setComputer(access.views);
   }, [ownsCommands, seesComputer]);
 
   const hideCommand = (id: string) =>
@@ -689,7 +689,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           {after}
         </div>
       )}
-      {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
+      {known && (
+        <ComputerStrip
+          machines={computer}
+          onChange={next => mounted.current && setComputer(views => views.map(view => (view.machine.id === next.machine.id ? next : view)))}
+          onFailure={err => mounted.current && setFailure(err)}
+        />
+      )}
       {known && <StateNotes state={state} ready={ready} sub={sub} />}
       {dragging && (
         <div className="t-drop" role="status">

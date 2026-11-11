@@ -468,7 +468,7 @@ export type WaitingRequest = MaterialStampView & {
 };
 
 /* Who takes a decision: the CEO and the CEO delegate, and also the people of its department or its owner. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; department: { id: string; name: string } | null };
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = MaterialStampView & {
@@ -482,9 +482,8 @@ export type ProposalDecision = MaterialStampView & {
   decidedBy?: DecidedBy;
 } & ({ kind: 'structure'; items: StructureItem[] } | { kind: 'staff'; items: StaffLine[] });
 
-/* The orchestrator's request for the computer the server runs on, which people of the whole company see and the CEO and
-   the delegate answer. */
-export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerView };
+/* The orchestrator's request for a machine of the company, which its owner answers; id is the machine's. */
+export type ComputerAccessDecision = { kind: 'computer_access'; id: string; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerAccessView };
 
 /* A machine with agents on it that went away: for its owner and the CEO, closed by itself once back is set. */
 export type MachineAwayCard = {
@@ -502,7 +501,7 @@ export type MachineAwayCard = {
 export type Decisions = {
   requests: WaitingRequest[];
   proposals: ProposalDecision[];
-  computerAccess: ComputerAccessDecision | null;
+  computerAccess: ComputerAccessDecision[];
   machinesAway?: MachineAwayCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
@@ -588,6 +587,8 @@ export type MachineView = {
   core?: { webPort: number | null; path: 'direct' | 'relay' | null } | null;
   /* Its owner may put the company's core on it: it joined before machines had one, and its nodes are about. */
   needsCore?: boolean;
+  /* Its computer access as this person sees it; null without the core, or when it is not theirs to see. */
+  access?: ComputerAccessView | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -612,17 +613,29 @@ export type Running = {
 
 /* A machine command the orchestrator asked Hornhoof for, which only the CEO's screen gets: to connect a machine alone,
    to connect plans, or to add a plan to a machine. */
-/* Access to the computer the server runs on: whether Hornhoof reaches it, until when it is open, what the orchestrator asked it for. */
-/* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
-/* canAnswer: this person opens, closes or declines it; an older server sends none, as only the CEO saw it. */
-export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null; canAnswer?: boolean };
+/* A machine of the company that has its core. hostname: the name its computer told, or none. data: it keeps the company's
+   data. */
+export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: 'data' | 'worker' | null; os: 'linux' | 'darwin' | null; data: boolean };
+/* Computer access to one machine as this person sees it: whether Hornhoof reaches it, until when it is open, what the
+   orchestrator asked it for, and whether they may open or close it. key: not_needed for the server's own machine
+   while it holds no key; held when the machine holds its owner's key, so what the owner signs opens it; not_held when
+   it holds none or another, so nothing opens it until its owner runs a new command there. */
+export type ComputerAccessView = {
+  machine: AccessMachine;
+  reachable: boolean;
+  until: string | null;
+  asked: { reason: string; at: string } | null;
+  canOpen: boolean;
+  canClose: boolean;
+  key: 'not_needed' | 'held' | 'not_held';
+};
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[] };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;
