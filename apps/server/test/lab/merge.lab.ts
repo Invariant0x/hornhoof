@@ -30,6 +30,8 @@ describe('the lab, merges', () => {
   const log = async (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
   /* The restore as the updater says it went. */
   const restored = async (server: Server, id: string, bringBack: boolean) => {
+    /* A backup is restored from a machine that says it holds it, which the server's keeper says in its next report. */
+    await within(3, 'the server reports that it holds the backup', async () => (await sql(m1, `SELECT count(*) FROM machines WHERE '${id}' = ANY(held_backups)`)) !== '0');
     expect(await signIn(m1, server.url, PASSWORD)).toBe(200);
     const asked = await http(m1, 'POST', `${server.url}/api/backups/${id}/restore`, { body: { bringBack } });
     expect(asked.status, asked.body).toBe(202);
