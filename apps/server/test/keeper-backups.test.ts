@@ -28,7 +28,7 @@ async function stand(over: { secrets?: () => BundleSecrets } = {}) {
   const lines: string[] = [];
   /* record: what the app answers to a bundle's record in place of its own answer. down: it answers nothing. holders:
      which machines it says hold which bundles, in place of what it says itself. */
-  const said = { record: null as number | null, down: false, leads: true, holders: null as Record<string, string[]> | null, order: null as object | null };
+  const said = { record: null as number | null, down: false, leads: true, holders: null as Record<string, string[]> | null, order: null as object | null, last: undefined as object | null | undefined };
   const asked: string[] = [];
   const ask: Ask = async (method, path, body) => {
     asked.push(`${method} ${path}`);
@@ -37,7 +37,7 @@ async function stand(over: { secrets?: () => BundleSecrets } = {}) {
     const res = await c.app.inject({ method, url: path, ...(body === undefined ? {} : { payload: body as object }), ...OWN });
     try {
       const answer = res.json() as Record<string, unknown>;
-      return { status: res.statusCode, body: method === 'GET' ? { ...answer, ...(said.holders ? { holders: said.holders } : {}), ...(said.order ? { order: said.order } : {}) } : answer };
+      return { status: res.statusCode, body: method === 'GET' ? { ...answer, ...(said.holders ? { holders: said.holders } : {}), ...(said.order ? { order: said.order } : {}), ...(said.last !== undefined ? { last: said.last } : {}) } : answer };
     } catch {
       return { status: res.statusCode, body: null };
     }
@@ -271,6 +271,26 @@ describe('the keeper of backups', () => {
     expect(s.keeper.held()).toEqual([ids[4], ids[3], ids[1]]);
     /* No line of the keeper holds the order. */
     expect(s.lines.filter(line => line.includes(order.attempt) || line.includes('authorityPem'))).toEqual([]);
+  });
+
+  it('makes a bundle at once after the company was restored to an earlier time', async () => {
+    const s = await stand();
+    const first = await s.bundle();
+    s.advance(MINUTE);
+    const file = JSON.parse(((await s.recoveryFile()).json() as { text: string }).text.split('\n')[1]!) as { recipient: string };
+    const second = await s.bundle();
+    /* The ten minutes are far from over, and it asked for a dump for this recovery key already. */
+    s.advance(MINUTE);
+    await s.keeper.round();
+    expect(s.wanted()).toBeNull();
+    /* The company is restored from the second bundle: its records end before that bundle, as the database it was made
+       from did. The key is the company's still, and nothing of the restored company is backed up for it. */
+    const before = (await bundleRows(s.db)).find(row => row.id === first)!;
+    s.said.last = { id: first, madeAt: before.madeAt, recovery: null };
+    await s.keeper.round();
+    expect(s.wanted()).not.toBeNull();
+    expect(s.wanted()).not.toBe(second);
+    void file;
   });
 
   it('makes nothing while it does not lead', async () => {

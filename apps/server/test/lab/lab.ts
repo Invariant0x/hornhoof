@@ -49,11 +49,28 @@ function load(machine: string, images: string[]): Promise<void> {
   });
 }
 
+/* A network with addresses of its own choosing, so a machine can be put at the address another one had. Docker
+   refuses a range another network has, and then another one is tried. */
+async function makeNetwork(name: string, label: string): Promise<void> {
+  for (let tries = 0; ; tries++) {
+    const range = `10.${200 + randomBytes(1)[0]! % 50}.${randomBytes(1)[0]!}.0/24`;
+    const made = await run('docker', ['network', 'create', '--label', label, '--subnet', range, name]);
+    if (made.code === 0) return;
+    if (tries >= 20 || !/overlap/i.test(made.out)) throw new Error(`docker network create failed:\n${made.out.slice(-1000)}`);
+  }
+}
+
 export class Lab {
+  private made = 0;
+
   private constructor(
     private readonly id: string,
-    private readonly machines: LabMachine[],
+    private readonly machines: (LabMachine | null)[],
   ) {}
+
+  private get label(): string {
+    return `hornhoof.lab=${this.id}`;
+  }
 
   /* HH_LAB_BUILT=1: the three images are built already, as by a run before. */
   static async start(opts: { machines: number }): Promise<Lab> {
@@ -67,9 +84,9 @@ export class Lab {
     await must('docker', ['build', '-q', '-t', MACHINE_IMAGE, '-f', 'machine.Dockerfile', '.'], { cwd: HERE });
     const lab = new Lab(id, []);
     try {
-      await must('docker', ['network', 'create', '--label', label, `hh-lab-${id}`]);
-      for (let i = 1; i <= opts.machines; i++) lab.machines.push(await lab.boot(i, label));
-      await Promise.all(lab.machines.map(machine => load(machine.name, Object.values(LAB_IMAGES))));
+      await makeNetwork(`hh-lab-${id}`, label);
+      for (let i = 1; i <= opts.machines; i++) lab.machines.push(await lab.boot(label));
+      await Promise.all(lab.machines.map(machine => load(machine!.name, Object.values(LAB_IMAGES))));
       return lab;
     } catch (err) {
       await lab.stop();
@@ -80,6 +97,24 @@ export class Lab {
   machine(i: number): LabMachine {
     const machine = this.machines[i - 1];
     if (!machine) throw new Error(`The lab has no machine ${i}.`);
+    return machine;
+  }
+
+  /* That machine is gone with everything on it, as a computer that was lost: its container, the Docker inside it and
+     its volumes. Its address is free again. */
+  async remove(i: number): Promise<void> {
+    const { name } = this.machine(i);
+    await must('docker', ['rm', '-f', '-v', name]);
+    await must('docker', ['volume', 'rm', '-f', `${name}-docker`]);
+    this.machines[i - 1] = null;
+  }
+
+  /* A new machine on the lab's network, at that address when one is given, with the three images loaded as the first
+     ones got them. */
+  async add(opts: { ip?: string } = {}): Promise<LabMachine> {
+    const machine = await this.boot(this.label, opts.ip);
+    this.machines.push(machine);
+    await load(machine.name, Object.values(LAB_IMAGES));
     return machine;
   }
 
@@ -95,11 +130,12 @@ export class Lab {
     if (networks.length) await run('docker', ['network', 'rm', ...networks]);
   }
 
-  private async boot(i: number, label: string): Promise<LabMachine> {
+  private async boot(label: string, ip?: string): Promise<LabMachine> {
+    const i = ++this.made;
     const name = `hh-lab-${this.id}-m${i}`;
     /* The machine's own Docker keeps its images in a volume of the lab's, which goes with the lab. */
     await must('docker', ['volume', 'create', '--label', label, `${name}-docker`]);
-    await must('docker', ['run', '-d', '--privileged', '--name', name, '--hostname', `m${i}`, '--network', `hh-lab-${this.id}`, '--label', label, '-v', `${name}-docker:/var/lib/docker`, MACHINE_IMAGE]);
+    await must('docker', ['run', '-d', '--privileged', '--name', name, '--hostname', `m${i}`, '--network', `hh-lab-${this.id}`, ...(ip ? ['--ip', ip] : []), '--label', label, '-v', `${name}-docker:/var/lib/docker`, MACHINE_IMAGE]);
     for (;;) {
       if ((await run('docker', ['exec', name, 'docker', 'info'])).code === 0) break;
       if ((await must('docker', ['inspect', '--format', '{{.State.Running}}', name])) !== 'true') throw new Error(`${name} stopped: ${(await run('docker', ['logs', '--tail', '30', name])).out}`);

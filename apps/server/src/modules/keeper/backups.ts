@@ -76,6 +76,8 @@ export class BackupKeeper {
   private askedAt: number | null = null;
   private aheadAt: number | null = null;
   private askedFor: string | null = null;
+  /* When the newest bundle the app last named was made. */
+  private newestSeen: number | null = null;
 
   constructor(private readonly opts: BackupKeeperOptions) {
     this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
@@ -202,8 +204,17 @@ export class BackupKeeper {
     }
   }
 
+  /* The company's records went back in time: it was restored from a backup. What it holds now is in no bundle, so its
+     first dump waits for nothing that was asked before. */
+  private noteRestore(view: MakerView): void {
+    const newest = view.last ? Date.parse(view.last.madeAt) : null;
+    if (this.newestSeen !== null && (newest === null || newest < this.newestSeen)) this.askedAt = this.aheadAt = this.askedFor = null;
+    this.newestSeen = newest;
+  }
+
   /* A bundle is due when there is none, when the newest is six hours old, and when the recovery key changed since. */
   private askForDump(view: MakerView): void {
+    this.noteRestore(view);
     const now = this.now();
     const forKey = view.recovery && view.recovery.recipient !== view.last?.recovery ? view.recovery.recipient : null;
     const due = !view.last || now - Date.parse(view.last.madeAt) >= BUNDLE_EVERY_MS || forKey !== null;
