@@ -1,0 +1,704 @@
+import { randomUUID } from 'node:crypto';
+import { and, eq, sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import type { Db } from '../src/db/client.js';
+import {
+  agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
+  programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns,
+} from '../src/db/schema.js';
+import { nodeSource, withSource } from '../src/db/sources.js';
+import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/apply.js';
+import { complete } from '../src/modules/merge/check.js';
+import { ownDatabases } from './helpers.js';
+import { asPlan7, twoSides, type Side } from './merge-fixture.js';
+
+/* Each test forks its database, which a shared one would not survive. */
+ownDatabases();
+
+type Fork = Side & { source: () => Promise<import('../src/modules/merge/source.js').MergeSource> };
+type Conflict = { id: string; merge: string; carried: string | null; tbl: string; key: Record<string, unknown>; op: string; kind: string; topic: string; task_id: string | null; cols: string[]; here: Record<string, unknown> | null; there: Record<string, unknown> | null; why: string };
+type Kept = { merge: string; tbl: string; key: Record<string, unknown>; how: string; cols: string[]; was: Record<string, unknown> | null; here: Record<string, unknown> | null };
+
+const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
+
+/* A company on the leader, by plain inserts so that nothing but the test writes: its owner, a plan, the orchestrator, a
+   department with a head and two workers, an open turn and two tasks in it. */
+async function stand() {
+  const sides = await twoSides();
+  const { db } = sides.leader;
+  const [acme] = await db.insert(companies).values({ name: 'Acme' }).returning();
+  const on = { companyId: acme!.id };
+  const [owner] = await db.insert(people).values({ ...on, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+  const [plan] = await db.insert(subscriptions).values({ ...on, provider: 'claude', kind: 'personal', label: 'Plan', ownerPersonId: owner!.id, status: 'ready' }).returning();
+  const staff = { ...on, subscriptionId: plan!.id, model: '' };
+  const [orchestrator] = await db.insert(agents).values({ ...staff, kind: 'orchestrator', name: 'Olga' }).returning();
+  const [dev] = await db.insert(departments).values({ ...on, name: 'Development', roleCode: 'DEV' }).returning();
+  const [head] = await db.insert(agents).values({ ...staff, kind: 'head', name: 'Hana', departmentId: dev!.id }).returning();
+  const [ana] = await db.insert(agents).values({ ...staff, kind: 'worker', name: 'Ana', departmentId: dev!.id }).returning();
+  const [ben] = await db.insert(agents).values({ ...staff, kind: 'worker', name: 'Ben', departmentId: dev!.id }).returning();
+  const [turn] = await db.insert(turns).values({ ...on, number: 1, goal: 'Ship', status: 'open' }).returning();
+  const task = async (side: Db, number: number, title: string, over: Partial<typeof tasks.$inferInsert> = {}) =>
+    (await side.insert(tasks).values({ ...on, number, title, departmentId: dev!.id, turnId: turn!.id, createdByPersonId: owner!.id, ...over }).returning())[0]!;
+  const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];
+  let made = 0;
+  /* A merge of this fork into the leader, as the merger would run it. */
+  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void } = {}): Promise<{ id: string; result: MergeResult }> => {
+    made += 1;
+    const kept = over.kept ?? false;
+    const label = over.label ?? 'the fork';
+    const [row] = await rowsOf<{ id: string }>(db, sql`INSERT INTO net.merges (source, label) VALUES (${kept ? `kept:hornhoof_before_t${made}` : `machine:${made}`}, ${label}) RETURNING id`);
+    const source = await fork.source();
+    try {
+      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined) }) };
+    } finally {
+      await source.close();
+    }
+  };
+  const checked = async (fork: Fork, id: string) => {
+    const source = await fork.source();
+    try {
+      return await complete(db, id, source);
+    } finally {
+      await source.close();
+    }
+  };
+  const conflicts = (id?: string) => rowsOf<Conflict>(db, id ? sql`SELECT * FROM net.merge_conflicts WHERE merge = ${id} ORDER BY tbl, created_at, id` : sql`SELECT * FROM net.merge_conflicts ORDER BY tbl, created_at, id`);
+  const kept = (id: string) => rowsOf<Kept>(db, sql`SELECT * FROM net.merge_rows WHERE merge = ${id} ORDER BY tbl, how`);
+  const consumed = (id: string) => rowsOf<{ journal: string; how: string }>(db, sql`SELECT journal, how FROM net.merge_consumed WHERE merge = ${id}`);
+  const mergeRow = async (id: string) => (await rowsOf<{ status: string; path: string | null; xact: string | null; tasks: string[]; counts: Record<string, unknown>; task_wanted: boolean; from_at: Date | null; to_at: Date | null; applied_at: Date | null }>(db, sql`SELECT * FROM net.merges WHERE id = ${id}`))[0]!;
+  const titleOf = async (side: Db, id: string) => (await side.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
+  return { sides, db, acme: acme!, on, owner: owner!, plan: plan!, staff, orchestrator: orchestrator!, dev: dev!, head: head!, ana: ana!, ben: ben!, turn: turn!, one, two, task, merge, checked, conflicts, kept, consumed, mergeRow, titleOf };
+}
+
+describe('a merge applied', () => {
+  it('adds what the leader lacks', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    const [sales] = await fork.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning();
+    const added = await s.task(fork.db, 3, 'Three', { departmentId: sales!.id });
+    /* Events here meanwhile, so the numbers the fork gave its own are taken. */
+    await s.db.insert(taskEvents).values([{ ...s.on, taskId: s.one.id, kind: 'created' }, { ...s.on, taskId: s.one.id, kind: 'comment', text: 'here' }]);
+    await s.db.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} });
+    const events = await fork.db.insert(taskEvents).values([{ ...s.on, taskId: added.id, kind: 'created' }, { ...s.on, taskId: added.id, kind: 'comment', text: 'there' }]).returning();
+    const [said] = await fork.db.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: { text: 'there' } }).returning();
+    const [change] = await fork.db.insert(agentChanges).values({ ...s.on, agentId: s.ana.id, field: 'name', before: 'Ana', after: 'Anna' }).returning();
+    const { id, result } = await s.merge(fork);
+    expect(result.path).toBe('journal');
+    expect(result.counts).toMatchObject({ added: 6, changed: 0, deleted: 0, conflicts: 0, skipped: 0 });
+    expect(result.counts.byTable.task_events).toEqual({ added: 2, changed: 0, deleted: 0, conflicts: 0 });
+    expect((await s.db.select().from(departments).where(eq(departments.id, sales!.id)))[0]).toMatchObject({ name: 'Sales' });
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, added.id)))[0]).toMatchObject({ number: 3, title: 'Three', departmentId: sales!.id });
+    /* A log's rows come with a number of this side's own. */
+    const here = await s.db.select().from(taskEvents).where(eq(taskEvents.taskId, added.id)).orderBy(taskEvents.id);
+    expect(here.map(event => event.uuid)).toEqual(events.map(event => event.uuid));
+    expect(here.map(event => event.id)).toEqual([3, 4]);
+    expect(events.map(event => event.id)).toEqual([1, 2]);
+    const [heard] = await s.db.select().from(agentEvents).where(eq(agentEvents.id, said!.id));
+    expect([heard!.data, Number(heard!.seq) > Number(said!.seq)]).toEqual([{ text: 'there' }, true]);
+    /* In the order the source numbered them, by either way. */
+    for (const kept of [false, true]) {
+      const again = await stand();
+      const other = await again.sides.fork();
+      const told = await other.db.insert(agentEvents).values(['a', 'b', 'c', 'd', 'e'].map(text => ({ ...again.on, agentId: again.ana.id, kind: 'text' as const, data: { text } }))).returning();
+      await again.merge(other, { kept });
+      const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
+      expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
+    }
+    expect(await s.db.select().from(agentChanges).where(eq(agentChanges.id, change!.id))).toHaveLength(1);
+    expect(await s.conflicts(id)).toEqual([]);
+    const row = await s.mergeRow(id);
+    expect(row).toMatchObject({ status: 'applied', path: 'journal', task_wanted: true, tasks: [added.id] });
+    expect([row.xact, row.applied_at, row.from_at, row.to_at].every(Boolean)).toBe(true);
+    expect((await s.consumed(id)).every(entry => entry.how === 'applied')).toBe(true);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('applies a proven overwrite', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ title: 'There', version: 5 }).where(eq(tasks.id, s.one.id));
+    const { id, result } = await s.merge(fork);
+    expect(result.counts).toMatchObject({ added: 0, changed: 1, conflicts: 0 });
+    const [now] = await s.db.select().from(tasks).where(eq(tasks.id, s.one.id));
+    expect([now!.title, now!.version]).toEqual(['There', 6]);
+    expect(await s.conflicts(id)).toEqual([]);
+    expect(await s.consumed(id)).toMatchObject([{ how: 'applied' }]);
+    expect((await s.mergeRow(id)).tasks).toEqual([s.one.id]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it("keeps the leader's value on an unproven difference", async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ title: 'There', body: 'Only there' }).where(eq(tasks.id, s.one.id));
+    await s.db.update(tasks).set({ title: 'Here' }).where(eq(tasks.id, s.one.id));
+    const { id, result } = await s.merge(fork);
+    /* One row takes what is proven and lists what is not. */
+    expect(result.counts).toMatchObject({ changed: 1, conflicts: 1 });
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, s.one.id)))[0]).toMatchObject({ title: 'Here', body: 'Only there' });
+    const [conflict] = await s.conflicts(id);
+    expect(conflict).toMatchObject({ tbl: 'tasks', key: { id: s.one.id }, op: 'update', kind: 'differs', topic: 'work', task_id: s.one.id, cols: ['title'], carried: null });
+    expect([conflict!.here!.title, conflict!.there!.title]).toEqual(['Here', 'There']);
+    expect(conflict!.why).toBe('task #1 "Here": title: here "Here", there "There"');
+    expect(await s.consumed(id)).toMatchObject([{ how: 'conflict' }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('keeps a value the leader changed where its journal lost it', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await s.db.update(tasks).set({ title: 'Here' }).where(eq(tasks.id, s.one.id));
+    /* As a prune that took that row alone. */
+    await s.db.execute(sql`DELETE FROM net.journal WHERE tbl = 'tasks' AND op = 'update' AND key = ${JSON.stringify({ id: s.one.id })}::jsonb`);
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
+    const { id } = await s.merge(fork);
+    expect(await s.titleOf(s.db, s.one.id)).toBe('Here');
+    expect(await s.conflicts(id)).toMatchObject([{ tbl: 'tasks', kind: 'differs', cols: ['title'] }]);
+  });
+
+  it('deletes only what the source alone removed', async () => {
+    const s = await stand();
+    const [lonely] = await s.db.insert(teams).values({ ...s.on, departmentId: s.dev.id, name: 'Lonely' }).returning();
+    const [support] = await s.db.insert(departments).values({ ...s.on, name: 'Support', roleCode: 'SUP' }).returning();
+    const fork = await s.sides.fork();
+    await fork.db.delete(teams).where(eq(teams.id, lonely!.id));
+    await fork.db.delete(departments).where(eq(departments.id, support!.id));
+    const [note] = await s.db.insert(notebookNotes).values({ ...s.on, number: 1, text: 'Keep', departmentId: support!.id }).returning();
+    const { id, result } = await s.merge(fork);
+    expect(result.counts).toMatchObject({ deleted: 1, conflicts: 1 });
+    expect(await s.db.select().from(teams).where(eq(teams.id, lonely!.id))).toEqual([]);
+    /* Nothing of the merge deletes through a cascade. */
+    expect(await s.db.select().from(departments).where(eq(departments.id, support!.id))).toHaveLength(1);
+    expect(await s.db.select().from(notebookNotes).where(eq(notebookNotes.id, note!.id))).toHaveLength(1);
+    expect(await s.conflicts(id)).toMatchObject([{ tbl: 'departments', key: { id: support!.id }, op: 'delete', kind: 'still_used', there: null }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('never deletes through a skipped transaction', async () => {
+    const s = await stand();
+    const extra = await s.task(s.db, 3, 'Three', { turnId: null });
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, extra.id));
+    await withSource(nodeSource('n1', 'jobs', 7), () => fork.db.delete(tasks).where(eq(tasks.id, extra.id)));
+    /* The leader has its own result of that input. */
+    await withSource(nodeSource('n1', 'jobs', 7), () => s.db.update(tasks).set({ body: 'Seen here' }).where(eq(tasks.id, s.two.id)));
+    const { id, result } = await s.merge(fork);
+    expect(result.counts.deleted).toBe(0);
+    expect(await s.titleOf(s.db, extra.id)).toBe('Three');
+    const [conflict] = await s.conflicts(id);
+    expect(conflict).toMatchObject({ tbl: 'tasks', key: { id: extra.id }, op: 'delete', kind: 'removed_changed' });
+    expect(conflict!.there!.title).toBe('There');
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('skips what the leader already did from the same source', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    const said = (side: Db) => withSource(nodeSource('n1', 'jobs', 7), async () => (await side.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} }).returning())[0]!);
+    const [there, here] = [await said(fork.db), await said(s.db)];
+    const { id, result } = await s.merge(fork);
+    expect(result.counts).toMatchObject({ added: 0, skipped: 2 });
+    expect((await s.db.select({ id: agentEvents.id }).from(agentEvents)).map(row => row.id)).toEqual([here.id]);
+    expect((await s.consumed(id)).map(entry => entry.how)).toEqual(['skipped', 'skipped']);
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'agent_events', key: { id: there.id }, how: 'skipped' }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('closes the second open turn', async () => {
+    const s = await stand();
+    await s.db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, s.turn.id));
+    const fork = await s.sides.fork();
+    /* Each side opens its own turn with a task of that turn, which point at each other. */
+    const open = async (side: Db, number: number) => {
+      const [turn] = await side.insert(turns).values({ ...s.on, number: 2, goal: `Goal ${number}`, status: 'open' }).returning();
+      const task = await s.task(side, number, `Of turn ${number}`, { turnId: turn!.id });
+      await side.update(turns).set({ taskId: task.id }).where(eq(turns.id, turn!.id));
+      return { turn: turn!, task };
+    };
+    const [there, here] = [await open(fork.db, 3), await open(s.db, 4)];
+    const { id, result } = await s.merge(fork);
+    expect(result.counts).toMatchObject({ added: 2, conflicts: 0 });
+    const [turn] = await s.db.select().from(turns).where(eq(turns.id, there.turn.id));
+    expect(turn).toMatchObject({ status: 'closed', number: 3, taskId: there.task.id });
+    expect(turn!.closedAt).toBeInstanceOf(Date);
+    /* Its task that is not done goes on in the turn that is open here. */
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, there.task.id)))[0]).toMatchObject({ turnId: here.turn.id, number: 3 });
+    expect((await s.db.select().from(turns).where(eq(turns.status, 'open'))).map(found => found.id)).toEqual([here.turn.id]);
+    const written = await s.kept(id);
+    expect(written.map(row => [row.tbl, row.how, [...row.cols].sort()])).toEqual([['tasks', 'rewritten', ['turn_id']], ['turns', 'rewritten', ['closed_at', 'number', 'status']]]);
+    expect(written.find(row => row.tbl === 'turns')!.was).toMatchObject({ status: 'open', number: 2, closed_at: null });
+    expect(result.counts.rewritten).toBe(2);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('renumbers a split number', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    const [there, here] = [await s.task(fork.db, 3, 'Three there'), await s.task(s.db, 3, 'Three here')];
+    const { id } = await s.merge(fork);
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, there.id)))[0]).toMatchObject({ number: 4, title: 'Three there' });
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, here.id)))[0]!.number).toBe(3);
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'tasks', key: { id: there.id }, how: 'rewritten', cols: ['number'], was: { number: 3 } }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it.each([[false], [true]])("keeps two forks' task_events apart by uuid, kept %s", async kept => {
+    const s = await stand();
+    const line = (downstream: string, over: Partial<typeof mapReturns.$inferInsert> = {}) => ({ ...s.on, upstreamAgentId: s.head.id, downstreamAgentId: downstream, ...over });
+    await s.db.insert(mapReturns).values(line(s.ana.id, { sourceKey: null }));
+    const fork = await s.sides.fork();
+    /* The same number on each side, for another event. */
+    const [here] = await s.db.insert(taskEvents).values({ ...s.on, taskId: s.one.id, kind: 'comment', text: 'here' }).returning();
+    const [there] = await fork.db.insert(taskEvents).values({ ...s.on, taskId: s.one.id, kind: 'comment', text: 'there' }).returning();
+    expect(there!.id).toBe(here!.id);
+    await s.db.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} });
+    await s.db.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} });
+    const [message] = await fork.db.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} }).returning();
+    /* A line that was given back names what gave it back, with when. */
+    const back = { returnedAt: new Date(), returnedEpoch: 0 };
+    await fork.db.insert(mapReturns).values(line(s.ben.id, { ...back, sourceKey: `task:${there!.id}`, sourceTaskId: s.one.id }));
+    await fork.db.update(mapReturns).set({ ...back, sourceKey: `message:${message!.seq}` }).where(eq(mapReturns.downstreamAgentId, s.ana.id));
+    /* A line whose event the leader will not have: the fork's own event goes before the merge reads it. */
+    const [gone] = await fork.db.insert(taskEvents).values({ ...s.on, taskId: s.two.id, kind: 'comment', text: 'gone' }).returning();
+    await fork.db.insert(mapReturns).values(line(s.orchestrator.id, { ...back, sourceKey: `task:${gone!.id}` }));
+    await fork.db.delete(taskEvents).where(eq(taskEvents.id, gone!.id));
+    const { id } = await s.merge(fork, { kept });
+    const both = await s.db.select().from(taskEvents).where(eq(taskEvents.taskId, s.one.id)).orderBy(taskEvents.id);
+    expect(both.map(event => event.text)).toEqual(['here', 'there']);
+    const mine = both[1]!;
+    expect(mine.uuid).toBe(there!.uuid);
+    expect(mine.id).not.toBe(there!.id);
+    const lines = await s.db.select().from(mapReturns);
+    expect(lines.find(found => found.downstreamAgentId === s.ben.id)!.sourceKey).toBe(`task:${mine.id}`);
+    const [heard] = await s.db.select().from(agentEvents).where(eq(agentEvents.id, message!.id));
+    if (!kept) expect(lines.find(found => found.downstreamAgentId === s.ana.id)!.sourceKey).toBe(`message:${heard!.seq}`);
+    /* After a restore a difference is listed, in the words of this side's numbers. */
+    else expect((await s.conflicts(id)).find(conflict => conflict.tbl === 'map_returns' && conflict.kind === 'differs')!.cols).toContain('source_key');
+    expect(lines.some(found => found.downstreamAgentId === s.orchestrator.id)).toBe(false);
+    expect((await s.conflicts(id)).find(conflict => conflict.kind === 'refused')).toMatchObject({ tbl: 'map_returns', op: 'insert', why: expect.stringContaining('Its task_events row is not here.') });
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('makes a second head an ordinary agent', async () => {
+    const s = await stand();
+    const [sales] = await s.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning();
+    const fork = await s.sides.fork();
+    const hire = async (side: Db, name: string) => (await side.insert(agents).values({ ...s.staff, kind: 'head', name, departmentId: sales!.id }).returning())[0]!;
+    const [there, here] = [await hire(fork.db, 'There'), await hire(s.db, 'Here')];
+    const { id } = await s.merge(fork);
+    expect((await s.db.select().from(agents).where(eq(agents.id, there.id)))[0]!.kind).toBe('worker');
+    expect((await s.db.select().from(agents).where(eq(agents.id, here.id)))[0]!.kind).toBe('head');
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'agents', how: 'rewritten', cols: ['kind'], was: { kind: 'head' } }]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('refuses a row whose parent is gone, and what hangs on it', async () => {
+    const s = await stand();
+    const [parent] = await s.db.insert(departments).values({ ...s.on, name: 'Parent', roleCode: 'PAR' }).returning();
+    const [kept] = await s.db.insert(notebookNotes).values({ ...s.on, number: 1, text: 'Stays', departmentId: s.dev.id }).returning();
+    const fork = await s.sides.fork();
+    await s.db.delete(departments).where(eq(departments.id, parent!.id));
+    const [child] = await fork.db.insert(departments).values({ ...s.on, name: 'Child', roleCode: 'CHI', parentId: parent!.id }).returning();
+    const [note] = await fork.db.insert(notebookNotes).values({ ...s.on, number: 1, text: 'Of the child', departmentId: child!.id }).returning();
+    const task = await s.task(fork.db, 3, 'Of the child', { departmentId: child!.id });
+    await fork.db.insert(taskEvents).values([{ ...s.on, taskId: task.id, kind: 'created' }, { ...s.on, taskId: task.id, kind: 'comment', text: 'x' }]);
+    const sales = (await fork.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning())[0]!;
+    const { id, result } = await s.merge(fork);
+    /* The merge commits, and what did not hang on the lost parent applies. */
+    expect(await s.db.select().from(departments).where(eq(departments.id, sales.id))).toHaveLength(1);
+    expect(result.counts).toMatchObject({ added: 1, conflicts: 5 });
+    const refused = await s.conflicts(id);
+    expect(refused.map(conflict => [conflict.tbl, conflict.kind, conflict.op])).toEqual([
+      ['departments', 'refused', 'insert'], ['notebook_notes', 'refused', 'insert'], ['task_events', 'refused', 'insert'], ['task_events', 'refused', 'insert'], ['tasks', 'refused', 'insert'],
+    ]);
+    expect(refused[0]!.why).toContain('Its departments row is not here.');
+    expect(refused[0]!.there).toMatchObject({ id: child!.id, name: 'Child' });
+    expect(refused.find(conflict => conflict.tbl === 'tasks')).toMatchObject({ task_id: task.id, topic: 'work' });
+    for (const [table, key] of [[departments, child!.id], [notebookNotes, note!.id], [tasks, task.id]] as const) expect(await s.db.select().from(table).where(eq(table.id, key))).toEqual([]);
+    expect(await s.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id))).toEqual([]);
+    expect(await s.db.select().from(notebookNotes).where(eq(notebookNotes.id, kept!.id))).toHaveLength(1);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('refuses a task whose after names a refused task', async () => {
+    const s = await stand();
+    const [gone] = await s.db.insert(departments).values({ ...s.on, name: 'Gone', roleCode: 'GON' }).returning();
+    const fork = await s.sides.fork();
+    await s.db.delete(departments).where(eq(departments.id, gone!.id));
+    const first = await s.task(fork.db, 3, 'First', { departmentId: gone!.id, turnId: null });
+    const second = await s.task(fork.db, 4, 'Second', { after: [first.id], turnId: null });
+    const { id } = await s.merge(fork);
+    const refused = await s.conflicts(id);
+    expect(refused.map(conflict => [conflict.key.id, conflict.kind]).sort()).toEqual([[first.id, 'refused'], [second.id, 'refused']].sort());
+    expect(refused.find(conflict => conflict.key.id === second.id)!.why).toContain('Its tasks row is not here.');
+    expect(await s.db.select().from(tasks).where(eq(tasks.companyId, s.acme.id))).toHaveLength(2);
+  });
+
+  it('replays instead of putting values back', async () => {
+    const s = await stand();
+    const machine = async (key: string) => (await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: key, hostname: key }).returning())[0]!;
+    const [m1, m2] = [await machine('m1'), await machine('m2')];
+    const [node] = await s.db.insert(nodes).values({ ...s.on, machineId: m1.id, subscriptionId: s.plan.id }).returning();
+    const fork = await s.sides.fork();
+    await s.db.delete(machines).where(eq(machines.id, m2.id));
+    await fork.db.update(nodes).set({ machineId: m2.id }).where(eq(nodes.id, node!.id));
+    const [second] = await fork.db.insert(nodes).values({ ...s.on, machineId: m1.id, subscriptionId: s.plan.id }).returning();
+    const { id } = await s.merge(fork);
+    const refused = await s.conflicts(id);
+    expect(refused.map(conflict => [conflict.key.id, conflict.kind, conflict.op, conflict.topic]).sort()).toEqual([[node!.id, 'refused', 'update', 'plans'], [second!.id, 'refused', 'insert', 'plans']].sort());
+    expect(refused.find(conflict => conflict.key.id === node!.id)!.why).toContain('Its machines row is not here.');
+    /* The second one fails only once the first is not written: on a key another row still holds. */
+    expect(refused.find(conflict => conflict.key.id === second!.id)!.why).toContain('nodes_machine_plan');
+    expect((await s.db.select().from(nodes)).map(found => [found.id, found.machineId])).toEqual([[node!.id, m1.id]]);
+  });
+
+  it('sends one email on both sides to the CEO', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    const invite = async (side: Db, name: string) => (await side.insert(people).values({ ...s.on, name, email: 'maria@acme.test', status: 'invited', scopeKind: 'company' }).returning())[0]!;
+    const [there] = [await invite(fork.db, 'Maria there'), await invite(s.db, 'Maria here')];
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
+    const { id } = await s.merge(fork);
+    const [conflict] = await s.conflicts(id);
+    expect(conflict).toMatchObject({ tbl: 'people', key: { id: there.id }, op: 'insert', kind: 'refused', topic: 'people', task_id: null });
+    expect(conflict!.why).toContain('people_email_unique');
+    expect(await s.titleOf(s.db, s.one.id)).toBe('There');
+    expect((await s.db.select().from(people).where(eq(people.email, 'maria@acme.test'))).map(person => person.name)).toEqual(['Maria here']);
+  });
+
+  it("sends a change this side's rows no longer take to the orchestrator", async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ number: 7 }).where(eq(tasks.id, s.one.id));
+    await s.task(s.db, 7, 'Seven here');
+    const { id } = await s.merge(fork);
+    const [conflict] = await s.conflicts(id);
+    expect(conflict).toMatchObject({ tbl: 'tasks', key: { id: s.one.id }, op: 'update', kind: 'refused', topic: 'work', cols: ['number'], task_id: s.one.id });
+    expect(conflict!.why).toContain('tasks_company_number');
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, s.one.id)))[0]!.number).toBe(1);
+  });
+
+  it('stops what the source left running', async () => {
+    const s = await stand();
+    const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();
+    const fork = await s.sides.fork();
+    const job = async (status: 'queued' | 'running' | 'done') =>
+      (await fork.db.insert(jobs).values({ ...s.on, subscriptionId: s.plan.id, agentId: s.ana.id, prompt: 'Work', timeoutMs: 60_000, status, taskId: s.one.id, ...(status === 'done' ? { finishedAt: new Date() } : {}) }).returning())[0]!;
+    const [running, queued, done] = [await job('running'), await job('queued'), await job('done')];
+    const [command] = await fork.db.insert(computerRuns).values({ ...s.on, machineId: machine!.id, command: 'id', timeoutS: 60 }).returning();
+    const [run] = await fork.db.insert(testRuns).values({ ...s.on, number: 1, taskId: s.one.id, agentId: s.ana.id, jobId: done.id, command: 'npm test', parts: 2, timeoutMs: 60_000, status: 'running' }).returning();
+    const parts = await fork.db.insert(testParts).values([{ ...s.on, runId: run!.id, part: 1, status: 'queued' }, { ...s.on, runId: run!.id, part: 2, status: 'running' }]).returning();
+    const { id, result } = await s.merge(fork, { label: 'marat-mac' });
+    const error = 'Ran on marat-mac while it was cut off.';
+    for (const made of [running, queued]) {
+      const [now] = await s.db.select().from(jobs).where(eq(jobs.id, made.id));
+      expect([now!.status, now!.error, now!.finishedAt instanceof Date]).toEqual(['failed', error, true]);
+    }
+    expect((await s.db.select().from(jobs).where(eq(jobs.id, done.id)))[0]).toMatchObject({ status: 'done', error: null });
+    expect((await s.db.select().from(computerRuns).where(eq(computerRuns.id, command!.id)))[0]).toMatchObject({ state: 'lost', doneAt: expect.any(Date) });
+    expect((await s.db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]).toMatchObject({ status: 'stopped', finishedAt: expect.any(Date) });
+    for (const part of parts) expect((await s.db.select().from(testParts).where(eq(testParts.id, part.id)))[0]).toMatchObject({ status: 'stopped', error, finishedAt: expect.any(Date) });
+    const written = await s.kept(id);
+    expect(written.map(row => [row.tbl, row.how]).sort()).toEqual([['computer_runs', 'rewritten'], ['jobs', 'rewritten'], ['jobs', 'rewritten'], ['test_parts', 'rewritten'], ['test_parts', 'rewritten'], ['test_runs', 'rewritten']]);
+    expect(written.find(row => row.tbl === 'computer_runs')).toMatchObject({ cols: ['state', 'done_at'], was: { state: 'waiting', done_at: null } });
+    expect(result.counts.rewritten).toBe(6);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+    /* After a restore nobody knows where it ran. */
+    const again = await stand();
+    const kept = await again.sides.fork();
+    const [left] = await kept.db.insert(jobs).values({ ...again.on, subscriptionId: again.plan.id, prompt: 'Work', timeoutMs: 60_000, status: 'running' }).returning();
+    await again.merge(kept, { kept: true });
+    expect((await again.db.select().from(jobs).where(eq(jobs.id, left!.id)))[0]).toMatchObject({ status: 'failed', error: 'Ran before the restore; how it ended was not kept.' });
+  });
+
+  it('leaves open what the leader holds open', async () => {
+    const s = await stand();
+    const work = { ...s.on, subscriptionId: s.plan.id, prompt: 'Work', timeoutMs: 60_000 };
+    const [waiting] = await s.db.insert(jobs).values({ ...work, status: 'queued' }).returning();
+    const [failed] = await s.db.insert(jobs).values({ ...work, status: 'failed', error: 'Lost', finishedAt: new Date() }).returning();
+    const fork = await s.sides.fork();
+    await fork.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.id, waiting!.id));
+    await fork.db.update(jobs).set({ status: 'running', error: null, finishedAt: null, startedAt: new Date() }).where(eq(jobs.id, failed!.id));
+    const { id } = await s.merge(fork, { label: 'marat-mac' });
+    /* The turn the leader still holds in its queue runs here as the leader knows it: nothing of the source's run of it
+       is taken. */
+    expect((await s.db.select().from(jobs).where(eq(jobs.id, waiting!.id)))[0]).toMatchObject({ status: 'queued', startedAt: null });
+    /* One the leader holds ended is never written open. */
+    expect((await s.db.select().from(jobs).where(eq(jobs.id, failed!.id)))[0]).toMatchObject({ status: 'failed', error: 'Ran on marat-mac while it was cut off.', finishedAt: expect.any(Date), startedAt: expect.any(Date) });
+    const written = await s.kept(id);
+    expect(written.map(row => [row.key.id, row.how])).toEqual(expect.arrayContaining([[waiting!.id, 'rewritten'], [failed!.id, 'rewritten']]));
+    expect([...written.find(row => row.key.id === waiting!.id)!.cols].sort()).toEqual(['started_at', 'status']);
+    expect(await s.conflicts(id)).toEqual([]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('leaves the programs a server watched behind, and brings back a picture of one without it', async () => {
+    const s = await stand();
+    const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();
+    const [node] = await s.db.insert(nodes).values({ ...s.on, machineId: machine!.id, subscriptionId: s.plan.id }).returning();
+    const fork = await s.sides.fork();
+    const [job] = await fork.db.insert(jobs).values({ ...s.on, subscriptionId: s.plan.id, agentId: s.ana.id, prompt: 'Work', timeoutMs: 60_000, status: 'done', finishedAt: new Date() }).returning();
+    const [program] = await fork.db.insert(programInstances).values({ ...s.on, id: randomUUID(), agentId: s.ana.id, nodeId: node!.id, launched: true, active: true }).returning();
+    const [hung] = await fork.db.insert(programOperatorCases).values({
+      ...s.on, agentId: s.ana.id, jobId: job!.id, nodeId: node!.id, instance: program!.id, reason: 'recorded_no_activity', evidenceKey: 'k1', capability: 'c'.repeat(32), deadlineAt: new Date(Date.now() + 3_600_000),
+    }).returning();
+    const [picture] = await fork.db.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'image/png', bytes: Buffer.from('screen'), size: 6, operatorCaseId: hung!.id }).returning();
+    const { id, result } = await s.merge(fork);
+    expect(await s.db.select().from(programInstances)).toEqual([]);
+    expect(await s.db.select().from(programOperatorCases)).toEqual([]);
+    const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, picture!.id));
+    expect([kept!.operatorCaseId, Buffer.from(kept!.bytes).toString()]).toEqual([null, 'screen']);
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'attachments', how: 'rewritten', cols: ['operator_case_id'], was: { operator_case_id: hung!.id } }]);
+    expect([result.counts.added, await s.conflicts(id)]).toEqual([2, []]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('brings back a new machine with its access closed', async () => {
+    const s = await stand();
+    const machine = async (side: Db, key: string) => (await side.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: key, hostname: key }).returning())[0]!;
+    const open = { until: new Date(Date.now() + 3_600_000), openedBy: s.owner.id, openedAt: new Date(), grant: { payload: 'p', signature: 's' } };
+    const known = await machine(s.db, 'known');
+    await s.db.insert(machineAccess).values({ ...s.on, machineId: known.id });
+    const fork = await s.sides.fork();
+    const added = await machine(fork.db, 'added');
+    await fork.db.insert(machineAccess).values({ ...s.on, machineId: added.id, ...open });
+    const restored = await s.merge(fork, { kept: true });
+    expect((await s.db.select().from(machines).where(eq(machines.id, added.id)))[0]).toMatchObject({ hostname: 'added' });
+    expect((await s.db.select().from(machineAccess).where(eq(machineAccess.machineId, added.id)))[0]).toMatchObject({ until: null, openedBy: null, openedAt: null, grant: null });
+    expect((await s.kept(restored.id)).find(row => row.tbl === 'machine_access')).toMatchObject({ how: 'rewritten', cols: ['until', 'opened_by', 'opened_at', 'grant'] });
+    expect(await s.checked(fork, restored.id)).toEqual({ ok: true, missing: [] });
+    /* By the journal, the source opening a machine both sides know: listed, and closed here until its owner opens it. */
+    const journal = await stand();
+    const mine = (await journal.db.insert(machines).values({ ...journal.on, personId: journal.owner.id, machineKey: 'known', hostname: 'known' }).returning())[0]!;
+    await journal.db.insert(machineAccess).values({ ...journal.on, machineId: mine.id });
+    const apart = await journal.sides.fork();
+    await apart.db.update(machineAccess).set({ ...open, openedBy: journal.owner.id }).where(eq(machineAccess.machineId, mine.id));
+    const merged = await journal.merge(apart);
+    expect((await journal.db.select().from(machineAccess).where(eq(machineAccess.machineId, mine.id)))[0]).toMatchObject({ until: null, grant: null });
+    const [conflict] = await journal.conflicts(merged.id);
+    expect(conflict).toMatchObject({ tbl: 'machine_access', kind: 'differs', topic: 'access', op: 'update' });
+    expect([...conflict!.cols].sort()).toEqual(['grant', 'opened_at', 'opened_by', 'until']);
+  });
+
+  it('finds a row the carry wrote anew', async () => {
+    const s = await stand();
+    const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'listed' }).returning();
+    const [place] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
+    const fork = await s.sides.fork();
+    await s.db.delete(personAccess).where(eq(personAccess.id, place!.id));
+    const [anew] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
+    const { id, result } = await s.merge(fork, { kept: true });
+    expect(await s.conflicts(id)).toEqual([]);
+    expect(result.counts).toMatchObject({ matched: 1, added: 0 });
+    expect(await s.kept(id)).toMatchObject([{ tbl: 'person_access', key: { id: place!.id }, how: 'matched', here: { id: anew!.id } }]);
+    expect((await s.db.select().from(personAccess)).map(row => row.id)).toEqual([anew!.id]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('never reads a stale absence as a deletion or a stale value as a change', async () => {
+    const s = await stand();
+    const [stays, back] = [await s.task(s.db, 3, 'Stays', { turnId: null }), await s.task(s.db, 4, 'Comes back', { turnId: null })];
+    const fork = await s.sides.fork();
+    await fork.db.delete(tasks).where(eq(tasks.id, stays.id));
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
+    await s.db.delete(tasks).where(eq(tasks.id, back.id));
+    const { id, result } = await s.merge(fork, { kept: true });
+    expect(result.path).toBe('compare');
+    expect(await s.titleOf(s.db, stays.id)).toBe('Stays');
+    expect(await s.titleOf(s.db, s.one.id)).toBe('One');
+    expect(await s.titleOf(s.db, back.id)).toBe('Comes back');
+    expect(await s.conflicts(id)).toMatchObject([{ tbl: 'tasks', key: { id: s.one.id }, kind: 'differs', cols: ['title'], op: 'update' }]);
+    expect(result.counts).toMatchObject({ added: 1, deleted: 0, changed: 0, conflicts: 1 });
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('compares a kept database even when its journal adds nothing', async () => {
+    for (const kept of [true, false]) {
+      const s = await stand();
+      const fork = await s.sides.fork();
+      // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A fork's own database, which closes with its test.
+      await fork.client.exec(`ALTER TABLE tasks DISABLE TRIGGER net_journal; UPDATE tasks SET title = 'Unjournaled' WHERE id = '${s.one.id}'; ALTER TABLE tasks ENABLE TRIGGER net_journal`);
+      const { id, result } = await s.merge(fork, { kept });
+      expect(await s.titleOf(s.db, s.one.id)).toBe('One');
+      if (kept) {
+        expect(await s.conflicts(id)).toMatchObject([{ tbl: 'tasks', kind: 'differs', cols: ['title'] }]);
+        expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+      } else {
+        /* The journals share every row and prove nothing new: nothing is listed, and the check finds what nothing explains. */
+        expect([result.path, await s.conflicts(id)]).toEqual(['journal', []]);
+        expect(await s.checked(fork, id)).toEqual({ ok: false, missing: [{ table: 'tasks', key: { id: s.one.id } }] });
+      }
+    }
+  });
+
+  it('never adds sessions after a restore', async () => {
+    for (const kept of [true, false]) {
+      const s = await stand();
+      const fork = await s.sides.fork();
+      await fork.db.insert(sessions).values({ tokenHash: 'a'.repeat(64), personId: s.owner.id, expiresAt: new Date(Date.now() + 3_600_000) });
+      const { id } = await s.merge(fork, { kept });
+      expect(await s.db.select().from(sessions)).toHaveLength(kept ? 0 : 1);
+      expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+    }
+  });
+
+  it('merges a database plan 7 kept', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    const [sales] = await fork.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning();
+    await asPlan7(fork.client);
+    const { id, result } = await s.merge(fork, { kept: true });
+    expect(result.counts.added).toBe(1);
+    expect(await s.db.select().from(departments).where(eq(departments.id, sales!.id))).toHaveLength(1);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('carries a conflict left open', async () => {
+    const s = await stand();
+    const lost = { id: randomUUID() };
+    const hold = async (fork: Fork) => {
+      const [earlier] = await rowsOf<{ id: string }>(fork.db, sql`INSERT INTO net.merges (source, label, status) VALUES ('machine:earlier', 'an earlier one', 'merged') RETURNING id`);
+      await fork.db.execute(sql`INSERT INTO net.merge_conflicts (id, merge, tbl, key, op, kind, topic, there, why)
+        VALUES (${open}, ${earlier!.id}, 'tasks', ${JSON.stringify(lost)}::jsonb, 'insert', 'refused', 'work', ${JSON.stringify({ ...lost, title: 'Only here' })}::jsonb, 'Its departments row is not here.')`);
+    };
+    const open = randomUUID();
+    const [first, second] = [await s.sides.fork(), await s.sides.fork()];
+    await hold(first);
+    await hold(second);
+    const { id, result } = await s.merge(first);
+    expect(result.counts).toMatchObject({ carried: 1, conflicts: 1 });
+    expect(await s.conflicts(id)).toMatchObject([{ merge: id, carried: open, tbl: 'tasks', key: lost, op: 'insert', kind: 'refused', topic: 'work', here: null, there: { title: 'Only here' } }]);
+    expect(await s.checked(first, id)).toEqual({ ok: true, missing: [] });
+    /* It may hold the only copy of a value the company wrote, and is carried once. */
+    const again = await s.merge(second);
+    expect(again.result.counts.carried).toBe(0);
+    expect(await s.conflicts(again.id)).toEqual([]);
+    expect(await s.checked(second, again.id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('merges three sides one at a time', async () => {
+    const s = await stand();
+    const [first, second] = [await s.sides.fork(), await s.sides.fork()];
+    await first.db.update(tasks).set({ title: 'From the first' }).where(eq(tasks.id, s.one.id));
+    await second.db.update(tasks).set({ title: 'From the second' }).where(eq(tasks.id, s.two.id));
+    const [one, two] = [await s.merge(first), await s.merge(second)];
+    expect([await s.titleOf(s.db, s.one.id), await s.titleOf(s.db, s.two.id)]).toEqual(['From the first', 'From the second']);
+    expect([(await s.consumed(one.id)).length, (await s.consumed(two.id)).length]).toEqual([1, 1]);
+    /* What the first merge wrote here is no change of the second source's, and no difference of it either. */
+    expect([two.result.counts.changed, await s.conflicts()]).toEqual([1, []]);
+    expect(await s.checked(second, two.id)).toEqual({ ok: true, missing: [] });
+    /* A source read again brings nothing it brought before. */
+    const [more] = await rowsOf<{ id: string }>(s.db, sql`INSERT INTO net.merges (source, label) VALUES ('machine:again', 'the first again') RETURNING id`);
+    const source = await first.source();
+    const again = await runMerge(s.db, { id: more!.id, label: 'the first again', kept: false, companyId: s.acme.id }, source, { log: () => undefined });
+    await source.close();
+    expect(again.counts).toMatchObject({ changed: 0, added: 0, conflicts: 0 });
+  });
+
+  it('never applies twice', async () => {
+    const s = await stand();
+    await s.db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, s.turn.id));
+    const fork = await s.sides.fork();
+    await s.task(fork.db, 3, 'Three there', { turnId: null });
+    await s.task(s.db, 3, 'Three here', { turnId: null });
+    await fork.db.insert(turns).values({ ...s.on, number: 2, goal: 'There', status: 'open' });
+    await s.db.insert(turns).values({ ...s.on, number: 2, goal: 'Here', status: 'open' });
+    await fork.db.insert(jobs).values({ ...s.on, subscriptionId: s.plan.id, prompt: 'Work', timeoutMs: 60_000, status: 'running' });
+    const { id } = await s.merge(fork);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+    const before = await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.journal`);
+    const source = await fork.source();
+    await expect(runMerge(s.db, { id, label: 'the fork', kept: false, companyId: s.acme.id }, source, { log: () => undefined })).rejects.toThrow(new MergeRefused('The merge was applied already.'));
+    await source.close();
+    expect(await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.journal`)).toEqual(before);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('finishes the completion check', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
+    await fork.db.update(tasks).set({ title: 'Two there' }).where(eq(tasks.id, s.two.id));
+    await s.db.update(tasks).set({ title: 'Two here' }).where(eq(tasks.id, s.two.id));
+    const said = (side: Db) => withSource(nodeSource('n1', 'jobs', 7), async () => (await side.insert(agentEvents).values({ ...s.on, agentId: s.ana.id, kind: 'text', data: {} }).returning())[0]!);
+    const [there] = [await said(fork.db), await said(s.db)];
+    const added = await s.task(fork.db, 3, 'Three');
+    const { id } = await s.merge(fork);
+    expect((await s.consumed(id)).map(entry => entry.how).sort()).toEqual(['applied', 'applied', 'conflict', 'skipped', 'skipped']);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+    /* A journal row of the source that nothing accounts for. */
+    const [taken] = await rowsOf<{ journal: string; merge: string; at: string | Date; how: string }>(s.db, sql`DELETE FROM net.merge_consumed WHERE merge = ${id} AND how = 'applied' AND journal = (SELECT min(journal::text)::uuid FROM net.merge_consumed WHERE merge = ${id} AND how = 'applied') RETURNING *`);
+    expect((await s.checked(fork, id)).ok).toBe(false);
+    await s.db.execute(sql`INSERT INTO net.merge_consumed (journal, merge, at, how) VALUES (${taken!.journal}, ${id}, ${new Date(taken!.at).toISOString()}, 'applied')`);
+    /* A row the leader lacks that nothing names. */
+    await s.db.execute(sql`DELETE FROM net.merge_rows WHERE merge = ${id} AND how = 'skipped'`);
+    expect(await s.checked(fork, id)).toEqual({ ok: false, missing: [{ table: 'agent_events', key: { id: there.id } }] });
+    await s.db.execute(sql`INSERT INTO net.merge_rows (merge, tbl, key, how) VALUES (${id}, 'agent_events', ${JSON.stringify({ id: there.id })}::jsonb, 'skipped')`);
+    expect((await s.checked(fork, id)).ok).toBe(true);
+    /* What the company itself did to a row since is its own later change. */
+    await s.db.update(tasks).set({ title: 'Changed since' }).where(eq(tasks.id, added.id));
+    expect((await s.checked(fork, id)).ok).toBe(true);
+    await s.db.delete(tasks).where(eq(tasks.id, added.id));
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('changes nothing when it fails half way', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    for (let n = 3; n < 15; n += 1) await s.task(fork.db, n, `Task ${n}`, { turnId: null });
+    const state = async () => ({
+      tasks: (await s.db.select({ id: tasks.id }).from(tasks)).length,
+      journal: await rowsOf(s.db, sql`SELECT count(*)::int AS n FROM net.journal`),
+      records: await rowsOf(s.db, sql`SELECT (SELECT count(*) FROM net.merge_conflicts)::int AS conflicts, (SELECT count(*) FROM net.merge_consumed)::int AS consumed, (SELECT count(*) FROM net.merge_rows)::int AS kept`),
+    });
+    const before = await state();
+    await expect(s.merge(fork, { onUnit: n => (n === 10 ? Promise.reject(new Error('a fault')) : undefined) })).rejects.toThrow('a fault');
+    expect(await state()).toEqual(before);
+    expect((await rowsOf<{ status: string }>(s.db, sql`SELECT status FROM net.merges`)).map(row => row.status)).toEqual(['pending']);
+    /* Two shapes never merge. */
+    const other = await s.sides.fork();
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A fork's own database, which closes with its test.
+    await other.client.exec('ALTER TABLE teams ADD COLUMN nickname text');
+    await expect(s.merge(other)).rejects.toThrow(new MergeRefused('The two databases are of different versions.'));
+    /* Nor does another company's database. */
+    const stranger = await s.sides.fork();
+    await expect((async () => {
+      const [row] = await rowsOf<{ id: string }>(s.db, sql`INSERT INTO net.merges (source, label) VALUES ('machine:stranger', 'a stranger') RETURNING id`);
+      const source = await stranger.source();
+      try {
+        return await runMerge(s.db, { id: row!.id, label: 'a stranger', kept: false, companyId: randomUUID() }, source, { log: () => undefined });
+      } finally {
+        await source.close();
+      }
+    })()).rejects.toThrow(new MergeRefused('This database is of another company.'));
+    expect(await state()).toEqual(before);
+  });
+
+  it("holds the app's writes while it runs", async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    await fork.db.update(tasks).set({ title: 'There' }).where(eq(tasks.id, s.one.id));
+    let free!: () => void;
+    const waits = new Promise<void>(resolve => (free = resolve));
+    let reached!: () => void;
+    const atFirst = new Promise<void>(resolve => (reached = resolve));
+    const lines: string[] = [];
+    const merging = s.merge(fork, { onUnit: n => (n === 1 ? (reached(), waits) : undefined), log: line => lines.push(line) });
+    await atFirst;
+    const write = s.db.update(tasks).set({ title: 'Meanwhile' }).where(and(eq(tasks.id, s.two.id))).then(() => 'written');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    /* The merge holds the only connection a PGlite has, so what is there is asked of the merge's own result later. */
+    free();
+    const { id, result } = await merging;
+    expect(await write).toBe('written');
+    expect([await s.titleOf(s.db, s.one.id), await s.titleOf(s.db, s.two.id)]).toEqual(['There', 'Meanwhile']);
+    /* The write came after the merge: the merge lists nothing of it. */
+    expect([result.counts.changed, await s.conflicts(id)]).toEqual([1, []]);
+    const journal = await rowsOf<{ xact: string; key: { id: string } }>(s.db, sql`SELECT xact, key FROM net.journal WHERE tbl = 'tasks' AND op = 'update' ORDER BY at`);
+    expect(journal.map(row => row.key.id)).toEqual([s.one.id, s.two.id]);
+    expect(journal[0]!.xact).toBe((await s.mergeRow(id)).xact);
+    expect(result.heldMs).toBeGreaterThanOrEqual(150);
+    expect(lines).toEqual([`The merge ${id} held the app's writes ${result.heldMs} ms.`]);
+    expect(lines.join(' ')).not.toMatch(/There|Meanwhile|One|Two/);
+  });
+});
