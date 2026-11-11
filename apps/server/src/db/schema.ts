@@ -479,6 +479,9 @@ export const agents = pgTable(
     /* The node of its plan its program lives on, with its folder, session and terminal; it stays there while that node is
        ready. None on a company key, which runs on the built-in node, and before its first turn. */
     nodeId: uuid('node_id').references((): AnyPgColumn => nodes.id),
+    /* The machine whose built-in node its program lives on, by its network id, for one on a company key; none on a
+       plan's node, and before its first turn. */
+    builtinMachine: text('builtin_machine'),
     /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
        hashes it was hired with, so the card can say a template moved on. */
     roleKey: text('role_key'),
@@ -507,6 +510,7 @@ export const agents = pgTable(
   t => [
     uniqueIndex('agents_one_head').on(t.departmentId).where(sql`kind = 'head' AND removed_at IS NULL`),
     uniqueIndex('agents_one_orchestrator').on(t.companyId).where(sql`kind = 'orchestrator' AND removed_at IS NULL`),
+    check('agents_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
 
@@ -581,6 +585,8 @@ export const jobs = pgTable(
     subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
     /* The node it went out to; none for the built-in node's jobs, and while it waits. */
     nodeId: uuid('node_id').references(() => nodes.id),
+    /* The machine whose built-in node it went out to, by its network id; none for a job of a plan's node. */
+    builtinMachine: text('builtin_machine'),
     agentId: uuid('agent_id').references(() => agents.id),
     prompt: text('prompt').notNull(),
     /* What the turn was asked before the queue composed its sent prompt. Null for turns from before this was kept. */
@@ -620,6 +626,7 @@ export const jobs = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
 
@@ -1218,6 +1225,8 @@ export const testParts = pgTable(
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
     nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
+    /* The machine whose built-in node runs it, by its network id; none for a part on a plan's node. */
+    builtinMachine: text('builtin_machine'),
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */
     machineName: text('machine_name'),
@@ -1237,7 +1246,7 @@ export const testParts = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status)],
+  t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status), check('test_parts_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`)],
 );
 
 /* What a part's log said of its test files, read once from the log on the task: empty when it said nothing. */

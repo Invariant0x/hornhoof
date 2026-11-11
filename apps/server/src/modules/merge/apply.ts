@@ -6,7 +6,7 @@ import {
   compareOutcome, cutoffOf, differing, divergence, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
 } from './plan.js';
 import {
-  backupsOf, consumedIds, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
+  backupsOf, consumedIds, handoversOf, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
 } from './read.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ruleOf, type TableRule } from './rules.js';
 import type { MergeSource } from './source.js';
@@ -614,10 +614,19 @@ class Merge {
     return carried;
   }
 
-  /* A restore of an older bundle then lists, and can check, the bundles made after it. */
+  /* A restore of an older bundle then lists, and can check, the bundles made after it, and knows of each planned
+     switch written down after it. A switch between machines this database does not hold stays where it was. */
   private async backups(): Promise<void> {
     for (const backup of await backupsOf(this.src)) {
       await this.q('INSERT INTO net.backups SELECT * FROM jsonb_populate_record(NULL::net.backups, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(backup)]);
+    }
+    for (const handover of await handoversOf(this.src)) {
+      await this.q(
+        `INSERT INTO net.handovers SELECT h.* FROM jsonb_populate_record(NULL::net.handovers, $1::jsonb) h
+          WHERE EXISTS (SELECT 1 FROM public.machines m WHERE m.id = h.from_machine_id) AND EXISTS (SELECT 1 FROM public.machines m WHERE m.id = h.to_machine_id)
+         ON CONFLICT (id) DO NOTHING`,
+        [JSON.stringify(handover)],
+      );
     }
   }
 

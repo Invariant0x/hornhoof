@@ -92,6 +92,29 @@ describe('the databases a restore set aside', () => {
     expect(await s.merges()).toHaveLength(1);
   });
 
+  it('brings back the record of a planned switch', async () => {
+    const s = await stand();
+    await s.restored('hornhoof_before_t1');
+    const kept = await s.keep('hornhoof_before_t1');
+    /* The database that was set aside saw the server move between two machines after the backup was made. */
+    const [owner] = await kept.db.select().from(people).where(eq(people.isOwner, true));
+    const [from, to] = await kept.db.insert(machines).values([{ companyId: s.acme.id, personId: owner!.id, machineKey: 'from' }, { companyId: s.acme.id, personId: owner!.id, machineKey: 'to' }]).returning();
+    const handover = (id: string, toMachine: string) =>
+      kept.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots)
+        VALUES (${id}, ${from!.id}, 4, ${'0f'.repeat(16)}, '0/3000000', ${toMachine}, now(), '{"0f0f": "copy_0f0f0f0f0f0f0f0f_2"}'::jsonb)`);
+    const [moved, lost] = [randomUUID(), randomUUID()];
+    await handover(moved, to!.id);
+    /* One that names a machine no database has any more is left where it is, and the rest comes all the same. */
+    await kept.client.exec('SET session_replication_role = replica');
+    await handover(lost, randomUUID());
+    await kept.client.exec('SET session_replication_role = origin');
+    await s.merger.discover();
+    await s.merger.tick();
+    expect((await s.merges())[0]).toMatchObject({ status: 'merged', error: null });
+    const held = () => rowsOf<{ id: string; applied: string; slots: object }>(s.db, sql`SELECT id, applied, slots FROM net.handovers`);
+    expect(await held()).toEqual([{ id: moved, applied: '0/3000000', slots: { '0f0f': 'copy_0f0f0f0f0f0f0f0f_2' } }]);
+  });
+
   it('leaves it out when the CEO chose so', async () => {
     const s = await stand();
     const attempt = await s.restored('hornhoof_before_t1');

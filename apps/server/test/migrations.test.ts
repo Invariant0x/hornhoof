@@ -348,7 +348,8 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'Existing developer', 'DEV-ENG', '', null, '["dev-tdd"]', '{"base":"Existing assignment."}', '{"DEV-ENG":"existing-hash"}', null),
       (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
-    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key')::text as data from agents a order by name`)).rows;
+    /* A later migration adds the machine of an employee's built-in node, empty on every row. */
+    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'builtin_machine')::text as data from agents a order by name`)).rows;
     const plans = async () => (await db.execute<{ data: string }>(sql`select to_jsonb(s)::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
@@ -397,7 +398,8 @@ describe('migration 0086 composable skills', () => {
         values (${C}, ${card.kind}, ${card.name}, 'custom-model', ${JSON.stringify(card.skills)}::jsonb, ${JSON.stringify(overrides)}::jsonb,
         ${JSON.stringify(hashes)}::jsonb, 'high', 23, 'Keep the custom timer.', '2026-11-06T10:00:00Z', true)`);
     }
-    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills')::text as data from agents a order by name`)).rows;
+    /* A later migration adds the machine of an employee's built-in node, empty on every row. */
+    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills' - 'builtin_machine')::text as data from agents a order by name`)).rows;
     const before = await unchanged();
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -844,3 +846,73 @@ describe('migration 0109, the measures of the server order', () => {
     expect(await codeOf(db.execute(sql`insert into net.ranking (id) values (false)`))).toBe('23514');
   });
 });
+
+describe('migration 0110, the tables of a server move', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+  const fencedOf = async (db: PgliteDatabase, table: string) =>
+    (await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = ${table}`)).rows;
+  const A = '0f0f0f0f-0000-4000-8000-00000000000a';
+  const B = '0f0f0f0f-0000-4000-8000-00000000000b';
+
+  it('holds one move', async () => {
+    const db = await fullyMigrated();
+    expect(await fencedOf(db, 'move')).toEqual([{ deferrable: true, deferred: true }]);
+    const move = (state: string, reason: string | null, ended: boolean) =>
+      db.execute(sql`insert into net.move (machine_id, from_machine_id, asked_by, asked_at, state, reason, ended_at) values (${A}, ${B}, ${A}, now(), ${state}, ${reason}, ${ended ? sql`now()` : sql`null`})`);
+    /* A move that failed says why and when; one that goes on says neither. */
+    for (const [state, reason, ended] of [['failed', 'behind', false], ['failed', null, true], ['preparing', 'behind', false], ['switching', null, true], ['preparing', 'behind', true], ['failed', 'late', true], ['done', null, false]] as const) {
+      expect(await codeOf(move(state, reason, ended)), `${state} ${reason} ${ended}`).toBe('23514');
+    }
+    await move('preparing', null, false);
+    const [made] = (await db.execute<{ request: string }>(sql`select request::text as request from net.move`)).rows;
+    expect(made!.request).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await codeOf(move('preparing', null, false))).toBe('23505');
+    await db.execute(sql`update net.move set state = 'failed', reason = 'no_answer', ended_at = now()`);
+  });
+
+  it('records a handover', async () => {
+    const db = await fullyMigrated();
+    expect(await fencedOf(db, 'handovers')).toEqual([{ deferrable: true, deferred: true }]);
+    const slots = { ['0f'.repeat(16)]: 'copy_0f0f0f0f0f0f0f0f_2' };
+    await db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots)
+      values (gen_random_uuid(), ${A}, 4, ${'0f'.repeat(16)}, '0/3000000', ${B}, now(), ${JSON.stringify(slots)}::jsonb)`);
+    expect((await db.execute<{ slots: object }>(sql`select slots from net.handovers`)).rows).toEqual([{ slots }]);
+    expect(await codeOf(db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, to_machine_id, at) values (gen_random_uuid(), ${A}, 4, 'm', ${B}, now())`))).toBe('23502');
+    /* One with no slot to say holds none. */
+    await db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at) values (gen_random_uuid(), ${A}, 5, 'm', '0/4000000', ${B}, now())`);
+    expect((await db.execute(sql`select 1 from net.handovers where slots = '{}'::jsonb`)).rows).toHaveLength(1);
+  });
+
+  it("names a built-in node's machine", async () => {
+    const db = await fullyMigrated();
+    for (const table of ['jobs', 'agents', 'test_parts']) {
+      const [{ n }] = (await db.execute<{ n: number }>(sql`select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name = ${table} and column_name = 'builtin_machine' and data_type = 'text' and is_nullable = 'YES'`)).rows as [{ n: number }];
+      expect(n, table).toBe(1);
+      const [check] = (await db.execute<{ def: string }>(sql`select pg_get_constraintdef(c.oid) as def from pg_constraint c join pg_class t on t.oid = c.conrelid where t.relname = ${table} and c.contype = 'c' and pg_get_constraintdef(c.oid) like '%builtin_machine%'`)).rows;
+      expect(check?.def, table).toContain('^[0-9a-f]{32}([0-9a-f]{32})?$');
+    }
+    /* A network id of either length, in lowercase hex, and nothing else. */
+    const said = async (value: string) => (await db.execute<{ ok: boolean }>(sql`select ${value} ~ '^[0-9a-f]{32}([0-9a-f]{32})?$' as ok`)).rows[0]!.ok;
+    expect([await said('0f'.repeat(16)), await said('0f'.repeat(32)), await said('ABC'), await said('0'.repeat(33))]).toEqual([true, true, false, false]);
+  });
+
+  it('records the handover a state ended with', async () => {
+    const db = await fullyMigrated();
+    await db.execute(sql`insert into net_local.state (term_number, term_machine, machine, cluster) values (1, 'm', 'm', 'c')`);
+    await db.execute(sql`update net_local.state set handed_to = ${'0f'.repeat(16)}, handed_lsn = '0/3000000', handed_at = now()`);
+    for (const one of ['handed_to', 'handed_lsn', 'handed_at']) expect(await codeOf(db.execute(sql`update net_local.state set ${sql.raw(one)} = null`)), one).toBe('23514');
+    await db.execute(sql`update net_local.state set handed_to = null, handed_lsn = null, handed_at = null`);
+  });
+});
+

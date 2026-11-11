@@ -146,6 +146,12 @@ export async function openConflicts(q: Query): Promise<Row[]> {
   return (await q<{ row: Row }>('SELECT to_jsonb(c) AS row FROM net.merge_conflicts c WHERE c.picked IS NULL ORDER BY c.created_at, c.id')).map(found => found.row);
 }
 
+/* Every planned switch the side wrote down, oldest first; none on a side from before there were any. */
+export async function handoversOf(q: Query): Promise<Row[]> {
+  if (!(await has(q, 'handovers'))) return [];
+  return (await q<{ row: Row }>('SELECT to_jsonb(h) AS row FROM net.handovers h ORDER BY h.at, h.id')).map(found => found.row);
+}
+
 export async function backupsOf(q: Query): Promise<Row[]> {
   if (!(await has(q, 'backups'))) return [];
   return (await q<{ row: Row }>('SELECT to_jsonb(b) AS row FROM net.backups b ORDER BY b.made_at, b.id')).map(found => found.row);
