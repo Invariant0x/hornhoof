@@ -1,13 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
 import { agentEnv, RESET_AGENT_ENV } from '../agent-env.js';
 import { withProgramExit, type ProgramExit } from '../program-exit.js';
-import { KEEP_BYTES } from '../providers/process.js';
+import { KEEP_BYTES, stripEscapes } from '../providers/process.js';
 import { recorded, recordedAfter, recordingCursor, Recordings, type ExitSnapshot, type RecordingCursor } from './recordings.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
@@ -58,6 +58,8 @@ export function envFile(dir: string, env: Record<string, string>): string {
 const FROM_ENV_FILE = `${RESET_AGENT_ENV}; set -a; . "$0"; set +a; rm -f "$0"; exec "$@"`;
 const FROM_MACHINE = `${RESET_AGENT_ENV}; exec "$@"`;
 const WAIT_FOR_CAPTURE = 'IFS= read -r ready; exec "$@"';
+/* Shows a screen kept in a file, which goes with it. */
+const SHOW_FILE = 'cat "$0"; rm -f "$0"';
 const CAPTURE = fileURLToPath(new URL('../../hh-capture.cjs', import.meta.url));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -125,6 +127,8 @@ export class Tmux {
     const argv = file ? ['sh', '-c', FROM_ENV_FILE, file, ...command] : ['sh', '-c', FROM_MACHINE, 'hh-program', ...command];
     const has = await this.has(name);
     if (has) await this.ended(name);
+    /* tmux starts the program on an empty screen: what the last one showed goes above it first, with what it printed before. */
+    if (has) await this.screenAbove(name);
     /* The program starts only after its recorder is listening, including programs that exit immediately. */
     const gated = outputDir ? ['sh', '-c', WAIT_FOR_CAPTURE, 'hh-start', ...argv] : argv;
     const start = has
@@ -244,6 +248,46 @@ export class Tmux {
     if (!(await this.alive(name))) return null;
     const pid = Number((await this.run(['display-message', '-p', '-t', name, '#{pane_pid}']).catch(() => '')).trim());
     return pid > 0 ? pid : null;
+  }
+
+  /* Ends the program in the session and keeps its pane, with all the program printed, for a person to scroll back through:
+     the next program starts in that pane. tmux ends it as it ends a session's, and the pane shows again what it showed last. */
+  async stop(name: string): Promise<void> {
+    if (!(await this.has(name))) return;
+    await this.stopRecording(name);
+    await this.showInPane(name, await this.shown(name));
+    this.recordings.remove(name);
+  }
+
+  private async stopRecording(name: string): Promise<void> {
+    if (this.recordings.get(name)) await this.run(['pipe-pane', '-t', name]).catch(() => {});
+  }
+
+  /* Moves what the pane shows into its history, ending the program there if one runs. */
+  private async screenAbove(name: string): Promise<void> {
+    await this.stopRecording(name);
+    const shown = await this.shown(name);
+    if (!shown) return;
+    const rows = Number((await this.run(['display-message', '-p', '-t', name, '#{pane_height}']).catch(() => '')).trim()) || 0;
+    await this.showInPane(name, `${shown}${'\n'.repeat(rows)}`);
+  }
+
+  /* What the pane shows, in its colours, without the line tmux puts under a program that ended. */
+  private async shown(name: string): Promise<string> {
+    const lines = (await this.run(['capture-pane', '-p', '-e', '-t', name]).catch(() => '')).split('\n').filter(line => !/^Pane is dead/.test(stripEscapes(line)));
+    while (lines.length && !stripEscapes(lines.at(-1)!).trim()) lines.pop();
+    return lines.length ? `${lines.join('\n')}\x1b[0m` : '';
+  }
+
+  /* The pane shows these words in place of its program, which tmux ends as it ends a session's, and keeps them once shown. */
+  private async showInPane(name: string, words: string): Promise<void> {
+    const file = join(this.scratch(), `.hh-screen-${randomBytes(8).toString('hex')}`);
+    writeFileSync(file, words, { mode: 0o600 });
+    await this.run(['respawn-pane', '-k', '-t', name, 'sh', '-c', SHOW_FILE, file]).catch(error => {
+      rmSync(file, { force: true });
+      throw error;
+    });
+    while (await this.alive(name)) await new Promise(resolve => setTimeout(resolve, 10));
   }
 
   async kill(name: string): Promise<void> {

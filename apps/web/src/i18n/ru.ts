@@ -584,6 +584,7 @@ export const ru: Messages = {
     pictureUploaded: 'Путь к картинке вставлен в терминал. Нажмите Enter для отправки.',
     working: 'Работает…',
     opening: program => `Открывается терминал ${program}…`,
+    asleep: program => `Программа ${program} спит до следующей задачи агента. Прокрутите вверх, чтобы увидеть, что она сделала.`,
     escToStop: 'esc, чтобы прервать',
     stop: 'Остановить',
     waiting: n => `${n} в очереди`,

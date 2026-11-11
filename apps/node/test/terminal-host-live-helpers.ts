@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]>; live?: string[] } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]>; live?: string[]; watched?: boolean } = {}) {
   /* The host runs on the fake clock, which moves only as the test moves it: c.until, c.on and c.pass. Turns of the event
      loop stay real, for the sockets of the bridge. */
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
@@ -82,13 +82,21 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     views.push({ view, name, cols, rows, write });
     return view;
   });
+  /* A program that sleeps ends, and the next launch starts it again. */
+  let asleep = false;
   const launch = vi.spyOn(tmux, 'launch').mockImplementation(async (_name, spec) => {
+    if (asleep) alive.mockResolvedValue(true);
+    asleep = false;
     hookUrl = /^HH_BRIDGE='([^']+)'$/m.exec(readFileSync(spec.envFile!, 'utf8'))![1]!;
     mkdirSync(dirname(file), { recursive: true });
     record(kind === 'codex' ? { type: 'session_meta', payload: { id: SESSION, cwd: workDir } } : { type: 'metadata' });
     if (kind !== 'codex') await hook('start', { session_id: SESSION });
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+  const stop = vi.spyOn(tmux, 'stop').mockImplementation(async () => {
+    asleep = true;
+    alive.mockResolvedValue(false);
+  });
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   const exitSnapshot = vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   const screen = vi.spyOn(tmux, 'screen').mockImplementation(async () => display());
@@ -147,11 +155,13 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     await onClock(Promise.all(results), clocked); await onClock(host.stop(), clocked);
     vi.useRealTimers(); rmSync(home, { recursive: true, force: true });
   });
+  /* Someone has the agent's terminal open before its first turn, and keeps it open: its program stays up between turns. */
+  if (options.watched) await onClock(host.open({ type: 'term.open', termId: 'watching', agentKey: options.key ?? 'receipt', cols: 100, rows: 30, write: false }), clocked);
   const running = run(options.prompt ?? 'HANG');
   if (options.prompt === '') await onClock(running, clocked);
   else await untilOnClock(() => sent.some(m => m.type === 'job.program' && m.state === 'thinking'), clocked);
   paste.mockClear(); keys.mockClear();
-  return { host, tmux, running, run, sent, log, hook, record, finish, screen, paste, keys, alive, launch, submitted, attach, views,
+  return { host, tmux, running, run, sent, log, hook, record, finish, screen, paste, keys, alive, launch, stop, submitted, attach, views,
     until: (check: () => boolean | Promise<boolean>) => untilOnClock(check, clocked),
     on: <T>(promise: Promise<T>) => onClock(promise, clocked),
     pass: (ms: number) => passOnClock(ms, clocked),

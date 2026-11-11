@@ -101,7 +101,7 @@ describe('reviewed live delivery through program events', () => {
   });
 
   it('keeps the first Codex human turn and returns its unconfirmed input once', async () => {
-    const c = await liveTerminal('codex', 'lost', { prompt: '' });
+    const c = await liveTerminal('codex', 'lost', { prompt: '', watched: true });
     c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'human' } });
     c.record(userMessage('A first question.', 'human'));
     await c.until(() => c.sent.some(m => m.type === 'turn.open'));
@@ -268,7 +268,8 @@ describe('reviewed live delivery through program events', () => {
   });
 
   it.each([1, 3])('delivers %i failed live messages as later turns in the same program', async count => {
-    const c = await liveTerminal('claude', 'lost');
+    /* Someone looks at the terminal, so the program does not sleep between the turns. */
+    const c = await liveTerminal('claude', 'lost', { watched: true });
     const messages = [TEXT, 'Task #226 is yours.', 'The answer.\nContinue.'].slice(0, count);
     for (const text of messages) expect(await c.on(c.host.say('receipt', text))).toBe(false);
     expect(c.input()).toBe('');
