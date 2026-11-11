@@ -28,6 +28,7 @@ import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
+import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
@@ -142,6 +143,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
   orgRoutes(app, ctx);
+  mapLayoutRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);
