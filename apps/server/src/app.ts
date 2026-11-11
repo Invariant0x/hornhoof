@@ -30,6 +30,7 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
+import { assistantSetupRoutes } from './modules/assistants/setup.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
 import { signinRoutes } from './modules/subscriptions/signin.js';
@@ -142,6 +143,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   setupRoutes(app, ctx);
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
+  assistantSetupRoutes(app, ctx);
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
   subscriptionRoutes(app, ctx);

@@ -1,7 +1,8 @@
-import { asc, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { departments, people, personAccess, teams } from '../../db/schema.js';
+import { assistants, departments, people, personAccess, teams, type AssistantProgram } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 
 export const WHOLE_COMPANY = 'Whole company';
@@ -19,7 +20,25 @@ export type PersonView = {
   access: AccessView;
   /* Who they are in Telegram, for the heads' bots: a username, the account's number, or both once a bot met them. */
   telegram: { username: string | null; id: number | null } | null;
+  /* For an assistant: whose it is, its program, where it is woken, and when its key was made, never the key itself. */
+  assistant: AssistantView | null;
 };
+
+export type AssistantView = { owner: { id: string; name: string }; program: AssistantProgram; eventsUrl: string | null; key: { createdAt: string } | null };
+
+const owners = alias(people, 'owners');
+
+/* The assistants among these people, by their id. */
+async function assistantViews(db: Db, ids: string[]): Promise<Map<string, AssistantView>> {
+  if (!ids.length) return new Map();
+  const rows = await db
+    .select({ id: people.id, ownerId: owners.id, ownerName: owners.name, program: assistants.program, eventsUrl: assistants.eventsUrl, keyCreatedAt: assistants.keyCreatedAt })
+    .from(people)
+    .innerJoin(owners, eq(owners.id, people.assistantOf))
+    .innerJoin(assistants, eq(assistants.personId, people.id))
+    .where(inArray(people.id, ids));
+  return new Map(rows.map(r => [r.id, { owner: { id: r.ownerId, name: r.ownerName }, program: r.program, eventsUrl: r.eventsUrl, key: r.keyCreatedAt ? { createdAt: r.keyCreatedAt.toISOString() } : null }]));
+}
 
 /* Listed places come in the order the map shows departments and teams. */
 export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]> {
@@ -35,6 +54,7 @@ export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]>
       ? (await db.select({ id: people.id, username: people.telegramUsername, number: people.telegramUserId }).from(people).where(inArray(people.id, rows.map(p => p.id)))).map(t => [t.id, t])
       : [],
   );
+  const helpers = await assistantViews(db, rows.map(p => p.id));
   return rows.map(p => {
     const tg = telegram.get(p.id);
     const mine = access.filter(a => a.personId === p.id);
@@ -49,6 +69,7 @@ export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]>
       isOwner: p.isOwner,
       isCeoDelegate: p.isCeoDelegate,
       telegram: tg && (tg.username || tg.number) ? { username: tg.username, id: tg.number } : null,
+      assistant: helpers.get(p.id) ?? null,
       access: {
         whole: p.scopeKind === 'company',
         departments: depts.filter(d => deptIds.has(d.id)).map(d => ({ id: d.id, name: deptName(d) })),
