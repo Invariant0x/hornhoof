@@ -153,6 +153,7 @@ export type ErrorReason =
   | 'recovery_file_invalid'
   | 'no_authority'
   | 'not_owner_session'
+  | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';

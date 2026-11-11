@@ -38,6 +38,8 @@ import { loadTemplates, type Templates } from './modules/templates/load.js';
 import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
+import { refreshHolders } from './modules/backups/holders.js';
+import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
 import { archOf, registry } from './modules/updates/registry.js';
@@ -130,6 +132,9 @@ function closeOpenSockets(app: FastifyInstance): void {
   for (const client of app.websocketServer.clients) client.close(1012, 'Hornhoof takes no changes now.');
 }
 
+/* How often the holders of the newest bundles are looked at again. */
+const HOLDERS_EVERY_MS = 3_600_000;
+
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
@@ -181,6 +186,16 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
      registry only when asked waits for the first machine that wants to know. */
   ctx.mode.whenLead(() => void (config.updateCheckMs > 0 && refreshBuild(ctx)), () => undefined);
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+  /* Every hour while it leads, the app looks again at who holds the newest bundles. */
+  let holdersTimer: NodeJS.Timeout | undefined;
+  ctx.mode.whenLead(
+    () => {
+      holdersTimer = setInterval(() => void refreshHolders(ctx.db).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not look again at which machines hold the backups.')), HOLDERS_EVERY_MS);
+      holdersTimer.unref();
+    },
+    () => clearInterval(holdersTimer),
+  );
+  app.addHook('onClose', async () => clearInterval(holdersTimer));
   /* While this app leads it takes over the server's own computer access as an app from before left it, and looks
      again every second until that is done: its own machine gets its row only once its keeper has asked. */
   const takeOverAccess = (): void =>
@@ -248,6 +263,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   linkRoutes(app, ctx);
   networkRoutes(app, ctx);
   keyRoutes(app, ctx);
+  backupRoutes(app, ctx);
   outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
   return app;

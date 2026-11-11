@@ -40,6 +40,9 @@ const ReportBody = z.object({
   /* The system of the computer, as its installer wrote it down; left out when not known, and the row keeps what its
      node's join said. */
   os: z.enum(['linux', 'darwin']).optional(),
+  /* The public half of the age key its keeper made, and the bundles it holds: its newest sixteen at most. */
+  ageKey: z.string().regex(/^age1[02-9ac-hj-np-z]{58}$/).optional(),
+  heldBackups: z.array(z.uuid()).max(16).optional(),
   /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });

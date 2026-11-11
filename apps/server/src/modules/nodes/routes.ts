@@ -60,6 +60,11 @@ const buildLine = (image: string, build: LeaderBuild): string => `build ${build.
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
+/* The ticks of a machine's card: whether it takes the company's test runs, and whether it keeps the company's backups. */
+const TicksBody = z
+  .object({ lendsTests: z.boolean().optional(), keepsBackups: z.boolean().optional() })
+  .strict()
+  .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
 export const PlanBody = z.object({ subscription: z.uuid() }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
@@ -237,7 +242,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(isNull(machines.revokedAt), shownMachine);
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -316,6 +321,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
         needsCore: needsCore(m),
         access: accessOf(m.id),
+        /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
+        keepsBackups: m.networkId ? m.keepsBackups : null,
+        heldBackups: m.networkId ? m.heldBackups.length : null,
         drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),
@@ -338,15 +346,16 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  /* Whether the machine takes the company's test runs. A machine lent again may take a run that waits. */
+  /* Whether the machine takes the company's test runs, and whether it keeps the company's backups. A machine lent again
+     may take a run that waits. */
   app.patch('/api/machines/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const { lendsTests } = LendBody.parse(req.body);
+    const ticks = TicksBody.parse(req.body);
     await ownMachine(me, id);
-    await db.update(machines).set({ lendsTests }).where(eq(machines.id, id));
-    if (lendsTests) await pumpTests(ctx);
-    return { lendsTests };
+    const [now] = await db.update(machines).set(ticks).where(eq(machines.id, id)).returning({ lendsTests: machines.lendsTests, keepsBackups: machines.keepsBackups });
+    if (ticks.lendsTests) await pumpTests(ctx);
+    return now;
   });
 
   const imageOf = (part: 'node' | 'updater') => nodeImageOfBuild({
