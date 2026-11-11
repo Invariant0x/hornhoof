@@ -119,12 +119,24 @@ describe('a Telegram bot of a head', () => {
     expect(notHead.json().error.reason).toBe('telegram_heads_only');
   });
 
-  it('is set only by people with the whole company', async () => {
+  it('is set by people with the whole company and by the person responsible for the head\'s department, by no one else', async () => {
     const c = await company();
     const { sales, head } = await salesHead(c);
+    const [acme] = await c.db.select().from(companies);
+    const [support] = await c.db.insert(departments).values({ companyId: acme!.id, templateKey: 'support', roleCode: 'SUP' }).returning();
     const ann = await invitePerson(c.app, c.ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales.id] } });
-    const res = await connectBot(c.app, ann, head.id, SECOND);
-    expect(res.statusCode).toBe(403);
+    const bob = await invitePerson(c.app, c.ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales.id, support!.id] } });
+    const [bobRow] = await c.db.select().from(people).where(eq(people.email, 'bob@acme.com'));
+    await c.db.update(departments).set({ ownerPersonId: bobRow!.id }).where(eq(departments.id, support!.id));
+    expect((await connectBot(c.app, ann, head.id, SECOND)).statusCode).toBe(403);
+    expect((await connectBot(c.app, bob, head.id, SECOND)).statusCode).toBe(403);
+    expect((await connectBot(c.app, bob, c.orchestrator.id, SECOND)).statusCode).toBe(403);
+    const [annRow] = await c.db.select().from(people).where(eq(people.email, 'ann@acme.com'));
+    await c.db.update(departments).set({ ownerPersonId: annRow!.id }).where(eq(departments.id, sales.id));
+    const own = await connectBot(c.app, ann, head.id, SECOND);
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toEqual({ telegram: { username: 'acme_sales_bot' } });
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/agents/${head.id}/telegram`, ...as(ann) })).statusCode).toBeLessThan(300);
   });
 
   it('stops listening when it is taken off, and when its head leaves the company', async () => {

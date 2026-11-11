@@ -2,7 +2,8 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
+import { requireDepartmentChanger } from '../../auth/departments.js';
+import { changedBy, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
@@ -22,9 +23,10 @@ export async function telegramOf(db: Db, agentId: string): Promise<TelegramView>
   return bot ?? null;
 }
 
-/* Only people with the whole company give an agent a bot or take it off, from their own screen. */
-function requireBotKeeper(me: Person): void {
-  requireCompanyScope(me);
+/* People with the whole company give an agent a bot or take it off, and so does the person responsible for a head's
+   department, who runs it as the CEO does; the orchestrator is in no department. Always from their own screen. */
+async function requireBotKeeper(db: Db, me: Person, agent: AgentRow): Promise<void> {
+  await requireDepartmentChanger(db, me, agent.kind === 'orchestrator' ? null : agent.departmentId);
   if (me.via) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen.', 'company_scope_only');
 }
 
@@ -73,7 +75,7 @@ async function keepBot(ctx: Ctx, me: Person, agent: AgentRow, token: string, bot
 export function telegramRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/agents/:id/telegram', async req => {
     const { me, agent } = await agentFor(ctx, req);
-    requireBotKeeper(me);
+    await requireBotKeeper(ctx.db, me, agent);
     if (agent.kind === 'worker') throw new ApiError(409, 'conflict', 'Only department heads and the orchestrator have a Telegram bot.', 'telegram_heads_only');
     const { token } = TokenBody.parse(req.body);
     const bot = await botOf(ctx, token);
@@ -85,7 +87,7 @@ export function telegramRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete('/api/agents/:id/telegram', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
-    requireBotKeeper(me);
+    await requireBotKeeper(ctx.db, me, agent);
     const removed = await ctx.db.transaction(async tx => {
       const [gone] = await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id)).returning({ username: telegramBots.username });
       if (gone) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'telegram', before: `@${gone.username}`, after: null });

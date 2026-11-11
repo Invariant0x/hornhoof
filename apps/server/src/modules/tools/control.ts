@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
-import { cardPrincipal, ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
@@ -27,8 +27,9 @@ import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffL
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 /* asCeo: only the CEO may ask for this one call of a tool anyone may ask for. permission: the CEO's answer in a task's card
-   that lets a machine change go when no CEO's words are in the turn. */
-type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true; permission?: string };
+   that lets a machine change go when no CEO's words are in the turn. department: the department the change stays in, whose
+   owner asks for it as the CEO does. */
+type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true; permission?: string; department?: string };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
 
@@ -43,7 +44,7 @@ const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company o
 
 /* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
    uses them only in a turn that answers the CEO or the CEO delegate now, as that person, never because an employee, a
-   timer, a task or another person asked. */
+   timer, a task or another person asked. Those that change one department go for its owner too. */
 export const CEO_ONLY = new Set([
   'invite_person',
   'change_person',
@@ -66,6 +67,8 @@ export const CEO_ONLY = new Set([
   'set_team_urgent_only',
 ]);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+export const ONLY_DEPARTMENT_OWNER =
+  "Only the CEO, the CEO delegate or this department's owner can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask one of them first.";
 const NO_PERMISSION =
   "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
 
@@ -122,7 +125,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
       'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; staff true brings the people of its template with it, each on the plan and model its role asks for, or waiting for a plan) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
-      'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
+      'Only in a turn that answers the CEO or the CEO delegate, as their decision, or the owner of a department, for products and sub-units of their own department.',
     BuildBody.shape,
     body => ({ method: 'POST', url: '/api/departments/build', payload: body }),
   );
@@ -132,7 +135,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'Hires employees into a department, as the CEO\'s click on a staff card does. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } } as in propose_staff: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
       'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes. ' +
-      'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
+      'Only in a turn that answers the CEO, the CEO delegate or the owner of this department, as their decision.',
     { department: Id('department'), proposalId: z.uuid().optional(), people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
     async ({ department, proposalId, people: lines }) => {
       const url = `/api/departments/${department}/staff`;
@@ -147,9 +150,9 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       'testMemoryGb, the free memory a machine needs to take a test run of it (4 by default), ' +
       'and fullTestCommand, the command that runs its whole test suite (null takes it away): a run of exactly that sets the GitHub status hornhoof/tests on the commit it checked, for which the token needs the right to write commit statuses, and GitHub then builds images without running the tests again.',
     { department: Id('department'), ...RepoBody.shape },
-    ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body }),
+    ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body, department }),
   );
-  tool('remove_repository', 'Disconnects a department\'s git repository.', { department: Id('department') }, ({ department }) => ({ method: 'DELETE', url: `/api/departments/${department}/repository` }));
+  tool('remove_repository', 'Disconnects a department\'s git repository.', { department: Id('department') }, ({ department }) => ({ method: 'DELETE', url: `/api/departments/${department}/repository`, department }));
 
   tool(
     'change_employee',
@@ -170,7 +173,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'set_team_urgent_only',
     'Says whether a sub-unit of a department takes only urgent work. Who is in it holds what they hold; from then on work that is not urgent is not given to them.',
     { department: Id('department'), team: Id('sub-unit'), urgentOnly: z.boolean() },
-    ({ department, team, urgentOnly }) => ({ method: 'PATCH', url: `/api/departments/${department}/teams/${team}`, payload: { urgentOnly } }),
+    ({ department, team, urgentOnly }) => ({ method: 'PATCH', url: `/api/departments/${department}/teams/${team}`, payload: { urgentOnly }, department }),
   );
   tool('reset_employee', 'Puts an employee back to its role as the templates have it now: its skills, texts and effort. Its model and subscription stay.', { employee: Id('employee') }, ({ employee }) => ({
     method: 'POST',
@@ -372,9 +375,14 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
 
 /* What only the CEO asks for goes as the CEO or the CEO delegate this turn answers now, kept under the input lock from words
    that would change it meanwhile, so the route sees the person it is for and allows that person what their own screen
-   does. A machine change without them goes as the CEO whose answer in a task's card it names. */
+   does. A change inside one department goes as its owner too. A machine change without them goes as the CEO whose answer
+   in a task's card it names. */
 function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
   return withInputLock(ctx, job.agentId, async () => {
+    if (made.department) {
+      const runs = await departmentPrincipal(ctx.db, job.id, made.department);
+      return runs ? send(ctx, app, job, made, runs) : say(ONLY_DEPARTMENT_OWNER, true);
+    }
     const personId = await ceoPrincipal(ctx.db, job.id);
     if (personId) return send(ctx, app, job, made, personId);
     if (!made.permission) return say(ONLY_CEO, true);

@@ -6,7 +6,7 @@ kind: procedure
 ---
 You can configure an explicitly authorized company resource.
 
-Read the exact subscription, machine, repository, public link or software version first. Resource changes come only from the CEO through the dedicated tool in the turn answering that person. An employee requesting them goes through the authorized company coordinator; a skill supplies a method, not tool access or a human approval.
+Read the exact subscription, machine, repository, public link or software version first. Resource changes come only from the CEO through the dedicated tool in the turn answering that person; the repository of a department and its sub-units' urgent-only setting also come from that department's owner, as from the CEO. An employee requesting them goes through the authorized company coordinator; a skill supplies a method, not tool access or a human approval.
 
 Before disconnecting a machine, removing a subscription or repository, changing public access or updating running software, verify the exact requested target and consequence. Do not reuse another machine owner's access approval. For protected machine access, use ask_computer_access with the reason and wait for its actual authorization; never ask the CEO to type shell commands.
 

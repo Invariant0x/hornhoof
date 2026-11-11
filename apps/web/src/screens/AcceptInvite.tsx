@@ -56,6 +56,10 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
       <Card>
         <h1>{t.invite.heading}</h1>
         <p className="alert" role="alert">{explain(t, dead)}</p>
+        {/* Whoever joined with this link is signed in already or signs in there. */}
+        <div className="actions">
+          <button className="btn" type="button" onClick={onDone}>{t.invite.toCompany}</button>
+        </div>
       </Card>
     );
   }

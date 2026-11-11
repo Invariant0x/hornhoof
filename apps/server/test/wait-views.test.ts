@@ -69,7 +69,9 @@ describe('what people read of the waits on a task', () => {
     const asked = await c.work('Asked', c.crew.mine);
     await ask(c.app.ctx, c.crew.mine.id, asked.id, { kind: 'approval', text: 'Send it?', approval: { channel: 'message', kind: 'welcome email', amount: null }, topic: 'task' });
     expect(await waitsOn(c, asked, c.tokens.ann)).toMatchObject([{ kind: 'person', owner: null }]);
-    expect(await waitsOn(c, asked, c.tokens.olga).catch(() => null)).toBeNull();
+    /* Olga owns Development and sees its work, so she reads herself as the person it waits on; Wes does not see that task. */
+    expect(await waitsOn(c, asked, c.tokens.olga)).toMatchObject([{ kind: 'person', owner: { personId: c.ids.olga } }]);
+    expect(await waitsOn(c, asked, c.tokens.wes).catch(() => null)).toBeNull();
     expect(await waitsOn(c, asked, c.tokens.ceo)).toMatchObject([{ kind: 'person', owner: { personId: c.ids.olga } }]);
   });
 

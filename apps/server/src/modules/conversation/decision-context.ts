@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
+import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, people, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -88,6 +89,15 @@ export async function actingCeo(db: Reader, personId: string): Promise<string | 
 export async function ceoPrincipal(db: Reader, jobId: string): Promise<string | null> {
   const principal = await decisionPrincipal(db, jobId);
   return principal ? actingCeo(db, principal.personId) : null;
+}
+
+/* The person the turn answers now, if they run this department as the CEO does: the CEO, the CEO delegate or the owner the
+   CEO named for it. Null for anyone else. */
+export async function departmentPrincipal(db: Reader, jobId: string, departmentId: string): Promise<string | null> {
+  const principal = await decisionPrincipal(db, jobId);
+  if (!principal) return null;
+  const [p] = await db.select().from(people).where(eq(people.id, principal.personId));
+  return p && (await runsDepartment(db, p, departmentId)) ? p.id : null;
 }
 
 /* For the computer the CEO opened: the CEO or the CEO delegate the turn answers now, or whose click opening it the note

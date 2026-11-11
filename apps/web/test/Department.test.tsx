@@ -620,6 +620,28 @@ describe('Department view', () => {
     expect(within(screen.getByRole('region', { name: 'Tasks' })).getByRole('button', { name: 'New task' })).toBeInTheDocument();
     await drawer(user, 'About the department');
     expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Sub-units' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Hire' })).not.toBeInTheDocument();
+  });
+
+  it('lets the owner of the department hire into it, and change its repository and sub-units, without the orchestrator', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/roster': [200, ROSTER] },
+      { ...DEV_ORG, departments: [{ ...dev!, ownerPersonId: 'p6', people: [...dev!.people, LENA] }] },
+      listed('p6', 'Lena'),
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const about = screen.getByRole('complementary', { name: 'About the department' });
+    expect(within(about).getByRole('region', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(about).getByRole('region', { name: 'Sub-units' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '+ Hire' }));
+    expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
+    expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/agents/orchestrator/messages')).toBe(false);
   });
 
   it("closes a department to people who do not reach it", async () => {

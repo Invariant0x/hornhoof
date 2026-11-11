@@ -6,8 +6,8 @@ import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { departmentsHad, requireDepartmentHad } from '../../auth/departments.js';
-import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
+import { departmentsHad, requireDepartmentHad, runsDepartment } from '../../auth/departments.js';
+import { ownsPlace, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, TURN_MODES, turns } from '../../db/schema.js';
@@ -213,7 +213,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* The task as this person reads it. */
-  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: actsAsCeo(me) });
+  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId) });
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from. */
   app.get('/api/task-departments', async req => {
@@ -466,17 +466,19 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!spots.some(t => reaches(viewer.access, t))) throw refuse(403, 'not_your_department', 'This department is not one you have.');
     }
     const facts = await treeFacts(db, me.companyId, dept.id, t => seesTask(viewer, t));
-    return { tree: workTree(factsFor(viewer, facts), new Date()) };
+    return { tree: workTree(factsFor(viewer, facts, dept.id), new Date()) };
   });
 
-  /* The numbers add up all of a department, its agents' work whoever's plan they are on, so they go only with the full view. */
+  /* The numbers add up all of a department, its agents' work whoever's plan they are on, so they go only with the full view
+     and to the department's owner, who sees all of them. */
   app.get('/api/departments/:id/pipeline', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { turn } = PipelineQuery.parse(req.query);
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
-    if (!(await viewerOf(db, me)).full) throw refuse(403, 'ceo_view_only', 'Only the CEO and the CEO delegate read the numbers of a whole department.');
+    const viewer = await viewerOf(db, me);
+    if (!viewer.full && !ownsPlace(viewer, { departmentId: dept.id })) throw refuse(403, 'ceo_view_only', 'Only the CEO, the CEO delegate and the department\'s owner read the numbers of a whole department.');
     return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
   });
 }

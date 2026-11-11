@@ -3,10 +3,10 @@ import { ApiError } from '../errors.js';
 import type { Access } from './access.js';
 import { decisionPlace, listsPlace, namedOwner, ownerDepartment, type Candidate, type DecisionSubject } from './decision-owner.js';
 
-/* Who may take a decision. The CEO and the CEO's delegate take every one; a department's owner also its approvals and its
-   own decisions; a department's own decision also every active person whose access lists that department or the product it
-   is about. Seeing a decision is a matter of access alone: someone who sees one without this right reads it and cannot take
-   it. */
+/* Who may take a decision. The CEO and the CEO's delegate take every one; a department's owner also its approvals, its own
+   decisions, what is asked about its repository and releases, and a change to its staff, sub-units and products; a
+   department's own decision also every active person whose access lists that department or the product it is about. Seeing
+   a decision is a matter of access alone: someone who sees one without this right reads it and cannot take it. */
 
 export type Decider = { companyId: string; status: 'active' | 'invited' | 'disabled'; scopeKind: ScopeKind; isOwner: boolean; isCeoDelegate: boolean };
 
@@ -18,6 +18,10 @@ const takesAsOwner = (subject: DecisionSubject, access: Access): boolean => {
   return department !== null && access.owns?.has(department) === true;
 };
 
+/* A change inside departments the person owns, every one of them. */
+const runsAll = (subject: DecisionSubject, access: Access): boolean =>
+  subject.source === 'proposal' && Boolean(subject.departments?.length) && subject.departments!.every(id => access.owns?.has(id) === true);
+
 const takesWithDepartment = (subject: DecisionSubject, access: Access): boolean => {
   const place = decisionPlace(subject);
   return place !== null && listsPlace(access, place);
@@ -26,7 +30,7 @@ const takesWithDepartment = (subject: DecisionSubject, access: Access): boolean 
 export function canDecide(subject: DecisionSubject, person: Decider, access: Access, companyId: string): boolean {
   if (person.companyId !== companyId || person.status !== 'active') return false;
   if (actsAsCeo(person)) return true;
-  return takesAsOwner(subject, access) || takesWithDepartment(subject, access);
+  return runsAll(subject, access) || takesAsOwner(subject, access) || takesWithDepartment(subject, access);
 }
 
 export function requireDecision(subject: DecisionSubject, person: Decider, access: Access, companyId: string): void {

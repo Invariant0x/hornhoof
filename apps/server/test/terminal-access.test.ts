@@ -25,7 +25,9 @@ const CASES = [
   { who: 'own plan, other department', viewer: 'ann', agent: 'away', refused: true },
   { who: "another's plan, other department", viewer: 'ann', agent: 'far', refused: true },
   { who: 'department owner, own plan', viewer: 'olga', agent: 'owned', write: true },
-  { who: "department owner, another's plan", viewer: 'olga', agent: 'other', refused: true },
+  /* The owner of a department watches every agent of it, and types only on a plan of their own. */
+  { who: "department owner, another's plan", viewer: 'olga', agent: 'other', write: false },
+  { who: "department owner, another's plan, other department", viewer: 'olga', agent: 'far', refused: true },
   { who: 'whole company, own plan', viewer: 'wes', agent: 'wide', write: true },
   { who: "whole company, another's plan", viewer: 'wes', agent: 'other', refused: true },
   { who: "delegate, another's plan", viewer: 'lisa', agent: 'other', write: false },

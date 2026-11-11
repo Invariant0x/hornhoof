@@ -55,7 +55,7 @@ describe('AcceptInvite', () => {
   it('explains an expired or used invite', async () => {
     mockApi({ 'GET /api/invites/old': [410, { error: { code: 'gone', message: 'This invite has already been used or has expired. Ask for a new one.' } }] });
     render(<AcceptInvite token="old" onDone={() => {}} />);
-    expect(await screen.findByText('This invite link was already used or has expired. Ask for a new one.')).toBeInTheDocument();
+    expect(await screen.findByText('This invite link was already used or has expired. If you joined with it, sign in with your email and password. If not, ask for a new one.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Join' })).not.toBeInTheDocument();
   });
 

@@ -64,13 +64,13 @@ describe('standalone employee abilities', () => {
     expect(templates.skills.get('dev-lead')!.description.ru).not.toMatch(/универсал/i);
   });
 
-  it('requires the CEO exact-candidate approval in the standalone delivered release ability', () => {
+  it('requires the exact-candidate approval of the department owner or the CEO in the standalone delivered release ability', () => {
     const packet = renderInstructions(templates, {
       id: 'a', companyId: 'c', kind: 'worker', name: 'Alex', roleKey: 'SUP-T2',
       skills: ['dev-ci-release'], overrides: {}, templateHashes: {},
     } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
     const release = packet.skills.find(file => file.name === 'dev-ci-release')!;
-    expect(release.body).toMatch(/to the CEO\. Obtain their explicit yes for that exact candidate/);
+    expect(release.body).toMatch(/its owner, or the CEO when it has none\. Obtain their explicit yes for that exact candidate/);
   });
 
   it('renders one selected ability intact across department identities', () => {

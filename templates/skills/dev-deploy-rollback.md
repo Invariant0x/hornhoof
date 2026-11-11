@@ -8,7 +8,7 @@ sources: [anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/
 You can deploy an approved build and restore the previously agreed working version.
 
 Before:
-- The build passed every gate and the CEO approved this exact commit.
+- The build passed every gate and the person who approves the department's releases, its owner or the CEO, approved this exact commit.
 - A backup of the data was taken and you know how to restore it.
 - You know the previous version and the command to go back to it.
 - Migrations in this release: can the previous version run on the new schema? If not, say so before deploying.

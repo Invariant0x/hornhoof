@@ -65,14 +65,14 @@ describe('the live stream', () => {
     }
   });
 
-  it('keeps a department owner and a person with the whole company to the same rule', async () => {
+  it('carries a department owner every agent of their department, and a person with the whole company only their own', async () => {
     const c = await aclCompany();
-    for (const [viewer, seen] of [['olga', c.crew.owned], ['wes', c.crew.wide]] as const) {
+    for (const [viewer, seen, hidden] of [['olga', [c.crew.owned, c.crew.other], c.crew.far], ['wes', [c.crew.wide], c.crew.other]] as const) {
       const stream = await openStream(c.app, c.tokens[viewer]);
-      await said(c, seen, 'Own');
-      await said(c, c.crew.other, 'Other');
+      for (const agent of seen) await said(c, agent, 'Seen');
+      await said(c, hidden, 'Hidden');
       await flush(c, stream);
-      expect(stream.messages.filter(m => m.type === 'agent_event').map(m => m.agentId)).toEqual([seen.id]);
+      expect(stream.messages.filter(m => m.type === 'agent_event').map(m => m.agentId)).toEqual(seen.map(a => a.id));
       stream.close();
     }
   });
