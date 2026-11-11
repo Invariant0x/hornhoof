@@ -33,7 +33,7 @@ async function openTerminal(page: Page, profile: Profile, write: boolean) {
     sendOutput = data => ws.send(JSON.stringify({ type: 'data', data }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const rows = window.locator('.xterm-rows');

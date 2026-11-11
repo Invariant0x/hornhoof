@@ -80,7 +80,7 @@ for (const look of looks) {
         page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
         const change = await serveMotion(page);
         await page.goto('/');
-        if (view !== 'map') await page.getByRole('button', { name: look.lang === 'en' ? /Development/ : /Разработка/ }).click();
+        if (view !== 'map') await page.getByRole('button', { name: look.lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         if (view === 'tree') {
           await page.getByRole('button', { name: look.lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
           await page.locator('.tv-scroll').evaluate(el => { el.scrollLeft = el.scrollWidth; });

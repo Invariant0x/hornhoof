@@ -20,7 +20,7 @@ function aloneIn({ tree, org }: Tree, name: string): Tree {
 
 async function open(page: Page, lang: 'en' | 'ru', info?: TestInfo, width?: number) {
   await page.goto('/');
-  await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+  await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
   if (info) {
     const evidence = info.outputPath(`department-${lang}-${width}-map.png`);
     await page.screenshot({ path: evidence });

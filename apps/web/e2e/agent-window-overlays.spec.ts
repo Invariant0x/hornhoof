@@ -48,7 +48,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     const fitName = en ? 'Show everything' : 'Показать все';
     await page.locator('.map').getByRole('button', { name: fitName, exact: true }).click();
     const mapWithoutWindow = await box(mapWorld);
-    await page.getByRole('button', { name: /Development/ }).click();
+    await page.getByRole('button', { name: /^Development/ }).click();
     const department = page.locator('.dview'), world = department.locator('.world');
     const fit = department.getByRole('button', { name: fitName, exact: true });
     await fit.click();

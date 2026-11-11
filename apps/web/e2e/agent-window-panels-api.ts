@@ -53,7 +53,7 @@ async function openEmployee(page: Page, { lang, theme, width }: Settings) {
   const stops: string[] = [];
   await page.route('**/api/agents/b1/stop', route => { stops.push(route.request().method()); return route.fulfill({ json: {} }); });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: WORDS[lang].members }).getByRole('button', { name: /Bruno/ }).click();
   return { window: page.getByRole('complementary', { name: /^Bruno,/ }), errors, connections: () => live.connections, stops, sent };
 }

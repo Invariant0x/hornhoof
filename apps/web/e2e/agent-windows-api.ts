@@ -166,7 +166,7 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
     },
     openEmployee: async (name: string) => {
       await tab(words.tabs[0]!).click();
-      if (!(await page.locator('.dview').count())) await page.getByRole('button', { name: /Development/ }).click();
+      if (!(await page.locator('.dview').count())) await page.getByRole('button', { name: /^Development/ }).click();
       await page.getByRole('region', { name: words.members }).getByRole('button', { name: new RegExp(name) }).click();
       await expect(windowOf(name)).toBeVisible();
     },

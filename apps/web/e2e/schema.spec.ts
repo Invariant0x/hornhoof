@@ -122,7 +122,7 @@ for (const look of [
       }, look);
       await serveSchema(page, org(state.staff));
       await page.goto('/');
-      await page.getByRole('button', { name: look.lang === 'en' ? /Development/ : /Разработка/ }).click();
+      await page.getByRole('button', { name: look.lang === 'en' ? /^Development/ : /^Разработка/ }).click();
       await expect(page.locator('.dcanvas')).toBeVisible();
       await page.locator('.dview .zoom').getByRole('button', { name: look.lang === 'en' ? 'Show everything' : 'Показать все' }).click();
 

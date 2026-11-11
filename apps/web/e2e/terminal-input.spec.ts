@@ -63,7 +63,7 @@ async function openTerminal(page: Page, options: Options) {
     ws.send(JSON.stringify({ type: 'data', data: '\x1b[?2004hTERMINAL-READY\r\n> ' }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development|Разработка/ }).click();
+  await page.getByRole('button', { name: /^(Development|Разработка)/ }).click();
   await page.getByRole('region', { name: COPY[options.lang].members }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const textarea = window.locator('.xterm-helper-textarea');
@@ -177,7 +177,7 @@ test('reconnect rechecks kept text and commands against the new rights', async (
     ws.send(JSON.stringify({ type: 'data', data: downgraded ? 'SECOND-READY\r\n> ' : 'FIRST-READY\r\n> ' }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const textarea = page.locator('.xterm-helper-textarea');
   await expect(page.locator('.xterm-rows')).toContainText('FIRST-READY');
