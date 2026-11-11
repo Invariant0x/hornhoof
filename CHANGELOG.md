@@ -5,6 +5,38 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.6] - 2026-11-11
+
+An agent's window opens as a plain chat, each person arranges the company map as they like, and a department holds
+several repositories.
+
+### Before you update
+
+- Migration 0099 adds the table where each person's arrangement of the company map is kept. Nothing old is converted.
+
+### Added
+
+- A department holds more than one repository. Add repository on the department's About panel, or the orchestrator's
+  add_repository, brings another one as a new product of the department, named after it, and a task of that product
+  works in its repository. Two repositories of one department whose addresses end in the same name are refused, since
+  its agents would clone them into one folder.
+- Each block of the company map, a person, a department or the orchestrator, has a grip at its top left corner that
+  moves it, by mouse, finger or arrow keys. Each person's arrangement is kept on the server for them alone, and Put
+  back as it was returns their map to its first look.
+
+### Changed
+
+- An agent's window opens as a chat: the person's words on one side, the agent's on the other, its steps of work folded
+  into one line, and its state in plain words above the input. The terminal is one click away on the toolbar, and the
+  browser remembers which of the two a person chose last.
+- Every line of the company map runs at right angles, the lines from the orchestrator to the departments too, and
+  follows a block that moves.
+
+### Fixed
+
+- The person responsible for a department now sees its repository and those of its products, which 0.18.5 let them
+  change but not see.
+
 ## [0.18.5] - 2026-11-11
 
 People on Windows add a machine or a plan with one PowerShell command, a head or the orchestrator can be written to
