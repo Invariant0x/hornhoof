@@ -64,6 +64,12 @@ describe('the node image', () => {
     for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'util-linux', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });
 
+  it('starts the node under tini, which ends the processes left without a parent, such as a closed view\'s tmux client', () => {
+    expect(installed).toContain('tini');
+    expect(runtime).toContain('ENTRYPOINT ["/usr/bin/tini", "--", "node", "/app/apps/node/dist/main.js"]');
+    expect(runtime).toContain('CMD ["run"]');
+  });
+
   it('installs unzip in the runtime and fails the build if unzip -v fails', () => {
     expect(installed).toContain('unzip');
     const layer = runtime.slice(runtime.indexOf('RUN apt-get update'), runtime.indexOf('\nCOPY --from=quality'));

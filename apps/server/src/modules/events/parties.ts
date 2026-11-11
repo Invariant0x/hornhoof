@@ -11,7 +11,8 @@ const Party = z.object({
   role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
   agentKind: z.enum(['orchestrator', 'head', 'worker']).optional(),
 });
-export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional() });
+/* channel: the way a person's message came when not from the agent's window. */
+export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.literal('telegram').optional() });
 export type MessageParty = z.infer<typeof Party>;
 export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
 export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
@@ -54,7 +55,7 @@ export async function incomingEnvelope(ctx: PartyContext, companyId: string, age
   const to = await agentParty(ctx, companyId, agentId);
   const notice = field(data, 'notification');
   if (notice !== undefined) return noticeEnvelope(data, to);
-  if (personId) return { direction: 'in', from: await personParty(ctx, companyId, personId), to };
+  if (personId) return { direction: 'in', from: await personParty(ctx, companyId, personId), to, ...(field(data, 'channel') === 'telegram' ? { channel: 'telegram' as const } : {}) };
   const by = field(data, 'by');
   if (field(data, 'from') === 'agent' && typeof by === 'string') return { direction: 'in', from: await agentParty(ctx, companyId, by), to };
   if (field(data, 'from') === 'orchestrator') {

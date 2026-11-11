@@ -16,7 +16,7 @@ async function openTree(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', 
   page.on('request', r => { if (r.method() !== 'GET') writes.push(r.method() + ' ' + new URL(r.url()).pathname); });
   await serveTree(page, { during: true });
   await page.goto('/');
-  await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+  await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
   await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
   await expect(page.locator('.tv-in')).toBeVisible();
   await page.evaluate(() => document.fonts.ready);

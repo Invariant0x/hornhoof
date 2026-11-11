@@ -2,15 +2,15 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import type { AgentCardView, Me } from '../src/types';
+import type { AgentCardView } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
-import { CARD, ME, mockApi, TEAM_KEY } from './api-mock';
+import { CARD, mockApi, TEAM_KEY } from './api-mock';
 
-function open(routes: Record<string, unknown> = {}, me: Me = ME) {
+function open(routes: Record<string, unknown> = {}) {
   const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
   render(
     <LanguageProvider>
-      <AgentCard me={me} agentId="b1" onClose={() => {}} />
+      <AgentCard agentId="b1" onClose={() => {}} />
     </LanguageProvider>,
   );
   return { calls };
@@ -192,7 +192,7 @@ describe('AgentCard', () => {
     mockApi({ 'GET /api/agents/b1': [200, { ...CARD, retry }] });
     const card = (live?: Parameters<typeof AgentCard>[0]['live']) => (
       <LanguageProvider>
-        <AgentCard me={ME} agentId="b1" live={live} onClose={() => {}} />
+        <AgentCard agentId="b1" live={live} onClose={() => {}} />
       </LanguageProvider>
     );
     const { rerender } = render(card());
@@ -464,8 +464,7 @@ describe('AgentCard', () => {
   });
 
   it('only shows the card to someone who cannot change it', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({ 'GET /api/agents/b1': [200, { ...CARD, canEdit: false }] }, listed);
+    open({ 'GET /api/agents/b1': [200, { ...CARD, canEdit: false }] });
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Reset to template' })).not.toBeInTheDocument();
@@ -473,12 +472,16 @@ describe('AgentCard', () => {
   });
 
   it("lets a person of the department change the card but not remove the employee", async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({}, listed);
+    open({ 'GET /api/agents/b1': [200, { ...CARD, canRemove: false }] });
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Reset to template' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove from the company' })).not.toBeInTheDocument();
+  });
+
+  it("lets the owner of the employee's department remove it", async () => {
+    open();
+    expect(await screen.findByRole('button', { name: 'Remove from the company' })).toBeInTheDocument();
   });
 
   it('keeps edits made in both views of the prompt', async () => {
@@ -514,6 +517,62 @@ describe('AgentCard', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sub-unit' }), '');
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')[1]?.body).toEqual({ team: null }));
     expect(screen.getByRole('combobox', { name: 'Sub-unit' })).toHaveValue('');
+  });
+});
+
+describe('the Telegram bot on a head\'s card', () => {
+  const HEAD: AgentCardView = { ...CARD, kind: 'head', name: 'Sasha', telegram: null };
+  const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
+
+  it('connects a bot by its token from @BotFather, and shows only the bot\'s name after', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'GET /api/agents/b1': [200, HEAD], 'PUT /api/agents/b1/telegram': [200, { telegram: { username: 'acme_sales_bot' } }] });
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    expect(within(bot).getByText(/@BotFather/, { selector: 'p' })).toBeInTheDocument();
+    const field = within(bot).getByLabelText('Token from @BotFather');
+    expect(within(bot).getByRole('button', { name: 'Connect bot' })).toBeDisabled();
+    await user.type(field, ` ${TOKEN} `);
+    await user.click(within(bot).getByRole('button', { name: 'Connect bot' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/agents/b1/telegram', body: { token: TOKEN } }));
+    const link = await within(bot).findByRole('link', { name: '@acme_sales_bot' });
+    expect(link).toHaveAttribute('href', 'https://t.me/acme_sales_bot');
+    expect(within(bot).queryByLabelText('Token from @BotFather')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(TOKEN);
+  });
+
+  it('says why Telegram did not take the token, in Russian too', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const user = userEvent.setup();
+    open({ 'GET /api/agents/b1': [200, HEAD], 'PUT /api/agents/b1/telegram': [400, { error: { code: 'validation', message: 'Telegram does not take this token.', reason: 'telegram_token' } }] });
+    const bot = await screen.findByRole('region', { name: 'Бот в Telegram' });
+    await user.type(within(bot).getByLabelText('Токен от @BotFather'), TOKEN);
+    await user.click(within(bot).getByRole('button', { name: 'Подключить бота' }));
+    expect(await within(bot).findByRole('alert')).toHaveTextContent('Telegram не принимает этот токен');
+  });
+
+  it('takes the bot off after asking', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'GET /api/agents/b1': [200, { ...HEAD, telegram: { username: 'acme_sales_bot' } }], 'DELETE /api/agents/b1/telegram': [204, undefined] });
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    await user.click(within(bot).getByRole('button', { name: 'Remove bot' }));
+    await user.click(within(bot).getByRole('button', { name: 'Yes, remove' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'DELETE')?.path).toBe('/api/agents/b1/telegram'));
+    expect(await within(bot).findByLabelText('Token from @BotFather')).toBeInTheDocument();
+  });
+
+  it('shows the orchestrator\'s bot to someone who cannot change it, with nothing to change', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...HEAD, kind: 'orchestrator', canRemove: false, telegram: { username: 'acme_ceo_bot' } }] });
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    expect(within(bot).getByRole('link', { name: '@acme_ceo_bot' })).toBeInTheDocument();
+    expect(within(bot).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(bot).queryByLabelText('Token from @BotFather')).not.toBeInTheDocument();
+  });
+
+  it('has no bot on a worker\'s card', async () => {
+    open();
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByRole('region', { name: 'Telegram bot' })).not.toBeInTheDocument();
   });
 });
 
@@ -642,8 +701,7 @@ describe('AgentCard assignment', () => {
   });
 
   it('shows the assignment read-only to a person who cannot change the card', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({ 'GET /api/agents/b1': [200, { ...assignmentCard('Maintain billing.'), canEdit: false }] }, listed);
+    open({ 'GET /api/agents/b1': [200, { ...assignmentCard('Maintain billing.'), canEdit: false }] });
     expect(await screen.findByRole('textbox', { name: 'Assignment' })).toHaveValue('Maintain billing.');
     expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();

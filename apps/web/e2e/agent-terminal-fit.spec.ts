@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
+import { chooseTerminal } from './api';
 
 /* Render real native scrollbars in headless Chromium so .xterm-viewport has a visible scrollbar track and thumb. */
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
@@ -29,6 +30,7 @@ async function openMeasuredTerminal(page: Page, width: number, height: number, t
     localStorage.setItem('hh-lang', 'en');
     localStorage.setItem('hh-theme', selectedTheme);
   }, theme);
+  await chooseTerminal(page);
 
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -61,7 +63,7 @@ async function openMeasuredTerminal(page: Page, width: number, height: number, t
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
 
   const agentWindow = page.getByRole('complementary', { name: /^Bruno,/ });

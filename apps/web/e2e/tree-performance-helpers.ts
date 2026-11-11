@@ -54,7 +54,7 @@ export async function serveFullDepartment(page: Page): Promise<{ full: Tree; ren
 
 export async function openDepartment(page: Page, tree = true): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   if (tree) {
     await page.getByRole('button', { name: 'Tree', exact: true }).click();
     await expect(page.locator('.tv-labs .dept-chip')).toHaveCount(12);

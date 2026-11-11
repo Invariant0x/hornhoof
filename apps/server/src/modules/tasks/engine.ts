@@ -523,7 +523,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
-  const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
+  const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent, input.departmentId);
   const last = await lastTaskNumber(tx, assignee.companyId);
   const turnId = await turnForNewTask(tx, assignee.companyId, parent);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided

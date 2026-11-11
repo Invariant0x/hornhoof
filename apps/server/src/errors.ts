@@ -12,6 +12,7 @@ export type ErrorReason =
   | 'signed_out'
   | 'cross_site'
   | 'company_scope_only'
+  | 'department_owner_only'
   | 'decision_not_allowed'
   | 'owner_ceo_only'
   | 'owner_no_access'
@@ -122,6 +123,8 @@ export type ErrorReason =
   | 'no_turnkey_team'
   | 'repo_invalid'
   | 'repo_command_invalid'
+  | 'repo_folder_taken'
+  | 'product_taken'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'picture_invalid'
@@ -173,7 +176,13 @@ export type ErrorReason =
   | 'no_authority'
   | 'not_owner_session'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`
-  | 'starting';
+  | 'starting'
+  | 'telegram_token'
+  | 'telegram_unreachable'
+  | 'telegram_taken'
+  | 'telegram_heads_only'
+  | 'telegram_invalid'
+  | 'telegram_person_taken';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
 /* A change counts as sent once any commit of it is listed. One that failed between two commits is listed too, so the
@@ -260,5 +269,7 @@ export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback)
   /* The log lines of a transaction name the route that ran it, however many awaits lie between them. */
   app.addHook('preHandler', (req, _reply, done) => requestRoute.run(`${req.method} ${req.routeOptions.url}`, done));
   app.setErrorHandler(errorAnswer);
-  app.setNotFoundHandler(async (req, reply) => (await fallback?.(req, reply)) ?? reply.status(404).send(body('not_found', 'Not found.')));
+  /* A fallback that answers gives back the reply, which waits for the answer to end and then gives nothing. So it is not
+     awaited here, or a 404 would follow the page already sent. */
+  app.setNotFoundHandler((req, reply) => fallback?.(req, reply) ?? reply.status(404).send(body('not_found', 'Not found.')));
 }

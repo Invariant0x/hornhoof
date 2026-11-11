@@ -11,6 +11,9 @@ export const ME: Me = {
   company: { id: 'c1', name: 'Acme' },
 };
 
+/* A person who last chose the terminal in this browser: an agent's window opens with it rather than with the chat. */
+export const chooseTerminal = (page: Page) => page.addInitScript(() => localStorage.setItem('hh-agent-view', 'terminal'));
+
 export const AGENT_HIDDEN = { error: { code: 'forbidden', message: 'This employee is not on a plan of yours in a department you have.', reason: 'agent_hidden' } };
 
 const DEV = { id: 'd2', name: 'Development' };
@@ -73,11 +76,12 @@ const ROUTES: Record<string, unknown> = {
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
+  '/api/map/layout': { blocks: {} },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
     program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 },
-    runsOn: [], changes: [], interrupted: [], canEdit: true, timer: null,
+    runsOn: [], changes: [], interrupted: [], canEdit: true, canRemove: true, timer: null,
   } satisfies AgentCardView,
   '/api/agents/orchestrator/events?after=0': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
 };

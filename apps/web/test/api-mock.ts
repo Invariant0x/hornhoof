@@ -231,6 +231,7 @@ export const CARD: AgentCardView = {
   interrupted: [],
   timer: null,
   canEdit: true,
+  canRemove: true,
 };
 
 /* Required route snapshots for an active Review, independent Development and waiting/closed work. */

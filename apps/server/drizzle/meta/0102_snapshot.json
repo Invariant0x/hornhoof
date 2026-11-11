@@ -1,6 +1,6 @@
 {
-  "id": "1669e0bb-a4d9-40c3-af20-cd12e537e79f",
-  "prevId": "1593c29b-8318-4fc9-b0ee-e3c5562b93dc",
+  "id": "a84ecde7-7a78-4a25-904f-20ab92f46e4c",
+  "prevId": "b522e79c-afec-458b-acb0-8428a0fb5a40",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1188,45 +1188,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.authority": {
-      "name": "authority",
-      "schema": "",
-      "columns": {
-        "singleton": {
-          "name": "singleton",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "cert_pem": {
-          "name": "cert_pem",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "key_enc": {
-          "name": "key_enc",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
-    },
     "public.backlog_items": {
       "name": "backlog_items",
       "schema": "",
@@ -1453,64 +1414,6 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
-    },
-    "public.certificates": {
-      "name": "certificates",
-      "schema": "",
-      "columns": {
-        "serial": {
-          "name": "serial",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "machine_id": {
-          "name": "machine_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "until": {
-          "name": "until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "certificates_machine_id_machines_id_fk": {
-          "name": "certificates_machine_id_machines_id_fk",
-          "tableFrom": "certificates",
-          "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
     },
     "public.companies": {
       "name": "companies",
@@ -2929,66 +2832,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "network_id": {
-          "name": "network_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sign_key": {
-          "name": "sign_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "web_port": {
-          "name": "web_port",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "peer_port": {
-          "name": "peer_port",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "commit": {
-          "name": "commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "uptime_s": {
-          "name": "uptime_s",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fsync_p99_ms": {
-          "name": "fsync_p99_ms",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disk_free": {
-          "name": "disk_free",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "report_at": {
-          "name": "report_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -3022,13 +2865,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "machines_network_id_unique": {
-          "name": "machines_network_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "network_id"
-          ]
-        },
         "machines_person_key": {
           "name": "machines_person_key",
           "nullsNotDistinct": false,
@@ -3039,12 +2875,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "machines_role": {
-          "name": "machines_role",
-          "value": "role IS NULL OR role IN ('data', 'worker')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.map_returns": {
@@ -7582,43 +7413,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.peer_secrets": {
-      "name": "peer_secrets",
-      "schema": "",
-      "columns": {
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "secret_enc": {
-          "name": "secret_enc",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "peer_secrets_kind": {
-          "name": "peer_secrets_kind",
-          "value": "kind IN ('data', 'app')"
-        }
-      },
-      "isRLSEnabled": true
     },
     "public.pending_wakes": {
       "name": "pending_wakes",

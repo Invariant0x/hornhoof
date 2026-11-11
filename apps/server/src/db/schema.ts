@@ -104,10 +104,25 @@ export const people = pgTable(
     isOwner: boolean('is_owner').notNull().default(false),
     /* The CEO's delegate takes the CEO's decisions, while active with the whole company. Only the CEO sets it. */
     isCeoDelegate: boolean('is_ceo_delegate').notNull().default(false),
+    /* Who they are in Telegram, so a head's bot knows them: a username, kept in small letters, and the number Telegram gives
+       the account, which a bot learns the first time they write under that username and goes by from then on. */
+    telegramUsername: text('telegram_username'),
+    telegramUserId: bigint('telegram_user_id', { mode: 'number' }),
     createdAt: createdAt(),
   },
-  t => [index('people_company_id').on(t.companyId)],
+  t => [index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId)],
 );
+
+/* Where a person put the blocks of the company map: the hub, a department or a person, each by its top left in the map's
+   world. Each person keeps their own arrangement, which follows them to another device; a block not in it stands where the
+   map places it. */
+export type MapBlocks = Record<string, { x: number; y: number }>;
+export const mapLayouts = pgTable('map_layouts', {
+  personId: uuid('person_id').primaryKey().references(() => people.id),
+  companyId: companyId(),
+  blocks: jsonb('blocks').$type<MapBlocks>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const sessions = pgTable(
   'sessions',
@@ -517,7 +532,7 @@ export const agents = pgTable(
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch', 'team'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch', 'team', 'telegram'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(
@@ -663,6 +678,38 @@ export const agentEvents = pgTable(
     uniqueIndex('agent_events_operator_ordinal').on(t.companyId, sql`(data->'operatorEvidence'->>'instance')`, sql`(data->'operatorEvidence'->>'ordinal')`).where(sql`data->>'operatorEvidenceId' is not null`),
     index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
   ],
+);
+
+/* A head's or the orchestrator's Telegram bot: its token, encrypted with the server's secret and never shown again, the
+   bot's own number and name from Telegram, and the update it reads from next, so a restart neither loses nor repeats one.
+   A bot belongs to one agent, and an agent has one bot. */
+export const telegramBots = pgTable('telegram_bots', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().unique().references(() => agents.id),
+  tokenEnc: text('token_enc').notNull(),
+  botUserId: bigint('bot_user_id', { mode: 'number' }).notNull().unique(),
+  username: text('username').notNull(),
+  updateOffset: bigint('update_offset', { mode: 'number' }).notNull().default(0),
+  createdBy: uuid('created_by').references(() => people.id),
+  createdAt: createdAt(),
+});
+
+/* A person's message that came through a bot, whose answer goes back to their chat: the turn it went into, the last event
+   of that turn already sent there, whether anything was, and the language the bot speaks to them in. */
+export const telegramReplies = pgTable(
+  'telegram_replies',
+  {
+    id: id(),
+    botId: uuid('bot_id').notNull().references(() => telegramBots.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').notNull().references(() => jobs.id),
+    chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+    afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
+    answered: boolean('answered').notNull().default(false),
+    lang: text('lang', { enum: ['en', 'ru'] }).notNull(),
+    createdAt: createdAt(),
+  },
+  t => [unique('telegram_replies_job_chat').on(t.botId, t.jobId, t.chatId)],
 );
 
 export const proposals = pgTable('proposals', {

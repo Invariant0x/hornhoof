@@ -3,7 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { canViewAgent } from '../../auth/agent-view.js';
-import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { requireDepartmentChanger } from '../../auth/departments.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -85,11 +86,16 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { job: publicJob(view) };
   });
 
+  /* The whole company stops any running turn, a department's owner one of an employee of their department. */
   app.post('/api/jobs/:id/cancel', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
-    const [job] = await db.select({ status: jobs.status, agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.companyId, me.companyId)));
+    const [job] = await db
+      .select({ status: jobs.status, agentId: jobs.agentId, departmentId: agents.departmentId })
+      .from(jobs)
+      .leftJoin(agents, eq(agents.id, jobs.agentId))
+      .where(and(eq(jobs.id, id), eq(jobs.companyId, me.companyId)));
+    await requireDepartmentChanger(db, me, job?.departmentId ?? null);
     if (job?.agentId && !(await seesAgentOfJob(db, me, job.agentId))) throw notOwner();
     if (!job) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
     if (job.status !== 'running') throw new ApiError(409, 'conflict', 'This job is not running.', 'nothing_running');

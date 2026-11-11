@@ -30,6 +30,7 @@ import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
+import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
@@ -61,6 +62,8 @@ import { readCommit, type CommitReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
+import { TelegramBots } from './modules/telegram/bots.js';
+import { telegramRoutes } from './modules/telegram/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
 import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
@@ -87,7 +90,8 @@ export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logg
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
-   its certificate, the commit a repository's branch is at and the mark a full test run leaves on a commit. */
+   its certificate, the commit a repository's branch is at, the mark a full test run leaves on a commit and the heads'
+   Telegram bots. */
 export type Ctx = Deps & {
   /* When this server came up: it did not hear of any machine before then. */
   startedAt: Date;
@@ -120,6 +124,7 @@ export type Ctx = Deps & {
   challenges: Challenges;
   tls: LinkTls;
   mode: AppMode;
+  telegram: TelegramBots;
 };
 
 declare module 'fastify' {
@@ -215,7 +220,13 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.challenges = new Challenges();
   ctx.tls = new LinkTls(ctx);
   app.addHook('onClose', async () => ctx.tls.stop());
+  ctx.telegram = new TelegramBots(ctx);
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+  /* The heads' bots listen only while this app leads: a message one takes is written down, and two apps asking
+     Telegram for the same bot's messages would take them from each other. A bot stops before the database and the
+     nodes go, so a message it is taking reaches its agent first. */
+  ctx.mode.whenLead(() => ctx.telegram.start(), () => ctx.telegram.stop());
+  app.addHook('preClose', async () => ctx.telegram.stop());
   /* A database that was restored takes over who may get in now before this app serves anybody on it: the first thing
      it does when it first leads. Until that has gone through, every request but for its health is turned away as
      while it starts, in whatever mode, since the sessions the backup brought back would else still read; a failure is
@@ -303,6 +314,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
   orgRoutes(app, ctx);
+  mapLayoutRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);
@@ -338,5 +350,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   mergeRoutes(app, ctx);
   outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
+  telegramRoutes(app, ctx);
   return app;
 }

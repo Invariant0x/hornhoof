@@ -269,8 +269,8 @@ class FakeSocket {
   testError(reason: 'denied' | 'expired' | 'unavailable' | 'unknown') {
     this.onmessage?.({ data: JSON.stringify({ type: 'error', reason }) });
   }
-  program(running: boolean) {
-    this.onmessage?.({ data: JSON.stringify({ type: 'program', running }) });
+  program(running: boolean, asleep = false) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'program', running, ...(asleep ? { asleep } : {}) }) });
   }
   ended(code: number, reason: string) {
     this.readyState = 3;
@@ -331,6 +331,8 @@ beforeEach(() => {
   FakeResizeObserver.all = [];
   vi.stubGlobal('WebSocket', FakeSocket);
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  /* These are about the terminal, which a person reaches by choosing it over the chat. */
+  localStorage.setItem('hh-agent-view', 'terminal');
 });
 
 describe("an agent's live terminal in its window", () => {
@@ -358,6 +360,22 @@ describe("an agent's live terminal in its window", () => {
     ws.opened();
     ws.program(false);
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    ws.program(true);
+    await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('shows what a program that sleeps printed, and says it sleeps until the next task, with no loader over it', async () => {
+    const { container } = open();
+    const ws = await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    ws.opened();
+    ws.program(false, true);
+    await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent("The Claude program sleeps until this agent's next task. Scroll up to see what it did."));
+    expect(terminal.queryByText('Opening the Claude terminal…')).not.toBeInTheDocument();
+    /* A turn starts it: the loader shows until it is up. */
+    ws.program(false);
+    await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…'));
+    expect(terminal.queryByText(/sleeps until/)).not.toBeInTheDocument();
     ws.program(true);
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
@@ -492,11 +510,11 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([{ type: 'input', data }]);
   });
 
-  it('shows the log with what was said, and the terminal again', async () => {
+  it('shows the chat with what was said, and the terminal again', async () => {
     const user = userEvent.setup();
     open();
     const ws = await socket();
-    await user.click(screen.getByRole('button', { name: 'Log' }));
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
     expect(ws.readyState).toBe(3);
     await waitFor(() => expect(terms[0]!.disposed).toBe(true));
@@ -744,7 +762,7 @@ describe("an agent's live terminal in its window", () => {
     open();
     for (let i = 0; i < 5; i++) {
       (await socket()).opened();
-      await user.click(screen.getByRole('button', { name: 'Log' }));
+      await user.click(screen.getByRole('button', { name: 'Chat' }));
       await user.click(screen.getByRole('button', { name: 'Terminal' }));
       await waitFor(() => expect(FakeSocket.all).toHaveLength(i + 2));
     }
@@ -795,7 +813,7 @@ describe("an agent's live terminal in its window", () => {
     open(false);
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
     expect(FakeSocket.all).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: 'Log' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chat' })).not.toBeInTheDocument();
   });
 
   it('copies selected text on selection, Cmd+C, Ctrl+Shift+C and Ctrl+C without sending ^C or Escape to the program, and keeps Ctrl+C without selection', async () => {

@@ -334,6 +334,19 @@ function placeStrip(strip: StripEntry[], low: number, maxRow: number, out: Peopl
   if (progress.best) commitStripRow(progress.best, out);
 }
 
+/* The wires of people's routes: each person's routes joined into one tree with a dot at every fork, and a gap where a wire
+   passes under another person's. The same for routes laid out here or moved on the map since. */
+export function wirePeople(routes: PersonRoute[], chips: PersonChip[]): Pick<PeopleLayout, 'wires' | 'vias' | 'gaps'> {
+  const out: PeopleLayout = { chips: [], wires: [], vias: [], routes: [], gaps: [] };
+  const middle = new Map(chips.map(c => [c.id, c.x + c.w / 2]));
+  for (const id of new Set(routes.map(r => r.personId))) {
+    const tree = personTree(id, routes.filter(r => r.personId === id), middle.get(id) ?? 0);
+    out.wires.push(...tree.wires);
+    tree.vias.forEach(v => addVia(out.vias, v));
+  }
+  return { vias: out.vias, ...bridgeWires(out.wires) };
+}
+
 /* Keep each person connected when fixed card ports need bridges, and keep their traces clear of the hub. */
 export function peopleLayout(spots: Spot[], people: DeptPersonInput[]): PeopleLayout {
   const out: PeopleLayout = { chips: [], wires: [], vias: [], routes: [], gaps: [] };

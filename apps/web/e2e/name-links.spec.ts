@@ -40,7 +40,7 @@ async function expectNameHover(link: Locator) {
 
 async function openTree(page: Page, lang: 'en' | 'ru', line = /Vera, #121/) {
   await page.goto('/');
-  await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+  await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
   await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
   const graph = page.getByRole('group', { name: lang === 'en' ? 'Tree of turn 4' : 'Дерево хода 4' });
   await expect(graph).toBeVisible();

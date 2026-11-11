@@ -126,7 +126,7 @@ describe('Setup', () => {
     expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     expect(await screen.findByText(withKey(command))).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText('Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Go to the map' }));

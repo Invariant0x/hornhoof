@@ -139,7 +139,7 @@ describe('asking for an approval under the policy', () => {
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     await (await bruno(c))();
     const hers = (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(c.danaToken) })).json();
-    expect(hers.addressed[0]).toMatchObject({ ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo' }, approval: { channel: 'spend' } });
+    expect(hers.requests[0]).toMatchObject({ kind: 'approval', agent: { id: c.worker.id }, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo' } });
   });
 
   it('creates no request within the limit, at the limit neither, and leaves the task free', async () => {
@@ -286,8 +286,10 @@ describe('telling the CEO when goals are missed', () => {
     expect(ceo.counts.total).toBe(1);
     expect(ceo.requests[0]).toMatchObject({ ownerPersonId: c.ids.ceo, canAnswer: true, kind: 'question' });
     expect(ceo.requests[0].text).toContain('Release 1.0 by Friday');
+    /* The owner reads it with the rest of her department's work, and it is not hers to answer. */
     const dana = (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(c.danaToken) })).json();
-    expect([dana.requests, dana.addressed, dana.counts.total]).toEqual([[], [], 0]);
+    expect(dana.requests).toMatchObject([{ ownerPersonId: c.ids.ceo, canAnswer: false, kind: 'question' }]);
+    expect([dana.addressed, dana.counts.byPerson[c.ids.dana]]).toEqual([[], undefined]);
   });
 });
 

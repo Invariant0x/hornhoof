@@ -110,6 +110,8 @@ async function signedIn(browser: Browser, server: Server, who: keyof Boot['token
   await context.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
+    /* These are about who sees an agent's terminal, so the windows open with it rather than the chat. */
+    localStorage.setItem('hh-agent-view', 'terminal');
   }, { lang, theme });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -124,7 +126,7 @@ const errorsOf = (page: Page) => (page as Page & { __errors?: string[] }).__erro
 
 async function openAgent(page: Page, name: string) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   const chip = page.locator('.dept-chip').filter({ hasText: name });
   await expect(chip).toBeVisible();
   await chip.locator('.schip').click();
@@ -163,7 +165,7 @@ test('real server applies both plan and department to map, schema, tree and list
     await expect(ann.locator('.map')).toContainText('Own work');
     await expect(ann.locator('.map')).not.toContainText('Hidden work');
     await expect(ann.locator('.map')).not.toContainText('Away work');
-    await ann.getByRole('button', { name: /Development/ }).click();
+    await ann.getByRole('button', { name: /^Development/ }).click();
     await expect(ann.locator('.dcanvas .dept-chip')).toHaveCount(1);
     await expect(ann.locator('.dcanvas')).toContainText('Mina');
     for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);
@@ -181,13 +183,11 @@ test('real server applies both plan and department to map, schema, tree and list
   }
 });
 
-test('real server lets the department owner see only their own agent and full viewers see all', async ({ browser, server }) => {
+test('real server lets the department owner see every agent of their department and full viewers see all', async ({ browser, server }) => {
   try {
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
     await olga.goto(`/departments/${server.dev.id}`);
-    await expect(olga.locator('.dcanvas')).toContainText('Oleg');
-    await expect(olga.locator('.dcanvas')).not.toContainText('Mina');
-    await expect(olga.locator('.dcanvas')).not.toContainText('Otto');
+    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(olga.locator('.dcanvas')).toContainText(name);
     for (const who of ['ceo', 'lisa'] as const) {
       const viewer = await signedIn(browser, server, who, 'en', 'light', 1440);
       await viewer.goto(`/departments/${server.dev.id}`);

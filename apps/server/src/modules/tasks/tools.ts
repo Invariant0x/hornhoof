@@ -16,8 +16,8 @@ import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { setUrgent } from './urgency.js';
-import { answersCeoOrDelegate } from '../conversation/decision-context.js';
-import { ONLY_CEO } from '../tools/control.js';
+import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
+import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
@@ -66,6 +66,8 @@ function fitted<T extends TaskDetail>(detail: T): string {
 
 const Title = z.string().trim().min(1).max(120);
 const Brief = z.string().max(600).describe('One to three sentences people read on the map and in the tracker.');
+/* A department may keep several repositories: its own, and one on each product. */
+const Product = z.uuid().describe("The product whose repository the change goes to, as taskRepositories in your briefing lists them; without one the task works in the department's own repository.");
 const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the checking stages check), product, constraints. Rewrite it as the current truth.');
 const After = z
   .array(Ref)
@@ -99,7 +101,7 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 const Mode = z.enum(TURN_MODES).describe('How the turn runs: echelons, where code work goes through Architecture, Development, Review, Security and Tests, or turnkey, where one member of a turnkey team does the whole turn alone.');
 const TurnWords = z
@@ -269,13 +271,14 @@ class TaskTools {
     return settled && orchestratorId === this.job.agentId ? `${text} ${settled.note}` : text;
   }
 
-  /* Only the CEO or delegate answered in this turn can make work urgent. */
-  private async forCeoAlone(): Promise<void> {
-    if (!(await answersCeoOrDelegate(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+  /* Only the CEO or delegate answered in this turn can make work urgent, or the owner of the department it is in. */
+  private async urgentBy(departmentId: string | null): Promise<void> {
+    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
   }
 
-  private async urgentFromCeo(items: { urgent?: boolean | undefined }[]): Promise<void> {
-    if (items.some(item => item.urgent)) await this.forCeoAlone();
+  private async urgentFromCeo(items: { department: string; urgent?: boolean | undefined }[]): Promise<void> {
+    for (const department of new Set(items.filter(item => item.urgent).map(item => item.department))) await this.urgentBy(department);
   }
 
   private async underQuestionCap(): Promise<void> {
@@ -301,8 +304,8 @@ class TaskTools {
       return;
     }
     if (input.product) return;
-    const products = await this.db.select({ name: departments.name }).from(departments).where(and(eq(departments.parentId, agent.departmentId!), isNotNull(departments.repoUrl)));
-    if (products.length) throw refuse(400, 'task_invalid', `Name the product: the code of your department lives in the repositories of its products (${products.map(product => product.name ?? 'unnamed').join(', ')}). Without one the task has no repository and closes by a report.`);
+    const products = await this.db.select({ id: departments.id, name: departments.name, url: departments.repoUrl }).from(departments).where(and(eq(departments.parentId, agent.departmentId!), isNotNull(departments.repoUrl)));
+    if (products.length) throw refuse(400, 'task_invalid', `Name the product whose repository the change goes to: the code of your department lives in the repositories of its products (${products.map(product => `${product.name ?? 'unnamed'} (${product.id}): ${product.url}`).join('; ')}). Without one the task has no repository and closes by a report.`);
   }
 
   private async createdTaskText(task: Task, executor: Agent): Promise<string> {
@@ -422,7 +425,7 @@ class TaskTools {
             .enum(DECISION_TOPICS)
             .optional()
             .describe(
-              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; people, access, subscriptions, machines, repositories, public_link, updates or release for what only the CEO decides. Name it on every question; without it the CEO answers.',
+              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; repositories or release for your department\'s repository and releases, which its owner answers, or the CEO when it has none; people, access, subscriptions, machines, public_link or updates for what only the CEO decides. Name it on every question; without it the CEO answers.',
             ),
         },
       },
@@ -536,13 +539,13 @@ class TaskTools {
       'set_urgent',
       {
         description:
-          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO or the CEO delegate says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>
         this.run(async () => {
-          await this.forCeoAlone();
           const { agent, task } = await this.find(ref);
+          await this.urgentBy(task.departmentId);
           const moved = await setUrgent(this.ctx, { agentId: agent.id }, task.id, urgent);
           return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),
@@ -582,8 +585,8 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and where only the products of the department keep code, its product; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         this.run(async () => {

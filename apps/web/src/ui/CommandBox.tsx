@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
 import { withOwnerKey } from '../owner-key';
@@ -48,8 +48,37 @@ export async function loadMachineCommands(
   setCoreCommands(cores);
 }
 
-/* The install command with Copy, and what running it means for the person's subscription, or for their machine. A
-   command that joins a machine shows with the viewer's own key on it, so the machine knows its owner: with no key yet
+/* The install command the server gave, for Windows PowerShell: it runs install.ps1 of the same server with the same words,
+   which runs the same install.sh in Docker Desktop. It is made here from the command, so the code in it, and the owner's
+   key a joining command carries, reach exactly the screens the command reaches. None for a command of another kind. */
+export function windowsCommand(command: string): string | null {
+  const m = /^curl -fsSL (https?:\/\/[^\s"'`$;|&]+)\/install\.sh \| bash(?: -s -- (--join [A-Za-z0-9_-]+(?: --owner-key [A-Za-z0-9_-]{80,200})?))?$/.exec(command);
+  if (!m) return null;
+  const script = `${m[1]}/install.ps1`;
+  return m[2]
+    ? `powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm ${script}))) ${m[2]}"`
+    : `powershell -ExecutionPolicy Bypass -c "irm ${script} | iex"`;
+}
+
+function CommandLine({ command, label }: { command: string; label?: string }) {
+  const id = useId();
+  const line = (
+    <div className="command">
+      <code>{command}</code>
+      <CopyButton text={command} />
+    </div>
+  );
+  if (!label) return line;
+  return (
+    <div className="command-box" role="group" aria-labelledby={id}>
+      <p className="muted" id={id}>{label}</p>
+      {line}
+    </div>
+  );
+}
+
+/* The install command with Copy, the same one for Windows beside it when there is one, and what running it means for
+   the person's subscription, or for their machine. A command that joins a machine shows with the viewer's own key on it, so the machine knows its owner: with no key yet
    it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
    the command show without one, with a line that says so: such a machine joins and opens to nobody. Any other command
    shows as it is. */
@@ -81,13 +110,14 @@ export function CommandBox({ command, trust, password }: { command: string; trus
 
   const keyless = joins && key === NO_KEY_HERE;
   const shown = joins && !keyless ? (key ? withOwnerKey(command, key) : null) : command;
+  const windows = shown ? windowsCommand(shown) : null;
   return (
     <div className="command-box">
       {shown ? (
-        <div className="command">
-          <code>{shown}</code>
-          <CopyButton text={shown} />
-        </div>
+        <>
+          <CommandLine command={shown} label={windows ? t.subs.onMacLinux : undefined} />
+          {windows && <CommandLine command={windows} label={t.subs.onWindows} />}
+        </>
       ) : left ? (
         <>
           <p className="muted">{t.subs.ownerKeyNeeded}</p>

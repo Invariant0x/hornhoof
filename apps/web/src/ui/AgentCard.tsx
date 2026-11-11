@@ -4,8 +4,9 @@ import { errorText, useLanguage, useT } from '../i18n';
 import { cutLine } from '../restarts';
 import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, Me, Part, SubView } from '../types';
+import type { AgentCardView, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
+import { TelegramBot } from './TelegramBot';
 import { Ask } from './Ask';
 import { PanelFrame } from './SidePanels';
 import { LimitMeters } from './PlanLimits';
@@ -15,7 +16,7 @@ import { byProvider, servingLabel } from './StaffCard';
 
 /* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
 /* onRemoved: the agent is gone, and so is what stood for it. */
-type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onRemoved?(): void };
+type Props = { agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onRemoved?(): void };
 
 const FAILURE_TEXT_MAX = 300;
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
@@ -152,7 +153,7 @@ function liveState(card: AgentCardView, live: AgentLive | undefined): AgentLive 
 }
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
-export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
+export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -166,8 +167,6 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
   const [rawDraft, setRawDraft] = useState<string | null>(null);
   const [broken, setBroken] = useState(false);
   const [asking, setAsking] = useState<'reset' | 'remove' | null>(null);
-  /* Only the whole company removes an employee; the card says who may change it. */
-  const company = me.person.scopeKind === 'company';
   const base = `/api/agents/${agentId}`;
 
   useEffect(() => {
@@ -370,6 +369,8 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
         )}
 
         {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
+        {/* Whoever may remove this agent keeps its bot too: the whole company, or the person responsible for its department. */}
+        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={card.canRemove} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>
@@ -491,7 +492,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
                     {t.agent.reset}
                   </button>
                 )}
-                {company && (
+                {card.canRemove && (
                   <button className="act danger" type="button" onClick={() => setAsking('remove')}>
                     {t.agent.remove}
                   </button>

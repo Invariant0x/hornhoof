@@ -627,6 +627,8 @@
           "apps/server/test/credentials.test.ts",
           "apps/server/test/department-echelons-template.test.ts",
           "apps/server/test/department-echelons.test.ts",
+          "apps/server/test/department-owner-rights.test.ts",
+          "apps/server/test/departments.test.ts",
           "apps/server/test/development-checks-template.test.ts",
           "apps/server/test/development-echelons-cleanup.test.ts",
           "apps/server/test/development-echelons-template.test.ts",
@@ -675,6 +677,7 @@
         "globs": [
           ".github/workflows/**",
           "scripts/install.sh",
+          "scripts/install.ps1",
           "apps/updater/**",
           "Dockerfile",
           "compose.yaml",

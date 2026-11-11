@@ -1,6 +1,6 @@
 {
-  "id": "4773b412-0ecb-4e17-b128-8b3f4a250a0a",
-  "prevId": "3cb962e8-d6ec-4fff-adfd-33f22b775b5f",
+  "id": "20ac9926-99e1-4fba-8171-cf96669e2cd0",
+  "prevId": "6b273349-5664-4454-ba22-c849f783189e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -512,12 +512,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "builtin_machine": {
-          "name": "builtin_machine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "role_key": {
           "name": "role_key",
           "type": "text",
@@ -744,12 +738,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "agents_builtin_machine": {
-          "name": "agents_builtin_machine",
-          "value": "builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.applied": {
@@ -2569,12 +2558,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "builtin_machine": {
-          "name": "builtin_machine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "agent_id": {
           "name": "agent_id",
           "type": "uuid",
@@ -2914,12 +2897,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "jobs_builtin_machine": {
-          "name": "jobs_builtin_machine",
-          "value": "builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.link_tls": {
@@ -3578,30 +3556,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "link_rtt_ms": {
-          "name": "link_rtt_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "link_mbps": {
-          "name": "link_mbps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "internet_rtt_ms": {
-          "name": "internet_rtt_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "internet_mbps": {
-          "name": "internet_mbps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3720,10 +3674,6 @@
         "machines_upload_state": {
           "name": "machines_upload_state",
           "value": "upload_state IS NULL OR upload_state IN ('waiting', 'received', 'kept')"
-        },
-        "machines_measures_range": {
-          "name": "machines_measures_range",
-          "value": "link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0"
         }
       },
       "isRLSEnabled": false
@@ -13211,12 +13161,6 @@
           "notNull": true,
           "default": false
         },
-        "builtin_machine": {
-          "name": "builtin_machine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "machine_id": {
           "name": "machine_id",
           "type": "uuid",
@@ -13377,12 +13321,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "test_parts_builtin_machine": {
-          "name": "test_parts_builtin_machine",
-          "value": "builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.test_runs": {

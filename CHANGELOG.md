@@ -5,6 +5,82 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.6] - 2026-11-11
+
+An agent's window opens as a plain chat, each person arranges the company map as they like, and a department holds
+several repositories.
+
+### Before you update
+
+- Migration 0099 adds the table where each person's arrangement of the company map is kept. Nothing old is converted.
+
+### Added
+
+- A department holds more than one repository. Add repository on the department's About panel, or the orchestrator's
+  add_repository, brings another one as a new product of the department, named after it, and a task of that product
+  works in its repository. Two repositories of one department whose addresses end in the same name are refused, since
+  its agents would clone them into one folder.
+- Each block of the company map, a person, a department or the orchestrator, has a grip at its top left corner that
+  moves it, by mouse, finger or arrow keys. Each person's arrangement is kept on the server for them alone, and Put
+  back as it was returns their map to its first look.
+
+### Changed
+
+- An agent's window opens as a chat: the person's words on one side, the agent's on the other, its steps of work folded
+  into one line, and its state in plain words above the input. The terminal is one click away on the toolbar, and the
+  browser remembers which of the two a person chose last.
+- Every line of the company map runs at right angles, the lines from the orchestrator to the departments too, and
+  follows a block that moves.
+
+### Fixed
+
+- The person responsible for a department now sees its repository and those of its products, which 0.18.5 let them
+  change but not see.
+
+## [0.18.5] - 2026-11-11
+
+People on Windows add a machine or a plan with one PowerShell command, a head or the orchestrator can be written to
+through a Telegram bot, and the person responsible for a department runs it as the CEO does. An agent's terminal
+scrolls back through its whole conversation, and an agent's program sleeps between its tasks.
+
+### Before you update
+
+- From this release the person responsible for a department hires into it and removes its employees, changes its
+  sub-units, products and repositories, and answers its approvals without asking the CEO. Check who is responsible for
+  each department.
+- Migration 0098 adds the tables of Telegram bots and each person's Telegram. Nothing old is converted.
+
+### Added
+
+- Wherever an install or update command is shown, a command for Windows stands beside the one for a Mac or Linux. It
+  runs in PowerShell, says what it installs and then installs WSL 2 and Docker Desktop when they are missing, and goes
+  on by itself after a restart Windows asks for.
+- A head of a department or the orchestrator may have a Telegram bot. Someone with the whole company, or the person
+  responsible for the head's department, connects it on the agent's card with the token from @BotFather. Each person
+  sets their Telegram in People. A known person writes to the bot as in the agent's window, the agent learns who they
+  are in the company, and its answer comes back to the chat. A stranger is told their Telegram number.
+
+### Changed
+
+- The person responsible for a department runs it as the CEO does: hires into it from its roster, removes its
+  employees, stops their turns, makes and changes its sub-units, adds its products and repositories, pauses its tasks
+  and says they are urgent, with no approval of the CEO. They see every employee of the department and watch its
+  terminals without typing. Departments themselves, people, access, plans, machines and updates stay with the CEO.
+- Claude Code and Codex now draw on the terminal's main screen, so an agent's terminal scrolls back through the whole
+  conversation, up to its last 5000 lines.
+- An agent's program ends once its turn is over and nothing waits for it, and its next task starts it again in the
+  same conversation. Its terminal keeps what it printed and says that it sleeps. 20 idle programs held 3.7 GiB on one
+  node.
+- An invite link opened again after use says to sign in with the email and password set with it, and leads into the
+  company, instead of asking for a new link, which resets the password.
+
+### Fixed
+
+- Every screen link opened in the browser wrote "Reply was already sent" into the server log with its whole address,
+  invite tokens and setup codes included.
+- The node runs under tini, which ends the processes left without a parent; one node kept about a hundred of them.
+- Words of a program's earlier run in its terminal no longer pass for a program that is signed out.
+
 ## [0.18.4] - 2026-11-10
 
 A second company on a computer that already runs Hornhoof gets a name of its own instead of starting in the first

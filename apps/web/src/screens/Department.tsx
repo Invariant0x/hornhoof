@@ -13,7 +13,8 @@ import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, Tree
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
-import { RepoSettings } from '../ui/RepoSettings';
+import { Repositories } from '../ui/RepoSettings';
+import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { byState, TaskRow } from '../ui/TaskRow';
@@ -279,8 +280,10 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const mine = reach.find(p => p.id === me.person.id);
   const sees = company || !!mine;
   const canGive = company || !!mine?.access.departments.some(x => x.id === d.id);
+  /* The department's owner runs it as the whole company does: its people, sub-units and repository. */
+  const runs = company || (!!mine && d.ownerPersonId === me.person.id);
   const [tree, setTree] = useState(false);
-  const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | null>(null);
+  const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | 'hire' | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, sees && (tree || drawer === 'speed'));
   const openAgent = useOpenAgent();
   const chrome = useDepartmentSpace(language, panel);
@@ -444,7 +447,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     transition: still || !view.smooth ? 'none' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
     ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
   } as CSSProperties;
-  const drawerTitle = drawer === 'speed' ? t.dept.speed : drawer === 'tasks' ? t.dept.tasksButton : t.dept.about;
+  const drawerTitle = drawer === 'speed' ? t.dept.speed : drawer === 'tasks' ? t.dept.tasksButton : drawer === 'hire' ? t.dept.hiring : t.dept.about;
   const treeButton = tree ? t.dept.mapButton : t.dept.treeButton;
   const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
@@ -561,8 +564,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
           {t.dept.about}
         </button>
-        {company && (
-          <button className="btn" type="button" onClick={onHire}>
+        {/* The orchestrator's window is the whole company's; the owner hires from the roster here. */}
+        {runs && (
+          <button className="btn" type="button" onClick={company ? onHire : () => setDrawer('hire')}>
             {t.dept.hire}
           </button>
         )}
@@ -574,10 +578,11 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
             {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
+            {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
               <>
-                <DeptEmployeeList department={d} company={company} />
-                <DeptSubUnits department={d} company={company} />
+                <DeptEmployeeList department={d} company={runs} />
+                <DeptSubUnits department={d} company={runs} />
                 <DeptApprovals department={d} shown={canGive} />
                 {sees && (
                   <section aria-labelledby={`${id}-briefing`}>
@@ -586,12 +591,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                     <BriefingPanel placeId={d.id} />
                   </section>
                 )}
-                {company && (
-                  <section aria-labelledby={`${id}-repo`}>
-                    <h3 id={`${id}-repo`}>{t.dept.repository}</h3>
-                    <RepoSettings placeId={d.id} repository={d.repository} />
-                  </section>
-                )}
+                {runs && <Repositories department={d} />}
                 {d.products.length > 0 && (
                   <section aria-labelledby={`${id}-products`}>
                     <h3 id={`${id}-products`}>{t.dept.products}</h3>
@@ -599,7 +599,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                       {d.products.map(p => (
                         <li key={p.id}>
                           <b>{p.name}</b>
-                          {company && <RepoSettings placeId={p.id} repository={p.repository} compact />}
                           {sees && (
                             <section className="briefing-product" aria-label={`${t.briefing.title}: ${p.name}`}>
                               <h4>{t.briefing.title}</h4>

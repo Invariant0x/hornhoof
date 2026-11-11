@@ -50,7 +50,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true })).toBeVisible();
     await page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true }).getByRole('button', { name: t.window.close, exact: true }).click();
     await tab(t.shell.tabs.map).click();
-    await page.getByRole('button', { name: /Development/ }).click();
+    await page.getByRole('button', { name: /^Development/ }).click();
     await expect(page).toHaveURL(/\/departments\/d2$/);
     await expect(page.getByRole('heading', { name: 'Development', exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`department-${lang}-${theme}-${width}.png`), animations: 'disabled' });
@@ -160,7 +160,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/improvements$/);
 
     await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
-    await page.getByRole('button', { name: /Development/ }).click();
+    await page.getByRole('button', { name: /^Development/ }).click();
     const department = page.getByRole('heading', { name: 'Development', exact: true });
     await page.getByRole('button', { name: t.dept.tasksButton, exact: true }).click();
     await page.getByRole('button', { name: /#1 Checkout step 1 / }).click();

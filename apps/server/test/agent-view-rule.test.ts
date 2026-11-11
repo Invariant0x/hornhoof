@@ -19,10 +19,18 @@ describe('who sees an agent', () => {
     expect(seesAgent(person(listed([...departments])), { subscriptionId, spot })).toBe(sees);
   });
 
-  it('counts owning a department or having the whole company for no more than reach', () => {
-    const owner = { ...listed(['dev']), owns: new Set(['dev']) };
-    expect(seesAgent(person(owner), { subscriptionId: 'other', spot })).toBe(false);
-    expect(seesAgent(person(owner), { subscriptionId: 'mine', spot })).toBe(true);
+  it('gives the owner of a department every agent of it, its products and sub-units, on any plan or none, and nothing more', () => {
+    const owner = { ...listed(['dev', 'sales']), owns: new Set(['dev']) };
+    expect(seesAgent(person(owner), { subscriptionId: 'other', spot })).toBe(true);
+    expect(seesAgent(person(owner), { subscriptionId: null, spot })).toBe(true);
+    expect(seesAgent(person(owner), { subscriptionId: 'other', spot: { departmentId: 'shop', parentId: 'dev', teamId: null } })).toBe(true);
+    expect(seesAgent(person(owner), { subscriptionId: 'other', spot: { departmentId: 'dev', teamId: 'web' } })).toBe(true);
+    expect(seesAgent(person(owner), { subscriptionId: 'other', spot: { departmentId: 'sales' } })).toBe(false);
+    expect(seesAgent(person(owner), { subscriptionId: 'mine', spot: { departmentId: 'sales' } })).toBe(true);
+    expect(seesAgent(person(owner), { subscriptionId: 'other', spot: { departmentId: null } })).toBe(false);
+  });
+
+  it('counts having the whole company for no more than reach', () => {
     expect(seesAgent(person(WHOLE), { subscriptionId: 'other', spot })).toBe(false);
     expect(seesAgent(person(WHOLE), { subscriptionId: 'mine', spot })).toBe(true);
   });

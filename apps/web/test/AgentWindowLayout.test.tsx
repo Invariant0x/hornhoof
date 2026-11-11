@@ -30,7 +30,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
 
 async function openEmployee(user: ReturnType<typeof userEvent.setup>) {
   render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
-  await user.click(await screen.findByRole('button', { name: /Development/ }));
+  await user.click(await screen.findByRole('button', { name: /^Development/ }));
   await user.click(await screen.findByRole('button', { name: /Bruno/ }));
   return screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
 }
@@ -154,7 +154,7 @@ describe('agent window task and controls', () => {
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
     render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
-    await user.click(await screen.findByRole('button', { name: /Разработка/ }));
+    await user.click(await screen.findByRole('button', { name: /^Разработка/ }));
     await user.click(await screen.findByRole('button', { name: /Bruno/ }));
     const button = await screen.findByRole('button', { name: 'Нет задачи' });
     expect(button).toBeDisabled();
@@ -173,7 +173,7 @@ describe('agent window task and controls', () => {
     });
     const user = userEvent.setup();
     render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
-    await user.click(await screen.findByRole('button', { name: /Development/ }));
+    await user.click(await screen.findByRole('button', { name: /^Development/ }));
     await user.click(await screen.findByRole('button', { name: /Bruno/ }));
     const button = await screen.findByRole('button', { name: 'No task' });
     expect(button).toBeDisabled();

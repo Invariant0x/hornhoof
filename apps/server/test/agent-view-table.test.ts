@@ -25,10 +25,11 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 type Crew = keyof AclCompany['crew'];
 type Viewer = keyof AclCompany['tokens'];
-type Call = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: object };
+type Call = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; payload?: object };
 
-/* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything. */
-type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; closedStatus?: 403 | 404 };
+/* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything;
+   ownerToo: or for the owner of the agent's department. */
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; closedStatus?: 403 | 404 };
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -51,7 +52,7 @@ const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
 const POINTED: Pointed[] = [
   { route: 'GET /api/agents/:id', of: anAgent('GET', '') },
   { route: 'PATCH /api/agents/:id', of: anAgent('PATCH', '', { effort: null }) },
-  { route: 'DELETE /api/agents/:id', of: anAgent('DELETE', ''), companyOnly: true },
+  { route: 'DELETE /api/agents/:id', of: anAgent('DELETE', ''), companyOnly: true, ownerToo: true },
   { route: 'GET /api/agents/:id/events', of: anAgent('GET', '/events') },
   { route: 'POST /api/agents/:id/messages', of: anAgent('POST', '/messages', { text: 'hi' }) },
   { route: 'POST /api/agents/:id/pictures', of: async (c, agent) => ({ method: 'POST', url: `/api/agents/${c.crew[agent].id}/pictures`, payload: {} }) },
@@ -59,12 +60,15 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/agents/:id/start', of: anAgent('POST', '/start', {}) },
   { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
   { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
+  /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
+  { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true, ownerToo: true },
+  { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
   { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits') },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
-  { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true },
+  { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true, ownerToo: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
   { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
   /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
@@ -78,7 +82,8 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
   { name: 'own plan, other department', viewer: 'ann', agent: 'away', closed: true },
   { name: "another's plan, other department", viewer: 'ann', agent: 'far', closed: true },
   { name: 'department owner, own plan', viewer: 'olga', agent: 'owned', closed: false },
-  { name: "department owner, another's plan", viewer: 'olga', agent: 'other', closed: true },
+  { name: "department owner, another's plan", viewer: 'olga', agent: 'other', closed: false },
+  { name: "department owner, another's plan, other department", viewer: 'olga', agent: 'far', closed: true },
   { name: 'whole company, own plan', viewer: 'wes', agent: 'wide', closed: false },
   { name: "whole company, another's plan", viewer: 'wes', agent: 'other', closed: true },
   { name: 'delegate', viewer: 'lisa', agent: 'far', closed: false },
@@ -109,8 +114,8 @@ const LISTS: Listed[] = [
   { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
-  { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
-  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 200, wes: 403, lisa: 200, ceo: 200 } },
+  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
@@ -123,8 +128,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
-  'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
-  'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
+  'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
+  'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'GET /api/task-departments': 'backlog.test.ts: only the departments the person has',
   'GET /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'PUT /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
@@ -153,10 +158,11 @@ const NO_AGENT_DATA: string[] = [
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
   'PUT /api/departments/:id/work-mode',
-  'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/staff',
+  'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/repositories', 'POST /api/departments/:id/staff',
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
+  'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout',
   'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'POST /api/machines/:id/disconnect', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
   'GET /api/me/key', 'PUT /api/me/key',
   'GET /api/backups', 'POST /api/backups/recovery', 'GET /api/backups/recovery', 'GET /api/backups/:id/warning', 'POST /api/backups/:id/restore', 'POST /api/backups/kept/:name/leave', 'GET /api/merges/:id/conflicts', 'POST /api/merges/pick', 'GET /api/network/backups', 'POST /api/network/backups', 'POST /api/network/certificate', 'GET /api/network/computer', 'POST /api/network/computer/:id', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report', 'POST /api/network/secrets',
@@ -169,7 +175,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/recovery', 'GET /api/recovery', 'POST /api/recovery/restore', 'POST /api/recovery/challenge', 'PUT /api/recovery/bundles/:id',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
   'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
-  'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
+  'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'GET /install.ps1', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
   'GET /robots.txt', 'GET /.well-known/acme-challenge/*',
 ];
 
@@ -199,7 +205,7 @@ async function busy() {
 }
 
 /* What each person may read of the crew. */
-const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['owned'], wes: ['wide'] };
+const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['mine', 'other', 'head', 'owned'], wes: ['wide'] };
 
 describe('every real route', () => {
   it('has its place in the table', async () => {
@@ -214,14 +220,14 @@ describe('every real route', () => {
 });
 
 describe('one thing of one agent', () => {
-  it.each(POINTED)('$route', async ({ route, of, companyOnly, closedStatus = 403 }) => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, closedStatus = 403 }) => {
     const c = await aclCompany();
     const got: string[] = [];
     /* Those that are closed first: what opens may change or remove what it is given. */
     for (const { name, viewer, agent, closed } of [...CASES].sort((a, b) => Number(b.closed) - Number(a.closed))) {
       const res = await call(c, await of(c, agent), viewer);
       got.push(`${name}: ${res.statusCode}`);
-      const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
+      const scoped = companyOnly && (viewer === 'ann' || (viewer === 'olga' && !ownerToo));
       if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
       else expect([403, closedStatus], `${route}, ${name}`).not.toContain(res.statusCode);
       if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);

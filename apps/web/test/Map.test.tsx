@@ -257,7 +257,84 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Dept 7');
     const top = Math.min(...[...container.querySelectorAll<HTMLElement>('.dept')].map(d => parseFloat(d.style.top)));
-    expect(parseFloat(container.querySelector<HTMLElement>('.chips')!.style.top) + 56).toBeLessThanOrEqual(top - 20);
+    for (const card of container.querySelectorAll<HTMLElement>('.chips > li')) expect(parseFloat(card.style.top) + 56).toBeLessThanOrEqual(top - 20);
+  });
+
+  it('stands the blocks where this person put them, and puts them back as they were', async () => {
+    const calls = mockApi({
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'GET /api/map/layout': [200, { blocks: { 'dept:d1': { x: 40, y: 700 }, 'person:p2': { x: 900, y: 20 } } }],
+      'DELETE /api/map/layout': [204, undefined],
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    await waitFor(() => expect([marketing.style.left, marketing.style.top]).toEqual(['40px', '700px']));
+    const maria = screen.getByText('Maria').closest('li')!;
+    expect([maria.style.left, maria.style.top]).toEqual(['900px', '20px']);
+    /* Every line still runs only across and down, now to where the blocks stand. */
+    for (const path of container.querySelectorAll('.wires path.tr')) {
+      const pts = path.getAttribute('d')!.slice(2).split(' L ').map(p => p.split(' ').map(Number));
+      expect(pts.slice(1).every((q, i) => q[0] === pts[i]![0] || q[1] === pts[i]![1]), path.getAttribute('d')!).toBe(true);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Put back as it was' }));
+    const home = deptLayout(2)[0]!;
+    expect([marketing.style.left, marketing.style.top]).toEqual([`${home.x}px`, `${home.y}px`]);
+    expect(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d')).toBe(`M ${home.path.map(p => p.join(' ')).join(' L ')}`);
+    expect(screen.queryByRole('button', { name: 'Put back as it was' })).not.toBeInTheDocument();
+    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/api/map/layout', body: undefined }));
+  });
+
+  it('moves a block by the grip at its corner, keeps it there, and leaves the map and the block alone', async () => {
+    const opened: string[] = [];
+    const calls = mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'PATCH /api/map/layout': (b: unknown) => [200, b] });
+    const { container } = render(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const home = deptLayout(2)[0]!;
+    const world = container.querySelector<HTMLElement>('.world')!;
+    const view = world.style.transform;
+    const grip = screen.getByRole('button', { name: 'Move Marketing' });
+    fireEvent.pointerDown(grip, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(grip, { clientX: 130, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(grip, { clientX: 160, clientY: 130, pointerId: 1 });
+    /* The card follows the hand before it lets go, and nothing is kept yet. */
+    expect([marketing.style.left, marketing.style.top]).toEqual([`${home.x + 60}px`, `${home.y + 30}px`]);
+    expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
+    fireEvent.pointerUp(grip, { clientX: 160, clientY: 130, pointerId: 1 });
+    expect(world.style.transform).toBe(view);
+    expect([marketing.style.left, marketing.style.top]).toEqual([`${home.x + 60}px`, `${home.y + 30}px`]);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { blocks: { 'dept:d1': { x: home.x + 60, y: home.y + 30 } } } }));
+    expect(opened).toEqual([]);
+    /* The arrow keys move it too, and a press on the card still opens the department. */
+    fireEvent.keyDown(grip, { key: 'ArrowDown' });
+    expect(marketing.style.top).toBe(`${home.y + 40}px`);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { blocks: { 'dept:d1': { x: home.x + 60, y: home.y + 40 } } } }));
+    fireEvent.click(marketing);
+    expect(opened).toEqual(['d1']);
+    expect(screen.getByRole('button', { name: 'Put back as it was' })).toBeInTheDocument();
+  });
+
+  it('gives every block a grip named in the language of the person, the hub and the people too', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    await screen.findByText('Marketing');
+    expect(screen.getAllByRole('button', { name: /^Передвинуть: / }).map(b => b.getAttribute('aria-label'))).toEqual(
+      expect.arrayContaining(['Передвинуть: Оркестратор', 'Передвинуть: Marketing', 'Передвинуть: Development', 'Передвинуть: Ivan', 'Передвинуть: Maria']),
+    );
+  });
+
+  it('says so when a move could not be kept, and a press on a grip that does not move keeps nothing', async () => {
+    const calls = mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'PATCH /api/map/layout': [500, { error: { code: 'internal', message: 'Down.' } }] });
+    render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const grip = screen.getByRole('button', { name: 'Move Ivan' });
+    fireEvent.pointerDown(grip, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(grip, { clientX: 102, clientY: 101, pointerId: 1 });
+    fireEvent.pointerUp(grip, { clientX: 102, clientY: 101, pointerId: 1 });
+    expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
+    fireEvent.keyDown(grip, { key: 'ArrowLeft', shiftKey: true });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save where you moved it. Move it again to try once more.');
   });
 
   it('sends no pulses while nobody exchanges messages', async () => {
@@ -646,10 +723,10 @@ describe('Map', () => {
   it('shows what a department works on now where it would say it has no agents', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', name: 'Sales', current: { id: 't5', number: 5, title: 'Call ten shops' } }), dept({ id: 'd2', name: 'Support' })] }] });
     render(<MapScreen {...PROPS} />);
-    const sales = await screen.findByRole('button', { name: /Sales/ });
+    const sales = await screen.findByRole('button', { name: /^Sales/ });
     expect(sales.querySelector('.now')).toHaveTextContent('#5 Call ten shops');
     expect(sales).not.toHaveTextContent('No agents yet');
-    expect(screen.getByRole('button', { name: /Support/ })).toHaveTextContent('No agents yet');
+    expect(screen.getByRole('button', { name: /^Support/ })).toHaveTextContent('No agents yet');
   });
 
   it.each(['en', 'ru'] as const)("shows the tracker progress under the hub in %s, between the traces", async language => {
@@ -915,13 +992,12 @@ describe('deptLayout', () => {
     const spots = deptLayout(7);
     const [hx, hy] = spots[0]!.path[0]!;
     for (const s of spots) {
-      const [start, bend, ...rest] = s.path;
+      const [start, ...rest] = s.path;
       expect(start).toEqual([hx, hy]);
-      /* The first step runs straight out along the hub's row or leaves on a 45 degree line; the rest run straight across or down. */
-      if (bend![1] !== hy) expect(Math.abs(bend![0] - hx)).toBe(Math.abs(bend![1] - hy));
-      let prev = bend!;
+      /* Every step runs straight across or down, the first one under the hub too: no line on the map is diagonal. */
+      let prev = start!;
       for (const p of rest) {
-        expect(p[0] === prev[0] || p[1] === prev[1]).toBe(true);
+        expect(p[0] === prev[0] || p[1] === prev[1], JSON.stringify(s.path)).toBe(true);
         prev = p;
       }
       const near = s.x + s.w / 2 < hx ? s.x + s.w : s.x;

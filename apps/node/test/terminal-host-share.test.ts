@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { gitEnv } from '../src/workspace.js';
 import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
 
 const GIB = 1024 ** 3;
@@ -36,5 +37,27 @@ describe("an agent program's share of its machine for tests", () => {
   it("keeps the number of workers the machine's own settings give", async () => {
     const { launch } = await liveTerminal('claude', 'queued', { live: ['other-1'], host: { machine, env: { VITEST_MAX_WORKERS: '3' } } });
     expect(startedWith(launch)).not.toContain('VITEST_MAX_WORKERS');
+  });
+});
+
+/* A department may keep several repositories, and each task's turn works in its own, with that repository's token. */
+describe('the repository a program that stays up works in', () => {
+  it('starts the program again in its session for a turn whose repository has another token', async () => {
+    const c = await liveTerminal('claude', 'queued', { host: { machine, env: {} } });
+    const thinking = (jobId: string) => c.until(() => c.sent.some(m => m.type === 'job.program' && m.jobId === jobId && m.state === 'thinking'));
+    c.finish();
+    await c.on(c.running);
+    const shop = c.run('Shop work.', 'job-shop', { env: gitEnv({ url: 'https://github.com/acme/shop.git', token: 'ghp_shop2222' }) });
+    await thinking('job-shop');
+    expect(startedWith(c.launch, c.launch.mock.calls.length - 1)).toMatch(/^HH_GIT_PASSWORD='ghp_shop2222'$/m);
+    c.finish();
+    await c.on(shop);
+    const launched = c.launch.mock.calls.length;
+    const platform = c.run('Platform work.', 'job-platform', { env: gitEnv({ url: 'https://github.com/acme/platform.git', token: 'ghp_platform1111' }) });
+    await thinking('job-platform');
+    expect(c.launch).toHaveBeenCalledTimes(launched + 1);
+    expect(startedWith(c.launch, launched)).toMatch(/^HH_GIT_PASSWORD='ghp_platform1111'$/m);
+    c.finish();
+    expect(await c.on(platform)).toMatchObject({ ok: true });
   });
 });

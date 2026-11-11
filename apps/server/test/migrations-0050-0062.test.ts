@@ -228,7 +228,8 @@ describe('migration 0053', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect((await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows).toEqual(before);
+    /* Migration 0098 gives every person an empty Telegram. */
+    expect((await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows).toEqual(before.map(row => ({ data: { ...(row.data as object), telegram_username: null, telegram_user_id: null } })));
     await db.execute(sql`insert into person_changes (company_id, person_id, actor_id, field, before, after) values (${company}, ${person}, ${actor}, 'name', 'Lisa', 'Lisa Ray')`);
     await db.execute(sql`delete from people where id = ${actor}`);
     expect((await db.execute(sql`select actor_id, before, after from person_changes`)).rows).toEqual([{ actor_id: null, before: 'Lisa', after: 'Lisa Ray' }]);

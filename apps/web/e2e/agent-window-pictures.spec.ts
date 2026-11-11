@@ -2,7 +2,7 @@ import { expect, test, type JSHandle, type Locator, type Page, type Route } from
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { EventView } from '../src/types';
-import { AGENT_HIDDEN } from './api';
+import { AGENT_HIDDEN, chooseTerminal } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
@@ -26,6 +26,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, settings);
+  await chooseTerminal(page);
   const live: AgentFixture = { awake: false, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR, events: events.b1, viewer: me };
   await serveAgentWindow(page, live);
   await page.route('**/api/**', route => {
@@ -156,13 +157,13 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const errors = watchErrors(page);
       const server = await serve(page, 'delegate', settings);
       const window = await open(page, 'orchestrator', lang);
-      await window.getByRole('button', { name: t.window.showLog, exact: true }).click();
+      await window.getByRole('button', { name: t.window.showChat, exact: true }).click();
       const line = lineOf(window, 'orchestrator', t);
       await line.click();
       await paste(line, await picture(page, 'screen.png'));
       await expect(window.getByRole('img', { name: 'screen.png', exact: true })).toBeVisible();
       await shot(page, info, 'pasted', settings);
-      await window.getByRole('button', { name: t.window.sendPictures, exact: true }).click();
+      await window.getByRole('button', { name: t.window.chat.send, exact: true }).click();
       await expect.poll(() => server.messages).toEqual([{ agent: 'orchestrator', text: '', pictures: ['pic1'] }]);
       await expect(window.getByRole('link', { name: t.window.openPicture('screen.png'), exact: true })).toBeVisible();
       await checkPage(page, errors);

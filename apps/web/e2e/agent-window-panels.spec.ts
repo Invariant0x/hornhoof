@@ -190,7 +190,7 @@ for (const who of PEOPLE) {
     });
   }
 
-  test(`Log still stands in the place of the terminal, panels or not: ${who}`, async ({ page }) => {
+  test(`The chat still stands in the place of the terminal, panels or not: ${who}`, async ({ page }) => {
     const { window, terminal, errors, words, openPanel, panel } = await openAgent(page, { lang: 'en', theme: 'light', width: 1440 }, who);
     await window.getByRole('button', { name: words.log, exact: true }).click();
     await expect(terminal).toHaveCount(0);

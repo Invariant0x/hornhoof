@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { testRuns, turns } from '../../db/schema.js';
+import { departments, testRuns, turns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/engine.js';
 import { routeOf } from '../tasks/echelons-store.js';
@@ -60,12 +60,19 @@ async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null
   return `turn-${turn!.number}`;
 }
 
-/* The newest test runs of a task, and those on its turn's branch in its own repository where that is what the task is
+/* Where a task's turn branch is: its product's repository, or for a task of the whole department every repository the
+   department and its products keep, as a turn may change several. */
+async function turnPlaces(db: Reader['db'], task: Task): Promise<string[]> {
+  if (task.productId || !task.departmentId) return [task.productId, task.departmentId].filter((id): id is string => Boolean(id));
+  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, task.departmentId));
+  return [task.departmentId, ...products.map(p => p.id)];
+}
+
+/* The newest test runs of a task, and those on its turn's branch in its own repositories where that is what the task is
    about, each with the commit it pinned and whether it still proves its branch. */
 export async function taskEvidence(ctx: Reader, task: Task): Promise<RunEvidence[]> {
   const branch = await turnBranchOf(ctx.db, task);
-  const places = [task.productId, task.departmentId].filter((id): id is string => Boolean(id));
-  const onTurnBranch = branch ? and(eq(testRuns.branch, branch), inArray(testRuns.departmentId, places)) : undefined;
+  const onTurnBranch = branch ? and(eq(testRuns.branch, branch), inArray(testRuns.departmentId, await turnPlaces(ctx.db, task))) : undefined;
   const runs = await ctx.db
     .select()
     .from(testRuns)

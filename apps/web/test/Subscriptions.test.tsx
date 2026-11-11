@@ -390,7 +390,7 @@ describe('Subscriptions', () => {
     await user.click(screen.getByRole('button', { name: 'Get the command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['claude', 'codex'] } });
     expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText(TRUST)).toBeInTheDocument();
   });
 
@@ -787,7 +787,7 @@ describe('signing in to plans', () => {
     expect(await within(card).findByText(text)).toBeInTheDocument();
     expect(within(card).getByText(update)).toBeInTheDocument();
     expect(within(card).getByText(trust)).toBeInTheDocument();
-    await userEvent.click(within(card).getByRole('button', { name: copy }));
+    await userEvent.click(within(card).getAllByRole('button', { name: copy })[0]!);
     expect(copied).toEqual([update]);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     /* The next try starts clean: the note and its command go once the sign-in starts. */
@@ -936,12 +936,12 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Kimi, Ivan' });
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(workingParts(card)).toEqual([]);
-    /* Why, the command with Copy and how long it works, then Remove: one block, nothing beside it. */
+    /* Why, the command and the one for Windows, each with Copy, and how long they work, then Remove: one block, nothing beside it. */
     const [why, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
     await vi.waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
     expect(install).toHaveTextContent(lifetime);
-    expect(buttons(install!)).toEqual([actions[0]]);
+    expect(buttons(install!)).toEqual([actions[0], actions[0]]);
     expect(buttons(last!)).toEqual([actions[1]]);
     expect(rest).toEqual([]);
   });
@@ -969,11 +969,11 @@ describe('the card of a plan that does not work', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
     await vi.waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
     expect(workingParts(card)).toEqual([]);
-    /* The machine and why, the command with Copy, and Sign in and Remove under them. */
+    /* The machine and why, the command and the one for Windows with Copy, and Sign in and Remove under them. */
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
     expect(block.firstElementChild).toHaveTextContent(OLD_TEXT);
     expect(within(block).getByText(UPDATE)).toBeInTheDocument();
-    expect(buttons(block)).toEqual(['Copy', 'Sign in', 'Remove']);
+    expect(buttons(block)).toEqual(['Copy', 'Copy', 'Sign in', 'Remove']);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     /* The screen alone keeps it: opened again, the card is the working plan's. */
     unmount();
@@ -1013,7 +1013,7 @@ describe('the card of a plan that does not work', () => {
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
     await vi.waitFor(() => expect(block.firstElementChild).toHaveTextContent(OLD_TEXT));
     expect(within(card).queryByText('On ivan-mbp. Only Ivan can sign in.')).not.toBeInTheDocument();
-    expect(buttons(block)).toEqual(['Copy', 'Sign in', 'Remove']);
+    expect(buttons(block)).toEqual(['Copy', 'Copy', 'Sign in', 'Remove']);
     expect(blocks(card)).toEqual(['blk blk-fix']);
   });
 

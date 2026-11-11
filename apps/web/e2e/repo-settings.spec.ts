@@ -9,13 +9,15 @@ const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const LONG = 'npm ci --prefer-offline --no-audit --no-fund && ATestRunnerWithANameSoLongThatNoLineOfThePanelCanHoldAllOfItAtOnceAndHasNowhereToBreak --shard={part}/{parts} --reporter=verbose';
 const REPO: Repository = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234', author: null, testMemoryGb: 4, fullTestCommand: null };
 
-function orgWith(repository: Repository): Org {
+type Product = Org['departments'][number]['products'][number];
+
+function orgWith(repository: Repository, products: Product[] = []): Org {
   return {
     company: ME.company,
     orchestrator: null,
     agents: { total: 0, working: 0 },
     people: [],
-    departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', ownerPersonId: null, agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [], repository }],
+    departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', ownerPersonId: null, agents: { total: 0, working: 0 }, products, teams: [], people: [], employees: [], roles: [], repository }],
   };
 }
 
@@ -32,10 +34,24 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
   await taskStream(page);
   await serveApi(page);
   let shown = repository;
+  const products: Product[] = [];
   const puts: unknown[] = [];
+  const posts: unknown[] = [];
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
-    if (url.pathname === '/api/org') return route.fulfill({ json: orgWith(shown) });
+    if (url.pathname === '/api/org') return route.fulfill({ json: orgWith(shown, products) });
+    /* A product's briefing, which the panel shows under it. */
+    if (/^\/api\/departments\/p\d+\/briefing$/.test(url.pathname)) return route.fulfill({ json: { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } } });
+    /* Another repository whose address ends as the department's own does is refused, as the server refuses it. */
+    if (url.pathname === '/api/departments/d2/repositories' && route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { name: string; url: string; branch: string };
+      posts.push(body);
+      if (body.url.endsWith('/app.git')) return route.fulfill({ status: 409, json: { error: { code: 'conflict', message: 'taken', reason: 'repo_folder_taken' } } });
+      const product = { id: `p${products.length + 1}`, name: body.name, repository: { url: body.url, branch: body.branch, tokenLast4: null, author: null, testMemoryGb: 4, fullTestCommand: null } };
+      products.push(product);
+      await route.fulfill({ status: 201, json: { product } });
+      return page.evaluate(() => window.hubTaskEvent('org'));
+    }
     if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.7.0', commit: 'task-386' } });
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-386' }, available: false, latest: null, updater: { status: null, waiting: null } } });
     if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: { departmentId: 'd2', owner: null, canSetOwner: false, canChangePolicy: false, candidates: [], rules: [] } });
@@ -55,10 +71,10 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
   await page.evaluate(async () => { await document.fonts.ready; });
   /* Tall enough that the panel shows the whole section, without scrolling, in its screenshots. */
   await page.setViewportSize({ width, height: 2200 });
-  return { errors, puts };
+  return { errors, puts, posts };
 }
 
-const section = (page: Page, t: Messages) => page.getByRole('region', { name: t.dept.repository, exact: true });
+const section = (page: Page, t: Messages) => page.getByRole('region', { name: t.dept.repositories, exact: true });
 
 async function fitsTheScreen(page: Page, width: number) {
   const scroll = await page.evaluate(() => {
@@ -111,6 +127,47 @@ for (const lang of ['en', 'ru'] as const) {
         await expect.poll(() => puts.at(-1)).toEqual({ url: REPO.url, branch: 'main', fullTestCommand: null });
         await expect(part.getByText(t.dept.noFullCommand)).toBeVisible();
         expect(errors.filter(e => !/400/.test(e))).toEqual([]);
+      });
+    }
+  }
+}
+
+const OTHER = 'https://github.com/acme/a-mobile-application-whose-repository-name-runs-on-and-on-past-any-line.git';
+
+for (const lang of ['en', 'ru'] as const) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 375]) {
+      test(`a person adds another repository to a department, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        const t = MESSAGES[lang];
+        const { errors, posts } = await open(page, lang, theme, width);
+        const part = section(page, t);
+        await expect(part.getByRole('listitem').first()).toContainText(t.dept.ownRepository);
+        await part.getByRole('button', { name: t.dept.addRepository, exact: true }).click();
+        const form = part.getByRole('form', { name: t.dept.addRepository });
+
+        /* An address that ends as the department's own does: the server says why, and what was typed stays. */
+        await form.getByLabel(t.dept.address, { exact: true }).fill('https://github.com/other/app.git');
+        await expect(form.getByLabel(t.dept.repoName, { exact: true })).toHaveValue('app');
+        await form.getByRole('button', { name: t.dept.addThis, exact: true }).click();
+        await expect(form.getByRole('alert')).toHaveText(t.errors.repo_folder_taken);
+        await fitsTheScreen(page, width);
+        await part.screenshot({ path: info.outputPath(`repo-add-refused-${width}-${lang}-${theme}.png`) });
+
+        await form.getByLabel(t.dept.address, { exact: true }).fill(OTHER);
+        await expect(form.getByLabel(t.dept.repoName, { exact: true })).toHaveValue('a-mobile-application-whose-repository-name-runs-on-and-on-pa');
+        await form.getByLabel(t.dept.repoName, { exact: true }).fill('Mobile');
+        await fitsTheScreen(page, width);
+        await part.screenshot({ path: info.outputPath(`repo-add-form-${width}-${lang}-${theme}.png`) });
+        await form.getByRole('button', { name: t.dept.addThis, exact: true }).click();
+        await expect.poll(() => posts.at(-1)).toEqual({ name: 'Mobile', url: OTHER, branch: 'main' });
+
+        /* The new product shows with its repository, its long address wrapped inside the panel. */
+        const mobile = part.getByRole('listitem', { name: 'Mobile' });
+        await expect(mobile.getByText(OTHER)).toBeVisible();
+        await expect(part.getByRole('form', { name: t.dept.addRepository })).toHaveCount(0);
+        await fitsTheScreen(page, width);
+        await part.screenshot({ path: info.outputPath(`repo-add-done-${width}-${lang}-${theme}.png`) });
+        expect(errors.filter(e => !/409/.test(e))).toEqual([]);
       });
     }
   }

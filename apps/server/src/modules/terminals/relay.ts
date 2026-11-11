@@ -60,7 +60,7 @@ export class TerminalRelay {
       return;
     }
     if (msg.type === 'term.program') {
-      view.socket.send(JSON.stringify({ type: 'program', running: msg.running }));
+      view.socket.send(JSON.stringify({ type: 'program', running: msg.running, ...(msg.asleep ? { asleep: true } : {}) }));
       return;
     }
     this.views.delete(msg.termId);

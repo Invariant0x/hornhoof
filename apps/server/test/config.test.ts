@@ -67,6 +67,12 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'yes' })).toThrow('HORNHOOF_KEEPER must be on, or not set.');
   });
 
+  it('talks to Telegram\'s own Bot API unless TELEGRAM_API_URL names a stand-in', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).telegramApiUrl).toBe('https://api.telegram.org');
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TELEGRAM_API_URL: 'http://127.0.0.1:9100/' }).telegramApiUrl).toBe('http://127.0.0.1:9100');
+    expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TELEGRAM_API_URL: 'api.telegram.org' })).toThrow('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.');
+  });
+
   it('knows the tunnel container by a plain host name', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).tunnelHost).toBeUndefined();
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: 'tunnel' }).tunnelHost).toBe('tunnel');

@@ -15,7 +15,7 @@ const CARD: AgentCardView = {
   currentTask: null,
   id: BRUNO.id, name: BRUNO.name, kind: 'worker', role: null, department: { id: 'd2', name: 'Development' },
   product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', retry: null, failure: null, obsolete: { at: NOW - 60_000 }, skills: [], parts: [],
-  raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null,
+  raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, canRemove: false, timer: null,
 };
 const PROGRAM: ProgramView = { state: 'thinking', since: NOW - 12 * 60_000, tool: null, screenAt: NOW, signAt: null, retry: null, reportedAt: NOW };
 const ORG: Org = {
@@ -54,7 +54,7 @@ for (const lang of ['en', 'ru'] as const) {
         page.on('pageerror', error => errors.push(error.message));
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
         await page.goto('/');
-        await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+        await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();
         const card = page.getByRole('complementary', { name: 'Bruno', exact: true });

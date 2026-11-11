@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { actsAsCeo } from '../../auth/decisions.js';
+import { runsDepartment } from '../../auth/departments.js';
 import { people, tasks, type TaskPause } from '../../db/schema.js';
 import { requireTaskHead } from './echelons-update.js';
 import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx, type Wake } from './engine.js';
@@ -11,11 +11,11 @@ export function refusePaused(task: Pick<Task, 'number' | 'paused'>): void {
   if (task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused: ${task.paused.reason} Its work waits until whoever paused it resumes it.`);
 }
 
-/* The department head, the orchestrator or a person who acts as the CEO stops and resumes work. */
+/* The department head, the orchestrator, a person who acts as the CEO or the department's owner stops and resumes work. */
 async function requirePauser(ctx: Pick<Ctx, 'db'>, task: Task, actor: Actor): Promise<void> {
   if (actor.agentId !== undefined) return requireTaskHead(ctx, task, actor.agentId);
   const [person] = await ctx.db.select().from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, task.companyId)));
-  if (!person || !actsAsCeo(person)) throw refuse(403, 'task_not_yours', 'Only the CEO, the CEO delegate, the department head or the orchestrator pauses work.');
+  if (!person || !(await runsDepartment(ctx.db, person, task.departmentId))) throw refuse(403, 'task_not_yours', 'Only the CEO, the CEO delegate, the department\'s owner, the department head or the orchestrator pauses work.');
 }
 
 /* The task and every open task under it, held for this change, the task first and then level by level. */

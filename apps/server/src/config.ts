@@ -40,6 +40,8 @@ export type Config = {
   templatesDir: string;
   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
   relayUrl: string;
+  /* Where the Telegram Bot API answers; tests put a stand-in here. */
+  telegramApiUrl: string;
   /* The keeper container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
@@ -99,6 +101,7 @@ const Env = z.object({
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+  TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
@@ -206,6 +209,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     secureCookies: publicUrl.startsWith('https://'),
     nodeKey: nodeKeyOf(env),
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+    telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     keeper: set.HORNHOOF_KEEPER === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),

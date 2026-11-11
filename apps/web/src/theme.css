@@ -362,7 +362,8 @@ select:disabled { opacity: .55; }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
-.chips { display: flex; margin: 0; padding: 0; list-style: none; }
+.chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
+.chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
 .chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
 .chip .ic { width: 18px; height: 18px; }
@@ -418,6 +419,15 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .cnt b { color: var(--ink); font-weight: 600; }
 /* Zoom bottom left and the orchestrator's line bottom middle, as in the prototype. */
 .zoom { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; }
+/* A block's grip at its top left corner, 44 px to touch at any zoom and outside the block; the map's corners are not mirrored. */
+.grip { box-sizing: border-box; padding: 0; border: 0; background: none; color: var(--line2); cursor: move; touch-action: none; transform-origin: 100% 100%; }
+.grip svg { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.grip:hover, .grip:active, .grip:focus-visible { color: var(--cyan-ink); }
+.grip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* Put back as it was, and a move that was not saved, above the zoom. */
+.map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
+.map-arrange .alert { margin: 0; }
+.map-arrange .btn { min-height: 44px; background: var(--hud); }
 .zbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
 .zbtn:hover { color: var(--cyan-ink); }
 .zbtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -433,6 +443,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ticker .tx.in { animation: tin .45s ease-out; }
 @keyframes blink { 50% { opacity: .35; } }
 @media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } }
+/* On a narrow screen the orchestrator's line stands over the zoom, and the way back over that line. */
+@media (max-width: 720px) { .map-arrange { bottom: 124px; } }
 @media (prefers-reduced-motion: reduce) { .ticker .live { animation: none; } }
 
 /* People */
@@ -617,12 +629,6 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 @keyframes tin { from { opacity: 0; transform: translateY(4px); } }
 .t-line { display: grid; gap: 12px; }
 .t-line:has(> .t-r:not(.alone)) { margin-top: -10px; }
-.t-wel { align-self: flex-start; padding: 10px 16px 10px 12px; border: 1px solid var(--amber); border-radius: 6px; }
-.t-wel div { white-space: pre-wrap; }
-.t-wel .w1 i { font-style: normal; color: var(--amber); }
-.t-wel .w2 { padding-left: 18px; color: var(--muted); }
-.t-u { color: var(--muted); white-space: pre-wrap; }
-.t-u em { font-style: normal; color: var(--ink); }
 /* A message between an agent and someone else: one line that names both, its text folded under it until opened, as a
    folded transcript is in Claude Code. */
 .t-m { display: grid; grid-template-columns: 18px 1fr; color: var(--muted); }
@@ -637,11 +643,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-l { display: grid; grid-template-columns: 18px 1fr; }
 .t-l > i { font-style: normal; }
 .t-l > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.t-t > i, .t-done .t-l > i { color: var(--ok); }
+.t-t > i { color: var(--ok); }
 .t-t b { font-weight: 700; }
-.t-bad > i { color: var(--pink); }
 .t-plan b { font-weight: 700; }
-.t-done { display: grid; gap: 2px; }
 .t-r { display: grid; grid-template-columns: 18px 28px 1fr; color: var(--muted); }
 .t-r > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Like Claude Code: a tool call takes two lines at most and its result three. */
@@ -653,11 +657,6 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .md ul, .md ol { padding-left: 20px; }
 .md strong { font-weight: 700; color: var(--ink); }
 .md code { color: var(--cyan-ink); }
-.t-sp { display: grid; grid-template-columns: 18px 1fr; color: var(--amber-ink); }
-.t-sp > i { font-style: normal; color: var(--amber); animation: spin 2.4s linear infinite; display: inline-block; width: 12px; }
-.t-sp span { color: var(--muted); }
-.t-sp .t-q { margin-left: 12px; }
-.t-sp .btn { margin-left: 12px; vertical-align: middle; }
 .t-link { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; text-decoration: underline; cursor: pointer; }
 .t-why { flex: none; margin: 0 12px; padding: 6px 2px 0; font-family: var(--f-body); font-size: 12.5px; color: var(--amber-ink); }
 .t-in { flex: none; display: flex; align-items: flex-start; gap: 10px; margin: 4px 12px 0; padding: 9px 12px; border: 1px solid var(--line2); border-radius: 6px; }
@@ -682,6 +681,46 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-pics { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px 16px; }
 .t-pics img { display: block; max-width: 180px; max-height: 120px; border: 1px solid var(--line2); border-radius: 4px; }
 .t-pic-gone { color: var(--muted); font-size: 12.5px; }
+/* The chat: what a person and the agent wrote, one on each side, each with who and when. The program's steps fold into one
+   quiet line, and what happened besides words is a line across. */
+.t-log.chat { gap: 14px; padding: 16px 16px 8px; scrollbar-gutter: stable; font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+.chat-empty { margin: auto 0; padding: 0 16px; color: var(--muted); text-align: center; }
+.chat-msg { justify-self: start; display: grid; gap: 4px; min-width: 0; max-width: min(88%, 560px); margin: 0; }
+.chat-msg.person { justify-self: end; }
+.chat-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: 12px; color: var(--muted); }
+.chat-who > span { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.chat-msg.person .chat-who { justify-content: flex-end; }
+.chat-body { min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-inline-start: 3px solid var(--line2); border-radius: 6px; background: var(--surface2); color: var(--ink); overflow-wrap: anywhere; }
+.chat-msg.person .chat-body { border-color: var(--line2); border-inline-start-width: 1px; border-inline-end: 3px solid var(--cyan); background: var(--glow); }
+.chat-msg.quiet .chat-body { padding: 0; padding-inline-start: 10px; border: 0; border-inline-start: 2px solid var(--line2); border-radius: 0; background: none; color: var(--muted); }
+.chat-text { white-space: pre-wrap; }
+.chat-body .md { display: grid; gap: 8px; }
+.chat-body .md pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--f-mono); font-size: 12px; }
+.chat-body .md h2, .chat-body .md h3 { margin: 0; font-size: 15px; }
+.chat-body .t-pics { margin: 8px 0 0; }
+.chat-note { justify-self: center; max-width: 100%; padding: 0 8px; font-size: 12.5px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.chat-note.bad { color: var(--pink-ink); }
+.chat-note .t-left { text-align: start; white-space: pre-wrap; }
+.chat-quiet { font-size: 12.5px; }
+.chat-steps { align-self: start; display: grid; gap: 6px; min-width: 0; max-width: 100%; }
+.chat-steps > button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0; padding-inline-end: 8px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; text-align: start; cursor: pointer; }
+.chat-steps > button > i { font-style: normal; }
+.chat-steps > button:hover { color: var(--cyan-ink); }
+.chat-steps > button:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.chat-steps-list { display: grid; gap: 8px; min-width: 0; padding-inline-start: 10px; border-inline-start: 2px solid var(--line); font-family: var(--f-mono); font-size: 12px; line-height: 1.55; color: var(--muted); }
+.chat-state { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 12px 0; padding: 0 2px; font-family: var(--f-body); font-size: 12.5px; color: var(--muted); }
+.chat-state.working { color: var(--amber-ink); }
+.chat-state .spinner { width: 12px; height: 12px; }
+/* The line to write in: the words grow upwards, the pictures and the send button stay at the last line. */
+.t-in.chat-in { align-items: flex-end; gap: 8px; padding: 0; padding-inline-start: 12px; font-family: var(--f-body); }
+.chat-in textarea { margin: 11px 0; font-family: var(--f-body); font-size: 14px; }
+.chat-in .t-tray { padding-top: 8px; }
+.chat-in .t-add { margin-bottom: 11px; }
+.chat-send { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 0; border-start-end-radius: 6px; border-end-end-radius: 6px; background: none; color: var(--cyan-ink); cursor: pointer; }
+.chat-send:hover:not(:disabled) { background: var(--glow); }
+.chat-send:disabled { cursor: not-allowed; opacity: .45; }
+.chat-send:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+.chat-send svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
@@ -747,7 +786,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
-@media (prefers-reduced-motion: reduce) { .t-log > *, .t-sp > i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .t-log > * { animation: none; } }
 
 /* A department card on the map opens the department. */
 button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
@@ -1009,9 +1048,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .ac-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 .ac-history ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
 /* The timer: a tick to wake, then how often, what to do and when the next round comes, each on its own line. */
-.ac-timer, .ac-timer form { display: grid; gap: 10px; justify-items: start; }
-.ac-timer > p { margin: 0; font-size: 13px; }
-.ac-timer .field { justify-self: stretch; }
+.ac-timer, .ac-timer form, .ac-telegram, .ac-telegram form { display: grid; gap: 10px; justify-items: start; }
+.ac-timer > p, .ac-telegram p { margin: 0; font-size: 13px; }
+.ac-timer .field, .ac-telegram .field { justify-self: stretch; }
 .ac-timer label.check { display: flex; gap: 8px; align-items: start; font-size: 13px; cursor: pointer; }
 .ac-timer label.check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--cyan); }
 .ac-timer small { font-size: 12.5px; color: var(--muted); }

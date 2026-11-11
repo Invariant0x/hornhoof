@@ -1,14 +1,16 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
+import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, people, tasks, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx } from './engine.js';
 import { freePeers, type Work } from './role-peers.js';
 
-/* Whether work is urgent is data: the CEO says so through the orchestrator or a route, and nothing is read from its words.
-   Work under a task is as urgent as it is. A team may take urgent work only, and who is in it says who that holds for. */
+/* Whether work is urgent is data: the CEO or a department's owner says so through the orchestrator or a route, and nothing
+   is read from its words. Work under a task is as urgent as it is. A team may take urgent work only, and who is in it says
+   who that holds for. */
 
 /* What the filters that give out work ask. It looks at nothing but these two, and leaves work a holder already has alone. */
 export const mayHoldTask = ({ urgent }: Pick<Task, 'urgent'>, { urgentOnly }: { urgentOnly: boolean }): boolean => urgent || !urgentOnly;
@@ -50,22 +52,22 @@ export async function refuseNotUrgent(ctx: Ctx, actor: Actor, companyId: string,
   if (who) throw await notForThem(ctx, actor, companyId, work, who);
 }
 
-const notAllowed = () => refuse(403, 'urgent_not_allowed', 'Only the CEO or the CEO delegate says that work is urgent, by themselves or through the orchestrator. Nothing was changed.');
+const notAllowed = () => refuse(403, 'urgent_not_allowed', 'Only the CEO, the CEO delegate or the department\'s owner says that work is urgent, by themselves or through the orchestrator. Nothing was changed.');
 
-/* The orchestrator acts for the CEO: its tools check that the turn answers them. */
-async function maySayUrgent(db: Db | Tx, companyId: string, actor: Actor): Promise<boolean> {
+/* The orchestrator acts for the CEO and for a department's owner: its tools check that the turn answers them. */
+async function maySayUrgent(db: Db | Tx, companyId: string, actor: Actor, departmentId: string | null): Promise<boolean> {
   if (actor.agentId !== undefined) {
     const [agent] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, companyId)));
     return agent?.kind === 'orchestrator';
   }
   const [person] = await db.select().from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, companyId)));
-  return Boolean(person && actsAsCeo(person));
+  return Boolean(person && (await runsDepartment(db, person, departmentId)));
 }
 
 /* A new task with nothing above it is urgent when someone who may says so; under a task it is what that task is. */
-export async function urgencyOfNew(db: Db | Tx, companyId: string, actor: Actor, parent: Pick<Task, 'urgent'> | null, asked: boolean | undefined): Promise<boolean> {
+export async function urgencyOfNew(db: Db | Tx, companyId: string, actor: Actor, parent: Pick<Task, 'urgent'> | null, asked: boolean | undefined, departmentId: string | null): Promise<boolean> {
   if (parent) return parent.urgent;
-  if (asked && !(await maySayUrgent(db, companyId, actor))) throw notAllowed();
+  if (asked && !(await maySayUrgent(db, companyId, actor, departmentId))) throw notAllowed();
   return asked === true;
 }
 
@@ -73,7 +75,7 @@ export async function urgencyOfNew(db: Db | Tx, companyId: string, actor: Actor,
    so with the company held none comes up under it meanwhile. Nobody is woken, as it changes nothing of the work. */
 export async function setUrgent(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, taskId: string, urgent: boolean): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
-  if (!(await maySayUrgent(ctx.db, task.companyId, actor))) throw notAllowed();
+  if (!(await maySayUrgent(ctx.db, task.companyId, actor, task.departmentId))) throw notAllowed();
   if (task.parentId) throw refuse(409, 'urgent_follows_parent', `#${task.number} is as urgent as the task above it. Change the top of its tree.`);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is closed.`);
   const row = await ctx.db.transaction(async tx => {

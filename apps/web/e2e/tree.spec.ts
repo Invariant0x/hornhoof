@@ -24,7 +24,7 @@ for (const lang of ['en', 'ru'] as const) {
         for (const during of [true, false]) {
           live.during = during;
           await page.goto('/');
-          await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+          await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
           await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
           const graph = page.getByRole('group', { name: lang === 'en' ? 'Tree of turn 4' : 'Дерево хода 4' });
           await expect(graph).toBeVisible();
@@ -142,7 +142,7 @@ for (const lang of ['en', 'ru'] as const) {
       });
       const open = async () => {
         await page.goto('/');
-        await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+        await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
       };
       await open();

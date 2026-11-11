@@ -678,6 +678,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 describe('what only the CEO may ask for', () => {
   const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
   const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask one of them first.";
 
   /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
   async function quiet() {
@@ -727,12 +728,13 @@ describe('what only the CEO may ask for', () => {
       ['set_public_link', { name: 'acme' }],
       ['remove_public_link', {}],
       ['set_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/acme.git', token: 'ghp_x' }],
+      ['add_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/other.git', token: 'ghp_x' }],
       ['update_hornhoof', { version: 'latest' }],
       ['lend_machine', { machine: '00000000-0000-4000-8000-0000000000aa', lendsTests: true }],
       ['machine_command', {}],
       ['add_plan_to_machine', { machine: '00000000-0000-4000-8000-0000000000aa', subscription: '00000000-0000-4000-8000-0000000000bb' }],
     ] as const) {
-      expect(text(await call(client, name, args)), name).toBe(ONLY_CEO);
+      expect(text(await call(client, name, args)), name).toBe(name === 'set_repository' || name === 'add_repository' ? ONLY_DEPARTMENT_OWNER : ONLY_CEO);
     }
     expect(await statusOf(db, lena.id)).toBe('active');
     expect((await call(client, 'change_employee', { employee: (await db.select().from(agents).where(eq(agents.name, 'Bruno')))[0]!.id, on: false })).isError).toBeFalsy();

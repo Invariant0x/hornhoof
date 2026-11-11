@@ -45,6 +45,7 @@ for (const [group, path, expected] of [
   ['a risky source of the server, which mutation also lists', 'apps/server/src/auth/password.ts', ['server']],
   ['the workflow of a build', '.github/workflows/images.yml', ['release-scripts', 'server']],
   ['the installer', 'scripts/install.sh', ['release-scripts', 'server']],
+  ['the installer for Windows', 'scripts/install.ps1', ['release-scripts', 'server']],
   ['the updater', 'apps/updater/updater.sh', ['release-scripts', 'server']],
   ['the image of the app', 'Dockerfile', ['release-scripts', 'server']],
   ['the compose file', 'compose.yaml', ['release-scripts', 'server']],

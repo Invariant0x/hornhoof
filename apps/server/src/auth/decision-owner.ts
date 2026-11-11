@@ -6,15 +6,18 @@ import type { Access, Spot } from './access.js';
 export type Candidate = { id: string; status: 'active' | 'invited' | 'disabled'; isOwner: boolean; access: Access };
 
 /* A request of an agent on a task, or a card of the orchestrator. His request for a machine is its owner's, and no
-   decision of this kind. */
+   decision of this kind. A card that names departments changes only their staff, sub-units and products. */
 export type DecisionSubject =
   | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
-  | { source: 'proposal' }
+  | { source: 'proposal'; departments?: readonly string[] }
   /* What a merge could not prove about people, access, plans, machines or protected records: the CEO's alone. */
   | { source: 'merge' };
 
 /* The topics a department's own person decides; every other one, and one not given, is the CEO's. */
 export const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
+
+/* The topics of a department's work its named owner decides too, as the CEO does: its repository and its releases. */
+export const OWNED: readonly DecisionTopic[] = ['repositories', 'release'];
 
 function ceoOf(people: readonly Candidate[]): string {
   const ceo = people.find(p => p.isOwner && p.status === 'active');
@@ -35,11 +38,12 @@ export function decisionPlace(d: DecisionSubject): Spot | null {
   return d.spot;
 }
 
-/* The department whose owner takes a decision: every approval on its work or a product's, of any kind and topic, and its
-   own decisions. What only the CEO decides, and what no department holds, has none. */
+/* The department whose owner takes a decision: every approval on its work or a product's, of any kind and topic, its own
+   decisions, and what is asked about its repository and releases. What only the CEO decides, and what no department holds,
+   has none. */
 export function ownerDepartment(d: DecisionSubject): string | null {
   if (d.source !== 'request' || !d.spot.departmentId) return null;
-  if (d.kind !== 'approval' && !decisionPlace(d)) return null;
+  if (d.kind !== 'approval' && !decisionPlace(d) && !(d.topic && OWNED.includes(d.topic))) return null;
   return d.spot.parentId ?? d.spot.departmentId;
 }
 

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
+import { chooseTerminal } from './api';
 
 type Options = {
   lang: 'en' | 'ru';
@@ -37,6 +38,7 @@ async function openTerminal(page: Page, options: Options) {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, options);
+  await chooseTerminal(page);
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', msg => {
     if (msg.type() === 'error' && !(options.pictureStatus === 413 && msg.location().url.includes('/pictures'))) errors.push(msg.text());
@@ -63,7 +65,7 @@ async function openTerminal(page: Page, options: Options) {
     ws.send(JSON.stringify({ type: 'data', data: '\x1b[?2004hTERMINAL-READY\r\n> ' }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development|Разработка/ }).click();
+  await page.getByRole('button', { name: /^(Development|Разработка)/ }).click();
   await page.getByRole('region', { name: COPY[options.lang].members }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const textarea = window.locator('.xterm-helper-textarea');
@@ -166,6 +168,7 @@ test('reconnect rechecks kept text and commands against the new rights', async (
   let downgraded = false;
   await page.setViewportSize({ width: 1440, height: 900 });
   await serveAgentWindow(page, live);
+  await chooseTerminal(page);
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
     sockets.push(ws);
     ws.onMessage(raw => {
@@ -177,7 +180,7 @@ test('reconnect rechecks kept text and commands against the new rights', async (
     ws.send(JSON.stringify({ type: 'data', data: downgraded ? 'SECOND-READY\r\n> ' : 'FIRST-READY\r\n> ' }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const textarea = page.locator('.xterm-helper-textarea');
   await expect(page.locator('.xterm-rows')).toContainText('FIRST-READY');

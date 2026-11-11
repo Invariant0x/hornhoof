@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -46,12 +47,20 @@ async function started(program: Program, { plain = false, remember, readyMs, too
   const sent: OperatorNodeMessage[] = [];
   const reports: NodeMessage[] = [];
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  /* A program that sleeps ends; the next launch starts it again. */
+  let asleep = false;
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
+    if (asleep) alive.mockResolvedValue(true);
+    asleep = false;
     mkdirSync(dirname(file), { recursive: true });
     record({ type: 'session_meta', payload: { id: sessionId, cwd: workDir } });
   });
   vi.spyOn(tmux, 'run').mockResolvedValue('80 24');
-  vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+  const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+  vi.spyOn(tmux, 'stop').mockImplementation(async () => {
+    asleep = true;
+    alive.mockResolvedValue(false);
+  });
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   vi.spyOn(tmux, 'screen').mockImplementation(async () => `OpenAI Codex\n${program.status}\n${codexPrompt(program.input)}`);
@@ -181,6 +190,9 @@ it('starts anew for the next turn a program whose tools were turned away as it c
     c.host['bridge']['heardList'](c.agentKey, Date.now());
     c.finish(words, `turn-${++turn}`);
   } }, { toolsMs: 100 });
+  /* Someone has its terminal open, so it stays up between the turns. */
+  vi.spyOn(c.tmux, 'attach').mockReturnValue(Object.assign(new EventEmitter(), { stdin: { write: () => true }, stdout: new EventEmitter(), kill: () => {} }) as never);
+  await onClock(c.host.open({ type: 'term.open', termId: 'watching', agentKey: c.agentKey, cols: 80, rows: 24, write: false }));
   expect(await onClock(c.running)).toMatchObject({ ok: true });
   await c.host.start();
   /* No turn opens while it waits for one. */

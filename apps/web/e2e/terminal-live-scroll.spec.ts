@@ -8,6 +8,7 @@ import { expect as baseExpect, test, type Locator, type Page, type WebSocketRout
 import ts from 'typescript';
 import type * as ViewStream from '../../node/src/terminal/view-stream';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
+import { chooseTerminal } from './api';
 
 /* The node's view history and the agent window over what a real tmux said, recorded once in fixtures. Time is the test's
    own on both sides: the node's clock moves only when the test lets it, and so does the page's. */
@@ -250,11 +251,12 @@ async function openWindow(page: Page, recording: Recording, write: boolean): Pro
   await serveAgentWindow(page, live);
   await program.serve(page);
   await countFrames(page);
+  await chooseTerminal(page);
   await page.clock.install({ time: START - 60_000 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.clock.pauseAt(START);
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = { page, program, rows: page.locator('.xterm-rows') };
   await drawn(window);

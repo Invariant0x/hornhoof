@@ -55,7 +55,7 @@ function noticeLine(message: MessageEnvelope): string {
 export function messageHeading(message: MessageEnvelope): string {
   const senders = message.senders?.length ? message.senders.map(partyLine).join(', ') : partyLine(message.from);
   if (message.from.kind === 'hornhoof') return `From Hornhoof, ${noticeLine(message)} to ${partyLine(message.to)}:`;
-  const sender = message.notification ? `${senders} via Hornhoof, ${noticeLine(message)}` : senders;
+  const sender = message.notification ? `${senders} via Hornhoof, ${noticeLine(message)}` : message.channel === 'telegram' ? `${senders} via Telegram` : senders;
   return `From ${sender} to ${partyLine(message.to)}:`;
 }
 
@@ -63,6 +63,19 @@ export function messageHeading(message: MessageEnvelope): string {
 export function addressed(text: string, message: MessageEnvelope): string {
   const heading = messageHeading(message);
   return text.startsWith(`${heading}\n`) ? text : `${heading}\n\n${text}`;
+}
+
+/* What a person is in the company, as far as it weighs their words: its owner, the CEO's delegate, the person responsible
+   for the agent's department. department is null for an agent outside any department. */
+export type Standing = { owner: boolean; delegate: boolean; department: boolean | null };
+
+/* Below a person's message that came through the agent's Telegram bot: who they are, and where the answer goes. */
+export function answerInTelegram(author: { name: string }, standing: Standing): string {
+  const is = [standing.owner && "the company's owner (the CEO)", standing.delegate && "the CEO's delegate", standing.department && 'responsible for your department'].filter(Boolean);
+  const who = is.length
+    ? `${author.name} is ${is.join(' and ')}.`
+    : `${author.name} is neither the company's owner nor the CEO's delegate${standing.department === false ? ', nor responsible for your department' : ''}.`;
+  return `${author.name} wrote this in Telegram. ${who} Your answer in this window goes back to them there as plain text, so write it without formatting.`;
 }
 
 /* An employee's message to another agent, which reads it as the employee's words, not as orders. */

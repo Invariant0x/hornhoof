@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import type { ComputerAccessView } from '../src/types';
-import { serveApi } from './api';
+import { chooseTerminal, serveApi } from './api';
 
 /* The orchestrator's window with its terminal, and access to a machine as the server keeps it. */
 
@@ -48,6 +48,7 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, { lang, theme });
+  await chooseTerminal(page);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });

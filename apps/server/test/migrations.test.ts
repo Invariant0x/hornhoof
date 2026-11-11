@@ -411,7 +411,7 @@ describe('migration 0086 composable skills', () => {
   });
 });
 
-describe('migration 0098, the tables of the network', () => {
+describe('migration 0100, the tables of the network', () => {
   it('marks the sessions of an older install as made before the __Host- cookie', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -435,7 +435,7 @@ describe('a database from before the link had a certificate', () => {
   });
 });
 
-describe('migration 0099, the fences and the journal', () => {
+describe('migration 0101, the fences and the journal', () => {
   const tablesOfPublic = sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by 1`;
   const journaledTables = sql`select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
     where t.tgname = 'net_journal' and n.nspname = 'public' order by 1`;
@@ -525,7 +525,7 @@ describe('migrations 0100 and 0101, where each change came from', () => {
   });
 });
 
-describe("migration 0102, the tables of the company's network", () => {
+describe("migration 0104, the tables of the company's network", () => {
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -562,7 +562,7 @@ describe("migration 0102, the tables of the company's network", () => {
   });
 });
 
-describe('migration 0103, what joined machines need', () => {
+describe('migration 0105, what joined machines need', () => {
   async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -614,7 +614,7 @@ describe('migration 0103, what joined machines need', () => {
   });
 });
 
-describe('migration 0104, computer access per machine', () => {
+describe('migration 0106, computer access per machine', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -695,7 +695,7 @@ describe('migrations 0105 and 0106, the backups', () => {
   });
 });
 
-describe('migration 0107, the merge records', () => {
+describe('migration 0109, the merge records', () => {
   const RECORDS = ['merges', 'merge_rows', 'merge_conflicts', 'merge_consumed', 'restores', 'horizon'];
 
   async function fullyMigrated(): Promise<PgliteDatabase> {
@@ -753,7 +753,7 @@ describe('migration 0107, the merge records', () => {
   });
 });
 
-describe('migration 0108, the server order and the copies', () => {
+describe('migration 0110, the server order and the copies', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -814,7 +814,7 @@ describe('migration 0108, the server order and the copies', () => {
   });
 });
 
-describe('migration 0109, the measures of the server order', () => {
+describe('migration 0111, the measures of the server order', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -847,7 +847,7 @@ describe('migration 0109, the measures of the server order', () => {
   });
 });
 
-describe('migration 0110, the tables of a server move', () => {
+describe('migration 0112, the tables of a server move', () => {
   async function fullyMigrated(): Promise<PgliteDatabase> {
     const client = await freshPglite();
     onTestFinished(() => client.close());

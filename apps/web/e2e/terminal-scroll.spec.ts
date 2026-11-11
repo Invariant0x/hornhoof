@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
+import { chooseTerminal } from './api';
 
 type Profile = 'claude' | 'codex' | 'kimi' | 'agy';
 const PROFILES: Profile[] = ['claude', 'codex', 'kimi', 'agy'];
@@ -18,6 +19,7 @@ async function openTerminal(page: Page, profile: Profile, write: boolean) {
     localStorage.setItem('hh-lang', 'en');
     localStorage.setItem('hh-theme', 'dark');
   });
+  await chooseTerminal(page);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const sent: string[] = [];
@@ -33,7 +35,7 @@ async function openTerminal(page: Page, profile: Profile, write: boolean) {
     sendOutput = data => ws.send(JSON.stringify({ type: 'data', data }));
   });
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const rows = window.locator('.xterm-rows');

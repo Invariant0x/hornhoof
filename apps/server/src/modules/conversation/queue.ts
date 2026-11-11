@@ -19,7 +19,7 @@ import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
-import { repoAt, repoFor } from '../departments/repository.js';
+import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
@@ -199,7 +199,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[] }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram'; telegram?: { bot: string; chat: number; update: number } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -963,7 +963,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const job = await dueTurn(ctx, agent, sub);
   if (!job) return;
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
-  const at = await repoAt(ctx, [agent.productId, agent.departmentId]);
+  const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
