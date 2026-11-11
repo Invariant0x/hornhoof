@@ -17,6 +17,8 @@ const JAR = '/tmp/owner.jar';
 
 const b64url = (bytes: ArrayBuffer | Uint8Array): string => Buffer.from(bytes as ArrayBuffer).toString('base64url');
 const quoted = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+/* A text inside a statement for the database. */
+const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 const pause = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 /* Waits until the look gives something, however long this computer takes: only a person stops a lab that never gets there. */
@@ -47,7 +49,8 @@ async function http(machine: LabMachine, method: string, url: string, opts: { bo
   return { status: Number(code), body, json: <T>() => JSON.parse(body) as T };
 }
 
-/* The owner's key, made as the browser makes it; the test keeps the private half and gives the server only the wrapped one. */
+/* The owner's key, made as the browser makes it; the test keeps the private half and gives the server only the wrapped
+   one. grant: what the owner signs to open a machine for an hour, as their browser does. */
 async function ownerKey(password: string) {
   const { subtle } = webcrypto;
   const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
@@ -57,7 +60,12 @@ async function ownerKey(password: string) {
   const wrapping = await subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000 }, typed, { name: 'AES-GCM', length: 256 }, false, ['wrapKey']);
   const wrapped = await subtle.wrapKey('pkcs8', pair.privateKey, wrapping, { name: 'AES-GCM', iv });
   const publicKey = b64url(await subtle.exportKey('spki', pair.publicKey));
-  return { publicKey, print: createHash('sha256').update(Buffer.from(publicKey, 'base64url')).digest('base64url'), stored: { publicKey, wrapped: b64url(wrapped), salt: b64url(salt), iv: b64url(iv), iterations: 600_000 } };
+  const grant = async (machine: string) => {
+    const at = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify({ v: 1, machine, until: at + 3600, at, nonce: b64url(webcrypto.getRandomValues(new Uint8Array(16))) });
+    return { payload, signature: b64url(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(payload))) };
+  };
+  return { publicKey, grant, print: createHash('sha256').update(Buffer.from(publicKey, 'base64url')).digest('base64url'), stored: { publicKey, wrapped: b64url(wrapped), salt: b64url(salt), iv: b64url(iv), iterations: 600_000 } };
 }
 
 /* A question to the server's database, on the server's own machine. */
@@ -157,7 +165,45 @@ describe('the lab', () => {
     expect(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper sh -c 'printf "%s|%s" "$HORNHOOF_SECRET" "$NODE_KEY"'`), 'the keeper env')).toBe('|');
     expect(coreEnv).not.toMatch(/^(HORNHOOF_SECRET|NODE_KEY|POSTGRES_PASSWORD|PUBLIC_URL)=/m);
 
-    /* 5. Disconnect cuts it off: it says so itself, and its certificate is on the server's list. */
+    /* 5. Its owner opens its computer with what their key signs, and a command runs there as root. Commands are written
+       into the server's database as the orchestrator's tool writes them. */
+    const machine = status.machine!;
+    const networkId = await sql(m1, `SELECT network_id FROM machines WHERE id = '${machine}'`);
+    type Views = { views: { machine: { id: string }; reachable: boolean; key: string; until: string | null }[] };
+    const viewOf = async () => (await http(m1, 'GET', `${server}/api/machines/access`)).json<Views>().views.find(view => view.machine.id === machine);
+    await until(async () => {
+      const view = await viewOf();
+      return view?.reachable && view.key === 'held';
+    });
+    const grant = await key.grant(networkId);
+    const opened = await http(m1, 'POST', `${server}/api/machines/${machine}/access/open`, { body: { grant } });
+    expect(opened.status, opened.body).toBe(200);
+    const run = async (command: string): Promise<string> =>
+      (await sql(m1, `INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) SELECT company_id, id, ${literal(command)}, 60 FROM machines WHERE id = '${machine}' RETURNING id`)).split('\n')[0]!;
+    const ended = (id: string) =>
+      until(async () => {
+        const said = await sql(m1, `SELECT state || '|' || coalesce(exit::text, '') || '|' || coalesce(output, '') FROM computer_runs WHERE id = '${id}'`);
+        return said.startsWith('waiting|') || said.startsWith('sent|') ? null : said;
+      });
+    /* The machine's own files are at /host: the name it reads there is its own. */
+    expect(await ended(await run('cat /host/etc/hostname'))).toBe('done|0|m2');
+    const settings = async () => JSON.parse(ok(await m2.exec(`cd ${folder} && docker compose exec -T keeper cat /control/computer.json`), 'computer.json')) as { untilSec: number | null; by: string };
+    expect(await settings()).toMatchObject({ untilSec: (JSON.parse(grant.payload) as { until: number }).until, by: 'keeper' });
+
+    /* Closed by its owner, nothing runs there: a command that comes then never starts. */
+    expect((await http(m1, 'POST', `${server}/api/machines/${machine}/access/close`)).status).toBe(200);
+    await until(async () => (await settings()).untilSec === null);
+    expect(await ended(await run('touch /host/root/ran-while-closed'))).toMatch(/^done\|126\|/);
+    /* A row written past the app says open again, with the grant that was closed: the machine's keeper takes no such
+       word, so it stays closed, and a command sent then is answered by its updater as closed. */
+    await sql(m1, `UPDATE machine_access SET until = now() + interval '1 hour', "grant" = ${literal(JSON.stringify(grant))}::jsonb WHERE machine_id = '${machine}'`);
+    const refused = await ended(await run('touch /host/root/ran-on-a-forged-row'));
+    expect(refused).toMatch(/^done\|126\|/);
+    expect((await settings()).untilSec).toBeNull();
+    expect((await m2.exec('ls /root/ran-while-closed /root/ran-on-a-forged-row')).code).not.toBe(0);
+    await sql(m1, `UPDATE machine_access SET until = NULL, "grant" = NULL WHERE machine_id = '${machine}'`);
+
+    /* 6. Disconnect cuts it off: it says so itself, and its certificate is on the server's list. */
     const serial = await sql(m1, `SELECT serial FROM certificates WHERE machine_id = '${status.machine}' AND revoked_at IS NULL`);
     expect(serial).toMatch(/^[0-9a-f]+$/);
     expect((await http(m1, 'POST', `${server}/api/machines/${status.machine}/disconnect`)).status).toBe(204);
