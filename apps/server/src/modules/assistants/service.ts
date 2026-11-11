@@ -89,9 +89,14 @@ export class Assistants {
     this.wakes = new Wakes(ctx);
   }
 
+  /* A server that cannot read its assistants still starts, without them, as it does without its Telegram bots. */
   async start(): Promise<void> {
-    const rows = await this.ctx.db.selectDistinct({ companyId: assistants.companyId }).from(assistants);
-    for (const { companyId } of rows) this.collect(companyId);
+    try {
+      const rows = await this.ctx.db.selectDistinct({ companyId: assistants.companyId }).from(assistants);
+      for (const { companyId } of rows) this.collect(companyId);
+    } catch (err) {
+      this.ctx.log.error({ error: loggable(err) }, 'Could not start passing on what assistants wait for.');
+    }
     this.sweep();
     this.sweeper = setInterval(() => this.sweep(), SWEEP_MS);
     this.sweeper.unref();
