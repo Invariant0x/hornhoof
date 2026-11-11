@@ -288,7 +288,7 @@ test('keeps the department choice and the search box inside a 375 px phone scree
 
   /* Department NewTask select and AgentCard selects (3 in .ac-pick + 1 in .ac-timer) */
   await page.getByRole('button', { name: 'Map' }).click();
-  await page.getByRole('button', { name: new RegExp(LONG_DEPT.name) }).click();
+  await page.getByRole('button', { name: new RegExp(`^${LONG_DEPT.name}`) }).click();
   await page.getByRole('button', { name: 'Department tasks' }).click();
   await page.getByRole('button', { name: 'New task', exact: true }).click();
   await expectSelectInsideViewport(page.locator('.new-task select'), 375);
