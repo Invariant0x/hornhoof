@@ -59,8 +59,14 @@ describe("a worker keeper's settings", () => {
 
   it("reads the worker's own lines, and no secret of the company", () => {
     const config = workerConfig({ ...ENV, HORNHOOF_SECRET: 's'.repeat(44), NODE_KEY: 'n'.repeat(40), DATABASE_URL: 'postgres://x', POSTGRES_PASSWORD: 'p' });
-    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], ownerKey: null });
+    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], ownerKey: null, hostOs: null });
     expect(JSON.stringify(config)).not.toMatch(/ssss|nnnn|postgres/);
+  });
+
+  it('takes the system of its computer as the installer names it, and no other word for one', () => {
+    expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'darwin' }).hostOs).toBe('darwin');
+    expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'linux' }).hostOs).toBe('linux');
+    expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'windows' }).hostOs).toBeNull();
   });
 
   it('takes the ticket, the ports, the addresses and the name the installer wrote', () => {
