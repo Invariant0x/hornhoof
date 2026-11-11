@@ -105,6 +105,9 @@ describe('a department owner on the screen', () => {
     expect((await send(c, c.danaToken, 'POST', `/api/jobs/${job!.id}/cancel`)).statusCode).toBe(403);
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     expect((await send(c, c.danaToken, 'POST', `/api/jobs/${job!.id}/cancel`)).statusCode).toBe(202);
+    /* The orchestrator is in no department: its turn stays the whole company's to stop. */
+    const [own] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.orchestrator.subscriptionId!, agentId: c.orchestrator.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
+    expect((await send(c, c.danaToken, 'POST', `/api/jobs/${own!.id}/cancel`)).json().error.reason).toBe('company_scope_only');
   });
 
   it('pauses, resumes and makes urgent the work of their department', async () => {

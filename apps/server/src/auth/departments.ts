@@ -48,8 +48,10 @@ export async function runsDepartment(db: Pick<Db, 'select'>, me: Pick<Person, 'i
   return (await accessOf(db, me)).owns?.has(dept.parentId ?? departmentId) === true;
 }
 
-/* People who see the whole company change any department, as before; a department's owner changes their own. */
+/* People who see the whole company change any department, as before; a department's owner changes their own. What is in no
+   department stays the whole company's. */
 export async function requireDepartmentChanger(db: Pick<Db, 'select'>, me: Person, departmentId: string | null): Promise<void> {
   if (me.scopeKind === 'company' || (await runsDepartment(db, me, departmentId))) return;
+  if (!departmentId) throw new ApiError(403, 'forbidden', 'Only people with access to the whole company can do this.', 'company_scope_only');
   throw new ApiError(403, 'forbidden', 'Only this department\'s owner or people with access to the whole company can do this.', 'department_owner_only');
 }
