@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { arrangedBounds, arrangeMap, deptKey, deptLayout, HUB_KEY, personKey, type MapArrangement } from '../src/map-arrange';
 import { peopleLayout } from '../src/map-people';
+import { ROAD } from '../src/map-roads';
 import { departmentPeople } from '../src/org';
 import { pulsePath } from '../src/screens/Map';
 import type { Department, Org } from '../src/types';
@@ -48,18 +49,23 @@ const IVANS_MOVES = { [deptKey(SIX[1]!.id)]: { x: 860, y: 980 }, [personKey('n1'
 
 /* Each line the map draws, with the blocks it joins when it joins two. */
 const ways = (arr: MapArrangement): { pts: Point[]; ends?: string[] }[] => [
-  ...arr.depts.map(d => ({ pts: d.path })),
-  ...arr.top.filter(t => t.apart).map(t => ({ pts: t.path })),
+  ...arr.depts.map(d => ({ pts: d.path, ends: [HUB_KEY, deptKey(d.id)] })),
+  ...arr.top.filter(t => t.apart).map(t => ({ pts: t.path, ends: [HUB_KEY, personKey(t.id)] })),
   ...(arr.bus ? [...arr.bus.lines, arr.bus.drop].map(pts => ({ pts })) : []),
   ...arr.people.routes.map(r => ({ pts: r.pts, ends: [deptKey(r.deptId), personKey(r.personId)] })),
 ];
-/* Runs of different lines side by side closer than a road, for at least a road's length: they should have joined into one. */
-function sideBySide(all: { pts: Point[] }[]): string[] {
+/* Runs of different lines side by side closer than near, for at least as long, with no block standing between them: they
+   should have joined into one. */
+function sideBySide(all: { pts: Point[] }[], blocks: Rect[], near = ROAD): string[] {
   const runs = all.flatMap(({ pts }, line) => segments(pts).map(([p, q]) => {
     const across = p[1] === q[1], at = across ? p[1] : p[0], [a, b] = across ? [p[0], q[0]] : [p[1], q[1]];
     return { line, across, at, lo: Math.min(a, b), hi: Math.max(a, b) };
   }));
-  return runs.flatMap((r, i) => runs.slice(i + 1).filter(o => o.line !== r.line && o.across === r.across && o.at !== r.at && Math.abs(o.at - r.at) < 28 && Math.min(o.hi, r.hi) - Math.max(o.lo, r.lo) >= 28)
+  const between = (r: (typeof runs)[number], o: (typeof runs)[number]) => blocks.some(b => {
+    const [atLo, atHi, alLo, alHi] = r.across ? [b.y, bottom(b), b.x, right(b)] : [b.x, right(b), b.y, bottom(b)];
+    return atLo >= Math.min(r.at, o.at) && atHi <= Math.max(r.at, o.at) && alLo < Math.min(r.hi, o.hi) && alHi > Math.max(r.lo, o.lo);
+  });
+  return runs.flatMap((r, i) => runs.slice(i + 1).filter(o => o.line !== r.line && o.across === r.across && o.at !== r.at && Math.abs(o.at - r.at) < near && Math.min(o.hi, r.hi) - Math.max(o.lo, r.lo) >= near && !between(r, o))
     .map(o => `${r.across ? 'across' : 'down'} ${r.at} [${r.lo}, ${r.hi}] and ${o.at} [${o.lo}, ${o.hi}]`));
 }
 
@@ -209,10 +215,12 @@ describe('a block moved on the map', () => {
   });
 
   it('joins the lines of people who look after several departments into roads, as laid out and wherever blocks are put', () => {
-    for (const placed of [{}, IVANS_MOVES, { [HUB_KEY]: { x: 420, y: 330 }, [personKey(OLEG)]: { x: 40, y: 1000 } }]) {
+    /* As laid out, as Ivan arranged it, with the hub and Oleg moved, and with Development put down below and on the right. */
+    const dragged = [{ x: 560, y: 1010 }, { x: 900, y: 800 }].map(at => ({ [deptKey(SIX[1]!.id)]: at }));
+    for (const placed of [{}, IVANS_MOVES, { [HUB_KEY]: { x: 420, y: 330 }, [personKey(OLEG)]: { x: 40, y: 1000 } }, ...dragged]) {
       const arr = arrangeMap(IVANS, placed);
       const all = ways(arr);
-      expect(sideBySide(all), JSON.stringify(placed)).toEqual([]);
+      expect(sideBySide(all, arr.blocks.map(b => b.rect)), JSON.stringify(placed)).toEqual([]);
       for (const { pts, ends } of all) {
         expect(square(pts)).toBe(true);
         if (ends) expect(crossesOthers(arr, pts, ends), JSON.stringify(pts)).toBe(false);
@@ -222,6 +230,13 @@ describe('a block moved on the map', () => {
         expect(onEdge(r.pts[r.pts.length - 1]!, blockOf(arr, personKey(r.personId)))).toBe(true);
       }
     }
+  });
+
+  it("joins the lines that ran 28 and 46 apart on Ivan's map as he arranged it, and none of them runs through a card", () => {
+    const arr = arrangeMap(IVANS, IVANS_MOVES);
+    const all = ways(arr);
+    expect(sideBySide(all, arr.blocks.map(b => b.rect), 47)).toEqual([]);
+    for (const { pts, ends } of all) if (ends) expect(crossesOthers(arr, pts, ends), JSON.stringify(pts)).toBe(false);
   });
 
   it('marks where a road forks with a dot, outside the blocks', () => {

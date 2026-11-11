@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { Org, PersonView } from '../src/types';
+import { ROAD } from '../src/map-roads';
 import { box, ME, serveApi } from './api';
 
 /* Six departments, three people with the whole company on top, Dan beside Sales and four people who each look after several
@@ -73,8 +74,10 @@ async function drawnSegments(page: Page): Promise<Seg[]> {
   );
 }
 
-/* Lines that run side by side closer than a road's width for at least as long, and stretches drawn more than once. */
-async function sideBySide(page: Page) {
+/* Lines that run side by side closer than road for at least as long, and stretches drawn more than once. As the map is laid
+   out and as a person arranged it, no two lines run side by side closer than a road; while a block moves, none closer than
+   the gap between blocks. */
+async function sideBySide(page: Page, road = 28) {
   const segs = await drawnSegments(page);
   const near: string[] = [], twice: string[] = [];
   segs.forEach((a, i) => segs.slice(i + 1).forEach(b => {
@@ -82,7 +85,7 @@ async function sideBySide(page: Page) {
     if (a.axis !== b.axis || along <= 0.5) return;
     const gap = Math.abs(a.at - b.at), what = `${a.axis} ${a.at} [${a.lo}, ${a.hi}] and ${b.at} [${b.lo}, ${b.hi}]`;
     if (gap < 0.01) twice.push(what);
-    else if (gap < 28 && along >= 28) near.push(what);
+    else if (gap < road && along >= road) near.push(what);
   }));
   return { near, twice };
 }
@@ -96,7 +99,7 @@ test.describe('lines on the company map run as roads', () => {
     await serveMap(page);
     const errors = await open(page);
     await shot(page, info, 'roads-default');
-    expect(await sideBySide(page)).toEqual({ near: [], twice: [] });
+    expect(await sideBySide(page, ROAD)).toEqual({ near: [], twice: [] });
 
     /* The corner of a card is its grip: nothing is drawn there, only the pointer turns into a hand that moves it. */
     const grip = page.getByRole('button', { name: 'Move Development' });
@@ -130,7 +133,7 @@ for (const lang of ['en', 'ru'] as const) {
         await serveMap(page);
         const errors = await open(page);
         await shot(page, info, `roads-default-${lang}-${theme}-${width}`);
-        expect(await sideBySide(page)).toEqual({ near: [], twice: [] });
+        expect(await sideBySide(page, ROAD)).toEqual({ near: [], twice: [] });
 
         /* Pointing at a card's corner draws nothing over it. */
         const card = await box(page.locator('.dept').nth(1));
@@ -141,7 +144,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.reload();
         await expect(page.getByRole('button', { name: lang === 'en' ? 'Put back as it was' : 'Вернуть как было' })).toBeVisible();
         await shot(page, info, `roads-arranged-${lang}-${theme}-${width}`);
-        expect(await sideBySide(page)).toEqual({ near: [], twice: [] });
+        expect(await sideBySide(page, ROAD)).toEqual({ near: [], twice: [] });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         expect(errors).toEqual([]);
       });

@@ -47,8 +47,30 @@ describe('lines that run side by side', () => {
     expect([a![1], b![1]]).toEqual([[40, 112], [40, 112]]);
   });
 
+  it('join when they run 28 and 46 apart, as lines on a map arranged by hand do', () => {
+    for (const gap of [28, 46]) {
+      const beside: Way = { ...toFar, pts: [[52, 40], [52, 100 + gap], [560, 100 + gap], [560, 200]] };
+      const [a, b] = joinRoads([toLeft, beside], [TOP, LEFT, FAR]);
+      expect([gap, a![1]![1]]).toEqual([gap, b![1]![1]]);
+      for (const [pts, end] of [[a!, LEFT], [b!, FAR]] as const) {
+        expect(square(pts)).toBe(true);
+        expect(onEdge(pts[pts.length - 1]!, end)).toBe(true);
+        for (const block of [TOP, LEFT, FAR].filter(r => r !== end && r !== TOP)) expect(segments(pts).some(([p, q]) => through(p, q, block))).toBe(false);
+      }
+    }
+  });
+
+  it('stay apart when a block stands between them', () => {
+    const between: Rect = { x: 200, y: 112, w: 60, h: 26 };
+    const beside: Way = { ...toFar, pts: [[52, 40], [52, 146], [560, 146], [560, 200]] };
+    const [a, b] = joinRoads([toLeft, beside], [TOP, LEFT, FAR, between]);
+    /* They still share the way down from the card, 12 apart, but go across on either side of the block. */
+    expect([a![1]![1], b![1]![1]]).toEqual([100, 146]);
+    for (const pts of [a!, b!]) expect(segments(pts).some(([p, q]) => through(p, q, between))).toBe(false);
+  });
+
   it('stay as they are when a road apart or more', () => {
-    const apart: Way = { ...toFar, pts: [[80, 40], [80, 100 + ROAD], [560, 100 + ROAD], [560, 200]] };
+    const apart: Way = { ...toFar, pts: [[40 + ROAD, 40], [40 + ROAD, 100 + ROAD], [560, 100 + ROAD], [560, 200]] };
     expect(joinRoads([toLeft, apart], [TOP, LEFT, FAR])).toEqual([toLeft.pts, apart.pts]);
   });
 
