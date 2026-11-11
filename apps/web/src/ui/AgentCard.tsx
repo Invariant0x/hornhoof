@@ -6,6 +6,7 @@ import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
+import { TelegramBot } from './TelegramBot';
 import { Ask } from './Ask';
 import { PanelFrame } from './SidePanels';
 import { LimitMeters } from './PlanLimits';
@@ -370,6 +371,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
         )}
 
         {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
+        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={company} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>

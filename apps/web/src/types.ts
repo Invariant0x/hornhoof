@@ -44,6 +44,8 @@ export type PersonView = {
   isOwner: boolean;
   isCeoDelegate?: boolean;
   access: AccessView;
+  /* Who they are in Telegram, for the heads' bots: a username, the account's number, or both once a bot met them. */
+  telegram?: { username: string | null; id: number | null } | null;
   /* On the map: how many decisions wait for this person among those the viewer sees; null when the viewer cannot see them. */
   pendingDecisions?: number | null;
 };
@@ -286,6 +288,8 @@ export type AgentCardView = {
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
   /* forWork: it skips a round while every open task waits on purpose and nothing failed since the last one. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
+  /* The Telegram bot people write to it through, by its name; only heads and the orchestrator have one. */
+  telegram?: { username: string } | null;
 };
 
 /* A subscription or key that may serve a department, with the models it runs. */
@@ -332,7 +336,7 @@ export type EventView = {
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
-  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number };
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' };
 };
 
 /* What the browser hears live from /api/stream. */

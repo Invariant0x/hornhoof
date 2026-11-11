@@ -35,14 +35,16 @@ function serviceLine(t: Messages, language: Language, m: AgentMessageView, to: s
   return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', n?.detail?.[language] ?? '', to);
 }
 
-/* "Message from … to …" for what came in, "Message to … from …" for what went out, and a notice for what Hornhoof said. */
+/* "Message from … to …" for what came in, "Message to … from …" for what went out, and a notice for what Hornhoof said.
+   A person's message from Telegram says so. */
 export function messageLine(t: Messages, language: Language, m: AgentMessageView): string {
   const from = partyName(t, language, m.from);
   const to = partyName(t, language, m.to);
   if (m.direction === 'out') return t.window.messageTo(to, from);
   if (m.from.kind === 'hornhoof') return serviceLine(t, language, m, to);
   const senders = m.senders?.length ? m.senders.map(p => partyName(t, language, p)).join(', ') : from;
-  return m.notification ? t.window.messageVia(senders, to) : t.window.messageFrom(from, to);
+  if (m.notification) return t.window.messageVia(senders, to);
+  return m.channel === 'telegram' ? t.window.messageTelegram(from, to) : t.window.messageFrom(from, to);
 }
 
 /* One message as a single line that names who wrote to whom; its whole text, service lines too, opens under it. */

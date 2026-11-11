@@ -361,3 +361,57 @@ describe('the name in the edit form', () => {
     expect(screen.getByLabelText('Должность')).toBeInTheDocument();
   });
 });
+
+describe('a person\'s Telegram in the edit form', () => {
+  const open = async (me: Me, who: string, people: PersonView[], routes: Parameters<typeof mockApi>[0] = {}) => {
+    const calls = mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS], ...routes });
+    const user = userEvent.setup();
+    render(<People me={me} />);
+    await user.click(await screen.findByRole('button', { name: `Edit ${who}` }));
+    return { calls, user };
+  };
+
+  it('lets you set your own Telegram, and sends it only when it changed', async () => {
+    const { calls, user } = await open(ME, 'Ivan', PEOPLE, { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], telegram: { username: 'ivan_k', id: null } } }] });
+    const field = screen.getByLabelText('Telegram');
+    expect(field).toHaveValue('');
+    expect(screen.getByText(/bots/, { selector: 'small, p, span' })).toBeInTheDocument();
+    await user.type(field, '@Ivan_K');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { title: 'CEO', telegram: '@Ivan_K' } });
+  });
+
+  it('shows the Telegram a person has and leaves it out of Save when untouched', async () => {
+    const people = [PEOPLE[0]!, { ...PEOPLE[1]!, telegram: { username: 'maria_r', id: 5550002 } }, PEOPLE[2]!];
+    const { calls, user } = await open(ME, 'Maria', people, { 'PATCH /api/people/p2': [200, { person: people[1] }] });
+    expect(screen.getByLabelText('Telegram')).toHaveValue('@maria_r');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')!.body).not.toHaveProperty('telegram');
+  });
+
+  it('clears it with an empty field', async () => {
+    const people = [PEOPLE[0]!, { ...PEOPLE[1]!, telegram: { username: null, id: 5550002 } }, PEOPLE[2]!];
+    const { calls, user } = await open(ME, 'Maria', people, { 'PATCH /api/people/p2': [200, { person: { ...people[1], telegram: null } }] });
+    expect(screen.getByLabelText('Telegram')).toHaveValue('5550002');
+    await user.clear(screen.getByLabelText('Telegram'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')!.body).toMatchObject({ telegram: '' });
+  });
+
+  it('is not offered on the CEO\'s row to someone else with the whole company', async () => {
+    const maria: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', isOwner: false } };
+    await open(maria, 'Ivan', PEOPLE);
+    expect(screen.queryByLabelText('Telegram')).not.toBeInTheDocument();
+  });
+
+  it('is labelled in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const user = userEvent.setup();
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: ru.people.editLabel('Ivan') }));
+    expect(screen.getByLabelText('Telegram')).toBeInTheDocument();
+    expect(screen.getByText(/боты/)).toBeInTheDocument();
+    localStorage.clear();
+  });
+});
