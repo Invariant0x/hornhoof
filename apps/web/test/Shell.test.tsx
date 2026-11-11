@@ -195,3 +195,40 @@ describe('Shell', () => {
     expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
   });
 });
+
+describe('the recovery file banner', () => {
+  const BACKUPS = { last: null, recovery: null, recoveryNeeded: true, linkChanged: false, restore: null, kept: [], bundles: [] };
+  const LINK = { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' };
+  const shown = (me = ME, backups: object = BACKUPS) => {
+    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/backups': [200, backups], 'GET /api/link': [200, LINK] });
+    render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
+    return calls;
+  };
+
+  it('asks the CEO to save the recovery file while there is none, and opens the company settings', async () => {
+    shown();
+    const banner = await screen.findByRole('status', { name: 'Backups' });
+    expect(banner).toHaveTextContent('Save the recovery file, so the company can be restored if this server is lost.');
+    const user = userEvent.setup();
+    await user.click(within(banner).getByRole('button', { name: 'Open company settings' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
+    expect(await within(dialog).findByRole('button', { name: 'Save the recovery file' })).toBeInTheDocument();
+  });
+
+  it('says so when the public link changed since the file was saved', async () => {
+    shown(ME, { ...BACKUPS, linkChanged: true });
+    expect(await screen.findByRole('status', { name: 'Backups' })).toHaveTextContent('The public link changed, so the recovery file is out of date. Save a new one.');
+  });
+
+  it('shows nothing once the file is saved, and nothing to anyone but the CEO', async () => {
+    const saved = shown(ME, { ...BACKUPS, recovery: { madeAt: '2026-11-10T08:00:00.000Z', madeBy: 'Ivan' }, recoveryNeeded: false });
+    await waitFor(() => expect(saved.some(call => call.path === '/api/backups')).toBe(true));
+    expect(screen.queryByRole('status', { name: 'Backups' })).not.toBeInTheDocument();
+    const calls = shown({ ...ME, person: { ...ME.person, id: 'p2', isOwner: false } });
+    await screen.findAllByRole('navigation');
+    await act(async () => { await Promise.resolve(); });
+    expect(calls.some(call => call.path === '/api/backups')).toBe(false);
+    expect(screen.queryByRole('status', { name: 'Backups' })).not.toBeInTheDocument();
+  });
+});
+

@@ -434,6 +434,36 @@ describe('Machines', () => {
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { lendsTests: false } }));
   });
 
+  it('ticks backups like test runs, on a machine with a core', async () => {
+    const withCore = MACHINES.map(machine => (machine.id === 'm1' ? { ...machine, keepsBackups: true, heldBackups: 2 } : { ...machine, keepsBackups: null, heldBackups: null }));
+    const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false }] });
+    const user = userEvent.setup();
+    render(<Machines me={ME} />);
+    const mine = await openCard('ivan-mbp');
+    const keep = within(mine).getByRole('checkbox', { name: "Keep the company's backups on ivan-mbp" });
+    expect(keep).toBeChecked();
+    expect(fact(mine, 'Backups')).toContain('Keep company backups');
+    expect(within(mine).getByText('Backups held: 2')).toBeInTheDocument();
+    await user.click(keep);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { keepsBackups: false } }));
+    await vi.waitFor(() => expect(keep).not.toBeChecked());
+    /* A machine without the company's core keeps none, and says nothing of them. */
+    const other = card('build-box');
+    expect(within(other).queryByRole('checkbox', { name: /backups/ })).not.toBeInTheDocument();
+    expect(within(other).queryByText(/company backups/)).not.toBeInTheDocument();
+  });
+
+  it("shows whether another person's machine keeps backups, without the switch", async () => {
+    const withCore = MACHINES.map(machine => ({ ...machine, keepsBackups: machine.id === 'm2', heldBackups: machine.id === 'm2' ? 1 : 0 }));
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: null }] });
+    const lead: Me = { ...ME, person: { ...ME.person, id: 'p9', scopeKind: 'listed', isOwner: false } };
+    render(<Machines me={lead} />);
+    const maria = await openCard('build-box');
+    expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(maria).getByText('Keeps company backups')).toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByText('Keeps no company backups')).toBeInTheDocument();
+  });
+
   it("shows another person's machine as lent or not, without the switch", async () => {
     lists({}, null);
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };

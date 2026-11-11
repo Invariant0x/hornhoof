@@ -8,7 +8,7 @@ Setup offers the company a public link, like `https://acme.hornhoof.org`. It sta
 
 - You can write another name, or take a new random one with "Random name".
 - Hornhoof tells you at once whether the name is free.
-- The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Share access.
+- The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Company settings.
 
 ## What changes once there is a link?
 
@@ -20,11 +20,11 @@ Link names are public: every link's certificate is listed in public logs, so any
 
 ## What does hornhoof.org see?
 
-The connection is encrypted to your company's own machine, which gets the link's certificate from Let's Encrypt. So hornhoof.org passes it on unread and sees only the name being reached. While that is not possible, the link falls back to https that ends at hornhoof.org, as Share access shows. hornhoof.org has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
+The connection is encrypted to your company's own machine, which gets the link's certificate from Let's Encrypt. So hornhoof.org passes it on unread and sees only the name being reached. While that is not possible, the link falls back to https that ends at hornhoof.org, as Company settings shows. hornhoof.org has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
 
 ## How do I change or remove the link?
 
-People who see the whole company find the link under Share access in the account menu. There they can:
+People who see the whole company find the link under Company settings in the account menu. There they can:
 
 - copy it;
 - move it to another name;

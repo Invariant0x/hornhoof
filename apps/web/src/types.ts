@@ -559,6 +559,36 @@ export type MachineDrop = { at: string; back: string | null; offlineMs: number |
 /* What GET /api/machines/:id/connections answers: the last day in short, and the latest drops, newest first. */
 export type ConnectionHistory = { summary: { drops: number; averageMs: number | null; cause: DropCause | null }; events: MachineDrop[] };
 
+/* A restore of the company from a backup, as its keeper and its updater say it. */
+export type RestoreStep = 'fetch' | 'check' | 'open' | 'load' | 'swap' | 'start';
+export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'done' | 'failed'; step: RestoreStep; line: string; at: string; kept: string | null };
+/* A backup of the company. recovery: whether the recovery file saved now opens it, an older one does, or none.
+   restorable with why null: it can be restored as it is; with needs_recovery_file: once that file is added. */
+export type BackupBundle = {
+  id: string;
+  dumpedAt: string;
+  reason: 'timer' | 'update';
+  size: number;
+  recovery: 'none' | 'current' | 'older';
+  where: { machine: string | null; name: string; online: boolean }[];
+  restorable: boolean;
+  why: 'newer_build' | 'not_held' | 'needs_recovery_file' | null;
+};
+export type BackupsView = {
+  last: string | null;
+  recovery: { madeAt: string; madeBy: string } | null;
+  recoveryNeeded: boolean;
+  linkChanged: boolean;
+  restore: RestoreStatus | null;
+  /* The databases restores replaced and kept on the server. */
+  kept: { name: string; at: string }[];
+  bundles: BackupBundle[];
+};
+/* What a restore to a backup's time undoes. */
+export type RestoreWarning = { machines: { name: string; owner: string }[]; people: string[] };
+/* A server set up anew that was given a recovery file: the backups sent to it so far. */
+export type RecoveryView = { company: string; link: string | null; bundles: { id: string; dumpedAt: string; reason: string; size: number; from: string }[]; restore: RestoreStatus | null };
+
 export type MachineView = {
   id: string;
   hostname: string;
@@ -590,6 +620,10 @@ export type MachineView = {
   needsCore?: boolean;
   /* Its computer access as this person sees it; null without the core, or when it is not theirs to see. */
   access?: ComputerAccessView | null;
+  /* Whether its owner lets it keep the company's backups, and how many it holds; null without the core. Older servers
+     omit them. */
+  keepsBackups?: boolean | null;
+  heldBackups?: number | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of

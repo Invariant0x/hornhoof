@@ -197,6 +197,8 @@ function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 export const api = {
   upload: <T>(path: string, file: Blob) => respond<T>(path, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }),
+  /* A file sent whole to a place of its own, as a backup is to a server that is being restored. */
+  putFile: <T>(path: string, file: Blob) => respond<T>(path, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: file }),
   text: (path: string) => respondText(path),
   streamBytes: (path: string, signal?: AbortSignal) => respondBytes(path, signal),
   get: <T>(path: string) => request<T>('GET', path),

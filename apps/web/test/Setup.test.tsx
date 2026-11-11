@@ -234,7 +234,7 @@ describe('the public link on the setup screen', () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Share access\.$/);
+    expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Company settings\.$/);
     expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
     await user.type(screen.getByLabelText('Company name'), 'Рога и копыта');
     expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
@@ -317,7 +317,7 @@ describe('the public link on the setup screen', () => {
     await user.click(screen.getByRole('radio', { name: 'Later' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('hornhoof.org does not answer now. Try again in a few minutes.')).toBeInTheDocument();
-    expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Share access\./)).toBeInTheDocument();
+    expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Company settings\./)).toBeInTheDocument();
   });
 });
 
@@ -433,3 +433,96 @@ describe('Setup without the setup link', () => {
     expect(posted(calls)[0]!.body).toMatchObject({ code: 'TYPED-CODE', companyName: 'Acme' });
   });
 });
+
+describe('Setup from a recovery file', () => {
+  const FILE = '# Hornhoof recovery file for Acme.\n{"v":1}\n';
+  const ID = '0f0f0f0f-0000-4000-8000-00000000000a';
+  const BUNDLE = { id: ID, dumpedAt: '2026-11-10T08:00:00.000Z', reason: 'timer', size: 5 * 1024 * 1024, from: 'm1' };
+  const view = (over: object = {}) => ({ company: 'c1', link: 'https://acme.hornhoof.org', bundles: [], restore: null, ...over });
+
+  beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+  afterEach(() => vi.useRealTimers());
+
+  it('restores from a recovery file', async () => {
+    let bundles: object[] = [];
+    let needed = true;
+    let restore: object | null = null;
+    const calls = mockApi({
+      'POST /api/recovery': [200, view()],
+      'GET /api/recovery?code=LINK-CODE-123': () => (needed ? [200, view({ bundles, restore })] : [404, { error: { code: 'not_found', reason: 'not_recovering' } }]),
+      'POST /api/recovery/restore': () => {
+        restore = { attempt: 'a1', id: ID, state: 'running', step: 'load', line: 'Loading the backup.', at: BUNDLE.dumpedAt, kept: null };
+        return [202, { attempt: 'a1' }];
+      },
+      'GET /api/setup': () => [200, { needed, linkDomain: 'hornhoof.org', recovering: needed }],
+    });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
+    expect(screen.getByText('Choose the recovery file you saved in Company settings.')).toBeInTheDocument();
+    /* The code came with the setup link, so only the file is asked for. */
+    expect(screen.queryByLabelText('Setup code')).not.toBeInTheDocument();
+    await user.upload(screen.getByLabelText('Recovery file'), new File([FILE], 'hornhoof-recovery.txt', { type: 'text/plain' }));
+    expect(await screen.findByText('Waiting for backups. Machines of the company that are still on send theirs within about 15 minutes.')).toBeInTheDocument();
+    expect(posted(calls)).toEqual([{ method: 'POST', path: '/api/recovery', body: { code: 'LINK-CODE-123', file: FILE } }]);
+    expect(screen.getByLabelText('Or upload a backup file')).toBeInTheDocument();
+    /* A machine that survived sends a backup: the screen finds it at its next look. */
+    bundles = [BUNDLE];
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    const pick = await screen.findByRole('button', { name: /^Restore the backup of / });
+    expect(pick).toHaveTextContent('Restore this one');
+    await user.click(pick);
+    expect(posted(calls).at(-1)).toEqual({ method: 'POST', path: '/api/recovery/restore', body: { code: 'LINK-CODE-123', id: ID } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await screen.findByText('Loading it into a new database')).toHaveAttribute('aria-current', 'step');
+    expect(screen.queryByRole('button', { name: /^Restore the backup of / })).not.toBeInTheDocument();
+    /* The company is back: the restored server knows it, and the person signs in as before. */
+    needed = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await screen.findByText('Restored. Sign in as before. If a plan was signed in on a lost machine, sign it in again under Subscriptions on a machine that is on.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/');
+  });
+
+  it('asks for the setup code when the link brought none, says why a file was refused, and goes back', async () => {
+    window.history.replaceState(null, '', '/setup');
+    const calls = mockApi({ 'POST /api/recovery': [400, { error: { code: 'validation', message: 'This is not a Hornhoof recovery file.', reason: 'recovery_file_invalid' } }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
+    await user.type(screen.getByLabelText('Setup code'), 'TYPED-CODE');
+    await user.upload(screen.getByLabelText('Recovery file'), new File(['not a file'], 'notes.txt', { type: 'text/plain' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This is not a Hornhoof recovery file.');
+    expect(posted(calls)).toEqual([{ method: 'POST', path: '/api/recovery', body: { code: 'TYPED-CODE', file: 'not a file' } }]);
+    await user.click(screen.getByRole('button', { name: 'Set up a new company instead' }));
+    expect(screen.getByRole('heading', { name: 'Name your company' })).toBeInTheDocument();
+  });
+
+  it('takes a backup file the person uploads, by the name the file gives itself', async () => {
+    const calls = mockApi({
+      'POST /api/recovery': [200, view()],
+      'GET /api/recovery?code=LINK-CODE-123': [200, view({ bundles: [BUNDLE] })],
+      [`PUT /api/recovery/bundles/${ID}?code=LINK-CODE-123`]: [201, { id: ID }],
+    });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
+    await user.upload(screen.getByLabelText('Recovery file'), new File([FILE], 'hornhoof-recovery.txt', { type: 'text/plain' }));
+    /* A backup as it travels: a line that says what it is, a line with what was signed, then the sealed part. */
+    const head = JSON.stringify({ manifest: JSON.stringify({ v: 1, id: ID }), signature: 's', certPem: 'c' });
+    await user.upload(await screen.findByLabelText('Or upload a backup file'), new File([`hornhoof-bundle v1\n${head}\n`, new Uint8Array(2048)], 'backup.bundle'));
+    expect(await screen.findByRole('button', { name: /^Restore the backup of / })).toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'PUT').map(call => call.path)).toEqual([`/api/recovery/bundles/${ID}?code=LINK-CODE-123`]);
+    /* A file that is no backup is not sent anywhere. */
+    await user.upload(screen.getByLabelText('Or upload a backup file'), new File(['holiday photos'], 'photos.zip'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This is not a backup the recovery file opens.');
+    expect(calls.filter(call => call.method === 'PUT')).toHaveLength(1);
+  });
+
+  it('opens on the backups when the server was given the file already', async () => {
+    mockApi({ 'GET /api/recovery?code=LINK-CODE-123': [200, view({ bundles: [BUNDLE] })], 'GET /api/setup': [200, { needed: true, linkDomain: 'hornhoof.org', recovering: true }] });
+    render(<Setup onDone={() => {}} recovering />);
+    expect(await screen.findByRole('button', { name: /^Restore the backup of / })).toBeInTheDocument();
+  });
+});
+

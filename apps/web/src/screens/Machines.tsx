@@ -222,20 +222,33 @@ type MachineControls = {
   addPlan: (machine: MachineView, sub: SubView) => unknown;
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
+  keepBackups: (machine: MachineView, value: boolean) => unknown;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
   fail: (err: unknown) => void;
 };
 
-function LendSetting({ machine, editable, onChange }: { machine: MachineView; editable: boolean; onChange: (value: boolean) => void }) {
+/* What the machine's owner lets the company use it for: its test runs, and, on a machine with the company's core,
+   keeping its backups. The owner, or someone who sees the whole company, ticks them; anyone else reads them. */
+function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: MachineView; editable: boolean; onLend: (value: boolean) => void; onKeep: (value: boolean) => void }) {
   const t = useT();
-  const value = editable ? (
+  const lends = editable ? (
     <label className="lend">
-      <input type="checkbox" aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onLend(e.target.checked)} />
       <span aria-hidden="true">{t.machines.lend}</span>
     </label>
   ) : <span className="muted">{machine.lendsTests ? t.machines.lent : t.machines.notLent}</span>;
-  return <Part title={t.tables.settings}><Facts items={[[t.tables.tests, value]]} /></Part>;
+  const items: [string, React.ReactNode][] = [[t.tables.tests, lends]];
+  if (typeof machine.keepsBackups === 'boolean') {
+    const keeps = editable ? (
+      <label className="lend">
+        <input type="checkbox" aria-label={t.machines.keepBackupsLabel(machine.hostname)} checked={machine.keepsBackups} onChange={e => onKeep(e.target.checked)} />
+        <span aria-hidden="true">{t.machines.keepBackups}</span>
+      </label>
+    ) : <span className="muted">{machine.keepsBackups ? t.machines.keepsBackups : t.machines.keepsNoBackups}</span>;
+    items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
+  }
+  return <Part title={t.tables.settings}><Facts items={items} /></Part>;
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -278,7 +291,7 @@ const disconnectQuestion = (t: Messages, m: MachineView): string =>
 function MachineSettings({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return <>
-    <LendSetting machine={m} editable={editable} onChange={value => controls.lend(m, value)} />
+    <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
     <div className="machine-actions">
       {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
       {m.needsCore && !busy && <button className="act" type="button" onClick={() => controls.makeCore(m)}>{t.machines.makeCore(m.hostname)}</button>}
@@ -470,6 +483,12 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, lendsTests } : x)) ?? null);
     });
 
+  const keepBackups = (m: MachineView, keepsBackups: boolean) =>
+    run(async () => {
+      await api.patch(`/api/machines/${m.id}`, { keepsBackups });
+      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -524,7 +543,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
-            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, disconnect, refresh: load, fail: setFailure,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )}

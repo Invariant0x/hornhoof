@@ -7,6 +7,7 @@ import { CopyButton } from '../ui/CopyButton';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { useDialogClose } from '../ui/use-dialog-close';
+import { Backups } from './Backups';
 
 type Link = { name: string; url: string };
 type Loaded = { link: Link | null; domain: string; tls?: TlsView | null };
@@ -23,9 +24,10 @@ function Encryption({ tls }: { tls: TlsView | null }) {
   );
 }
 
-/* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
-   copy, move to another name or remove. A company with no link starts on a long random name, as link names are public. */
-export function Settings({ onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
+/* The company's settings, for people who see the whole company: its public link at hornhoof.org, which they copy, move
+   to another name or remove, and for the CEO alone its backups. A company with no link starts on a long random name, as
+   link names are public. */
+export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
@@ -124,6 +126,7 @@ export function Settings({ onClose, onHome }: { me: Me; onClose: () => void; onH
           </section>
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+        {me.person.isOwner && <Backups />}
       </div>
     </div>
   );

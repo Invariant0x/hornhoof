@@ -8,6 +8,7 @@ import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
 import { Field } from '../ui/Field';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { LinkReady, type MadeLink } from '../ui/LinkReady';
+import { RestoreFromFile } from './RestoreFromFile';
 
 type Mode = 'api_key' | 'personal' | 'later';
 type KeyProvider = 'anthropic_api' | 'openai_api';
@@ -382,10 +383,12 @@ function StepsHead({ step }: { step: number }) {
 interface WizardProps {
   linkDomain: string;
   onAnswer: (answer: SetupAnswer, plan: PlanProvider, password: string) => void;
+  /* Instead of a new company: bring back one whose server was lost. */
+  onRestore: () => void;
 }
 
 /* The three steps of setup, with what the person has written kept while they go back and forth. */
-function Wizard({ linkDomain, onAnswer }: WizardProps) {
+function Wizard({ linkDomain, onAnswer, onRestore }: WizardProps) {
   const t = useT();
   const [form, update] = useForm();
   const [step, setStep] = useState(0);
@@ -432,6 +435,7 @@ function Wizard({ linkDomain, onAnswer }: WizardProps) {
         onBack={() => setStep(step - 1)}
         onFinish={finish}
       />
+      {step === 0 && <div className="actions"><button className="btn ghost" type="button" onClick={onRestore}>{t.setup.restore.link}</button></div>}
     </Card>
   );
 }
@@ -454,9 +458,11 @@ function ConnectMachine({ command, plan, password, onDone }: { command: string; 
 }
 
 /* linkDomain: what public links end in, as the server says. */
-export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string }) {
+export function Setup({ onDone, linkDomain = 'hornhoof.org', recovering = false }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string; recovering?: boolean }) {
   const t = useT();
   const after = useAfterSetup(onDone);
+  /* The server was given a recovery file already, or the person chose to give it one. */
+  const [restoring, setRestoring] = useState(recovering);
   if (after.made) {
     return (
       <Card>
@@ -466,5 +472,6 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
     );
   }
   if (after.command) return <ConnectMachine password={after.password} command={after.command} plan={after.plan} onDone={after.done} />;
-  return <Wizard linkDomain={linkDomain} onAnswer={after.answer} />;
+  if (restoring) return <Card><RestoreFromFile code={linkCode()} recovering={recovering} onBack={() => setRestoring(false)} /></Card>;
+  return <Wizard linkDomain={linkDomain} onAnswer={after.answer} onRestore={() => setRestoring(true)} />;
 }
