@@ -101,8 +101,9 @@ export async function shapeOf(client: PGlite): Promise<string> {
 const PLANNER_VIEW = `select coalesce(json_agg(json_build_object('oid', c.oid, 'relpages', c.relpages, 'reltuples', c.reltuples, 'relallvisible', c.relallvisible)), '[]')::text as view
   from pg_class c where c.relnamespace in ('public'::regnamespace, 'net'::regnamespace) and c.relkind in ('r', 'i')`;
 
-/* Each table, with the tables whose foreign keys point at it. */
-const POINTED_AT_BY = `select format('public.%I', t.relname) as table, format('public.%I', f.relname) as by
+/* Each table, with the tables whose foreign keys point at it, each by its schema: the records of merges in net point at
+   each other too. */
+const POINTED_AT_BY = `select format('%I.%I', t.relnamespace::regnamespace, t.relname) as table, format('%I.%I', f.relnamespace::regnamespace, f.relname) as by
   from pg_constraint c join pg_class t on t.oid = c.confrelid join pg_class f on f.oid = c.conrelid where c.contype = 'f'`;
 
 async function openShared(): Promise<Shared> {

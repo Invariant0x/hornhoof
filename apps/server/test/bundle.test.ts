@@ -116,6 +116,15 @@ describe('a backup bundle', () => {
     expect(said.filter(line => stretches.some(stretch => line.includes(stretch)))).toEqual([]);
   });
 
+  it('takes the reason fork', async () => {
+    const c = await company();
+    /* A database set aside before a merge is a bundle like any other, with a reason of its own. */
+    const fork = await c.seal({ reason: 'fork' });
+    expect(checkHead(fork.head, want(c))).toMatchObject({ id: fork.id, reason: 'fork' });
+    const other = await c.seal({ reason: 'other' as 'fork' });
+    expect(await reasonOf(() => checkHead(other.head, want(c)))).toBe('format');
+  });
+
   it('refuses what it must not open', async () => {
     const c = await company();
     const sealed = await c.seal();

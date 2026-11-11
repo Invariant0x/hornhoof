@@ -201,13 +201,19 @@ describe("the keeper's lease on real Postgres", () => {
     expect((await real.admin.query(`SELECT 1 FROM net.journal WHERE tbl = 'applied' AND op = 'delete'`)).rowCount).toBe(1);
   });
 
-  it('prunes as the keeper after the lease ended', async () => {
+  it('prunes as the keeper only while the lease holds', async () => {
     const { lease } = keeper();
     const term = await lease.take('normal', FAR);
     expect(term.machine).toBe('machine-a');
     await real.admin.query(OLD_ROWS);
-    await lease.fence();
+    /* The keeper's own session passes the fence, as it does when it prunes and writes the horizon. */
     expect(await lease.prune()).toBe(5);
     expect((await real.admin.query('SELECT 1 FROM net.journal')).rowCount).toBe(0);
+    expect((await real.admin.query<{ near: boolean }>(`SELECT abs(extract(epoch FROM now() - interval '7 days' - below)) < 5 AS near FROM net.horizon`)).rows).toEqual([{ near: true }]);
+    /* Once the lease ended nobody knows who reads the journal: nothing more goes. */
+    await real.admin.query(OLD_ROWS);
+    await lease.fence();
+    expect(await lease.prune()).toBe(0);
+    expect((await real.admin.query('SELECT 1 FROM net.journal')).rowCount).toBe(5);
   });
 });

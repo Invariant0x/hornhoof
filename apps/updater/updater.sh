@@ -858,11 +858,12 @@ plain_number() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; }
 # use is told by it for good.
 number_in_use() { psql_on postgres -tAc "SELECT oid FROM pg_database WHERE datname = 'hornhoof'" 2> /dev/null; }
 
-# restore_says <state> <step> <line> [kept]: restore-status.json, written whole and then moved.
+# restore_says <state> <step> <line> [kept]: restore-status.json, written whole and then moved. dumpedAt: from when the
+# restored database is, as the order has it; the app marks the restore by it once the order is gone.
 restore_says() {
   printf '%s\n' "$3"
-  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg state "$1" --arg step "$2" --arg line "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg kept "${4:-}" \
-    '{attempt: $attempt, id: $id, state: $state, step: $step, line: $line, at: $at, kept: (if $kept == "" then null else $kept end)}' > "$CONTROL/restore-status.json.new"
+  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg state "$1" --arg step "$2" --arg line "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg kept "${4:-}" --arg dumped "$R_DUMPED" \
+    '{attempt: $attempt, id: $id, state: $state, step: $step, line: $line, at: $at, kept: (if $kept == "" then null else $kept end)} + (if $dumped == "" then {} else {dumpedAt: $dumped} end)' > "$CONTROL/restore-status.json.new"
   mv "$CONTROL/restore-status.json.new" "$CONTROL/restore-status.json"
 }
 

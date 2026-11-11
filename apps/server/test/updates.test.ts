@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
@@ -347,6 +347,25 @@ describe('updates', () => {
     const again = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '0.4.1' }, ...as(ceo) });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('update_running');
+  });
+
+  it('waits for a merge', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const update = () => app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
+    /* A database from before a restore is still being brought back: migrations could part the two shapes. */
+    await db.execute(sql`INSERT INTO net.merges (source, label) VALUES ('kept:hornhoof_before_t1', 'a database')`);
+    for (const status of ['pending', 'applied']) {
+      await db.execute(sql`UPDATE net.merges SET status = ${status}`);
+      const refused = await update();
+      expect([status, refused.statusCode, refused.json().error.reason, refused.json().error.message]).toEqual([
+        status, 409, 'merge_pending', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Settings.',
+      ]);
+      expect(app.ctx.updater.claimed()).toBeNull();
+    }
+    await db.execute(sql`UPDATE net.merges SET status = 'merged'`);
+    expect((await update()).statusCode).toBe(202);
   });
 
   it('one restore or update at a time', async () => {

@@ -514,7 +514,7 @@ describe('PeerServer', () => {
     const identity = await age.generateX25519Identity();
     const own = { identity, recipient: await age.identityToRecipient(identity) };
     const held = stand.state.held!;
-    const view: MakerView = { company: COMPANY, recipients: [], recovery: null, last: { id: randomUUID(), madeAt: new Date().toISOString(), recovery: null }, holders: {}, wanted: [], order: null };
+    const view: MakerView = { company: COMPANY, recipients: [], recovery: null, last: { id: randomUUID(), madeAt: new Date().toISOString(), recovery: null }, holders: {}, wanted: [], order: null, fork: null };
     const keeper = new BackupKeeper({
       dir: mkdtempSync(join(tmpdir(), 'hh-keeper-')), controlDir: mkdtempSync(join(tmpdir(), 'hh-control-')), key: stand.own.key, held: () => held, age: own,
       secrets: () => ({ HORNHOOF_SECRET: 's', NODE_KEY: 'n', RELAY_URL: 'r' }), ask: () => Promise.resolve({ status: 200, body: view }), leads: () => true, log: ignore,

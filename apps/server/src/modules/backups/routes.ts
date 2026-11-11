@@ -12,6 +12,8 @@ import { BundleRefused, checkHead, MAX_HEAD } from './bundle.js';
 import { pickHolders } from './holders.js';
 import { activeRecovery, makeRecoveryFile } from './recovery.js';
 import { bundleRow, bundleRows, recordBundle } from './records.js';
+import { forkWanted } from '../merge/merger.js';
+import { KEPT_NAME } from '../merge/source.js';
 import { warningOf } from './restore.js';
 import type { HolderView, MakerView } from './types.js';
 
@@ -27,9 +29,11 @@ const RecordBody = z.object({ head: z.string().min(2).max(MAX_HEAD) });
 const BundleParams = z.object({ id: z.uuid() });
 /* A recovery file is a comment line and one line of JSON. */
 const MAX_RECOVERY_FILE = 16 * 1024;
-const RestoreBody = z.object({ recoveryFile: z.string().min(1).max(MAX_RECOVERY_FILE).optional() });
+const RestoreBody = z.object({ recoveryFile: z.string().min(1).max(MAX_RECOVERY_FILE).optional(), bringBack: z.boolean().optional() });
+const KeptParams = z.object({ name: z.string().regex(KEPT_NAME) });
 /* The stamp in the name of a database a restore kept, as the updater writes it. */
-const KEPT_NAME = /^hornhoof_before_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/;
+const KEPT_STAMP = /^hornhoof_before_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/;
+type KeptMerge = { id: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; added: number; conflicts: number; error: string | null };
 
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
@@ -72,6 +76,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
       holders: Object.fromEntries(held.map(row => [row.id, row.holders])),
       wanted: await ctx.restores.wanted(),
       order: ctx.restores.order(),
+      fork: await forkWanted(db),
     };
   }
 
@@ -84,12 +89,20 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { keeps: row.keepsBackups, hold: held.filter(bundle => bundle.holders.includes(machineId)).map(({ id, size, sha256 }) => ({ id, size, sha256 })), want };
   }
 
-  /* The databases a restore replaced and kept on this machine, newest first. */
-  async function keptDatabases(): Promise<{ name: string; at: string }[]> {
-    const found = rowsOf<{ name: string }>(await db.execute(sql`SELECT datname AS name FROM pg_database WHERE datname LIKE 'hornhoof_before_%' ORDER BY datname DESC`));
-    return found.flatMap(({ name }) => {
-      const stamp = KEPT_NAME.exec(name);
-      return stamp ? [{ name, at: `${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}.000Z` }] : [];
+  /* The databases a restore replaced and kept on this machine, newest first, each with how far the bringing back of
+     what it holds has got. One that was brought back or left out and removed is listed no more. */
+  async function keptDatabases(): Promise<{ name: string; at: string; merge: KeptMerge | null }[]> {
+    const found = rowsOf<{ name: string }>(await db.execute(sql`SELECT datname AS name FROM pg_database WHERE datname LIKE 'hornhoof_before_%'`)).map(row => row.name);
+    const merges = rowsOf<{ id: string; source: string; status: KeptMerge['status']; counts: { added?: number; conflicts?: number }; error: string | null }>(
+      await db.execute(sql`SELECT id, source, status, counts, error FROM net.merges WHERE source LIKE 'kept:%'`),
+    );
+    const bySource = new Map(merges.map(merge => [merge.source.slice(5), merge]));
+    const names = new Set([...found, ...merges.filter(merge => merge.status !== 'done').map(merge => merge.source.slice(5))]);
+    return [...names].sort().reverse().flatMap(name => {
+      const stamp = KEPT_STAMP.exec(name);
+      const merge = bySource.get(name);
+      const shown = merge ? { id: merge.id, status: merge.status, added: merge.counts.added ?? 0, conflicts: merge.counts.conflicts ?? 0, error: merge.error } : null;
+      return stamp ? [{ name, at: `${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}.000Z`, merge: shown }] : [];
     });
   }
 
@@ -125,6 +138,10 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (Math.abs(Date.now() - Date.parse(manifest.madeAt)) > RECORD_WITHIN_MS) throw new ApiError(400, 'validation', 'This bundle was not made today.', 'bundle_time');
     const known = await bundleRow(db, manifest.id);
     if (known) return reply.code(200).send({ holders: known.holders });
+    /* A fork is the bundle of a database the company set aside, under the id its merge gave it, and of nothing else. */
+    if (manifest.reason === 'fork' && rowsOf(await db.execute(sql`SELECT 1 FROM net.merges WHERE fork = ${manifest.id}`)).length === 0) {
+      throw new ApiError(400, 'validation', 'This bundle is of no database the company set aside.', 'bundle_refused');
+    }
     /* A bundle no recovery file opens stays on the data machine: nobody could open a copy once that machine is lost. */
     const holders = manifest.recovery ? await pickHolders(db, { size: manifest.size, keep: [] }) : [];
     const made = await recordBundle(db, { ...manifest, head, holders });
@@ -192,7 +209,18 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/backups/:id/restore', { bodyLimit: MAX_RECOVERY_FILE + 1024, logLevel: 'silent' }, async (req, reply) => {
     const me = ceo(await requirePerson(req, db));
     const { id } = BundleParams.parse(req.params);
-    const { recoveryFile } = RestoreBody.parse(req.body ?? {});
-    return reply.code(202).send({ attempt: await ctx.restores.start(me, id, recoveryFile) });
+    const { recoveryFile, bringBack } = RestoreBody.parse(req.body ?? {});
+    return reply.code(202).send({ attempt: await ctx.restores.start(me, id, recoveryFile, bringBack ?? true) });
+  });
+
+  /* The CEO leaves out what a database a restore kept holds: it is saved as a backup and removed, with nothing of it
+     brought back. Only while its bringing back still waits or runs. */
+  app.post('/api/backups/kept/:name/leave', async (req, reply) => {
+    ceo(await requirePerson(req, db));
+    leads();
+    const { name } = KeptParams.parse(req.params);
+    const left = rowsOf(await db.execute(sql`UPDATE net.merges SET status = 'removing' WHERE source = ${`kept:${name}`} AND status IN ('pending', 'applied') RETURNING id`));
+    if (left.length === 0) throw new ApiError(409, 'conflict', 'Nothing of this database is being brought back now.', 'not_pending');
+    return reply.code(204).send();
   });
 }

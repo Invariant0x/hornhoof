@@ -8,7 +8,8 @@ import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
 import { certificates, companies, computerRuns, departments, invites, machineAccess, machines, people, personAccess, recoveryKeys, sessions, teams } from '../../db/schema.js';
-import { ApiError, type ErrorReason } from '../../errors.js';
+import { ApiError, loggable, type ErrorReason } from '../../errors.js';
+import { writeChoice } from '../merge/kept.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { disablePerson } from '../people/routes.js';
@@ -180,8 +181,10 @@ export class Restores {
   }
 
   /* Takes the claim first, before anything is asked of the database, so a restore and an update asked at once never
-     both go on; every refusal after that frees it. Answers the attempt. */
-  async start(me: Person, id: string, recoveryText?: string): Promise<string> {
+     both go on; every refusal after that frees it. bringBack: whether what came after the bundle comes back from the
+     database the restore sets aside; it is written down before the order goes, as this app's memory does not outlive
+     the swap. Answers the attempt. */
+  async start(me: Person, id: string, recoveryText?: string, bringBack = true): Promise<string> {
     const { db, config } = this.ctx;
     this.order();
     if (!this.ctx.updater.present()) throw new ApiError(503, 'unavailable', 'The updater is not running, so nothing can be restored now.', 'updater_missing');
@@ -200,6 +203,7 @@ export class Restores {
         attempt, id: row.id, dumpedAt: row.dumpedAt, source: 'store', identity, expect: { sha256: row.sha256, size: row.size, signer: row.signer },
         company: row.company, authorityPem: authority.certPem, carry: true,
       };
+      writeChoice(config.controlDir, { attempt, bringBack });
       this.current = { order, at: Date.now(), from: held.from };
       return attempt;
     } catch (err) {
@@ -288,13 +292,23 @@ export class Restores {
   async afterSwap(): Promise<void> {
     const dir = this.ctx.config.controlDir;
     const carried = controlJson<{ attempt?: unknown; carry?: Carry }>(dir, RESTORE_CARRY);
+    const status = carried ? controlJson<RestoreStatus>(dir, RESTORE_STATUS) : readRestoreStatus(dir);
+    const swapped = status !== null && (status.state === 'done' || (status.state === 'running' && status.step === 'start'));
     if (carried) {
-      const status = controlJson<RestoreStatus>(dir, RESTORE_STATUS);
-      const swapped = status !== null && status.attempt === carried.attempt && (status.state === 'done' || (status.state === 'running' && status.step === 'start'));
-      if (swapped && carried.carry) await applyCarry(this.ctx, carried.carry);
+      if (swapped && status.attempt === carried.attempt && carried.carry) await applyCarry(this.ctx, carried.carry);
       rmSync(join(dir, RESTORE_CARRY), { force: true });
     }
+    if (swapped && status.dumpedAt) await this.mark(status);
     this.carried = false;
     this.applied = true;
+    /* The database the restore set aside is found once its updater has said which one it is. */
+    await this.ctx.merger.discover().catch((err: unknown) => this.ctx.log.warn({ error: loggable(err) }, 'Could not look for the database the restore kept. It is looked for again in a minute.'));
+  }
+
+  /* The mark a restore leaves in the database it restored, once per attempt: from which bundle and from when it is.
+     The order is gone by now and the restored database rarely holds its own bundle's record, so the updater's status
+     says it. A source that lacks this restore is compared row by row, as its journal proves nothing of these rows. */
+  private async mark(status: RestoreStatus): Promise<void> {
+    await this.ctx.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (${status.attempt}, ${status.id}, ${status.dumpedAt!}::timestamptz, ${status.kept}) ON CONFLICT (attempt) DO NOTHING`);
   }
 }

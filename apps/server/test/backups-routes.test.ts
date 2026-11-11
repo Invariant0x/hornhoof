@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, departments, machines } from '../src/db/schema.js';
@@ -96,6 +96,45 @@ describe('the backups routes', () => {
     const token = await setUpCompany(young.app);
     const early = await young.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(token) });
     expect([early.statusCode, (early.json() as { error: { reason: string } }).error.reason]).toEqual([409, 'no_authority']);
+  });
+
+  it("shows each kept database's merge, and leaves one out when the CEO says so", async () => {
+    const c = await company();
+    type Kept = { name: string; at: string; merge: { id: string; status: string; added: number; conflicts: number; error: string | null } | null };
+    const kept = async () => ((await c.app.inject({ url: '/api/backups', ...as(c.ceo) })).json() as { kept: Kept[] }).kept;
+    /* The databases there are, as the server's Postgres names them: none in a test, so the merges are listed by theirs. */
+    await c.db.execute(sql`INSERT INTO net.merges (id, source, label, status, counts, error) VALUES
+      ('00000000-0000-4000-8000-00000000000a', 'kept:hornhoof_before_20261110_090000', 'a database', 'applied', '{"added": 4, "conflicts": 2}'::jsonb, 'Not complete yet: tasks {"id": "x"}'),
+      ('00000000-0000-4000-8000-00000000000b', 'kept:hornhoof_before_20261109_080000', 'an older one', 'done', '{}'::jsonb, NULL)`);
+    expect(await kept()).toEqual([
+      { name: 'hornhoof_before_20261110_090000', at: '2026-11-10T09:00:00.000Z', merge: { id: '00000000-0000-4000-8000-00000000000a', status: 'applied', added: 4, conflicts: 2, error: 'Not complete yet: tasks {"id": "x"}' } },
+    ]);
+    const leave = (name: string, who = c.ceo) => c.app.inject({ method: 'POST', url: `/api/backups/kept/${name}/leave`, ...as(who) });
+    const zed = await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    expect((await leave('hornhoof_before_20261110_090000', zed)).statusCode).toBe(403);
+    expect((await leave('hornhoof_before_20261110_090000')).statusCode).toBe(204);
+    expect((await kept())[0]!.merge).toMatchObject({ status: 'removing' });
+    /* Only one that still waits can be left out. */
+    const again = await leave('hornhoof_before_20261110_090000');
+    expect([again.statusCode, (again.json() as { error: { reason: string } }).error.reason]).toEqual([409, 'not_pending']);
+    expect((await leave('hornhoof_before_20261109_080000')).statusCode).toBe(409);
+    expect((await leave('hornhoof')).statusCode).toBe(400);
+    await c.db.execute(sql`UPDATE net.merges SET status = 'pending' WHERE id = '00000000-0000-4000-8000-00000000000a'`);
+    expect((await leave('hornhoof_before_20261110_090000')).statusCode).toBe(204);
+  });
+
+  it('asks the keeper for the fork, and takes its record for that database alone', async () => {
+    const c = await company();
+    const fork = randomUUID();
+    await c.db.execute(sql`INSERT INTO net.merges (source, label, status, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', 'merged', ${fork})`);
+    expect((await c.view<MakerView>()).fork).toEqual({ id: fork, database: 'hornhoof_before_20261110_090000' });
+    /* A bundle that says it is a fork, of nothing the company set aside. */
+    const stray = await c.head({ reason: 'fork' });
+    const refused = await c.record(stray.head);
+    expect([refused.statusCode, (refused.json() as { error: { reason: string } }).error.reason]).toEqual([400, 'bundle_refused']);
+    const made = await c.head({ reason: 'fork', id: fork });
+    expect((await c.record(made.head)).statusCode).toBe(201);
+    expect((await c.view<MakerView>()).fork).toBeNull();
   });
 
   it('lists the bundles with where they are, for the CEO', async () => {

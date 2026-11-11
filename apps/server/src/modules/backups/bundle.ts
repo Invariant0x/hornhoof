@@ -21,7 +21,8 @@ export const SIGNED_PREFIX = 'hornhoof-bundle-manifest v1\n';
 export const MAX_HEAD = 65_536;
 export const MAX_CHALLENGE = 1024;
 
-export type BundleReason = 'timer' | 'update';
+/* fork: a database set aside before a merge, saved before it goes. */
+export type BundleReason = 'timer' | 'update' | 'fork';
 export type RecoveryLink = { name: string; url: string };
 /* dumpedAt: the moment a restore brings the company back to. madeAt: when it was sealed and signed. size, sha256: of
    the sealed part. recipients: the age keys it is sealed to, the recovery key among them when there is one.
@@ -52,7 +53,7 @@ const ManifestShape = z.strictObject({
   company: z.uuid(),
   dumpedAt: z.iso.datetime(),
   madeAt: z.iso.datetime(),
-  reason: z.enum(['timer', 'update']),
+  reason: z.enum(['timer', 'update', 'fork']),
   size: z.number().int().positive(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   recipients: z.array(z.string().min(1).max(200)).min(1).max(64),

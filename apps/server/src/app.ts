@@ -41,6 +41,8 @@ import { UpdaterControl } from './modules/updates/control.js';
 import { refreshHolders } from './modules/backups/holders.js';
 import { Restores } from './modules/backups/restore.js';
 import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
+import { keptDatabases } from './modules/merge/kept.js';
+import { Merger } from './modules/merge/merger.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
@@ -97,6 +99,8 @@ export type Ctx = Deps & {
   restores: Restores;
   /* A restore from a recovery file on a server that has no company yet. */
   totalLoss: TotalLoss;
+  /* The merges of the databases that came back. */
+  merger: Merger;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -187,6 +191,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.updater = new UpdaterControl(config.controlDir);
   ctx.restores = new Restores(ctx);
   ctx.totalLoss = new TotalLoss(ctx);
+  ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
@@ -212,6 +217,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     await ctx.totalLoss.tidy().catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not clear what was sent for a recovery.'));
   };
   ctx.mode.whenLead(settleRestore, () => clearTimeout(carryTimer));
+  /* What the databases that came back hold is brought back while this app leads, a look a minute. */
+  ctx.mode.whenLead(() => ctx.merger.start(), () => ctx.merger.stop());
+  app.addHook('onClose', async () => ctx.merger.stop());
   app.addHook('onClose', async () => clearTimeout(carryTimer));
   /* Its own build, for the machines that follow it, asked for off the path of any request. A server told to ask the
      registry only when asked waits for the first machine that wants to know. */

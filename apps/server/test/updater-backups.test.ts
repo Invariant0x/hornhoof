@@ -222,6 +222,19 @@ describe('updater, restore', () => {
     expect(existsSync(file(s, 'restore-carry.json'))).toBe(false);
   });
 
+  it("keeps the dump's time in the restore's status", async () => {
+    /* The order does not outlive the swap, and the restored database rarely holds its own bundle's record: the status
+       says from when the restored database is, whether the restore went through or not. */
+    const done = stand(OLD_ENV);
+    order(done);
+    await runOnce(done, null, { STUB_TERM: '7', ...WITH_CARRY });
+    expect((statusOf(done) as { dumpedAt?: string }).dumpedAt).toBe(DUMPED);
+    const failed = stand(OLD_ENV);
+    order(failed);
+    await runOnce(failed, null, { STUB_RESTORE: 'fail' });
+    expect(statusOf(failed)).toMatchObject({ state: 'failed', dumpedAt: DUMPED });
+  });
+
   it('changes nothing when the backup does not load or the database in use does not close', async () => {
     const s = stand(OLD_ENV);
     order(s);

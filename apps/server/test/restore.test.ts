@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as age from 'age-encryption';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -12,6 +12,7 @@ import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
+import { CHOICE_FILE } from '../src/modules/merge/kept.js';
 import { as, invitePerson, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
 import { backupCompany, from, MACHINE_ID, OWN } from './helpers-backups.js';
 
@@ -285,6 +286,43 @@ describe('a restore from a backup', () => {
       await s.app.ctx.restores.afterSwap();
       const [serial] = await s.db.select().from(certificates).where(eq(certificates.serial, 'aa01'));
       expect([serial!.revokedAt !== null, existsSync(join(s.control, RESTORE_CARRY))], JSON.stringify(status)).toEqual([applies, false]);
+    }
+  });
+
+  it("remembers the CEO's choice across the swap", async () => {
+    const s = await stand();
+    const file = join(s.control, CHOICE_FILE);
+    /* Unless the CEO says otherwise, what came after comes back. */
+    const first = ((await s.restore(s.made.id)).json() as { attempt: string }).attempt;
+    expect([JSON.parse(readFileSync(file, 'utf8')), statSync(file).mode & 0o777]).toEqual([{ attempt: first, bringBack: true }, 0o600]);
+    await s.ended(first);
+    const second = ((await s.restore(s.made.id, { bringBack: false })).json() as { attempt: string }).attempt;
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ attempt: second, bringBack: false });
+    expect((await s.restore(s.made.id, { bringBack: 'no' })).statusCode).toBe(400);
+  });
+
+  it('marks every restore', async () => {
+    const marks = (s: Awaited<ReturnType<typeof stand>>) => s.db.execute(sql`SELECT attempt, backup, dumped_at, kept FROM net.restores ORDER BY at`).then(answer => (answer as unknown as { rows: { attempt: string; backup: string; dumped_at: string; kept: string | null }[] }).rows);
+    const dumpedAt = '2026-11-10T08:00:00.000Z';
+    /* With something carried over, and with nothing, as after a restore from a recovery file. */
+    for (const carried of [true, false]) {
+      const s = await stand();
+      const attempt = randomUUID();
+      s.says({ attempt, state: 'running', step: 'start', dumpedAt });
+      if (carried) writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt, carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
+      await s.app.ctx.restores.afterSwap();
+      const [mark] = await marks(s);
+      expect([mark!.attempt, mark!.backup, new Date(mark!.dumped_at).toISOString(), mark!.kept], String(carried)).toEqual([attempt, s.made.id, dumpedAt, null]);
+      /* Once per attempt, however often the app starts. */
+      await s.app.ctx.restores.afterSwap();
+      expect(await marks(s)).toHaveLength(1);
+    }
+    /* An updater from before merges says no time, and a restore that failed left nothing to mark. */
+    for (const status of [{ state: 'done', step: 'start' }, { state: 'failed', step: 'start', dumpedAt }, { state: 'running', step: 'swap', dumpedAt }] as const) {
+      const s = await stand();
+      s.says({ attempt: randomUUID(), ...status });
+      await s.app.ctx.restores.afterSwap();
+      expect(await marks(s), JSON.stringify(status)).toEqual([]);
     }
   });
 

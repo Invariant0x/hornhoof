@@ -152,6 +152,8 @@ export type ErrorReason =
   | 'no_key'
   | 'recovery_file_invalid'
   | 'restore_busy'
+  | 'merge_pending'
+  | 'not_pending'
   | 'restore_running'
   | 'newer_build'
   | 'not_held'

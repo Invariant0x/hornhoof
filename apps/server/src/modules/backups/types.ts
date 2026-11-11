@@ -21,7 +21,8 @@ export type RestoreOrder = {
 };
 /* start is written only once the databases are swapped for good. */
 export type RestoreStep = 'fetch' | 'check' | 'open' | 'load' | 'swap' | 'start';
-export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'done' | 'failed'; step: RestoreStep; line: string; at: string; kept: string | null };
+/* dumpedAt: from when the restored database is, as the order had it; an updater from before merges does not say. */
+export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'done' | 'failed'; step: RestoreStep; line: string; at: string; kept: string | null; dumpedAt?: string };
 
 /* What the data machine's keeper hears: whom to seal to, what was made last, which machines hold what, and what to
    fetch or restore. */
@@ -33,6 +34,8 @@ export type MakerView = {
   holders: Record<string, string[]>;
   wanted: { id: string; from: string }[];
   order: RestoreOrder | null;
+  /* A database set aside before a merge that is not saved as a bundle yet: the bundle's id and the database's name. */
+  fork: { id: string; database: string } | null;
 };
 /* What a machine that may keep bundles hears. keeps: its owner's tick; false tells it to delete what it holds. hold: the
    bundles to keep. want: the ones the leader asks it to send. */
