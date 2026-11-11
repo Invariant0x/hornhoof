@@ -377,7 +377,8 @@ export class PeerSessions {
   }
 
   /* One hello at a time, each with the patience a connect gets: a busy machine answers late, and that is no reason to
-     let go of it. One that does not answer at all ends the session. */
+     let go of it. One that does not answer at all ends the session, unless another took its place meanwhile: closing cuts
+     a hello that was on its way, and what the session still carries is left to end by itself. */
   private hello(session: Session, kept: Kept): void {
     if (session.h2.destroyed || session.asking) return;
     session.asking = true;
@@ -388,7 +389,7 @@ export class PeerSessions {
         session.hello = hello;
         if (news) this.opts.changed?.();
       },
-      () => session.h2.destroy(),
+      () => void (kept.session === session && session.h2.destroy()),
     );
   }
 

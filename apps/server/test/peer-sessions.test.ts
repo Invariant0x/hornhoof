@@ -404,7 +404,8 @@ describe("a worker's sessions to the company's data machines", () => {
 
   it('lets what the relay session carries end by itself when a direct one takes its place', async () => {
     const stand = await standUp();
-    const sessions = stand.sessionsWith({ connectMs: 200 });
+    /* A hello is on its way nearly all the time, so one is cut by the change of sessions. */
+    const sessions = stand.sessionsWith({ connectMs: 200, helloMs: 1 });
     sessions.use([stand.target({ addresses: [NOWHERE], relayPort: stand.appPort })]);
     await until(() => sessions.leader()?.path === 'relay');
     const carried = await sessions.connectApp();
