@@ -1427,6 +1427,8 @@ export const en = {
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
     repo_command_invalid: 'A full test command that names its part with {part} must also say how many parts there are with {parts}.',
+    repo_folder_taken: 'Another repository of this department has an address that ends in the same name. Agents keep each repository in a folder of that name, so one department cannot keep both.',
+    product_taken: 'This department already has a product with this name. Pick another name.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',
     link_reserved: 'This name is kept for Hornhoof itself. Pick another one.',

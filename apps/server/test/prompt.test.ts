@@ -99,6 +99,13 @@ describe('orchestrator instructions', () => {
     expect(ability('orch-resources')).toMatch(/skill supplies a method, not tool access or a human approval/i);
   });
 
+  it('adds another repository to a department as a product of it, and connects one to a product it has', () => {
+    const resources = ability('orch-resources');
+    expect(resources).toMatch(/several repositories[\s\S]*add_repository[\s\S]*new product/i);
+    expect(resources).toMatch(/set_repository with the product's id/i);
+    expect(resources).toMatch(/addresses end in the same name/i);
+  });
+
   it('keeps one fact per note, reads current records after compaction and makes timers explicit assignments', () => {
     const notebook = ability('hh-notebook');
     for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note']) expect(notebook).toContain(words);
