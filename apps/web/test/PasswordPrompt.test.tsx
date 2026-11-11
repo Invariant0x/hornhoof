@@ -101,9 +101,11 @@ describe('a join command and the key of who looks at it', () => {
     expect(screen.getByText('Making your key')).toBeInTheDocument();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Password'), 'right{Enter}');
-    await expect.poll(() => document.querySelectorAll('code').length).toBe(2);
-    const [first, second] = [...document.querySelectorAll('code')].map(code => code.textContent!);
-    expect(first!.split(' --owner-key ')[1]).toBe(second!.split(' --owner-key ')[1]);
+    /* Each command shows for a Mac or Linux and for Windows, all four with the one key. */
+    await expect.poll(() => document.querySelectorAll('code').length).toBe(4);
+    const keys = [...document.querySelectorAll('code')].map(code => code.textContent!.split(' --owner-key ')[1]!.replace(/"$/, ''));
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toMatch(/^[A-Za-z0-9_-]{80,200}$/);
   });
 
   it('says the same in Russian', async () => {
