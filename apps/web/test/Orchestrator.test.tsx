@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
@@ -19,6 +19,8 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 const EVENTS = '/api/agents/orchestrator/events';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
+/* A person who last chose the terminal in this browser: the window opens with it. */
+const chooseTerminal = () => localStorage.setItem('hh-agent-view', 'terminal');
 
 const ev = (seq: number, kind: EventView['kind'], data: unknown, extra: Partial<EventView> = {}): EventView => ({ seq, kind, data, jobId: 'j1', person: null, at: '2026-10-29T10:00:00Z', ...extra });
 const IVAN = { id: 'p1', name: 'Ivan' };
@@ -54,19 +56,21 @@ function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
 describe('AgentWindow', () => {
   it("sends a correction of the orchestrator's card to the live terminal, where its owner writes", async () => {
     const user = userEvent.setup();
+    chooseTerminal();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true, canType: true } }] });
     await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
     expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
 
-  it('leaves typing to the live terminal, and keeps the line in the log', async () => {
+  it('leaves typing to the live terminal the person chose, and keeps the line in the chat', async () => {
     const user = userEvent.setup();
+    chooseTerminal();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
     expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Log' }));
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
     expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
@@ -82,10 +86,12 @@ describe('AgentWindow', () => {
     expect(container.querySelectorAll('.t-line')).toHaveLength(2);
   });
 
-  it('shows each kind of line the way a terminal would', async () => {
+  it('shows each kind of line in the chat, the steps of work folded into one', async () => {
     const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
     expect(await screen.findByText('What matters most right now?')).toBeInTheDocument();
-    expect(container.querySelector('.t-u')).toHaveTextContent('> Ivan: We make characters for schools');
+    expect(within(screen.getByText('We make characters for schools').closest('article')!).getByText('You')).toBeInTheDocument();
+    expect(screen.queryByText('hornhoof.company')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '2 steps of work' }));
     expect(container.querySelector('.t-t')).toHaveTextContent('hornhoof.company({})');
     expect(container.querySelector('.t-r')).toHaveTextContent('⎿Acme, 1 person');
     expect(screen.getByText('Ask about products').parentElement).toHaveTextContent('☒ Ask about products');
@@ -105,21 +111,21 @@ describe('AgentWindow', () => {
   });
 
   it("names Hornhoof for the turns it starts on a task", async () => {
-    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
-    await screen.findByText(/Payments/);
-    expect(container.querySelector('.t-u')).toHaveTextContent('> Hornhoof: #4 "Payments" is yours.');
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
+    const line = (await screen.findByText('#4 "Payments" is yours.')).closest('article')!;
+    expect(within(line).getByText('Hornhoof')).toBeInTheDocument();
   });
 
   it('names the orchestrator for what it wrote to an employee', async () => {
-    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Look at checkout first.', from: 'orchestrator' })], state: READY }] });
-    await screen.findByText(/Look at checkout first/);
-    expect(container.querySelector('.t-u')).toHaveTextContent('> Orchestrator: Look at checkout first.');
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Look at checkout first.', from: 'orchestrator' })], state: READY }] });
+    const line = (await screen.findByText('Look at checkout first.')).closest('article')!;
+    expect(within(line).getByText('Orchestrator')).toBeInTheDocument();
   });
 
   it('names the employee who wrote, as one does on a timer round', async () => {
-    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
-    await screen.findByText(/Report on #4/);
-    expect(container.querySelector('.t-u')).toHaveTextContent('> Wendy: Report on #4, please.');
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
+    const line = (await screen.findByText('Report on #4, please.')).closest('article')!;
+    expect(within(line).getByText('Wendy')).toBeInTheDocument();
   });
 
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
@@ -139,7 +145,8 @@ describe('AgentWindow', () => {
       ],
     });
     expect(await screen.findByText('Operations')).toHaveProperty('tagName', 'STRONG');
-    expect(container.querySelectorAll('.t-l ul > li')).toHaveLength(2);
+    expect(container.querySelectorAll('.chat-body ul > li')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '1 step of work' }));
     expect(screen.queryByText('ToolSearch')).not.toBeInTheDocument();
     expect(container.querySelectorAll('.t-r')).toHaveLength(1);
     expect(container.querySelector('.t-r')).not.toHaveClass('alone');
@@ -201,8 +208,8 @@ describe('AgentWindow', () => {
 
   it('shows that he works and stops him on Esc', async () => {
     const { calls } = await act(async () => open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
-    expect(screen.getByText(/esc to stop/)).toBeInTheDocument();
-    expect(screen.getByText('2 waiting')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Agent state' })).toHaveTextContent('Working on it');
+    expect(screen.getByText('2 more messages wait their turn')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
   });
@@ -627,6 +634,7 @@ describe('AgentWindow', () => {
   });
 
   it('shows nothing of an employee before it knows whether to open a terminal or a conversation', async () => {
+    chooseTerminal();
     mockApi({
       'GET /api/agents/b1': [200, CARD],
       'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
@@ -743,23 +751,25 @@ describe('messages between agents and people', () => {
     ev(5, 'text', { kind: 'text', text: 'Handed #78 to development.' }),
   ];
 
-  it("shows the orchestrator's messages each as one line naming who wrote to whom, the text folded and opened by a click", async () => {
+  it("shows a person's words to the orchestrator whole, and every other message as one line naming who wrote to whom, the text folded and opened by a click", async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
-    const david = await screen.findByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
+    /* Nothing is hidden: the service lines are in the person's words too. */
+    const david = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
+    expect(within(david).getByText('David AI (CEO assistant)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    const dana = screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' });
     expect(screen.getByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
     /* Folded: the text is not on the screen, and the agent's own words to the person are. */
-    expect(david).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText(/Take #78 into work/)).not.toBeInTheDocument();
-    expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
-    fireEvent.click(david);
-    expect(david).toHaveAttribute('aria-expanded', 'true');
-    /* Nothing is hidden: the service lines are in the opened text too. */
-    expect(screen.getByText(/Take #78 into work\.\s+Service: answer in Russian\./)).toBeInTheDocument();
+    expect(dana).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('#49 is blocked.')).not.toBeInTheDocument();
-    fireEvent.click(david);
-    expect(screen.queryByText(/Take #78 into work/)).not.toBeInTheDocument();
+    expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
+    fireEvent.click(dana);
+    expect(dana).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('#49 is blocked.')).toBeInTheDocument();
+    expect(screen.queryByText(/Give #78 to a developer/)).not.toBeInTheDocument();
+    fireEvent.click(dana);
+    expect(screen.queryByText('#49 is blocked.')).not.toBeInTheDocument();
   });
 
   it('opens every folded message with Ctrl+O and folds them again with it', async () => {
@@ -809,6 +819,7 @@ describe('messages between agents and people', () => {
   });
 
   it('leaves the whole window and Ctrl+O to the live terminal, even with messages that name who wrote to whom', async () => {
+    chooseTerminal();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
@@ -882,6 +893,7 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
     render(<LanguageProvider><AgentWindow me={me} org={DEV_ORG} agentId="b1" onClose={() => {}} /></LanguageProvider>);
     return calls;
   };
+  beforeEach(chooseTerminal);
   const noSecondLine = (name: string) => {
     expect(screen.queryByRole('textbox', { name })).not.toBeInTheDocument();
     expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
@@ -907,11 +919,11 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
     noSecondLine('Write to the orchestrator');
   });
 
-  it('writes from the line of the log, which keeps the words and says why when the server turns the message down', async () => {
+  it('writes from the line of the chat, which keeps the words and says why when the server turns the message down', async () => {
     const user = userEvent.setup();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/messages': [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }] });
     await screen.findByTestId('live-terminal');
-    await user.click(screen.getByRole('button', { name: 'Log' }));
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
     const line = screen.getByRole('textbox', { name: 'Write to the orchestrator' });
     await user.type(line, 'Please check{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('Only people with access to the whole company can do this.');

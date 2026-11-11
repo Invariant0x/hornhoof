@@ -266,9 +266,6 @@ export function PictureTray({ drafts, sending, onRemove, onBroken }: { drafts: D
           </button>
         </div>
       ))}
-      <button className="btn small" type="submit" disabled={sending}>
-        {t.window.sendPictures}
-      </button>
     </div>
   );
 }

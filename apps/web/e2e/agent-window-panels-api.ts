@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { AgentCardView, NoteView } from '../src/types';
 import { CARD, serveAgentWindow, type AgentFixture } from './agent-window-api';
-import { box } from './api';
+import { box, chooseTerminal } from './api';
 import { CLOSED, openWindow, type Settings } from './computer-strip-api';
 
 /* The side panels of an agent's window, for the orchestrator and for an employee who heads a department and so keeps a
@@ -11,8 +11,8 @@ export type Who = 'orchestrator' | 'employee';
 type Rect = { x: number; y: number; width: number; height: number };
 
 const WORDS = {
-  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Log', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook', back: 'Back to terminal' },
-  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Журнал', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот', back: 'К терминалу' },
+  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Chat', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook', back: 'Back to terminal' },
+  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Чат', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот', back: 'К терминалу' },
 };
 
 const NOTES: NoteView[] = [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-11-04T00:00:00.000Z' }];
@@ -44,6 +44,7 @@ async function openEmployee(page: Page, { lang, theme, width }: Settings) {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, { lang, theme });
+  await chooseTerminal(page);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { box } from './api';
+import { box, chooseTerminal } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
 async function activate(button: Locator) {
@@ -23,6 +23,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       localStorage.setItem('hh-lang', lang);
       localStorage.setItem('hh-theme', theme);
     }, { lang, theme });
+    await chooseTerminal(page);
     const en = lang === 'en';
     const errors: string[] = [], stops: string[] = [];
     page.on('pageerror', e => errors.push(e.message));

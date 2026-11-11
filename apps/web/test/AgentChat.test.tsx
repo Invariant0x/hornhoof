@@ -1,0 +1,179 @@
+import { act, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import { AgentWindow } from '../src/screens/AgentWindow';
+import type { EventView } from '../src/types';
+import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
+
+/* xterm needs a real canvas; the window only has to know the terminal is there. */
+vi.mock('../src/ui/AgentTerminal', () => ({
+  AgentTerminal: () => (
+    <div data-testid="live-terminal">
+      <textarea className="xterm-helper-textarea" aria-label="Terminal input" />
+    </div>
+  ),
+}));
+
+const EVENTS = '/api/agents/orchestrator/events';
+const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
+const WITH_TERMINAL = { ...READY, terminal: true, canType: true };
+const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
+/* Today, so a line shows its clock time alone. */
+const AT = new Date(new Date().setHours(10, 5, 0, 0)).toISOString();
+const time = (at: string, language = 'en') => new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(at));
+
+const ev = (seq: number, kind: EventView['kind'], data: unknown, extra: Partial<EventView> = {}): EventView => ({ seq, kind, data, jobId: 'j1', person: null, at: AT, ...extra });
+type Party = NonNullable<EventView['message']>['from'];
+const LISA: Party = { kind: 'person', id: 'p2', name: 'Lisa', role: null, department: null };
+const ORCH: Party = { kind: 'agent', id: 'a1', name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' };
+
+function open(routes: Record<string, unknown> = {}) {
+  const calls = mockApi({
+    'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
+    [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }],
+    'POST /api/agents/orchestrator/start': [200, { started: false }],
+    ...(routes as Record<string, [number, unknown]>),
+  });
+  const view = render(
+    <LanguageProvider>
+      <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={() => {}} />
+    </LanguageProvider>,
+  );
+  return { calls, ...view };
+}
+
+describe("an agent's window opens as a chat", () => {
+  it('opens as a chat even when its node shows the terminal, which is one click away and back', async () => {
+    const user = userEvent.setup();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WITH_TERMINAL }] });
+    expect(await screen.findByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Terminal' }));
+    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
+    expect(screen.getByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it("opens the person's last choice in the next window", async () => {
+    const user = userEvent.setup();
+    const first = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WITH_TERMINAL }] });
+    await user.click(await screen.findByRole('button', { name: 'Terminal' }));
+    first.unmount();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WITH_TERMINAL }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+  });
+
+  it('opens as a chat and still switches when the browser keeps nothing', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WITH_TERMINAL }] });
+    expect(await screen.findByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Terminal' }));
+    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it('shows the chat alone, with no switch, when the node has no terminal', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    open();
+    expect(await screen.findByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+});
+
+describe('the chat', () => {
+  it("shows the person's words and the agent's words, each with who wrote and when", async () => {
+    const later = new Date(new Date(AT).getTime() + 60_000).toISOString();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
+      ev(1, 'message', { text: 'We make characters for schools.' }, { person: { id: ME.person.id, name: ME.person.name } }),
+      ev(2, 'text', { text: 'What matters most right now?' }, { at: later }),
+      ev(3, 'message', { text: 'Parents matter too.' }, { person: { id: 'p2', name: 'Lisa' }, message: { direction: 'in', from: LISA, to: ORCH, channel: 'telegram' } }),
+    ], state: READY }] });
+    const mine = (await screen.findByText('We make characters for schools.')).closest('article')!;
+    expect(within(mine).getByText('You')).toBeInTheDocument();
+    expect(within(mine).getByText(time(AT))).toBeInTheDocument();
+    const answer = screen.getByText('What matters most right now?').closest('article')!;
+    expect(within(answer).getByText('Orchestrator')).toBeInTheDocument();
+    expect(within(answer).getByText(time(later))).toBeInTheDocument();
+    const lisa = screen.getByText('Parents matter too.').closest('article')!;
+    expect(within(lisa).getByText('Lisa, via Telegram')).toBeInTheDocument();
+  });
+
+  it('folds the steps of work into one quiet line that opens on a click', async () => {
+    const user = userEvent.setup();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
+      ev(1, 'text', { text: 'Looking at the company.' }),
+      ev(2, 'tool', { name: 'hornhoof.company', input: '{}' }),
+      ev(3, 'tool_result', { ok: true, summary: 'Acme, 1 person' }),
+      ev(4, 'todo', { items: [{ text: 'Ask about products', state: 'doing' }] }),
+      ev(5, 'tool', { name: 'hornhoof.departments', input: '{}' }),
+      ev(6, 'tool_result', { ok: true, summary: 'No departments' }),
+      ev(7, 'text', { text: 'Five departments fit.' }),
+    ], state: READY }] });
+    const steps = await screen.findByRole('button', { name: '3 steps of work' });
+    expect(steps).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('hornhoof.company')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ask about products')).not.toBeInTheDocument();
+    expect(screen.getByText('Looking at the company.')).toBeInTheDocument();
+    expect(screen.getByText('Five departments fit.')).toBeInTheDocument();
+    await user.click(steps);
+    expect(steps).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('hornhoof.company')).toBeInTheDocument();
+    expect(screen.getByText('Ask about products')).toBeInTheDocument();
+    expect(screen.getByText('No departments')).toBeInTheDocument();
+  });
+
+  it('says plainly that the agent works, and stops it', async () => {
+    const user = userEvent.setup();
+    const { calls } = await act(async () => open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
+    const state = await screen.findByRole('status', { name: 'Agent state' });
+    expect(state).toHaveTextContent('Working on it');
+    expect(state).toHaveTextContent('2 more messages wait their turn');
+    await user.click(within(state).getByRole('button', { name: 'Stop' }));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
+  });
+
+  it('says that an agent with nothing to do sleeps until its next task', async () => {
+    open();
+    expect(await screen.findByRole('status', { name: 'Agent state' })).toHaveTextContent('Asleep until the next task. A new message wakes it up.');
+  });
+
+  it('says what to do in a chat that has no messages yet', async () => {
+    open();
+    expect(await screen.findByText('No messages yet. Write below, and the answer comes here.')).toBeInTheDocument();
+  });
+
+  it('sends with its button', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'POST /api/agents/orchestrator/messages': [202, { jobId: 'j2' }] });
+    const input = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
+    await vi.waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, 'Schools first');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await vi.waitFor(() => expect(calls.find(c => c.path === '/api/agents/orchestrator/messages')?.body).toEqual({ text: 'Schools first' }));
+    expect(input).toHaveValue('');
+  });
+
+  it("names an employee for its words, and speaks Russian", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({
+      'GET /api/agents/b1': [200, CARD],
+      'GET /api/agents/b1/events?after=0': [200, { events: [ev(1, 'text', { text: 'Проверяю оплату.' }), ev(2, 'tool', { name: 'Bash', input: 'ls' })], state: { ...WITH_TERMINAL, busy: true, runningJobId: 'j1' } }],
+    });
+    render(<LanguageProvider><AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} /></LanguageProvider>);
+    expect(await screen.findByRole('log', { name: 'Переписка' })).toBeInTheDocument();
+    const answer = screen.getByText('Проверяю оплату.').closest('article')!;
+    expect(within(answer).getByText(CARD.name)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1 шаг работы' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Состояние агента' })).toHaveTextContent('Работает');
+    expect(screen.getByRole('button', { name: 'Отправить' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Терминал' })).toBeInTheDocument();
+  });
+});

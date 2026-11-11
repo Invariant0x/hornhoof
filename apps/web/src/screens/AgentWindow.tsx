@@ -1,12 +1,13 @@
 import { commandBlockOpen } from '../ui/CommandBox';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
-import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
+import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
+import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
 import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
 import { AgentTerminal } from '../ui/AgentTerminal';
@@ -29,6 +30,9 @@ const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
 const CATCH_UP_MS = 300;
 const NOTEBOOK_ICON = 'M6 4h11v16H6zM9 4v16M12 9h3M12 13h3';
+const TERMINAL_ICON = 'M5 7l5 5-5 5M12 17h7';
+const CHAT_ICON = 'M4 5h16v11H10l-5 4v-4H4z';
+const SEND_ICON = 'M5 12h13M13 6l6 6-6 6';
 const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
 const STOP_ICON = 'M7 7h10v10H7z';
 
@@ -162,6 +166,13 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
   if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
 }
 
+/* Words a person wrote to the agent, as the chat shows them on the person's side. A notice Hornhoof passed on is not. */
+function personWords(e: LogEvent): boolean {
+  if (e.kind !== 'message') return false;
+  if (!isMessage(e)) return e.person !== null;
+  return e.message.direction === 'in' && e.message.from.kind === 'person' && !e.message.notification;
+}
+
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
 
@@ -196,39 +207,23 @@ function TodoLine({ todo }: { todo: Todo }) {
   );
 }
 
-function AppliedLine({ applied, t }: { applied: Applied; t: Messages }) {
-  return (
-    <div className="t-done">
-      {(applied.created ?? []).map((d, j) => (
-        <div key={`c${j}`} className="t-l">
-          <i>⏺</i>
-          <div>{t.window.created(named(t, d), d.products.length)}</div>
-        </div>
-      ))}
-      {(applied.removed ?? []).map((d, j) => (
-        <div key={`r${j}`} className="t-l">
-          <i>⏺</i>
-          <div>{t.window.removed(named(t, d))}</div>
-        </div>
-      ))}
-      {(applied.hired ?? []).map(h => (
-        <div key={h.id} className="t-l">
-          <i>⏺</i>
-          <div>{t.window.hiredLine(h.name)}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
+/* What applying a card did: the departments it made and removed, and the people it hired. */
+const appliedLines = (t: Messages, applied: Applied): string[] => [
+  ...(applied.created ?? []).map(d => t.window.created(named(t, d), d.products.length)),
+  ...(applied.removed ?? []).map(d => t.window.removed(named(t, d))),
+  ...(applied.hired ?? []).map(h => t.window.hiredLine(h.name)),
+];
 
-function WindowToolbar({ t, terminal, state, hasTerminal, asLog, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; hasTerminal: boolean; asLog: boolean; stop(): void; onToggle(): void }) {
+/* The switch between the chat and the live terminal names and draws what it opens. */
+function WindowToolbar({ t, terminal, state, hasTerminal, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; hasTerminal: boolean; stop(): void; onToggle(): void }) {
+  const label = terminal ? t.window.showChat : t.window.showTerminal;
   return (
     <>
       {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
       {hasTerminal && (
-        <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={onToggle}>
+        <button type="button" aria-label={label} title={label} onClick={onToggle}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d={asLog ? 'M5 7l5 5-5 5M12 17h7' : 'M5 6h14M5 10h14M5 14h9M5 18h11'} />
+            <path d={terminal ? CHAT_ICON : TERMINAL_ICON} />
           </svg>
         </button>
       )}
@@ -254,9 +249,9 @@ function WindowAfter({ offerByHand, needsOrchestrator, failure, t, onPickByHand 
   );
 }
 
-/* An agent's window: its live terminal when its node shows one, or its conversation as a log; a line to write to it for
-   anyone who cannot type into that terminal; and the orchestrator's cards. Whoever reaches this window may write: the
-   server opens the agent's conversation and takes a message by the same rule. */
+/* An agent's window: its conversation as a chat with a line to write in, or its live terminal when its node shows one and
+   the person chose it; and the orchestrator's cards. Whoever reaches this window may write: the server opens the agent's
+   conversation and takes a message by the same rule. */
 /* What keeps the agent from answering now, or what happened to the last words it took. */
 function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: boolean; sub: SubView | null }) {
   const t = useT();
@@ -288,8 +283,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [failure, setFailure] = useState<unknown>(null);
   /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
-  /* The terminal shows unless the person asked for the log or the node could not show one. */
-  const [asLog, setAsLog] = useState(false);
+  /* The chat shows unless the person chose the terminal and the node shows one. */
+  const [view, toggleView] = useAgentView();
   const [noTerminal, setNoTerminal] = useState(false);
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
@@ -461,14 +456,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
-  const terminal = hasTerminal && !asLog;
+  const terminal = hasTerminal && view === 'terminal';
   /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
   const dragging = usePictureDrop(box, known && !terminal, state?.ready ?? false, pictures.add);
 
   useLayoutEffect(() => {
     const el = log.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, state?.busy, asLog, known]);
+  }, [events.length, state?.busy, view, known]);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -512,8 +507,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   }, [hasPictures]);
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
-  const messages = shown.filter(isMessage);
-  /* Only the log folds messages; the live terminal has the whole window, and its program has Ctrl+O. */
+  /* Messages between agents, and Hornhoof's, fold to a line each; a person's words show whole. */
+  const messages = shown.filter(isMessage).filter(e => !personWords(e));
+  /* Only the chat folds messages; the live terminal has the whole window, and its program has Ctrl+O. */
   const folding = useFolding(messages.map(messageKey), box, !terminal);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
@@ -549,88 +545,91 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
 
-  function line(e: LogEvent, i: number) {
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- proposal and typed events are not rendered as log lines
+  const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
+  const authorOf = (e: LogEvent): string => {
+    if (!isMessage(e)) return e.person?.id === me.person.id ? t.window.chat.you : (e.person?.name ?? '');
+    const name = e.message.from.id === me.person.id ? t.window.chat.you : partyName(t, language, e.message.from);
+    return e.message.channel === 'telegram' ? t.window.chat.viaTelegram(name) : name;
+  };
+
+  /* A step of the program's work, as its terminal would show it, inside the chat's folded line of steps. */
+  function step(e: LogEvent, i: number) {
+    if (e.kind === 'todo') return <TodoLine todo={e.data as Todo} />;
+    if (e.kind === 'tool_result') {
+      return (
+        <div className={`t-r${shown[i - 1]?.kind === 'tool' ? '' : ' alone'}`}>
+          <span />
+          <span>⎿</span>
+          <div>{field(e.data, 'summary')}</div>
+        </div>
+      );
+    }
+    return (
+      <div className="t-l t-t">
+        <i>⏺</i>
+        <div>
+          <b>{field(e.data, 'name')}</b>({field(e.data, 'input')})
+        </div>
+      </div>
+    );
+  }
+
+  function message(e: LogEvent) {
+    if (personWords(e)) {
+      return (
+        <ChatEntry side="person" who={authorOf(e)} at={e.at}>
+          <div className="chat-text">{field(e.data, 'text')}</div>
+          <SentPictures data={e.data} />
+        </ChatEntry>
+      );
+    }
+    if (isMessage(e)) {
+      return (
+        <div className="chat-quiet">
+          <EventMessage event={e} folding={folding} />
+          <SentPictures data={e.data} />
+        </div>
+      );
+    }
+    return (
+      <ChatEntry side="quiet" who={messageAuthor(t, field(e.data, 'from'), field(e.data, 'name'))} at={e.at}>
+        <div className="chat-text">{field(e.data, 'text')}</div>
+        <SentPictures data={e.data} />
+      </ChatEntry>
+    );
+  }
+
+  /* What happened besides words: a line across the chat, in red for what went wrong. */
+  const note = (text: ReactNode, bad = false) => <div className={`chat-note${bad ? ' bad' : ''}`}>{text}</div>;
+
+  function chatLine(e: LogEvent) {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- steps fold apart, proposals and typed events are not chat lines
     switch (e.kind) {
       case 'message':
-        return (
-          <>
-            {isMessage(e) ? (
-              <EventMessage event={e} folding={folding} />
-            ) : (
-              <div className="t-u">
-                &gt; <em>{e.person?.name ?? messageAuthor(t, field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
-              </div>
-            )}
-            <SentPictures data={e.data} />
-          </>
-        );
+        return message(e);
       case 'text':
         return (
-          <div className="t-l">
-            <i>⏺</i>
+          <ChatEntry side="agent" who={agentName} at={e.at}>
             <Markdown text={field(e.data, 'text')} />
-          </div>
+          </ChatEntry>
         );
-      case 'tool':
-        return (
-          <div className="t-l t-t">
-            <i>⏺</i>
-            <div>
-              <b>{field(e.data, 'name')}</b>({field(e.data, 'input')})
-            </div>
-          </div>
-        );
-      case 'tool_result':
-        return (
-          <div className={`t-r${shown[i - 1]?.kind === 'tool' ? '' : ' alone'}`}>
-            <span />
-            <span>⎿</span>
-            <div>{field(e.data, 'summary')}</div>
-          </div>
-        );
-      case 'todo':
-        return <TodoLine todo={e.data as Todo} />;
       case 'applied':
-        return <AppliedLine applied={e.data as Applied} t={t} />;
+        return <>{appliedLines(t, e.data as Applied).map((text, j) => <div key={j}>{note(text)}</div>)}</>;
       case 'failed':
-        return (
-          <div className="t-l t-bad">
-            <i>⏺</i>
-            <div>{failedText(t, e.data, !orchestrator)}</div>
-          </div>
-        );
+        return note(failedText(t, e.data, !orchestrator), true);
       case 'turn_refused':
-        return (
-          <div className="t-l t-bad">
-            <i>⏺</i>
-            <div>{t.window.turnRefused[(e.data as { reason: TurnRefusal }).reason]}</div>
-          </div>
-        );
+        return note(t.window.turnRefused[(e.data as { reason: TurnRefusal }).reason], true);
       case 'input_left':
-        return (
-          <div className="t-l">
-            <i>⏺</i>
-            <div>
-              {t.window.inputLeft.kept} {e.person ? t.window.inputLeft.by(e.person.name) : t.window.inputLeft.nobody}
-              <div className="t-left">{field(e.data, 'text')}</div>
-            </div>
-          </div>
+        return note(
+          <>
+            {t.window.inputLeft.kept} {e.person ? t.window.inputLeft.by(e.person.name) : t.window.inputLeft.nobody}
+            <div className="t-left">{field(e.data, 'text')}</div>
+          </>,
         );
       case 'stopped':
-        return (
-          <div className="t-l t-bad">
-            <i>⏺</i>
-            <div>{t.window.stopped}</div>
-          </div>
-        );
+        return note(t.window.stopped, true);
       case 'computer':
-        return (
-          <div className="t-l">
-            <i>⏺</i>
-            <div>{computerLine(t, language, e)}</div>
-          </div>
-        );
+        return note(computerLine(t, language, e));
     }
   }
 
@@ -641,7 +640,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   ];
 
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} hasTerminal={hasTerminal} asLog={asLog} stop={stop} onToggle={() => setAsLog(v => !v)} />}>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} hasTerminal={hasTerminal} stop={stop} onToggle={toggleView} />}>
       {!known && (
         <div className="t-log" aria-busy="true">
           {failure !== null && (
@@ -661,36 +660,30 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         </div>
       )}
       {known && !terminal && (
-        <div className="t-log" ref={log} role="log">
-          <div className="t-wel">
-            <div className="w1">
-              <i>✻</i> {title}
-            </div>
-            <div className="w2">{where}</div>
-          </div>
-          {shown.map((e, i) => (
-            <div key={messageKey(e)} className="t-line">
-              {line(e, i)}
-            </div>
-          ))}
-          {cards}
-          {state?.busy && (
-            <div className="t-sp">
-              <i>✻</i>
-              <div>
-                {t.window.working} <span>{t.window.escToStop}</span>
-                {state.queued > 0 && <span className="t-q">{t.window.waiting(state.queued)}</span>}
-                <button className="btn small ghost" type="button" onClick={stop}>
-                  {t.window.stop}
-                </button>
+        <div className="t-log chat" ref={log} role="log" aria-label={t.window.chat.conversation}>
+          {ready && !shown.length && <p className="chat-empty">{t.window.chat.empty}</p>}
+          {chatItems(shown).map(item =>
+            item.kind === 'steps' ? (
+              <ChatSteps key={`steps-${messageKey(item.events[0]!.event)}`} events={item.events}>
+                {item.events.map(({ event, index }) => (
+                  <div key={messageKey(event)} className="t-line">
+                    {step(event, index)}
+                  </div>
+                ))}
+              </ChatSteps>
+            ) : (
+              <div key={messageKey(item.event)} className="t-line">
+                {chatLine(item.event)}
               </div>
-            </div>
+            ),
           )}
+          {cards}
           {after}
         </div>
       )}
       {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
       {known && <StateNotes state={state} ready={ready} sub={sub} />}
+      {known && !terminal && (ready || state.busy) && <ChatState state={state} onStop={stop} />}
       {dragging && (
         <div className="t-drop" role="status">
           {t.window.dropPictures}
@@ -703,19 +696,23 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       {known && !terminal && (
         <form
-          className="t-in"
+          className="t-in chat-in"
           onSubmit={e => {
             e.preventDefault();
             void send();
           }}
         >
           <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.notPicture} />
-          <span aria-hidden="true">&gt;</span>
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>
           <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
           <AddPicture id={`picture-${agentId}`} disabled={!ready} onFiles={pictures.add} />
+          <button className="chat-send" type="submit" aria-label={t.window.chat.send} title={t.window.chat.send} disabled={!ready || pictures.sending}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d={SEND_ICON} />
+            </svg>
+          </button>
         </form>
       )}
       <div className="t-st">

@@ -2,7 +2,7 @@ import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import type { AgentCardView, Employee, Org } from '../src/types';
 import { CARD, SUB } from './agent-window-api';
-import { box, ME, serveApi, TASKS } from './api';
+import { box, chooseTerminal, ME, serveApi, TASKS } from './api';
 import type { Settings } from './computer-strip-api';
 
 /* A company with the orchestrator and a few employees, each with a window of its own: a terminal, a card and a task. */
@@ -13,12 +13,12 @@ const NAMES = ['Bruno', 'Clara', 'Dana', 'Egor'];
 const WORDS = {
   en: {
     orchestrator: 'Orchestrator', tabs: ['Map', 'Tasks', 'People', 'Subscriptions', 'Machines'], members: 'Members', tasks: 'Tasks', write: 'Write to the orchestrator',
-    minimize: 'Minimize', close: 'Close', log: 'Log', terminal: 'Terminal', card: 'Card', task: 'Task', full: 'Full screen', size: 'Restore size',
+    minimize: 'Minimize', close: 'Close', log: 'Chat', terminal: 'Terminal', card: 'Card', task: 'Task', full: 'Full screen', size: 'Restore size',
     openTerminalOf: (name: string) => `Open ${name}'s terminal`, restore: (name: string) => `Restore ${name}`, closeStrip: (name: string) => `Close ${name}`, role: ROLE.en, working: 'Working', sleeping: 'Sleeping', cardOf: (name: string) => `Card: ${name}`,
   },
   ru: {
     orchestrator: 'Оркестратор', tabs: ['Карта', 'Задачи', 'Люди', 'Подписки', 'Машины'], members: 'Сотрудники', tasks: 'Задачи', write: 'Написать оркестратору',
-    minimize: 'Свернуть', close: 'Закрыть', log: 'Журнал', terminal: 'Терминал', card: 'Карточка', task: 'Задача', full: 'На весь экран', size: 'Обычный размер',
+    minimize: 'Свернуть', close: 'Закрыть', log: 'Чат', terminal: 'Терминал', card: 'Карточка', task: 'Задача', full: 'На весь экран', size: 'Обычный размер',
     openTerminalOf: (name: string) => `Открыть терминал: ${name}`, restore: (name: string) => `Развернуть: ${name}`, closeStrip: (name: string) => `Закрыть: ${name}`, role: ROLE.ru, working: 'Работает', sleeping: 'Спит', cardOf: (name: string) => `Карточка: ${name}`,
   },
 };
@@ -139,6 +139,7 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, { lang, theme });
+  await chooseTerminal(page);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });
