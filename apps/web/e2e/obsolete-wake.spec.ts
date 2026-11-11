@@ -54,7 +54,7 @@ for (const lang of ['en', 'ru'] as const) {
         page.on('pageerror', error => errors.push(error.message));
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
         await page.goto('/');
-        await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+        await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();
         const card = page.getByRole('complementary', { name: 'Bruno', exact: true });

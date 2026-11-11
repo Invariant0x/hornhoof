@@ -256,7 +256,7 @@ async function openWindow(page: Page, recording: Recording, write: boolean): Pro
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.clock.pauseAt(START);
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = { page, program, rows: page.locator('.xterm-rows') };
   await drawn(window);

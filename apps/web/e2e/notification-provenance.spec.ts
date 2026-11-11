@@ -26,7 +26,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
       event(4, hornhoof, { source: 'program_operator', tasks: [task] }, 'The program needs an operator.'),
     ] });
     await page.goto('/');
-    await page.getByRole('button', { name: /Development/ }).click();
+    await page.getByRole('button', { name: /^Development/ }).click();
     await page.getByRole('region', { name: language === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
     const window = page.getByRole('complementary', { name: /^Bruno,/ });
     const author = window.getByRole('button', { name: language === 'en' ? 'Message from Hana with a long employee name via Hornhoof to Bruno' : 'Сообщение от Hana with a long employee name через Hornhoof для Bruno' });

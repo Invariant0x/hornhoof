@@ -27,7 +27,7 @@ async function prepare(page: Page, info: TestInfo, { lang, theme, width }: Setti
 
 async function openFromMap(page: Page, lang: Settings['lang']) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
 }
 
@@ -216,7 +216,7 @@ test('a hidden terminal menu leaves Escape with the account menu', async ({ page
   await serveAgentWindow(page, live);
   await chooseTerminal(page);
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: 'Bruno, Developer' });
   await window.locator('.xterm-screen').click({ button: 'right' });
@@ -239,7 +239,7 @@ test('the mobile task leaves the hidden conversation unchanged by Ctrl+O', async
   }] };
   await serveAgentWindow(page, live);
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: 'Bruno, Developer' });
   const notice = window.getByRole('button', { name: 'Hornhoof, recorded service message to Bruno' });

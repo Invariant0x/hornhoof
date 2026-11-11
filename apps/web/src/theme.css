@@ -362,7 +362,8 @@ select:disabled { opacity: .55; }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
-.chips { display: flex; margin: 0; padding: 0; list-style: none; }
+.chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
+.chips > li { position: absolute; }
 .chips li > .edge { height: 100%; }
 .chip > .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
 .chip .ic { width: 18px; height: 18px; }
@@ -418,6 +419,15 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .cnt b { color: var(--ink); font-weight: 600; }
 /* Zoom bottom left and the orchestrator's line bottom middle, as in the prototype. */
 .zoom { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; }
+/* A block's grip at its top left corner, 44 px to touch at any zoom and outside the block; the map's corners are not mirrored. */
+.grip { box-sizing: border-box; padding: 0; border: 0; background: none; color: var(--line2); cursor: move; touch-action: none; transform-origin: 100% 100%; }
+.grip svg { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.grip:hover, .grip:active, .grip:focus-visible { color: var(--cyan-ink); }
+.grip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* Put back as it was, and a move that was not saved, above the zoom. */
+.map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
+.map-arrange .alert { margin: 0; }
+.map-arrange .btn { min-height: 44px; background: var(--hud); }
 .zbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
 .zbtn:hover { color: var(--cyan-ink); }
 .zbtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -433,6 +443,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ticker .tx.in { animation: tin .45s ease-out; }
 @keyframes blink { 50% { opacity: .35; } }
 @media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } }
+/* On a narrow screen the orchestrator's line stands over the zoom, and the way back over that line. */
+@media (max-width: 720px) { .map-arrange { bottom: 124px; } }
 @media (prefers-reduced-motion: reduce) { .ticker .live { animation: none; } }
 
 /* People */

@@ -126,7 +126,7 @@ const errorsOf = (page: Page) => (page as Page & { __errors?: string[] }).__erro
 
 async function openAgent(page: Page, name: string) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   const chip = page.locator('.dept-chip').filter({ hasText: name });
   await expect(chip).toBeVisible();
   await chip.locator('.schip').click();
@@ -165,7 +165,7 @@ test('real server applies both plan and department to map, schema, tree and list
     await expect(ann.locator('.map')).toContainText('Own work');
     await expect(ann.locator('.map')).not.toContainText('Hidden work');
     await expect(ann.locator('.map')).not.toContainText('Away work');
-    await ann.getByRole('button', { name: /Development/ }).click();
+    await ann.getByRole('button', { name: /^Development/ }).click();
     await expect(ann.locator('.dcanvas .dept-chip')).toHaveCount(1);
     await expect(ann.locator('.dcanvas')).toContainText('Mina');
     for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);

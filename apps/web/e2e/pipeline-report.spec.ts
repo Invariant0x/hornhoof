@@ -85,7 +85,7 @@ async function open(page: Page, language: string, theme: string, reports: Record
     localStorage.setItem('hh-theme', look!);
   }, [language, theme]);
   await page.goto('/');
-  await page.getByRole('button', { name: language === 'en' ? /Development/ : /Разработка/ }).click();
+  await page.getByRole('button', { name: language === 'en' ? /^Development/ : /^Разработка/ }).click();
   await page.getByRole('button', { name: language === 'en' ? 'Speed' : 'Скорость', exact: true }).click();
   await page.getByRole('tab', { name: language === 'en' ? 'Report' : 'Отчет', exact: true }).click();
   return page.locator('.dv-drawer.spd');

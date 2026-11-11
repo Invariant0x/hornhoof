@@ -63,7 +63,7 @@ async function openMeasuredTerminal(page: Page, width: number, height: number, t
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
 
   const agentWindow = page.getByRole('complementary', { name: /^Bruno,/ });

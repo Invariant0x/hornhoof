@@ -44,7 +44,7 @@ function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me 
 }
 
 async function flyIn(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: /Development/ }));
+  await user.click(await screen.findByRole('button', { name: /^Development/ }));
   return screen.findByRole('heading', { level: 2, name: 'Development' });
 }
 
@@ -183,7 +183,7 @@ describe('Department view', () => {
       shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Development/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Development/ }));
     });
     expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
@@ -647,7 +647,7 @@ describe('Department view', () => {
   it("closes a department to people who do not reach it", async () => {
     const user = userEvent.setup();
     const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
-    await user.click(await screen.findByRole('button', { name: /Development/ }));
+    await user.click(await screen.findByRole('button', { name: /^Development/ }));
     expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Department tasks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
@@ -1233,7 +1233,7 @@ describe('Department work tree', () => {
     onTestFinished(() => localStorage.removeItem('hh-lang'));
     const user = userEvent.setup();
     shell(treeRoute({ ...DEV_TREE, turn: null }));
-    await user.click(await screen.findByRole('button', { name: /Разработка/ }));
+    await user.click(await screen.findByRole('button', { name: /^Разработка/ }));
     await user.click(screen.getByRole('button', { name: 'Дерево' }));
     expect(await screen.findByText('Сейчас нет открытого хода.')).toBeInTheDocument();
     expect(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Карта' })).toHaveAttribute('title', 'Карта');
@@ -1360,8 +1360,8 @@ describe("what an agent's program does, and the server's alarms about its turn",
   const lane = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip .schip')].find(b => b.textContent!.includes('Bruno'))!;
 
   describe.each([
-    ['en', /Development/, 'Tree'],
-    ['ru', /Разработка/, 'Дерево'],
+    ['en', /^Development/, 'Tree'],
+    ['ru', /^Разработка/, 'Дерево'],
   ] as const)('in %s', (lang, department, tree) => {
     it.each(STATES)('shows %s on the agent on the map and in the tree', async (_, state, en, ru, alarm) => {
       localStorage.setItem('hh-lang', lang);
@@ -1411,7 +1411,7 @@ describe("what an agent's program does, and the server's alarms about its turn",
     const now = Date.now();
     let org = live(now, { program: program(now, 'thinking', 12), alarm: null }, DEV_ORG);
     shell({ 'GET /api/org': async () => [200, org] });
-    fireEvent.click(await vi.waitFor(() => screen.getByRole('button', { name: /Development/ })));
+    fireEvent.click(await vi.waitFor(() => screen.getByRole('button', { name: /^Development/ })));
     await vi.waitFor(() => screen.getByRole('heading', { level: 2, name: 'Development' }));
     expect(stateOf(bruno())).toHaveTextContent('thinking 12 min');
     await act(() => vi.advanceTimersByTimeAsync(60_000));
@@ -1444,7 +1444,7 @@ describe("what an agent's program does, and the server's alarms about its turn",
     const now = Date.now();
     const routes = { 'GET /api/agents/b1': [200, { ...CARD, state: 'working' }], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] };
     shell(routes, live(now, { program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }, DEV_ORG));
-    await user.click(await screen.findByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }));
+    await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }));
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     await user.click(await screen.findByRole('button', { name: card }));
     const head = (await screen.findByRole('heading', { level: 3, name: 'Bruno' })).parentElement!;

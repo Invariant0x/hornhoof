@@ -26,7 +26,7 @@ export async function open(page: Page, agent: Agent, lang: Settings['lang']): Pr
     await page.getByRole('button', { name: t.map.openOrchestrator, exact: true }).click();
     return page.getByRole('complementary', { name: t.window.title });
   }
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
   return page.getByRole('complementary', { name: /^Bruno,/ });
 }

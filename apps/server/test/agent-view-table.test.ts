@@ -159,6 +159,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
+  'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout',
   'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/disconnect', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
   'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',

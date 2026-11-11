@@ -113,6 +113,17 @@ export const people = pgTable(
   t => [index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId)],
 );
 
+/* Where a person put the blocks of the company map: the hub, a department or a person, each by its top left in the map's
+   world. Each person keeps their own arrangement, which follows them to another device; a block not in it stands where the
+   map places it. */
+export type MapBlocks = Record<string, { x: number; y: number }>;
+export const mapLayouts = pgTable('map_layouts', {
+  personId: uuid('person_id').primaryKey().references(() => people.id),
+  companyId: companyId(),
+  blocks: jsonb('blocks').$type<MapBlocks>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const sessions = pgTable(
   'sessions',
   {

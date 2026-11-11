@@ -67,7 +67,7 @@ for (const lang of ['en', 'ru'] as const) {
         const live = { state: STATES[0]! };
         await serveAgent(page, live);
         await page.goto('/');
-        await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+        await page.getByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }).click();
         const chip = page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ });
         await chip.click();
         await page.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();

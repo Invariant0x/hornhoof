@@ -228,7 +228,7 @@ test('a task opened from a screen takes the window aside and leaves its strip', 
 
 test('a window minimized before its card came is named on its strip, and its terminal opens to its full size', async ({ page }) => {
   const { words, errors, release, windowOf, stripOf, openEmployee, barButton } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 }, { held: ['bruno'] });
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const hiddenTitle = page.getByRole('complementary', { name: 'Bruno', exact: true });
   await expect(hiddenTitle).toBeVisible();
