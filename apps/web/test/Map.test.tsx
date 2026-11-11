@@ -243,6 +243,67 @@ describe('Map', () => {
     expect(container.querySelector('.zoom .zv')).toHaveTextContent('120%');
   });
 
+  it('leaves the view where the person put it as the company changes live, the arrangement comes, panels open and a department closes, and opens it there again', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    onTestFinished(() => {
+      width.mockRestore();
+      height.mockRestore();
+    });
+    const stream = fakeStream();
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: { 'dept:d1': { x: 40, y: 700 } } }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const opened: string[] = [];
+    const { container, rerender, unmount } = render(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
+    /* The map shows all of itself when it first opens; then the person zooms in. */
+    await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    const mine = view();
+    stream.send({ type: 'working', working: 1 });
+    await act(async () => arrive());
+    await waitFor(() => expect(marketing.style.left).toBe('40px'));
+    expect(view()).toBe(mine);
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen />);
+    expect(view()).toBe(mine);
+    /* Into a department and out of it: the map flies into its card, and comes back to where the person left it. */
+    fireEvent.click(marketing);
+    await waitFor(() => expect(opened).toEqual(['d1']));
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen inside />);
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen />);
+    expect(view()).toBe(mine);
+    /* A reload opens the map where the person left it, at the same scale. */
+    unmount();
+    const again = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    expect(again.container.querySelector<HTMLElement>('.world')!.style.transform).toBe(mine);
+  });
+
+  it('shows all of the map as it first opens, with the blocks where the server keeps them, until the person moves it', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    onTestFinished(() => {
+      width.mockRestore();
+      height.mockRestore();
+    });
+    /* A view kept in a form the map cannot read counts as none. */
+    localStorage.setItem(`hh-map-view:${ME.company.id}:${ME.person.id}`, '{"k":"far"}');
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: { 'dept:d1': { x: 40, y: 1400 } } }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
+    await waitFor(() => expect(scale()).not.toBe(1));
+    const first = scale();
+    await act(async () => arrive());
+    await waitFor(() => expect(marketing.style.top).toBe('1400px'));
+    expect(scale()).toBeLessThan(first);
+  });
+
   it.each([375, 1440])('fits the company clear of a left panel at %ipx', async width => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} leftPanelOpen />);

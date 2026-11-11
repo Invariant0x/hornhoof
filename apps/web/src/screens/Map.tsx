@@ -13,7 +13,7 @@ import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
@@ -41,6 +41,27 @@ const PING_MS = 950;
 const FLASH_MS = 1400;
 /* A grip is this big to touch on the screen at any zoom. An arrow key moves its block this far, ten times as far with Shift. */
 const GRIP = 44, KEY_STEP = 10;
+
+/* Where the map stood when this person left it, kept in this browser for each company and person, so a reload opens it there. */
+const viewKey = (me: Me) => `hh-map-view:${me.company.id}:${me.person.id}`;
+
+function keptView(key: string): View | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<View> | null;
+    const ok = !!v && [v.x, v.y, v.k].every(n => typeof n === 'number' && Number.isFinite(n)) && v.k! > 0;
+    return ok ? { x: v.x!, y: v.y!, k: v.k!, smooth: false } : null;
+  } catch {
+    return null;
+  }
+}
+
+function keepView(key: string, { x, y, k }: View): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ x, y, k }));
+  } catch {
+    /* A private window may refuse; the map then shows all of itself on the next visit. */
+  }
+}
 
 /* What a plan that is not ready waits for: its owner's machine, the login or the first setup of its program. */
 function planWaits(t: Messages, sub: SubView): string {
@@ -432,9 +453,17 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const company = me.person.scopeKind === 'company';
   const { org, failure } = useOrg();
   const [shots, setShots] = useState<Shot[]>([]);
-  const [minZoom, setMinZoom] = useState(MIN_K);
+  const key = viewKey(me);
+  const [kept] = useState(() => keptView(key));
+  const [minZoom, setMinZoom] = useState(() => Math.min(MIN_K, kept?.k ?? MIN_K));
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, org, { min: minZoom, max: MAX_K });
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined);
+  /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
+     then; until then the map shows all of itself. */
+  const chose = useRef(!!kept);
+  const mine = useCallback(() => chose.current || touched(), [touched]);
+  /* The view the map flew into a department from, to stand at again when the department closes. */
+  const back = useRef<View | null>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
@@ -516,7 +545,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     });
   }, [org, arr, fire]);
 
-  /* Moving a block leaves the view where it is; the arrangement coming from the server or put back shows all of it again. */
+  /* Show everything. */
   const fit = useCallback(() => {
     const el = box.current;
     const shown = arrRef.current;
@@ -529,16 +558,37 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
     setMinZoom(Math.min(MIN_K, k));
     setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, leftPanelOpen, inside, setView, layout.version]);
+  }, [org, windowOpen, leftPanelOpen, inside, setView]);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
 
   useEffect(() => {
-    fit();
+    if (inside || !back.current) return;
+    setView({ ...back.current, smooth: true });
+    back.current = null;
+  }, [inside, setView]);
+
+  /* Until the view is the person's own, the map shows all of itself: as it opens, as the arrangement comes from the server or
+     is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
+     moving a block leave the view alone. */
+  const shown = !!arr;
+  useEffect(() => {
+    if (!shown || inside) return;
+    const auto = () => {
+      if (!mine() && !back.current) fitRef.current();
+    };
+    auto();
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(auto);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fit]);
+  }, [shown, inside, layout.version, mine]);
+
+  /* The person's own view stays for the next visit; the flight into a department is not theirs. */
+  useEffect(() => {
+    if (view.smooth !== 'fly' && !inside && mine()) keepView(key, view);
+  }, [view, inside, key, mine]);
 
   /* The map flies into the department's card until it fills the screen, then the department opens. */
   function openDecisions(personId: string) {
@@ -554,6 +604,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const el = box.current;
     if (!el || !el.clientWidth || still) return onOpenDepartment(id);
     const k = Math.min(el.clientWidth / spot.w, el.clientHeight / spot.h);
+    back.current ??= view;
     setView({ k, x: el.clientWidth / 2 - (spot.x + spot.w / 2) * k, y: el.clientHeight / 2 - (spot.y + spot.h / 2) * k, smooth: 'fly' });
     const timer = setTimeout(() => {
       timers.current.delete(timer);
@@ -745,7 +796,14 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         ))}
       </div>
 
-      <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={fit} />
+      <ZoomBar
+        k={view.k}
+        onZoom={f => zoomAt(f)}
+        onFit={() => {
+          chose.current = true;
+          fit();
+        }}
+      />
       {(arranged || layout.failed) && (
         <div className="map-arrange" onPointerDown={e => e.stopPropagation()}>
           {layout.failed && <p className="alert" role="alert">{t.map.layoutNotSaved}</p>}
