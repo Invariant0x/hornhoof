@@ -2,7 +2,7 @@ import type { Workspace } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { departments } from '../../db/schema.js';
+import { departments, tasks } from '../../db/schema.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
@@ -14,6 +14,14 @@ export async function repoAt(ctx: { db: Pick<Ctx['db'], 'select'>; config: Ctx['
     if (d?.repoUrl) return { department: d, repo: { url: d.repoUrl, branch: d.repoBranch ?? 'main', token: d.repoTokenEnc ? decryptSecret(d.repoTokenEnc, ctx.config.secret) : '', author: authorOf(d) } };
   }
   return null;
+}
+
+/* Where a turn looks for its repository: for a task of the agent's own department, the task's product and department, as
+   every check of the task does, so an agent of the whole department works in the repository of the product its task is
+   of; otherwise the agent's own product and department. */
+export async function turnPlaces(db: Pick<Ctx['db'], 'select'>, agent: { productId: string | null; departmentId: string | null }, taskId: string | null): Promise<(string | null)[]> {
+  const [task] = taskId ? await db.select({ productId: tasks.productId, departmentId: tasks.departmentId }).from(tasks).where(eq(tasks.id, taskId)) : [];
+  return task && task.departmentId === agent.departmentId ? [task.productId, task.departmentId] : [agent.productId, agent.departmentId];
 }
 
 /* The repository an agent works in: its product's, else its department's, else none. */

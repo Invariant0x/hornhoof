@@ -774,7 +774,7 @@ async function withRepositories() {
   const hire = async (name: string, productId: string | null, subscriptionId = sub!.id) =>
     (await db.insert(agents).values({ companyId, kind: 'worker', name, roleKey: 'DEV-BE', departmentId: dev!.id, productId, model: '', subscriptionId }).returning())[0]!;
   const repository = (id: string, payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${id}/repository`, payload, ...as(ceo) });
-  const task = async (agentId: string) => (await createTask(app.ctx, { agentId }, { title: 'Checkout API', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: agentId, executor: true })).task;
+  const task = async (agentId: string, productId: string | null = null) => (await createTask(app.ctx, { agentId }, { title: 'Checkout API', brief: '', body: '', departmentId: dev!.id, productId, assigneeAgentId: agentId, executor: true })).task;
   return { app, db, url, ceo, builtin, ctx: app.ctx, companyId, dev: dev!, shop: shop!, hire, repository, task };
 }
 
@@ -917,13 +917,13 @@ describe('a head', () => {
 });
 
 describe("working in the product's repository", () => {
-  it("sends an agent's turn with its product's repository, else its department's, and each agent its own folder", async () => {
+  it("sends a task's turn with its product's repository, else its department's, and each agent its own folder", async () => {
     const { ctx, builtin, companyId, dev, shop, hire, repository, task } = await withRepositories();
     expect((await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111' })).statusCode).toBe(200);
     expect((await repository(shop.id, { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222' })).statusCode).toBe(200);
     const bruno = await hire('Bruno', shop.id);
     const pia = await hire('Pia', null);
-    await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id, shop.id)).id, why: 'assigned' }]);
     const first = await nextRun(builtin);
     /* The repository as the company's registry of what is built knows it, so the agent's worktree gets its dependencies from there. */
     const scope = (ownerId: string, url: string) => ({ companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) });
@@ -934,6 +934,25 @@ describe("working in the product's repository", () => {
     expect(first.prompt).not.toContain('ghp_');
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
     expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null }, repositoryScope: scope(dev.id, 'https://github.com/acme/platform.git') });
+  });
+
+  it("clones the repository of the task's product for an agent of the whole department, and its own for its window", async () => {
+    const { ctx, builtin, companyId, dev, shop, hire, repository } = await withRepositories();
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111' });
+    await repository(shop.id, { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222' });
+    const pia = await hire('Pia', null);
+    const { task } = await createTask(ctx, { agentId: pia.id }, { title: 'Shop checkout', brief: '', body: '', departmentId: dev.id, productId: shop.id, assigneeAgentId: pia.id, executor: true });
+    await wakeAll(ctx, [{ agentId: pia.id, taskId: task.id, why: 'assigned' }]);
+    const run = await nextRun(builtin);
+    expect(run.workspace).toEqual({
+      key: pia.id,
+      repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null },
+      repositoryScope: { companyId, repositoryOwnerId: shop.id, repoUrlHash: hashToken('https://github.com/acme/shop.git') },
+    });
+    builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(() => builtin.acks.includes(run.jobId));
+    builtin.send({ type: 'agent.start', agentKey: pia.id });
+    expect((await nextRun(builtin)).workspace?.repo?.url).toBe('https://github.com/acme/platform.git');
   });
 
   it('gives the clone who its commits are by, and puts it in no message', async () => {
