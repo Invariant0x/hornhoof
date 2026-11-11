@@ -27,7 +27,7 @@ export const cleanups: (() => Promise<void>)[] = [];
 type Kind = 'claude' | 'codex' | 'kimi';
 type Mode = 'taken' | 'queued' | 'pasted' | 'silent' | 'lost' | 'hook' | 'bridge';
 
-export async function atWork(kind: Kind, mode: Mode) {
+export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watched?: boolean } = {}) {
   /* The host runs on the fake clock, which moves only as the test moves it: c.until, c.on and c.pass. Turns of the event
      loop stay real, for the hook a real hh-hook sends through the bridge. */
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
@@ -49,13 +49,21 @@ export async function atWork(kind: Kind, mode: Mode) {
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   /* No other agent's program runs on the node: tmux is not asked, so no real process runs while the clock moves. */
   vi.spyOn(tmux, 'livePrograms').mockResolvedValue([]);
+  /* A program that sleeps ends; the next launch starts it again. */
+  let asleep = false;
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
+    if (asleep) alive.mockResolvedValue(true);
+    asleep = false;
     mkdirSync(dirname(file), { recursive: true });
     if (kind === 'codex') record({ type: 'session_meta', payload: { id: SESSION, cwd: workDir } });
     else record({ type: 'metadata' });
     if (kind !== 'codex') await host['hook']('receipt', 'start', { session_id: SESSION });
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+  vi.spyOn(tmux, 'stop').mockImplementation(async () => {
+    asleep = true;
+    alive.mockResolvedValue(false);
+  });
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   vi.spyOn(tmux, 'screen').mockImplementation(async () => screen());
@@ -91,6 +99,8 @@ export async function atWork(kind: Kind, mode: Mode) {
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30 });
   listsAtStart(host);
+  /* Someone has the agent's terminal open, as one who types there does, so its program stays up between turns. */
+  if (watched) host['wanted'].set('watching', { key: 'receipt', size: { cols: 80, rows: 24 } });
   const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
   if (mode === 'bridge') await host.start();
   const run = () => {
