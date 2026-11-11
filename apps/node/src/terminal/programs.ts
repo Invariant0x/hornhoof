@@ -49,6 +49,12 @@ const bridgeEnv = (urls: AgentUrls) => ({
 
 const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }];
 
+/* Claude Code and Codex draw on an alternate screen by default, of which tmux keeps no history, and scroll it themselves:
+   a person's view of the session would have nothing to scroll back to. On the main screen what scrolls off stays in the
+   pane's history, and the view gets it. Claude Code's variable wins over its setting and over CLAUDE_CODE_NO_FLICKER. */
+const CLAUDE_MAIN_SCREEN = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: '1' } as const;
+const CODEX_MAIN_SCREEN = '--no-alt-screen';
+
 /* The long token of a Claude plan signed in once on another machine, which this node was given; none otherwise. */
 export function planToken(home: string): string | null {
   return readPrivate(join(home, CRED_FILES.claude_token))?.trim() || null;
@@ -79,7 +85,7 @@ export const claudeProgram: TermProgram = {
     ];
     const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
     const token = planToken(home);
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...CLAUDE_MAIN_SCREEN, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
   },
 };
 
@@ -92,7 +98,7 @@ export const codexProgram: TermProgram = {
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
     const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
-    const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', ...hooks, ...config, ...(model ? ['-m', model] : [])];
+    const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', CODEX_MAIN_SCREEN, ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];
     return { command, env: { CODEX_HOME: home, ...bridgeEnv(urls) }, sessionId };

@@ -15,8 +15,9 @@ const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 /* A node with an assignment for a program that waits at its empty prompt, on the screen that program really shows. The
-   paste is what 0.7.0 never got to: its check took the footer for a person's words. The clock moves only as the test moves it. */
-function assignment(program: TermProgram, ready: string, draft?: string, shown = real(draft ?? ready)) {
+   paste is what 0.7.0 never got to: its check took the footer for a person's words. The clock moves only as the test moves it.
+   An assignment that came without the program operator waits for the program a short time of its own. */
+function assignment(program: TermProgram, ready: string, draft?: string, shown = real(draft ?? ready), operated = true) {
   vi.useFakeTimers();
   const home = mkdtempSync(join(tmpdir(), 'hh-real-screen-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID();
@@ -37,9 +38,11 @@ function assignment(program: TermProgram, ready: string, draft?: string, shown =
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10, keptWaitMs: 20,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
-  const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
+  const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, ...(operated ? { operatorDelivery: { id: deliveryId, ordinal: 1 } } : {}), input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
   stops.push(async () => { abort.abort(); await onClock(host.stop()); await onClock(running); rmSync(home, { recursive: true, force: true }); });
-  return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
+  let ended = false;
+  void running.then(() => { ended = true; });
+  return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, ended: () => ended, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
 it.each([
@@ -54,6 +57,22 @@ it.each([
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', deliveryId, phase: 'attempt' }));
   await untilOnClock(() => paste.mock.calls.length > 0);
   expect(paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
+});
+
+/* A program the node starts again in its pane has what its last run printed above its screen, in the pane's history: Claude
+   Code and Codex stay on the main screen, for a person to scroll back through. Only what it shows now tells whether it is
+   signed out. */
+it.each([
+  ['codex', codexProgram, 'codex-0.166.0-first'],
+  ['kimi', kimiProgram, 'kimi-2.5.1-first'],
+] as const)('does not take %s for signed out by what its last run said above its screen', async (_kind, program, ready) => {
+  const c = assignment(program, ready, undefined, undefined, false);
+  let drawn = false;
+  c.screen.mockImplementation(async (_name, history = 200) => (drawn ? real(ready) : history ? '• Ran the check of the plan\n  └ The plan was signed out yesterday.\n' : ''));
+  await untilOnClock(() => c.screen.mock.calls.length > 1);
+  drawn = true;
+  await untilOnClock(() => c.paste.mock.calls.length > 0 || c.ended());
+  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
 });
 
 it.each([

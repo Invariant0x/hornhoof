@@ -37,6 +37,19 @@ describe('program updates managed outside the agent terminal', () => {
   });
 });
 
+/* tmux keeps no history of an alternate screen, so a person's view would have nothing to scroll back to. */
+describe('programs that leave their conversation in the history of the terminal', () => {
+  const launch = { bin: '/t/program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+
+  it.each([null, 'existing-session'])('keeps Claude Code on the main screen with session %s', sessionId => {
+    expect(claudeProgram.launch({ ...launch, sessionId }).env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN).toBe('1');
+  });
+
+  it.each([null, 'existing-session'])('keeps Codex on the main screen with session %s', sessionId => {
+    expect(codexProgram.launch({ ...launch, sessionId }).command).toContain('--no-alt-screen');
+  });
+});
+
 describe('Claude Code in a terminal', () => {
   it('starts a new session with a known id, its instructions, the bridge for tools and hooks', () => {
     const { command, env, sessionId } = claudeProgram.launch({ bin: '/t/claude', home: '/h', workDir: '/w/a1', sessionId: null, model: 'opus', instructionsFile: '/w/a1/.hh-instructions.md', urls: URLS });

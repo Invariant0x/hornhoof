@@ -1777,13 +1777,19 @@ export class TerminalHost {
   }
 
   private async signedOutBeforeReady(a: Agent, job: TermJob): Promise<boolean> {
-    return !job.operatorDelivery && job.signedOut.test(await this.screen(a.key));
+    return !job.operatorDelivery && job.signedOut.test(await this.shownNow(a));
+  }
+
+  /* What a starting program shows, without the lines above its screen: started again in its pane, it has what its last run
+     printed there, as Claude Code and Codex stay on the main screen for a person to scroll back through. */
+  private shownNow(a: Agent): Promise<string> {
+    return this.opts.tmux.screen(a.name, 0);
   }
 
   /* Whether the prompt shows, or null while the program is still on its way to it. Kimi shows its prompt also when it is
      not signed in, with a word to sign in; agy may first ask for its first-run setup. */
   private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
-    const screen = await this.screen(a.key);
+    const screen = await this.shownNow(a);
     if (kimiSignedOut(job, kind, screen)) return false;
     if (READY[kind](screen) || (await this.codexWaits(a, kind))) {
       await sleep(PROMPT_SETTLE_MS);
