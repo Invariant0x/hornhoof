@@ -1,5 +1,5 @@
 import { randomUUID, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -269,6 +269,81 @@ describe("a machine's keeper and its computer access", () => {
     s.put('notes.out.json', { exit: 0, output: '' });
     await carrier.tick();
     expect(s.asked.filter(call => call.method === 'POST')).toHaveLength(2);
+  });
+
+  it('lets go of what the app no longer has out, and of an answer nobody can read', async () => {
+    const s = stand();
+    const carrier = s.make();
+    carrier.prepare();
+    const until_ = s.nowS() + 3600;
+    const [gone, broken, kept] = [randomUUID(), randomUUID(), randomUUID()];
+    for (const id of [gone, broken, kept]) s.put(`${id}.json`, { id, command: 'true', timeout: 30 });
+    s.put(`${gone}.started`);
+    /* An answer the updater could not write whole: it is moved into place all the same, and stays unreadable. */
+    s.put(`${broken}.out.json`, '');
+    s.said.get = { status: 200, body: { ...open(until_).body, forget: [gone] } };
+    await carrier.tick();
+    /* Its updater stops what it began once the command's file is gone, and clears its own mark. */
+    expect(s.files()).toEqual([`${gone}.started`, `${kept}.json`].sort());
+    expect(s.asked.filter(call => call.method === 'POST')).toEqual([]);
+    expect(s.lines.filter(line => line.includes('could not be read'))).toHaveLength(1);
+  });
+
+  it('says so when it did not take the grant it was given', async () => {
+    const mine = await owner();
+    const s = stand({ pin: mine.publicKey });
+    const carrier = s.make();
+    carrier.prepare();
+    const gets = () => s.asked.filter(call => call.method === 'GET').map(call => call.path);
+    await carrier.tick();
+    s.said.get = open(s.nowS() + 3600, await (await owner()).grant());
+    await carrier.tick();
+    /* The round after: the app hears that this machine stayed closed, once. */
+    s.said.get = closed();
+    await carrier.tick();
+    await carrier.tick();
+    expect(gets().map(path => path.includes('refused=1'))).toEqual([false, false, true, false]);
+    /* A grant it took, and an answer that was closed, are nothing to say. */
+    s.said.get = open(s.nowS() + 3600, await mine.grant());
+    await carrier.tick();
+    await carrier.tick();
+    expect(gets().slice(-1)[0]).not.toContain('refused=1');
+  });
+
+  it('closes when it cannot write down what it spent, and still opens nothing twice', async () => {
+    const mine = await owner();
+    const s = stand({ pin: mine.publicKey });
+    const carrier = s.make();
+    carrier.prepare();
+    const until_ = s.nowS() + 3600;
+    const grant = await mine.grant();
+    s.said.get = open(until_, grant);
+    await carrier.tick();
+    expect(s.settings().untilSec).toBe(until_);
+    /* The keeper's folder takes no write: a folder stands where the file goes. */
+    rmSync(join(s.dir, GRANTS_FILE));
+    mkdirSync(join(s.dir, GRANTS_FILE, 'taken'), { recursive: true });
+    s.said.get = closed();
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    /* The same grant sent again opens nothing, though nothing could be written of its end. */
+    s.said.get = open(until_, grant);
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    /* A new grant opens nothing either while what it holds cannot be kept: it could not be told from a spent one later. */
+    s.said.get = open(until_, await mine.grant());
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    expect(s.lines.filter(line => line.includes('could not keep'))).toHaveLength(1);
+    /* Once the folder takes writes again, it does. */
+    rmSync(join(s.dir, GRANTS_FILE), { recursive: true });
+    const fresh = await mine.grant();
+    s.said.get = open(until_, fresh);
+    await carrier.tick();
+    expect(s.settings().untilSec).toBe(until_);
+    s.said.get = open(until_, grant);
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
   });
 
   it('asks often only while access is open or a command is out', async () => {

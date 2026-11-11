@@ -152,13 +152,13 @@ describe('what waits for people', () => {
     await c.app.ctx.computer.ask(c.companyId, await serverMachine(c.app), 'Fix the disk');
     const wes = await c.get('/api/requests', c.tokens.wes);
     expect(wes.json().proposals).toEqual([]);
-    expect(wes.json().computerAccess).toEqual([]);
+    expect(wes.json().machineAccess).toEqual([]);
     expect(leaks(wes, [c.orchestrator])).toEqual([]);
     expect(wes.body).not.toMatch(/Hire Zed|Fix the disk/);
     for (const viewer of ['ceo', 'lisa'] as const) {
       const full = (await c.get('/api/requests', c.tokens[viewer])).json();
       expect(full.proposals).toHaveLength(1);
-      expect(full.computerAccess[0].view.asked.reason).toBe('Fix the disk');
+      expect(full.machineAccess[0].view.asked.reason).toBe('Fix the disk');
     }
   });
 });

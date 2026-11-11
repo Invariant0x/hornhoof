@@ -627,7 +627,7 @@ export const ru: Messages = {
     computerWhat: machine => `На сутки он сможет выполнять команды с полными правами на машине ${machine}, и каждая будет видна в этом окне. Доступ закроется сам через сутки или когда вы его закроете.`,
     computerOpen: 'Открыть на сутки',
     computerNotNow: 'Не сейчас',
-    computerAccess: machine => `Доступ к машине ${machine}`,
+    machineAccess: machine => `Доступ к машине ${machine}`,
     computerOpenUntil: (machine, at) => `Доступ к машине ${machine} открыт до ${at}.`,
     computerOpenFor: machine => `Открыть доступ к машине ${machine} на сутки`,
     computerGives: machine => `Открытый доступ позволяет оркестратору изменить на машине ${machine} что угодно.`,
@@ -647,6 +647,7 @@ export const ru: Messages = {
     computerOpened: (who, at, machine) => `${who}: доступ к машине ${machine} открыт до ${at}`,
     computerClosed: (who, machine) => `${who}: доступ к машине ${machine} закрыт`,
     computerDeclined: (who, machine) => `${who}: доступ к машине ${machine} не открыт`,
+    computerRefused: machine => `Машина ${machine} не приняла подпись, которая ее открывает, поэтому доступ к ней закрыт. Проверьте, что на ней верные часы, и откройте доступ снова.`,
     failedEmployee: {
       timeout: 'Сотрудник не закончил за 15 минут.',
       not_logged_in: 'Подписка сотрудника вышла из аккаунта на своей машине. Войдите снова и напишите еще раз.',

@@ -18,7 +18,7 @@ function lineOf(t: Messages, language: Language, view: ComputerAccessView): Line
   const shared = { view, machine, shortName: view.machine.hostname || (view.machine.data ? t.window.computerServerName : view.machine.name), blocked: null };
   if (isOpen(view)) {
     const at = clock(language, view.until)!;
-    return { ...shared, key: `${view.machine.id} open`, asks: false, name: t.window.computerAccess(machine), text: t.window.computerUntil(at), why: [t.window.computerOpenUntil(machine, at)], decides: true, actions: view.canClose ? [{ action: 'close', label: t.window.computerClose, ghost: true }] : [] };
+    return { ...shared, key: `${view.machine.id} open`, asks: false, name: t.window.machineAccess(machine), text: t.window.computerUntil(at), why: [t.window.computerOpenUntil(machine, at)], decides: true, actions: view.canClose ? [{ action: 'close', label: t.window.computerClose, ghost: true }] : [] };
   }
   if (!view.asked) return null;
   const { reason } = view.asked;

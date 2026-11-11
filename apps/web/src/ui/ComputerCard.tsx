@@ -15,8 +15,8 @@ export function ComputerCard({ view, onChange, onFailure }: { view: ComputerAcce
 
   if (isOpen(view)) {
     return (
-      <section className="t-card" aria-label={t.window.computerAccess(machine)}>
-        <h4>{t.window.computerAccess(machine)}</h4>
+      <section className="t-card" aria-label={t.window.machineAccess(machine)}>
+        <h4>{t.window.machineAccess(machine)}</h4>
         <p className="t-card-brief">{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
         {view.canClose && (
           <div className="f">

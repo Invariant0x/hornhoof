@@ -512,13 +512,15 @@ describe("a worker's keeper", () => {
     await c.db.update(machineAccess).set({ until: new Date(Date.now() + 3_600_000), grant }).where(eq(machineAccess.machineId, machine));
     await until(() => w.lines.some(line => line.includes('with no grant of its owner')));
     expect(accessIn(config.controlDir)?.untilSec).toBeNull();
-    /* Its updater answers a command that comes then by itself, as closed: here the file only has to arrive. */
+    /* Its keeper tells the server so, and the row says closed again: nobody is shown an open machine that runs nothing,
+       and a command that comes then is ended without reaching the machine. */
+    await until(async () => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, machine)))[0]!.until === null);
     const late = await command(c, machine, 'id');
-    await until(() => existsSync(join(config.controlDir, 'computer', `${late}.json`)));
-    expect(accessIn(config.controlDir)?.untilSec).toBeNull();
+    await until(async () => (await runOf(c, late)).state === 'done');
+    expect(await runOf(c, late)).toMatchObject({ exit: 126 });
+    expect(existsSync(join(config.controlDir, 'computer', `${late}.json`))).toBe(false);
 
     /* Disconnected, it closes and asks no more. */
-    await c.db.update(machineAccess).set({ until: null, grant: null }).where(eq(machineAccess.machineId, machine));
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${machine}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
     await until(() => w.status().disconnected);
     expect(accessIn(config.controlDir)).toMatchObject({ untilSec: null, by: 'keeper' });

@@ -287,9 +287,9 @@ export function accessView(name: string, over: Partial<Omit<ComputerAccessView, 
 
 /* What GET /api/requests answers: the requests, the orchestrator's cards and his requests for machines, counted per
    owner and per asking agent as the server counts them. */
-export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'computerAccess'>> = {}): Decisions {
-  const all = { proposals: [], computerAccess: [], ...more };
-  const items = [...requests, ...all.proposals, ...all.computerAccess];
+export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'machineAccess'>> = {}): Decisions {
+  const all = { proposals: [], machineAccess: [], ...more };
+  const items = [...requests, ...all.proposals, ...all.machineAccess];
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const i of items) {

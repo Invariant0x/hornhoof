@@ -175,7 +175,7 @@ describe('access to the computer the server runs on', () => {
     const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: SERVER, canAnswer: true, machineId: c.machine });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true, machineId: c.machine });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
@@ -184,10 +184,11 @@ describe('access to the computer the server runs on', () => {
     expect(until_).toBeGreaterThanOrEqual(before + DAY_MS - 1000);
     expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
     expect(await accessOf(c)).toMatchObject({ until: new Date(until_), askedReason: null, askedAt: null, grant: null });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: SERVER, canAnswer: true, machineId: c.machine });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true, machineId: c.machine });
+    /* The server's own machine told no name, so the log names none, and each screen names it in its reader's language. */
     expect(await lines(db, orchestrator.id)).toEqual([
-      { state: 'asked', reason: 'Restart the nodes outside AppArmor.', machine: SERVER },
-      { state: 'opened', until: opened.json().until, machine: SERVER },
+      { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
+      { state: 'opened', until: opened.json().until },
     ]);
     /* The note that it is open is the CEO's order, so the turn it starts may use the computer. */
     const [note] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);

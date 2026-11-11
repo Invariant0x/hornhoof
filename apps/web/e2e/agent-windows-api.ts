@@ -108,7 +108,7 @@ async function serve(page: Page, live: Live): Promise<void> {
     if (task) return route.fulfill({ json: { task: detailOf(task) } });
     const answers: Record<string, unknown> = {
       '/api/org': ORG,
-      '/api/requests': { requests: [REQUEST], proposals: [], computerAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } },
+      '/api/requests': { requests: [REQUEST], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } },
       '/api/agents/orchestrator/start': { started: false },
       '/api/machines/access': { views: [] },
       '/api/nodes/commands': { commands: [] },

@@ -501,7 +501,8 @@ export type MachineAwayCard = {
 export type Decisions = {
   requests: WaitingRequest[];
   proposals: ProposalDecision[];
-  computerAccess: ComputerAccessDecision[];
+  /* The orchestrator's requests for machines. A server from before machines had access of their own sends none. */
+  machineAccess?: ComputerAccessDecision[];
   machinesAway?: MachineAwayCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };

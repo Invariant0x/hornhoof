@@ -181,13 +181,18 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
      registry only when asked waits for the first machine that wants to know. */
   ctx.mode.whenLead(() => void (config.updateCheckMs > 0 && refreshBuild(ctx)), () => undefined);
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
-  /* The first time this app leads it takes over the server's own computer access as an app from before left it, and
-     tries again every second while that fails and it still leads. */
+  /* While this app leads it takes over the server's own computer access as an app from before left it, and looks
+     again every second until that is done: its own machine gets its row only once its keeper has asked. */
   const takeOverAccess = (): void =>
-    void ctx.computer.importLegacy(config.controlDir).catch((err: unknown) => {
-      ctx.log.warn({ error: loggable(err) }, "Could not take over the computer access an older build left. Computer access is not served until it is.");
-      if (ctx.mode.current() === 'lead') setTimeout(takeOverAccess, 1000).unref();
-    });
+    void ctx.computer
+      .importLegacy(config.controlDir)
+      .catch((err: unknown) => {
+        ctx.log.warn({ error: loggable(err) }, 'Could not take over the computer access an older build left. Computer access is not served until it is.');
+        return false;
+      })
+      .then(done => {
+        if (!done && ctx.mode.current() === 'lead') setTimeout(takeOverAccess, 1000).unref();
+      });
   ctx.mode.whenLead(takeOverAccess, () => undefined);
   ctx.mode.whenLeaving(() => closeOpenSockets(app));
   app.addHook('onReady', async () => {

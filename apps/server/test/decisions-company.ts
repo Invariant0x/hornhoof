@@ -14,7 +14,7 @@ type View = {
   requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; explained: string | null; task: { number: number } }[];
   proposals: { id: string; kind: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; brief: string; department: { id: string } | null }[];
   addressed: { id: string; canAnswer: boolean; ownerPersonId: string }[];
-  computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } }[];
+  machineAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } }[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 

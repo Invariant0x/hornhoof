@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -26,6 +26,13 @@ export const SEEN_MS = 60_000;
 export const RUN_KEEP_MS = 24 * 3_600_000;
 /* A command its keeper took and does not hold this long after is lost: what it did is not known. */
 export const HELD_GRACE_S = 30;
+/* A command its keeper holds past the time it was given, and this much more, is lost all the same: its updater would
+   have ended and answered it by then. */
+export const SENT_GRACE_S = 300;
+/* A command no keeper took within this was never run, and is not run later: whoever asked has moved on. */
+export const WAITING_MS = 10 * 60_000;
+/* How often the commands of long ago are cleared away. */
+const CLEAR_EVERY_MS = 3_600_000;
 /* The end of a command's output that is kept. */
 export const OUTPUT_MAX = 30_000;
 /* What an app from before access was per machine left in the control folder, set aside until this app leads. */
@@ -47,7 +54,8 @@ export type AccessView = AccessState & { canOpen: boolean; canClose: boolean };
 export type RunResult = { exit: number; output: string };
 /* A command's answer, or that it still runs, that there is no such command, or that its machine's core lost it. */
 export type Waited = RunResult | 'running' | 'gone' | 'lost';
-export type Taken = { access: { untilSec: number; until: string; grant: Grant | null } | null; runs: { id: string; command: string; timeout: number }[] };
+/* forget: the commands the keeper named that are no longer out with it, whose files it lets go of. */
+export type Taken = { access: { untilSec: number; until: string; grant: Grant | null } | null; runs: { id: string; command: string; timeout: number }[]; forget: string[] };
 
 type Row = typeof machines.$inferSelect;
 type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via'>;
@@ -67,8 +75,12 @@ export const canClose = (me: Opener, machine: { personId: string }): boolean => 
 
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
+/* The name a line of the log keeps for a machine: the one its computer told. The server's own machine that told none is
+   left unnamed there, and each screen names it in the reader's own language. */
+export const logName = (machine: Pick<AccessMachine, 'hostname' | 'name' | 'data'>): string | null => machine.hostname || (machine.data ? null : machine.name);
 
 const closedLine = (name: string): string => `Access to ${name} is closed.`;
+const staleLine = (name: string): string => `${name} did not take this command in time, so it was not run.`;
 const notOwner = (name: string) => new ApiError(403, 'forbidden', `Only the owner of ${name} opens access to it.`, 'not_machine_owner');
 const noCore = () => new ApiError(404, 'not_found', "This machine has none of the company's core, so there is no access to open on it.", 'no_core');
 const unreachable = (name: string) => new ApiError(409, 'conflict', `Hornhoof cannot reach ${name} now: its core has not answered for a minute.`, 'machine_unreachable');
@@ -103,6 +115,7 @@ export class Computers {
   private readonly now: () => Date;
   private readonly seenAt = new Map<string, number>();
   private legacyDone = false;
+  private clearedAt = 0;
 
   constructor(
     private readonly ctx: Pick<Ctx, 'db' | 'config' | 'log'>,
@@ -292,17 +305,32 @@ export class Computers {
     });
   }
 
-  /* Waits a while for the command's answer. */
+  /* Waits a while for the command's answer. One that no keeper took in time is ended here too, so whoever asked hears
+     that it was not run. */
   async wait(runId: string, companyId: string, ms = this.waitMs): Promise<Waited> {
     const end = Date.now() + ms;
+    const mine = and(eq(computerRuns.id, runId), eq(computerRuns.companyId, companyId));
     for (;;) {
-      const [run] = await this.ctx.db.select().from(computerRuns).where(and(eq(computerRuns.id, runId), eq(computerRuns.companyId, companyId)));
+      const [run] = await this.ctx.db.select({ state: computerRuns.state, machineId: computerRuns.machineId, createdAt: computerRuns.createdAt }).from(computerRuns).where(mine);
       if (!run) return 'gone';
-      if (run.state === 'done') return { exit: run.exit ?? -1, output: run.output ?? '' };
-      if (run.state === 'lost') return 'lost';
-      if (Date.now() >= end) return 'running';
-      await sleep(POLL_MS);
+      if (run.state === 'waiting' && this.now().getTime() - run.createdAt.getTime() >= WAITING_MS) await this.endStale(run.machineId);
+      else if (run.state === 'done') {
+        const [done] = await this.ctx.db.select({ exit: computerRuns.exit, output: computerRuns.output }).from(computerRuns).where(mine);
+        return { exit: done?.exit ?? -1, output: done?.output ?? '' };
+      } else if (run.state === 'lost') return 'lost';
+      else if (Date.now() >= end) return 'running';
+      else await sleep(POLL_MS);
     }
+  }
+
+  /* Ends the commands of a machine that waited too long for its keeper: they were never run, and are not run later. */
+  private async endStale(machineId: string, tx: Db = this.ctx.db): Promise<void> {
+    const [row] = await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
+    const now = this.now();
+    await tx
+      .update(computerRuns)
+      .set({ state: 'done', exit: CLOSED_EXIT, output: staleLine(row ? this.nameOf(row) : 'The machine'), doneAt: now })
+      .where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'waiting'), lt(computerRuns.createdAt, new Date(now.getTime() - WAITING_MS + 1))));
   }
 
   /* The machine a command is for, for what the orchestrator is told of it. */
@@ -316,28 +344,53 @@ export class Computers {
   }
 
   /* What a machine's keeper takes when it asks: its access, and its next command while that is open. The keeper names
-     the commands it still holds: one it took and no longer holds, a while after, is lost, and none is ever sent twice. A
-     machine gets its next command only once none of its is out, as its updater runs one at a time. */
+     the commands it still holds: one it took and no longer holds, a while after, is lost, and so is one it holds long
+     past the time the command was given; none is ever sent twice, and the keeper is told which of those it named are
+     no longer out, to let go of them. A command nobody took in time is ended unrun. A machine gets its next command
+     only once none of its is out, as its updater runs one at a time. */
   async take(machineId: string, held: string[]): Promise<Taken> {
     return this.ctx.db.transaction(async tx => {
       const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
-      if (!row || row.revokedAt || !row.networkId) return { access: null, runs: [] };
+      if (!row || row.revokedAt || !row.networkId) return { access: null, runs: [], forget: held };
       const now = this.now();
-      const out = await tx.select({ id: computerRuns.id, sentAt: computerRuns.sentAt }).from(computerRuns).where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'sent')));
-      const lost = out.filter(run => !held.includes(run.id) && run.sentAt !== null && now.getTime() - run.sentAt.getTime() >= HELD_GRACE_S * 1000).map(run => run.id);
+      const out = await tx.select({ id: computerRuns.id, sentAt: computerRuns.sentAt, timeoutS: computerRuns.timeoutS }).from(computerRuns).where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'sent')));
+      const since = (run: (typeof out)[number]) => (run.sentAt ? now.getTime() - run.sentAt.getTime() : 0);
+      const lost = out.filter(run => (held.includes(run.id) ? since(run) >= (run.timeoutS + SENT_GRACE_S) * 1000 : since(run) >= HELD_GRACE_S * 1000)).map(run => run.id);
       if (lost.length) await tx.update(computerRuns).set({ state: 'lost', doneAt: now }).where(inArray(computerRuns.id, lost));
-      await tx.delete(computerRuns).where(and(eq(computerRuns.companyId, row.companyId), inArray(computerRuns.state, ['done', 'lost']), lt(computerRuns.doneAt, new Date(now.getTime() - RUN_KEEP_MS))));
+      const stillOut = out.filter(run => !lost.includes(run.id)).map(run => run.id);
+      const forget = held.filter(id => !stillOut.includes(id));
+      if (now.getTime() - this.clearedAt >= CLEAR_EVERY_MS) {
+        this.clearedAt = now.getTime();
+        await tx.delete(computerRuns).where(and(eq(computerRuns.companyId, row.companyId), inArray(computerRuns.state, ['done', 'lost']), lt(computerRuns.doneAt, new Date(now.getTime() - RUN_KEEP_MS))));
+      }
+      await this.endStale(machineId, tx);
       const [access] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
       if (!access?.until || access.until <= now) {
         await endRuns(tx, [machineId], new Map([[machineId, this.nameOf(row)]]), now, false);
-        return { access: null, runs: [] };
+        return { access: null, runs: [], forget };
       }
       const opened = { untilSec: Math.floor(access.until.getTime() / 1000), until: access.until.toISOString(), grant: access.grant };
-      if (out.length > lost.length) return { access: opened, runs: [] };
+      if (stillOut.length > 0) return { access: opened, runs: [], forget };
       const [next] = await tx.select().from(computerRuns).where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'waiting'))).orderBy(asc(computerRuns.createdAt), asc(computerRuns.id)).limit(1);
-      if (!next) return { access: opened, runs: [] };
+      if (!next) return { access: opened, runs: [], forget };
       await tx.update(computerRuns).set({ state: 'sent', sentAt: now }).where(eq(computerRuns.id, next.id));
-      return { access: opened, runs: [{ id: next.id, command: next.command, timeout: next.timeoutS }] };
+      return { access: opened, runs: [{ id: next.id, command: next.command, timeout: next.timeoutS }], forget };
+    });
+  }
+
+  /* The machine's keeper did not take the grant the app gave it: its clock is off, or it does not hold the key the app
+     thinks it holds. The machine is closed there whatever the row says, so the row says so too, and nobody is shown an
+     open machine that runs nothing. The machine, when that changed anything. */
+  async refused(machineId: string): Promise<AccessMachine | null> {
+    return this.ctx.db.transaction(async tx => {
+      const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
+      if (!row || row.revokedAt || !row.networkId) return null;
+      const now = this.now();
+      const closed = await tx.update(machineAccess).set({ until: null, grant: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.grant), gt(machineAccess.until, now))).returning({ id: machineAccess.machineId });
+      if (closed.length === 0) return null;
+      const machine = this.machineOf(row);
+      await endRuns(tx, [machineId], new Map([[machineId, machine.name]]), now, false);
+      return machine;
     });
   }
 
@@ -381,28 +434,30 @@ export class Computers {
     this.legacyDone = !existsSync(aside);
   }
 
-  /* The first time this app leads: what the file set aside said becomes the row of the server's own machine, and the
-     file goes. Until then nothing of computer access is served. */
-  async importLegacy(controlDir: string): Promise<void> {
-    if (this.legacyDone) return;
+  /* While this app leads: what the file set aside said becomes the row of the server's own machine, once that machine
+     has a row, and the file goes. It never writes over a row that is there: whatever was decided since the file was
+     written stands, so a file of before that turns up later opens nothing. Until it is done nothing of computer access
+     is served. Whether it is done: false while the server's own machine has no row yet, to be tried again. */
+  async importLegacy(controlDir: string): Promise<boolean> {
+    if (this.legacyDone) return true;
     const aside = join(controlDir, LEGACY_FILE);
     const { machineId } = this.ctx.config;
-    const [mine] = machineId && existsSync(aside) ? await this.ctx.db.select().from(machines).where(and(eq(machines.networkId, machineId), isNull(machines.revokedAt))) : [];
-    if (!mine) {
-      this.legacyDone = true;
-      return;
-    }
+    /* No file, or a server from before machines had ids, which has no machine of its own to open. */
+    if (!machineId || !existsSync(aside)) return (this.legacyDone = true);
+    const [mine] = await this.ctx.db.select().from(machines).where(and(eq(machines.networkId, machineId), isNull(machines.revokedAt)));
+    if (!mine) return false;
     const said = JSON.parse(readFileSync(aside, 'utf8')) as { untilSec?: unknown; asked?: { reason?: unknown; at?: unknown } | null };
     const now = this.now();
     const until = typeof said.untilSec === 'number' && said.untilSec * 1000 > now.getTime() ? new Date(said.untilSec * 1000) : null;
     const asked = said.asked && typeof said.asked.reason === 'string' && typeof said.asked.at === 'string' ? { askedReason: said.asked.reason.slice(0, 500), askedAt: new Date(said.asked.at) } : { askedReason: null, askedAt: null };
-    await this.ctx.db.transaction(async tx => {
+    const taken = await this.ctx.db.transaction(async tx => {
       await tx.select({ id: machines.id }).from(machines).where(eq(machines.id, mine.id)).for('update');
-      const set = { until, grant: null, openedBy: until ? mine.personId : null, openedAt: until ? now : null, ...asked };
-      await tx.insert(machineAccess).values({ machineId: mine.id, companyId: mine.companyId, ...set }).onConflictDoUpdate({ target: machineAccess.machineId, set });
+      const row = { machineId: mine.id, companyId: mine.companyId, until, grant: null, openedBy: until ? mine.personId : null, openedAt: until ? now : null, ...asked };
+      return (await tx.insert(machineAccess).values(row).onConflictDoNothing().returning({ id: machineAccess.machineId })).length > 0;
     });
     rmSync(aside, { force: true });
-    this.legacyDone = true;
+    this.ctx.log.info(taken ? `Took over the server's computer access as the build before left it: ${until ? `open until ${until.toISOString()}` : 'closed'}.` : "Left the server's computer access as it is: what the build before wrote is older than it.");
+    return (this.legacyDone = true);
   }
 
   ready(): boolean {

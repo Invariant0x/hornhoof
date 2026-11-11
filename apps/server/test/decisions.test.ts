@@ -90,7 +90,10 @@ describe('decisions waiting for people', () => {
       [c.structure.id, 'structure', c.ids.ivan],
       [c.staff.id, 'staff', c.ids.ivan],
     ]);
-    expect(all.computerAccess).toMatchObject([{ kind: 'computer_access', id: c.machine, ownerPersonId: c.ids.ivan, canAnswer: true, view: { asked: { reason: 'Inspect disk space.' } } }]);
+    expect(all.machineAccess).toMatchObject([{ kind: 'computer_access', id: c.machine, ownerPersonId: c.ids.ivan, canAnswer: true, view: { asked: { reason: 'Inspect disk space.' } } }]);
+    /* A page loaded before machines had access of their own reads the old key, which held one request or none: it gets
+       none, and goes on. */
+    expect((await c.app.inject({ url: '/api/requests', ...as(c.tokens.ceo) })).json()).toMatchObject({ computerAccess: null });
     expect(all.counts.byPerson).toEqual({ [c.ids.ivan]: 8, [c.ids.dan]: 1 });
     expect(all.counts.byAgent).toEqual({ [c.workers.dev.id]: 4, [c.workers.sales.id]: 1, [c.workers.mkt.id]: 1, [c.orchestrator.id]: 3 });
     expect(all.counts.total).toBe(9);
@@ -120,7 +123,7 @@ describe('decisions waiting for people', () => {
     const his = await c.view(c.tokens.dan);
     expect(his.requests.map(r => r.id).sort()).toEqual([c.devQuestion, c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
     expect(his.proposals).toEqual([]);
-    expect(his.computerAccess).toEqual([]);
+    expect(his.machineAccess).toEqual([]);
     expect(his.counts).toEqual({ byPerson: { [c.ids.dan]: 1, [c.ids.ivan]: 3 }, byAgent: { [c.workers.dev.id]: 4 }, total: 4 });
     /* He takes his department's own decisions; approvals, the CEO's topics and a question without a topic are the CEO's. */
     expect(Object.fromEntries(his.requests.map(r => [r.id, r.canAnswer]))).toEqual({
@@ -144,7 +147,7 @@ describe('decisions waiting for people', () => {
   it('show a person of the whole company without the delegate mark only what their agents ask, and let them take none', async () => {
     const c = await everyKind();
     const none = await c.view(c.tokens.zed);
-    expect([none.requests, none.addressed, none.proposals, none.computerAccess, none.counts.total]).toEqual([[], [], [], [], 0]);
+    expect([none.requests, none.addressed, none.proposals, none.machineAccess, none.counts.total]).toEqual([[], [], [], [], 0]);
     await ownPlan(c.db, 'zed@acme.com', c.workers.dev.id, c.orchestrator.id);
     const his = await c.view(c.tokens.zed);
     expect(his.requests).toHaveLength(4);
@@ -153,7 +156,7 @@ describe('decisions waiting for people', () => {
       [c.structure.id, false, { kind: 'ceo_and_delegate', department: null }],
       [c.staff.id, false, { kind: 'ceo_and_delegate', department: null }],
     ]);
-    expect(his.computerAccess).toMatchObject([{ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } }]);
+    expect(his.machineAccess).toMatchObject([{ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } }]);
     expect(his.counts.total).toBe(7);
     expect(his.counts.byPerson[c.ids.ivan]).toBe(6);
   });
@@ -164,8 +167,8 @@ describe('decisions waiting for people', () => {
     for (const token of [c.tokens.ceo, c.tokens.zed]) {
       const v = await c.view(token);
       expect(v.requests).toHaveLength(6);
-      expect(v.computerAccess).toHaveLength(1);
-      expect([...v.requests, ...v.proposals, ...v.computerAccess].every(d => d.canAnswer)).toBe(true);
+      expect(v.machineAccess).toHaveLength(1);
+      expect([...v.requests, ...v.proposals, ...v.machineAccess].every(d => d.canAnswer)).toBe(true);
     }
   });
 
@@ -174,12 +177,12 @@ describe('decisions waiting for people', () => {
     const mine = await c.view(c.tokens.ceo, `?person=${c.ids.dan}`);
     expect(mine.requests.map(r => r.id)).toEqual([c.devQuestion.request.id]);
     expect(mine.proposals).toEqual([]);
-    expect(mine.computerAccess).toEqual([]);
+    expect(mine.machineAccess).toEqual([]);
     expect(mine.counts.total).toBe(9);
     const ceos = await c.view(c.tokens.ceo, `?person=${c.ids.ivan}`);
     expect(ceos.requests).toHaveLength(5);
     expect(ceos.proposals).toHaveLength(2);
-    expect(ceos.computerAccess).toHaveLength(1);
+    expect(ceos.machineAccess).toHaveLength(1);
     /* The filter is no key: someone else's decisions stay out of sight, and a stranger's filter shows nothing. */
     await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     const sarasForDan = await c.view(c.tokens.dan, `?person=${c.ids.ivan}`);

@@ -55,6 +55,21 @@ export function leaderBuild(ctx: Ctx): LeaderBuild | null {
   return known?.build ?? null;
 }
 
+/* How long a join waits for the registry when the server knows no build of its own: well under the half minute its
+   installer gives the whole join. */
+export const JOIN_BUILD_WAIT_MS = 10_000;
+
+/* The server's own build for a join, which names it to a machine once and so asks the registry when nothing is known,
+   but only for a moment: a registry that is slow must not cost the machine its one-time command. */
+export async function buildSoon(ctx: Ctx, waitMs = JOIN_BUILD_WAIT_MS): Promise<LeaderBuild | null> {
+  const known = leaderBuild(ctx);
+  if (known) return known;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([refreshBuild(ctx), new Promise<void>(resolve => (timer = setTimeout(resolve, waitMs)))]);
+  clearTimeout(timer);
+  return leaderBuild(ctx);
+}
+
 type Granted = Pick<typeof machines.$inferSelect, 'commit' | 'goCommit' | 'goAt' | 'failedCommit' | 'failedAt'>;
 type Reported = Granted & Pick<typeof machines.$inferSelect, 'updateState' | 'reportAt'>;
 

@@ -1,10 +1,12 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
-import { companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
+import { agents, companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { logName, onMachine, type AccessMachine } from '../computer/access.js';
+import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
 import { followOf, installs, releaseHeld } from './follow.js';
@@ -42,9 +44,18 @@ const ReportBody = z.object({
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });
 
+/* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */
+async function machineRefused(ctx: Ctx, companyId: string, machine: AccessMachine): Promise<void> {
+  ctx.bus.publish(companyId, { type: 'computer' });
+  const [orchestrator] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
+  if (orchestrator) await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'computer', data: { state: 'refused', ...onMachine(logName(machine)) } });
+}
+
 /* held: the commands whose files the keeper still has, a few at most, as its updater runs one at a time. */
 const ComputerQuery = z.object({
   updater: z.enum(['0', '1']).default('0'),
+  /* The keeper did not take the grant it was last given: its machine stayed closed. */
+  refused: z.enum(['0', '1']).default('0'),
   held: z
     .string()
     .max(8 * 37)
@@ -181,8 +192,10 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      which commands it still holds. Asking is what makes the machine reachable. */
   app.get('/api/network/computer', async req => {
     const machine = await computerOf(await requireKeeper(req));
-    const { updater, held } = ComputerQuery.parse(req.query);
+    const { updater, held, refused } = ComputerQuery.parse(req.query);
     ctx.computer.seen(machine.id, updater === '1');
+    const closed = refused === '1' ? await ctx.computer.refused(machine.id) : null;
+    if (closed) await machineRefused(ctx, await companyId(), closed);
     return ctx.computer.take(machine.id, held);
   });
 

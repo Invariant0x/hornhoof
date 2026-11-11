@@ -7,7 +7,7 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { canViewComputer, onMachine, type AccessMachine, type AccessView } from './access.js';
+import { canViewComputer, logName, onMachine, type AccessMachine, type AccessView } from './access.js';
 import { seenAccess } from './seen.js';
 import { STARTS_FIRST } from '../sources/requests.js';
 
@@ -56,7 +56,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     served();
     const { machine, until, asked } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}).grant);
     changed(me.companyId);
-    const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(machine.name) }, me.id);
+    const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(logName(machine)) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
       const message = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: { personId: me.id } });
@@ -71,7 +71,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     served();
     const machine = await ctx.computer.close(me, machineId);
     changed(me.companyId);
-    await line(me.companyId, { state: 'closed', ...onMachine(machine.name) }, me.id);
+    await line(me.companyId, { state: 'closed', ...onMachine(logName(machine)) }, me.id);
     return seenOne(me, machineId);
   }
 
@@ -80,7 +80,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const machine = await ctx.computer.decline(me, machineId);
     if (machine) {
       changed(me.companyId);
-      await line(me.companyId, { state: 'declined', ...onMachine(machine.name) }, me.id);
+      await line(me.companyId, { state: 'declined', ...onMachine(logName(machine)) }, me.id);
     }
     return seenOne(me, machineId);
   }
@@ -116,7 +116,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!id) throw new ApiError(404, 'not_found', "This server's machine has none of the company's core yet.", 'no_core');
     return id;
   }
-  const asBefore = (view: AccessView) => ({ available: view.reachable, until: view.until, asked: view.asked, machine: view.machine.name, canAnswer: view.canOpen, machineId: view.machine.id });
+  const asBefore = (view: AccessView) => ({ available: view.reachable, until: view.until, asked: view.asked, machine: logName(view.machine), canAnswer: view.canOpen, machineId: view.machine.id });
   /* A server whose own machine has no core yet has no access to offer. */
   const NONE_YET = { available: false, until: null, asked: null, machine: null, canAnswer: false, machineId: null };
 

@@ -26,7 +26,7 @@ const ORG: Org = {
   ],
 };
 
-const DECISIONS: Decisions = { requests: [], proposals: [], computerAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
+const DECISIONS: Decisions = { requests: [], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
 
 const TURN: TurnView = {
   id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', mode: 'echelons', messages: [], taskId: null,

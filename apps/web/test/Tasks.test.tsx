@@ -312,7 +312,7 @@ describe('the decisions of one person', () => {
     const user = userEvent.setup();
     let asked = true;
     const calls = shell({
-      'GET /api/requests': () => [200, decisions(REQUESTS, { proposals: [STRUCTURE], computerAccess: asked ? [COMPUTER] : [] })],
+      'GET /api/requests': () => [200, decisions(REQUESTS, { proposals: [STRUCTURE], machineAccess: asked ? [COMPUTER] : [] })],
       'POST /api/machines/m-server/access/open': () => {
         asked = false;
         return [200, { ...SERVER_ACCESS, until: '2099-11-03T12:00:00.000Z', asked: null }];
@@ -333,11 +333,23 @@ describe('the decisions of one person', () => {
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
   });
 
+  it('show the rest of what waits from a server that knows no machine requests yet', async () => {
+    const user = userEvent.setup();
+    /* What a server of before answers: one request for the computer under the old key, and none under the new. */
+    const { machineAccess: _none, ...older } = decisions(REQUESTS, { proposals: [STRUCTURE] });
+    void _none;
+    shell({ 'GET /api/requests': [200, { ...older, computerAccess: { kind: 'computer_access', id: 'server', view: { available: true, until: null, asked: { reason: 'Old.', at: AT } } } }] });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('heading', { name: 'Company structure' })).toBeInTheDocument();
+    expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
+  });
+
   it('show a card for each machine the orchestrator asks for, and answer each on its own machine', async () => {
     const user = userEvent.setup();
     const mac = accessView('marat-mac', { asked: { reason: 'Clean Docker images.', at: AT }, machine: { os: 'darwin' } });
     const calls = shell({
-      'GET /api/requests': [200, decisions([], { computerAccess: [COMPUTER, { ...COMPUTER, id: 'm-marat-mac', view: mac }] })],
+      'GET /api/requests': [200, decisions([], { machineAccess: [COMPUTER, { ...COMPUTER, id: 'm-marat-mac', view: mac }] })],
       'POST /api/machines/m-marat-mac/access/decline': [200, { ...mac, asked: null }],
     });
     await openTasks(user);
@@ -355,7 +367,7 @@ describe('the decisions of one person', () => {
     const user = userEvent.setup();
     const staff: ProposalDecision = { ...STRUCTURE, id: 'pr2', kind: 'staff', department: { id: 'd2', name: 'development' }, brief: 'Hire a reviewer.', items: [{ role: 'DEV-BE', name: 'Reviewer' }] };
     shell({
-      'GET /api/requests': [200, decisions([], { proposals: [staff], computerAccess: [COMPUTER] })],
+      'GET /api/requests': [200, decisions([], { proposals: [staff], machineAccess: [COMPUTER] })],
       'GET /api/departments/d2/roster': [200, ROSTER],
       'POST /api/machines/m-server/access/open': [409, { error: { code: 'conflict', message: "Hornhoof cannot reach the server's computer now: its core has not answered for a minute.", reason: 'machine_unreachable' } }],
     });
@@ -369,7 +381,7 @@ describe('the decisions of one person', () => {
 
   it("show the CEO's own filter with the computer, and another person's without it", async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/org': [200, counted({ p1: 3, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!], { proposals: [STRUCTURE], computerAccess: [COMPUTER] })] });
+    shell({ 'GET /api/org': [200, counted({ p1: 3, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!], { proposals: [STRUCTURE], machineAccess: [COMPUTER] })] });
     await user.click(await screen.findByRole('button', { name: 'Ivan: 3 decisions wait' }));
     const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#10 Payments']);

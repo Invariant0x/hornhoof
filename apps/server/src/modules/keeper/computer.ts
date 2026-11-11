@@ -46,6 +46,8 @@ const SignedGrant = z.object({ payload: z.string().min(1).max(4096), signature: 
 const Answer = z.object({
   access: z.object({ untilSec: z.number().int().positive(), until: z.string(), grant: SignedGrant.nullable() }).nullable(),
   runs: z.array(z.object({ id: z.string().regex(UUID), command: z.string().min(1), timeout: z.number().int().positive() })).max(HELD_MOST),
+  /* The commands this keeper named that are no longer out with it. An app from before it said so names none. */
+  forget: z.array(z.string().regex(UUID)).max(HELD_MOST).default([]),
 });
 const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object({ nonce: z.string(), until: z.number() })) });
 type Grants = z.infer<typeof Grants>;
@@ -67,6 +69,12 @@ export class ComputerCarrier {
   private heardAt = 0;
   private wasOpen = false;
   private prepared = false;
+  /* The app said open with a grant this keeper did not take: said back to it at the next ask, once. */
+  private refusedGrant = false;
+  /* The numbers of grants that ended while the keeper's folder took no write: kept here until it does. */
+  private readonly spentUnwritten = new Map<string, number>();
+  /* What the keeper last decided of its grants, for a round in which the file cannot be read. */
+  private decided: Grants | null = null;
 
   constructor(private readonly opts: ComputerCarrierOptions) {
     this.now = opts.now ?? (() => new Date());
@@ -177,13 +185,35 @@ export class ComputerCarrier {
     }
   }
 
-  private grants(): Grants {
-    const kept = Grants.safeParse(readJson(join(this.opts.dir, GRANTS_FILE)));
-    return kept.success ? kept.data : { held: null, spent: [] };
+  /* What the keeper wrote down of its grants: nothing yet when there is no file, and null when a file is there that
+     cannot be read, which is no reason to forget what it said. */
+  private grants(): Grants | null {
+    const file = join(this.opts.dir, GRANTS_FILE);
+    if (!existsSync(file)) return { held: null, spent: [] };
+    try {
+      const kept = Grants.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+      return kept.success ? kept.data : null;
+    } catch {
+      return null;
+    }
   }
 
-  private keep(grants: Grants): void {
-    writePrivately(join(this.opts.dir, GRANTS_FILE), JSON.stringify(grants));
+  /* Whether it was kept. Without it nothing opens: a grant that could not be written down as held could not be told
+     from a spent one after a restart. */
+  private keep(grants: Grants): boolean {
+    try {
+      writePrivately(join(this.opts.dir, GRANTS_FILE), JSON.stringify(grants));
+      this.spentUnwritten.clear();
+      return true;
+    } catch (err) {
+      for (const one of grants.spent) this.spentUnwritten.set(one.nonce, one.until);
+      this.unkept(reasonOf(err));
+      return false;
+    }
+  }
+
+  private unkept(why: string): void {
+    this.sayHourly('grants', `The keeper could not keep its record of grants, so this machine's computer stays closed: ${why}`);
   }
 
   /* A grant that ended goes to the spent ones, each kept until its own end. */
@@ -195,13 +225,23 @@ export class ComputerCarrier {
   }
 
   /* Until when the app's answer opens this machine, in seconds, or null. With a key held, only its owner's grant for
-     this machine opens it, once, and no later than the grant says; the grants file is written before the access
-     changes. Without one, the server's own keeper takes its app's word, and any other stays closed. */
+     this machine opens it, once, and no later than the grant says; what the keeper holds and what it spent is written
+     down before the access changes, and while that cannot be written the machine is closed. Without a key, the
+     server's own keeper takes its app's word, and any other stays closed. */
   private openUntil(access: z.infer<typeof Answer>['access']): number | null {
     const nowS = Math.floor(this.now().getTime() / 1000);
     const pin = this.opts.pin();
+    this.refusedGrant = false;
     if (!pin) return this.opts.trustApp && access && access.untilSec > nowS ? access.untilSec : null;
-    const before = this.grants();
+    const read = this.grants();
+    /* What it holds and spent: as written, or as it last decided when the file cannot be read. With neither there is
+       nothing to go by, and nothing opens. */
+    const known = read ?? this.decided;
+    if (!known) {
+      this.unkept('the file cannot be read');
+      return null;
+    }
+    const before: Grants = { held: known.held, spent: [...known.spent, ...[...this.spentUnwritten].filter(([nonce]) => !known.spent.some(one => one.nonce === nonce)).map(([nonce, until]) => ({ nonce, until }))] };
     const sent = access?.grant ?? null;
     const same = before.held !== null && sent !== null && before.held.payload === sent.payload && before.held.signature === sent.signature;
     let after: Grants = same ? { held: before.held, spent: before.spent.filter(one => one.until > nowS) } : this.spend(before, before.held, nowS);
@@ -213,15 +253,24 @@ export class ComputerCarrier {
     } else {
       /* What it held ended with this answer, though the app sent it again. */
       if (same) after = this.spend(after, before.held, nowS);
-      if (access) this.sayHourly('grant', "The company server says this machine's computer access is open, with no grant of its owner that this machine's keeper takes. It stays closed.");
+      if (access) {
+        this.refusedGrant = true;
+        this.sayHourly('grant', "The company server says this machine's computer access is open, with no grant of its owner that this machine's keeper takes. It stays closed.");
+      }
     }
-    if (JSON.stringify(after) !== JSON.stringify(before)) this.keep(after);
+    const kept = JSON.stringify(after) === JSON.stringify(read) || this.keep(after);
+    /* A grant that could not be written down as held is not held, and is not spent either: it opens once it can be. */
+    this.decided = kept ? after : { held: null, spent: after.spent };
+    if (!kept) return null;
     return until !== null && until > nowS ? until : null;
   }
 
   private async takeAccess(): Promise<void> {
     const held = this.commandFiles().slice(0, HELD_MOST);
-    const path = `/api/network/computer?updater=${this.updaterAlive() ? 1 : 0}&held=${held.join(',')}`;
+    /* The app hears once that the grant it gave opened nothing here, so nobody is shown an open machine that is closed. */
+    const refused = this.refusedGrant ? '&refused=1' : '';
+    this.refusedGrant = false;
+    const path = `/api/network/computer?updater=${this.updaterAlive() ? 1 : 0}&held=${held.join(',')}${refused}`;
     const res = await this.opts.ask('GET', path, undefined, this.bounded()).catch((err: unknown) => ({ status: 0, body: reasonOf(err) }));
     if (this.stopped) return;
     const said = res.status === 200 ? Answer.safeParse(res.body) : null;
@@ -230,6 +279,7 @@ export class ComputerCarrier {
       const until = this.openUntil(said.data.access);
       this.wasOpen = until !== null;
       this.write(until === null ? CLOSED : { untilSec: until, until: new Date(until * 1000).toISOString(), asked: null, by: 'keeper' });
+      for (const id of said.data.forget) this.letGo(id);
       for (const run of said.data.runs) this.writeRun(run);
       return;
     }
@@ -256,8 +306,17 @@ export class ComputerCarrier {
     renameSync(`${base}.json.new`, `${base}.json`);
   }
 
+  /* A command the app no longer has out with this keeper, or whose answer nobody can read: its files go. The updater
+     stops what it began once the command's file is gone, and clears its own mark. */
+  private letGo(id: string): void {
+    if (this.stopped) return;
+    const base = join(this.file('computer'), id);
+    rmSync(`${base}.json`, { force: true });
+    rmSync(`${base}.out.json`, { force: true });
+  }
+
   /* Each answer the updater wrote goes to the app, and its files go once the app took it or knows no such command. A
-     command's file goes only so: the updater answers only while it is there. */
+     command's file goes only so, or when the app says to let go of it: the updater answers only while it is there. */
   private async bringAnswers(): Promise<void> {
     for (const name of this.names()) {
       if (this.stopped) return;
@@ -265,8 +324,13 @@ export class ComputerCarrier {
       if (!UUID.test(id)) continue;
       const base = join(this.file('computer'), id);
       const out = Out.safeParse(readJson(`${base}.out.json`));
-      /* Half written by the updater, which moves it into place: the next round reads it. */
-      if (!out.success) continue;
+      if (!out.success) {
+        /* The updater moves an answer into place whole, so one that cannot be read never will be: it is let go of, and
+           the app counts the command as lost. */
+        this.sayHourly('answer', `The answer of command ${id} could not be read on this machine, so its outcome is unknown.`);
+        this.letGo(id);
+        continue;
+      }
       const res = await this.opts.ask('POST', `/api/network/computer/${id}`, out.data, this.bounded()).catch(() => ({ status: 0, body: null }));
       if (res.status !== 204 && res.status !== 404) continue;
       rmSync(`${base}.json`, { force: true });

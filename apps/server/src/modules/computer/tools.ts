@@ -7,7 +7,7 @@ import { machinePrincipal, withInputLock } from '../conversation/decision-contex
 import { appendEvent, appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import type { ToolJob } from '../tools/job.js';
-import { onMachine, RUN_DEFAULT_S, RUN_MAX_S, type AccessMachine, type AccessState, type Waited } from './access.js';
+import { logName, onMachine, RUN_DEFAULT_S, RUN_MAX_S, type AccessMachine, type AccessState, type Waited } from './access.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 type Said = ReturnType<typeof say>;
@@ -116,7 +116,7 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       if (until) return say(`Access to ${machine.name} is open until ${until}. Use computer with machine ${machine.id}.`);
       await ctx.computer.ask(job.companyId, machine.id, reason);
       ctx.bus.publish(job.companyId, { type: 'computer' });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(machine.name) } });
+      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(logName(machine)) } });
       await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, machine.personId) });
       const state = (await ctx.computer.states(job.companyId)).find(one => one.machine.id === machine.id);
       const keyless = state?.key === 'not_held' ? ` ${machine.name} does not hold their key yet, and its card tells them what to do. Do not tell anyone to type commands.` : '';

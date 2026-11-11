@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { canReach, WHOLE, withOwned } from '../../auth/access.js';
@@ -6,7 +6,7 @@ import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from 
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { agents, departments, machineAccess, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
@@ -106,7 +106,9 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
   if (!orchestrator || me.via) return { cards: [], computers: [] };
   const seesHim = seesAgentId(viewer, orchestrator.id);
   const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
-  const computers = (await ctx.computer.views(me))
+  /* Most of the time no machine is asked for, and nothing of the machines is read. */
+  const [asked] = await db.select({ id: machineAccess.machineId }).from(machineAccess).where(and(eq(machineAccess.companyId, me.companyId), isNotNull(machineAccess.askedAt))).limit(1);
+  const computers = (asked ? await ctx.computer.views(me) : [])
     .filter(view => view.asked && (view.canOpen || (seesHim && canViewComputer(me))))
     .map(view => ({ view, asked: view.asked!, agentId: orchestrator.id, ownerPersonId: view.machine.personId, canAnswer: view.canOpen, decidedBy: machineDecidedBy(view) }));
   return { cards, computers };

@@ -434,6 +434,7 @@ describe('AgentWindow', () => {
               ev(2, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN }),
               ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
               ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
+              ev(5, 'computer', { state: 'refused', machine: 'marat-mac' }),
             ],
             state: READY,
           },
@@ -443,6 +444,7 @@ describe('AgentWindow', () => {
       expect(screen.getByText(/^Ivan opened access to the server's computer until .+$/)).toBeInTheDocument();
       expect(screen.getByText("Ivan closed access to the server's computer")).toBeInTheDocument();
       expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
+      expect(screen.getByText('marat-mac did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
     /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */
@@ -827,7 +829,7 @@ describe('messages between agents and people', () => {
 
 describe("who takes the orchestrator's card", () => {
   const card = (seq: number, id: string) => ev(seq, 'proposal', { proposalId: id, brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
-  const listed = (proposals: { id: string; canAnswer: boolean }[]) => [200, { requests: [], proposals, computerAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } }];
+  const listed = (proposals: { id: string; canAnswer: boolean }[]) => [200, { requests: [], proposals, machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } }];
   const DANA: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false }, canDecideCompany: false };
   const LOCKED = 'Decided by the CEO or the CEO delegate.';
 

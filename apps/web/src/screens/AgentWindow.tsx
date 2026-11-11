@@ -165,7 +165,7 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
 
-/* What the orchestrator asked of the computer, and what the CEO did about it. */
+/* What the orchestrator asked of a machine, what its owner did about it, and what the machine itself refused. */
 function computerLine(t: Messages, language: Language, e: EventView): string {
   const who = e.person?.name ?? t.window.hornhoof;
   const machine = field(e.data, 'machine') || t.window.computerServer;
@@ -176,6 +176,8 @@ function computerLine(t: Messages, language: Language, e: EventView): string {
       return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
     case 'closed':
       return t.window.computerClosed(who, machine);
+    case 'refused':
+      return t.window.computerRefused(machine);
     default:
       return t.window.computerDeclined(who, machine);
   }

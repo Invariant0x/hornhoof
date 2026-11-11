@@ -388,7 +388,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       requests: requestViews(mine, lines, commits, pictures, names, explaining, places),
       addressed: shown.filter(r => !r.known).map(r => addressedView(r, pictures.get(r.request.id) ?? [], places)),
       proposals: cards.map(c => proposalView(c, names, places)),
-      computerAccess: computers.map(c => computerView(c, names)),
+      /* A page loaded before machines had access of their own reads the old key, which held one request or none. */
+      computerAccess: null,
+      machineAccess: computers.map(c => computerView(c, names)),
       machinesAway: machineCards(me, person, decisions.machines),
       counts: decisions.counts,
     };

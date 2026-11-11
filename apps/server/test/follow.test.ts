@@ -2,8 +2,8 @@ import { generateKeyPairSync } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, jobs, machines, nodes, people, testParts, testRuns } from '../src/db/schema.js';
-import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, followOf, goodGrant, holdsMachine, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
+import { agents, companies, jobs, machines, nodeCodes, nodes, people, testParts, testRuns } from '../src/db/schema.js';
+import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsMachine, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
 import type { Build } from '../src/modules/updates/registry.js';
 import { as, connectNode, listen, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
@@ -272,6 +272,25 @@ describe("following the server's build", () => {
     const asked = c.find.mock.calls.length;
     await c.view(await c.worker('tower'));
     expect(c.find).toHaveBeenCalledTimes(asked);
+  });
+
+  /* The installer gives up on its join after half a minute, and a join command works once. */
+  it('asks the registry before a join command is used up, and for a moment only', async () => {
+    const c = await company({}, registry => void registry.find.mockRejectedValueOnce(new Error('The registry answered 503.')));
+    const code = ((await c.app.inject({ method: 'POST', url: '/api/machines/command', ...as(c.ceo) })).json() as { command: string }).command.split('--join ')[1];
+    const usedWhenAsked: (Date | null)[] = [];
+    c.find.mockImplementation(async () => {
+      usedWhenAsked.push((await c.db.select().from(nodeCodes))[0]!.usedAt);
+      return BUILD;
+    });
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
+    expect(joined.body.split('\n')[0]).toMatch(new RegExp(`^build ${COMMIT} `));
+    expect(usedWhenAsked).toEqual([null]);
+
+    /* A registry that never answers holds a join no longer than the moment given it, and the join goes on without. */
+    const silent = await company({}, registry => void registry.find.mockRejectedValueOnce(new Error('The registry answered 503.')));
+    silent.find.mockReturnValue(new Promise<Build>(() => undefined));
+    expect(await buildSoon(silent.ctx, 20)).toBeNull();
   });
 
   it('keeps the build and the word to install out of a view that did not come through the peer link', async () => {

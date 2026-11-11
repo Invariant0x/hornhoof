@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, computerRuns, departments, jobs, machineAccess, machines, people, personKeys, subscriptions } from '../src/db/schema.js';
-import { Computers, HELD_GRACE_S, LEGACY_FILE, SEEN_MS, type AccessView } from '../src/modules/computer/access.js';
+import { Computers, HELD_GRACE_S, LEGACY_FILE, SEEN_MS, SENT_GRACE_S, WAITING_MS, type AccessView } from '../src/modules/computer/access.js';
 import type { Grant } from '../src/modules/computer/grant.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { VIA } from '../src/modules/network/via.js';
@@ -141,7 +141,7 @@ describe('computer access to a machine of the company', () => {
     /* It is Marat's to answer, and shows in nobody else's requests. */
     const mine = (await c.views(c.tokens.marat)).filter(view => view.asked);
     expect(mine).toMatchObject([{ machine: { id: c.mac, name: 'marat-mac', os: 'darwin', data: false }, asked: { reason: 'Clean Docker images.' }, canOpen: true, key: 'held', reachable: true }]);
-    const requestsOf = async (token: string) => ((await c.app.inject({ url: '/api/requests', ...as(token) })).json() as { computerAccess: { id: string; canAnswer: boolean; ownerPersonId: string; decidedBy: { kind: string } }[] }).computerAccess;
+    const requestsOf = async (token: string) => ((await c.app.inject({ url: '/api/requests', ...as(token) })).json() as { machineAccess: { id: string; canAnswer: boolean; ownerPersonId: string; decidedBy: { kind: string } }[] }).machineAccess;
     expect(await requestsOf(c.tokens.marat)).toMatchObject([{ id: c.mac, canAnswer: true, ownerPersonId: c.ids.marat, decidedBy: { kind: 'machine_owner' } }]);
     for (const token of [c.tokens.dan, c.tokens.zed]) expect(await requestsOf(token)).toEqual([]);
     /* The CEO sees him, and so sees the request without the right to answer it. */
@@ -268,9 +268,9 @@ describe('computer access to a machine of the company', () => {
     await c.openMac();
     const [held, next] = [await c.start(c.mac), await c.start(c.mac)];
     expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([held]);
-    /* Named by its keeper it stays out, however long its updater takes, and nothing else goes out meanwhile. */
-    now += 3_600_000;
-    await c.db.update(machineAccess).set({ until: new Date(now + 3_600_000) }).where(eq(machineAccess.machineId, c.mac));
+    /* Named by its keeper it stays out for as long as the command was given, and nothing else goes out meanwhile. */
+    now += 500_000;
+    await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, next));
     expect((await computer.take(c.mac, [held])).runs).toEqual([]);
     expect(await computer.wait(held, c.acme.id)).toBe('running');
     /* No longer named: lost, and the next goes out. */
@@ -285,6 +285,59 @@ describe('computer access to a machine of the company', () => {
     expect(await computer.wait(next, '0f0f0f0f-0000-4000-8000-00000000000a')).toBe('gone');
   });
 
+  it('gives up a command that waited or was out too long, and tells the keeper what to let go of', async () => {
+    const c = await company();
+    let now = Date.now();
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    computer.moveLegacy(c.control);
+    computer.seen(c.mac, true);
+    c.app.ctx.computer = computer;
+    await c.openMac();
+    const stillOpen = () => c.db.update(machineAccess).set({ until: new Date(now + 3_600_000) }).where(eq(machineAccess.machineId, c.mac));
+    /* The machine fell asleep before its keeper took the command: hours later it is not run. */
+    const stale = await c.start(c.mac, 'apt-get upgrade -y');
+    await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, stale));
+    now += WAITING_MS + 1000;
+    await stillOpen();
+    expect(await computer.wait(stale, c.acme.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
+    expect((await computer.take(c.mac, [])).runs).toEqual([]);
+
+    /* One its keeper took and still names, long past the time it was given: its outcome is unknown, the keeper is told
+       to let go of it, and the next goes out. */
+    const [out, next] = [await c.start(c.mac, 'sleep 1'), await c.start(c.mac, 'id')];
+    for (const id of [out, next]) await c.db.update(computerRuns).set({ createdAt: new Date(now + (id === next ? 1 : 0)) }).where(eq(computerRuns.id, id));
+    expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([out]);
+    now += (300 + SENT_GRACE_S) * 1000 - 2000;
+    await stillOpen();
+    await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, next));
+    expect(await computer.take(c.mac, [out])).toMatchObject({ runs: [], forget: [] });
+    now += 3000;
+    const taken = await computer.take(c.mac, [out, '0f0f0f0f-0000-4000-8000-00000000000a']);
+    expect(taken.forget.sort()).toEqual(['0f0f0f0f-0000-4000-8000-00000000000a', out].sort());
+    expect(taken.runs.map(run => run.id)).toEqual([next]);
+    expect(await computer.wait(out, c.acme.id)).toBe('lost');
+  });
+
+  it("closes a machine whose keeper did not take what its owner signed, and says so", async () => {
+    const c = await company();
+    const stream = await openStream(c.app, c.tokens.marat);
+    await c.openMac();
+    const waiting = await c.start(c.mac);
+    await until(() => stream.messages.filter(message => message.type === 'computer').length === 1);
+    /* Its keeper asks, saying that the grant it was given opened nothing there: a clock that is off, or a key it does
+       not hold after all. */
+    const said = await c.app.inject({ url: '/api/network/computer?updater=1&refused=1', ...keeperOf(c.mac) });
+    expect(said.json()).toMatchObject({ access: null, runs: [] });
+    expect(await c.accessOf(c.mac)).toMatchObject({ until: null, grant: null });
+    expect((await c.runsOf(c.mac)).map(run => [run.id, run.state, run.exit])).toEqual([[waiting, 'done', 126]]);
+    await until(() => stream.messages.filter(message => message.type === 'computer').length === 2);
+    const lines = (await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer')))).map(event => event.data);
+    expect(lines.at(-1)).toEqual({ state: 'refused', machine: 'marat-mac' });
+    /* Said of a machine that is closed, it changes nothing and says nothing more. */
+    await c.app.inject({ url: '/api/network/computer?updater=1&refused=1', ...keeperOf(c.mac) });
+    expect((await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer'))))).toHaveLength(lines.length);
+  });
+
   it('ends the commands nobody took when access closes, and gives none on a closed machine', async () => {
     const c = await company();
     await c.openMac();
@@ -297,10 +350,10 @@ describe('computer access to a machine of the company', () => {
     ]);
     expect(await c.app.ctx.computer.start({ id: (await c.db.select().from(jobs))[0]!.id, agentId: c.orchestrator.id, companyId: c.acme.id }, c.mac, 'true', 300)).toBe('closed');
     /* Its keeper hears that it is closed, and takes nothing. */
-    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [] });
+    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [], forget: [] });
     /* A command written past the app onto a closed machine never runs either. */
     await c.db.insert(computerRuns).values({ companyId: c.acme.id, machineId: c.mac, command: 'id', timeoutS: 300 });
-    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [] });
+    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [], forget: [] });
     expect((await c.runsOf(c.mac)).at(-1)).toMatchObject({ state: 'done', exit: 126 });
   });
 
@@ -517,35 +570,53 @@ describe('what an app from before access was per machine left', () => {
     return computer;
   }
 
-  it('carries an open window over, once this app leads, and once only', async () => {
+  it('carries an open window over once the server has its own machine, and never over what was decided since', async () => {
     const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
     const untilSec = Math.floor(Date.now() / 1000) + 3600;
-    legacy(control, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: { reason: 'Look at the disk.', at: '2026-11-10T10:00:00.000Z' } });
+    const old = { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: { reason: 'Look at the disk.', at: '2026-11-10T10:00:00.000Z' } };
+    legacy(control, old);
     const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', ...SERVER_MACHINE_ENV });
     /* Set aside at start, by one rename. */
     expect([existsSync(join(control, 'computer.json')), existsSync(join(control, LEGACY_FILE))]).toEqual([false, true]);
     const ceo = await setUpCompany(app);
-    /* A server that led before its own machine had a row keeps the file for its next start. */
-    await until(() => app.ctx.computer.ready());
-    expect(existsSync(join(control, LEGACY_FILE))).toBe(true);
-    const server = await serverMachine(app);
-    const computer = nextStart(app, control, server);
-    /* Nothing of computer access is served before the file is taken over. */
-    expect(computer.ready()).toBe(false);
+    /* The server leads before its keeper gave its own machine a row: nothing of computer access is served until the
+       file is taken over, and the file is not left for a later start to find. */
+    expect(await app.ctx.computer.importLegacy(control)).toBe(false);
+    expect(app.ctx.computer.ready()).toBe(false);
     expect((await app.inject({ url: '/api/network/computer?updater=1', ...OWN_KEEPER })).statusCode).toBe(503);
+    const server = await serverMachine(app);
     expect((await app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(ceo) })).statusCode).toBe(503);
-    await computer.importLegacy(control);
-    expect(computer.ready()).toBe(true);
+    expect(await app.ctx.computer.importLegacy(control)).toBe(true);
+    expect(app.ctx.computer.ready()).toBe(true);
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     expect((await db.select().from(machineAccess))[0]).toMatchObject({ machineId: server, until: new Date(untilSec * 1000), openedBy: owner!.id, askedReason: 'Look at the disk.', grant: null });
     expect(existsSync(join(control, LEGACY_FILE))).toBe(false);
-    /* The owner's close after it stays: nothing is carried over twice, at this start or the next. */
+    /* The owner closes it. A file of before that turns up at a later start changes nothing of that. */
     expect((await app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(ceo) })).statusCode).toBe(200);
-    await computer.importLegacy(control);
+    writeFileSync(join(control, LEGACY_FILE), JSON.stringify(old));
     const again = nextStart(app, control, server);
-    expect(again.ready()).toBe(true);
-    await again.importLegacy(control);
-    expect((await db.select().from(machineAccess))[0]).toMatchObject({ until: null });
+    expect(again.ready()).toBe(false);
+    expect(await again.importLegacy(control)).toBe(true);
+    expect((await db.select().from(machineAccess))[0]).toMatchObject({ until: null, openedBy: owner!.id });
+    expect(existsSync(join(control, LEGACY_FILE))).toBe(false);
+  });
+
+  it('takes over by itself once the row is there, while the app leads', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    const untilSec = Math.floor(Date.now() / 1000) + 3600;
+    legacy(control, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null });
+    const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
+    await setUpCompany(app);
+    const server = await serverMachine(app);
+    await until(() => app.ctx.computer.ready());
+    expect((await db.select().from(machineAccess))[0]).toMatchObject({ machineId: server, until: new Date(untilSec * 1000) });
+    /* A server installed before machines had ids has no machine of its own to open: there is nothing to wait for. */
+    const idless = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    legacy(idless, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null });
+    const bare = await testApp({ HORNHOOF_CONTROL_DIR: idless });
+    await setUpCompany(bare.app);
+    await until(() => bare.app.ctx.computer.ready());
+    expect(await bare.db.select().from(machineAccess)).toEqual([]);
   });
 
   it('carries a closed one over as closed, and leaves what a keeper wrote', async () => {
@@ -553,7 +624,8 @@ describe('what an app from before access was per machine left', () => {
     legacy(control, { untilSec: null, until: null, asked: null });
     const first = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
     await setUpCompany(first.app);
-    await nextStart(first.app, control, await serverMachine(first.app)).importLegacy(control);
+    await serverMachine(first.app);
+    await first.app.ctx.computer.importLegacy(control);
     expect((await first.db.select().from(machineAccess))[0]).toMatchObject({ until: null, openedBy: null, askedReason: null });
 
     const keepers = mkdtempSync(join(tmpdir(), 'hh-control-'));

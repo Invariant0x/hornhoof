@@ -599,7 +599,7 @@ export const en = {
     computerWhat: (machine: string) => `For a day it runs commands as root on ${machine}, and each one shows in this window. Access closes by itself after a day, or when you close it.`,
     computerOpen: 'Open for a day',
     computerNotNow: 'Not now',
-    computerAccess: (machine: string) => `Access to ${machine}`,
+    machineAccess: (machine: string) => `Access to ${machine}`,
     computerOpenUntil: (machine: string, at: string) => `Access to ${machine} is open until ${at}.`,
     computerOpenFor: (machine: string) => `Open access to ${machine} for a day`,
     computerGives: (machine: string) => `Open access lets the orchestrator change anything on ${machine}.`,
@@ -619,6 +619,7 @@ export const en = {
     computerOpened: (who: string, at: string, machine: string) => `${who} opened access to ${machine} until ${at}`,
     computerClosed: (who: string, machine: string) => `${who} closed access to ${machine}`,
     computerDeclined: (who: string, machine: string) => `${who} did not open access to ${machine}`,
+    computerRefused: (machine: string) => `${machine} did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.`,
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
       not_logged_in: 'This employee\'s subscription is signed out on its machine. Sign in again, then write once more.',

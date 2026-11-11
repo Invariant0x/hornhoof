@@ -13,7 +13,7 @@ import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testP
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
-import { leaderBuild, refreshBuild, type LeaderBuild } from '../network/follow.js';
+import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
 import { findThisMachine } from '../network/store.js';
@@ -107,6 +107,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        no ticket. */
     const wantsCore = body.core || code.core;
     const here = wantsCore && isServerComputer(config, body.machineId);
+    /* The server's own build, so the core comes up on the build the server runs. This answer is the one to name it, so a
+       server that knows none asks the registry: before the command is used up, and for a moment only. */
+    const build = wantsCore ? await buildSoon(ctx) : null;
 
     const joined = await db.transaction(async tx => {
       const used = await tx
@@ -170,16 +173,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
-    /* The server's own build, so the core comes up on the build the server runs. A join command works once, so this
-       answer is the one to name it: when the server knows none, it asks the registry first. */
-    const build = core ? (leaderBuild(ctx) ?? (await refreshBuild(ctx).then(() => leaderBuild(ctx)))) : null;
 
     /* The build's line and the core's first, then one line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
-      const first = (build ? buildLine(config.image, build) : '') + (core ? coreLine(core) : '');
+      const first = (core && build ? buildLine(config.image, build) : '') + (core ? coreLine(core) : '');
       return reply.type('text/plain; charset=utf-8').send(first + joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
     }
-    return { machine: joined.machine, nodes: joined.nodes, core, build };
+    return { machine: joined.machine, nodes: joined.nodes, core, build: core ? build : null };
   });
 
   /* The core lives in a folder named after the company and takes the server's own web port first, so the company opens
