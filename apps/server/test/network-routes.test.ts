@@ -11,7 +11,7 @@ import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
-import { as, setUpCompany, testApp, until } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
 const VIA = 'x-hornhoof-via';
@@ -96,6 +96,48 @@ describe('the network routes the keeper calls', () => {
     const said = (await c.peers()).json() as { revoked: string[]; crlPem: string };
     expect(said.revoked).toEqual(['aa01']);
     expect(revokedIn(said.crlPem)).toEqual(['aa01']);
+  });
+
+  it("keeps the old leader's install when a copy leads", async () => {
+    const c = await company();
+    /* A, where the company was installed, with its certificate, and B, a joined computer that took the server: this
+       app runs on B. */
+    const [a] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: `server:${'f'.repeat(32)}`, hostname: 'old-rack', networkId: 'f'.repeat(32), role: 'data' }).returning();
+    await c.db.insert(certificates).values({ serial: 'aa01', machineId: a!.id, until: new Date(Date.now() + 86_400_000) });
+    const b = await c.joined('data', newKey(), { hostname: 'b-box', networkId: MACHINE_ID });
+    const answer = (await c.certificate(newKey())).json() as { machine: string };
+    expect(answer.machine).toBe(b.id);
+    expect((await c.db.select().from(machines).where(eq(machines.id, a!.id)))[0]!.revokedAt).toBeNull();
+    expect((await c.db.select().from(certificates).where(eq(certificates.serial, 'aa01')))[0]!.revokedAt).toBeNull();
+    expect(((await c.peers()).json() as { revoked: string[] }).revoked).toEqual([]);
+
+    /* The install is listed as a machine, by the name its keeper reported, and is no computer to disconnect. The
+       machine that leads is listed too, as the computer its owner joined, and does not leave either. */
+    const listed = (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json() as { machines: { id: string; hostname: string; serverInstall: boolean }[] };
+    expect(listed.machines.map(m => [m.id, m.hostname, m.serverInstall])).toEqual(expect.arrayContaining([[a!.id, 'old-rack', true], [b.id, 'b-box', false]]));
+    const refusal = async (id: string) => {
+      const res = await c.app.inject({ method: 'POST', url: `/api/machines/${id}/disconnect`, ...as(c.ceo) });
+      const { error } = res.json() as { error: { reason: string; message: string } };
+      return [res.statusCode, error.reason, error.message];
+    };
+    expect(await refusal(a!.id)).toEqual([409, 'server_install', 'The company was installed on old-rack, so it cannot be disconnected.']);
+    expect(await refusal(b.id)).toEqual([409, 'leader', 'b-box runs the company server. Move the server to another machine first.']);
+    expect((await c.serverRows()).map(row => row.id).sort()).toEqual([a!.id, b.id].sort());
+    /* The other routes of a machine take the install. */
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${a!.id}`, payload: { lendsTests: false }, ...as(c.ceo) })).statusCode).toBe(200);
+  });
+
+  it("refuses to disable the leader's person", async () => {
+    const c = await company();
+    const pat = await invitePerson(c.app, c.ceo, { name: 'Pat', email: 'pat@acme.test', access: { whole: true } });
+    const [person] = await c.db.select().from(people).where(eq(people.email, 'pat@acme.test'));
+    const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: person!.id, machineKey: 'pat-0001-abcd', hostname: 'pat-box', networkId: MACHINE_ID, role: 'data' }).returning();
+    const res = await c.app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { status: 'disabled' }, ...as(c.ceo) });
+    const { error } = res.json() as { error: { reason: string; message: string } };
+    expect([res.statusCode, error.reason, error.message]).toEqual([409, 'leader', 'pat-box runs the company server. Move the server to another machine first.']);
+    expect((await c.db.select().from(people).where(eq(people.id, person!.id)))[0]!.status).toBe('active');
+    expect((await c.db.select().from(machines).where(eq(machines.id, box!.id)))[0]!.revokedAt).toBeNull();
+    expect((await c.app.inject({ url: '/api/me', ...as(pat) })).statusCode).toBe(200);
   });
 
   it("renews a peer's certificate for the same key only", async () => {

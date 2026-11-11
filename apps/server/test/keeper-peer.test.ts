@@ -446,6 +446,7 @@ describe('the peer link in the keeper', () => {
       clear: async () => void (state.setting = null),
       checkpoint: async () => undefined,
       pulse: async () => void (state.pulses += 1),
+      moveTarget: async () => null,
     };
     return { state, catalog };
   }

@@ -6,6 +6,7 @@ import { requireCompanyPerson, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
 import type { UpdateState } from './check.js';
 import { modeGate } from '../keeper/app-mode.js';
+import { movingTo } from '../copies/move.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
@@ -98,6 +99,9 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (await ctx.merger.pending()) {
       throw new ApiError(409, 'conflict', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Company settings.', 'merge_pending');
     }
+    /* An update would stop the copy the server is to move with. */
+    const moving = await movingTo(ctx.db);
+    if (moving !== null) throw new ApiError(409, 'conflict', `The server is moving to ${moving || 'another machine'}. Update once it moved.`, 'moving');
     const id = randomUUID();
     claimUpdater(ctx, id);
     try {

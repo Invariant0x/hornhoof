@@ -17,6 +17,7 @@ import { linkOf, publicUrl } from '../link/link.js';
 import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
+import { askMove, cancelMove, moveView } from '../copies/move.js';
 import { setPriority } from '../copies/priority.js';
 import { holding } from '../copies/view.js';
 import { findThisMachine } from '../network/store.js';
@@ -25,10 +26,10 @@ import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
-import { disconnectMachines } from './disconnect.js';
+import { disconnectMachines, refuseLeader } from './disconnect.js';
 import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
-import { builtinMachine, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
+import { builtinMachine, isServerInstall, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
 
@@ -213,7 +214,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { subscription } = PlanBody.parse(req.body);
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine(config)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, subscription), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
@@ -230,7 +231,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/machines/:id/core', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine, eq(machines.kind, 'computer')));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine(config), eq(machines.kind, 'computer')));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     if (machine.networkId || isServerComputer(config, machine.machineKey)) {
@@ -245,7 +246,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/machines', async req => {
     const me = await requirePerson(req, db);
-    const live = and(isNull(machines.revokedAt), shownMachine);
+    const live = and(isNull(machines.revokedAt), shownMachine(config));
     const rows = await db
       .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path, keepsBackups: machines.keepsBackups, heldBackups: machines.heldBackups })
       .from(machines)
@@ -324,6 +325,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         arch: m.arch,
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
+        /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
+        serverInstall: isServerInstall(m.machineKey),
         ...machineState(hub, on(m.id).map(n => n.id)),
         ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
@@ -349,12 +352,18 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       ...(held ? { copies: held.copies } : {}),
       /* Whether this person sees the order the server passes on in. */
       priority: held !== null,
+      /* The request to move the server, for everyone who sees machines, and whether this person may ask for one: the CEO
+         on his own session, while this app leads. */
+      move: await moveView(db),
+      canMove: me.isOwner && !me.via && ctx.mode.current() === 'lead',
     };
   });
 
+  const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
+
   /* A live machine its owner, or someone who sees the whole company, may change. */
   async function ownMachine(me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
-    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine));
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine(config)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
     return machine;
@@ -363,7 +372,12 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/machines/:id/disconnect', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    await ownMachine(me, id);
+    const machine = await ownMachine(me, id);
+    /* The machine the company was installed on is no computer someone joined, and the one that leads does not leave. */
+    if (isServerInstall(machine.machineKey)) {
+      throw new ApiError(409, 'conflict', `The company was installed on ${machine.hostname || 'this machine'}, so it cannot be disconnected.`, 'server_install');
+    }
+    await refuseLeader(db, config, [id]);
     await disconnectMachines(ctx, [id]);
     return reply.code(204).send();
   });
@@ -372,11 +386,30 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
      or kept from the server. His alone, on his own session. */
   app.put('/api/machines/:id/priority', async (req, reply) => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
+    if (!me.isOwner || me.via) throw notCeo();
     const { id } = IdParams.parse(req.params);
     const { pin } = PriorityBody.parse(req.body);
     await ownMachine(me, id);
     await setPriority(ctx, id, pin);
+    return reply.code(204).send();
+  });
+
+  /* The CEO's request to move the server to this machine, and its taking off. His alone, on his own session. */
+  app.post('/api/machines/:id/move', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.via) throw notCeo();
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
+    await askMove(ctx, id, me.id);
+    return reply.code(202).send({ state: 'preparing' });
+  });
+
+  app.delete('/api/machines/:id/move', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.via) throw notCeo();
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
+    await cancelMove(ctx, id);
     return reply.code(204).send();
   });
 

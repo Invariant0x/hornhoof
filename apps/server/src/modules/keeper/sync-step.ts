@@ -31,7 +31,7 @@ export type CopySample = { machine: string; networkId: string; number: number; n
    company's link while this keeper's own client holds it. record: what the relay holds of who has the latest changes,
    as last read or stored. oldestWaitMs: for how long the oldest commit has waited on the named copy. slowForMs: for
    how long every look saw a commit wait over SLOW_WAIT_MS. namedBytes5s: what the named copy took in the last five
-   seconds. */
+   seconds. target: the network id of the machine the server is asked to move to, when it is one of the others. */
 export type SyncSample = {
   now: number;
   others: CopySample[];
@@ -42,6 +42,7 @@ export type SyncSample = {
   oldestWaitMs: number | null;
   slowForMs: number;
   namedBytes5s: number;
+  target: string | null;
 };
 
 /* What the controller keeps between looks. w: how far the leader had written once the setting held. posting: an answer
@@ -81,6 +82,12 @@ function best(s: SyncSample): CopySample | undefined {
   return s.others.filter(copy => copy.finished && copy.keptPaceMs >= PACE_FOR_MS).sort((a, b) => a.number - b.number)[0];
 }
 
+/* The copy of the machine the server is to move to, once it may be named: commits wait for it then, whatever its
+   number, so that it holds every confirmed change when the server stops. */
+function moveTarget(s: SyncSample): CopySample | undefined {
+  return s.target === null ? undefined : s.others.find(copy => copy.networkId === s.target && copy.finished && copy.keptPaceMs >= PACE_FOR_MS);
+}
+
 /* The first row that fits, as the plan's table has them. A setting is cleared only once the relay stored that this
    machine alone holds the latest changes, and the relay is told that a copy holds them only once the copy holds
    everything the leader had written when the setting took hold. */
@@ -95,8 +102,10 @@ function decide(s: SyncSample, m: SyncMemory): { action: SyncAction; flag: Flag 
   if (s.setting !== null) {
     const named = s.others.find(copy => copy.name === s.setting);
     if (!named || silent(named, s)) return dropped();
+    const target = moveTarget(s);
+    if (target && target.name !== named.name) return dropped();
     const better = best(s);
-    if (better && better.number < named.number) return dropped();
+    if (better && better.number < named.number && named.networkId !== s.target) return dropped();
     if (m.w === null) {
       if (named.syncState !== 'sync') return { action: NONE, flag: 'copy' };
       return { action: m.checkpointed ? { do: 'read_w' } : { do: 'checkpoint' }, flag: 'copy' };
@@ -106,7 +115,7 @@ function decide(s: SyncSample, m: SyncMemory): { action: SyncAction; flag: Flag 
     return { action: NONE, flag: 'copy' };
   }
   if (offStored) {
-    const next = best(s);
+    const next = moveTarget(s) ?? best(s);
     return { action: next ? { do: 'set', name: next.name } : NONE, flag: 'relay_off' };
   }
   return { action: POST_OFF, flag: null };

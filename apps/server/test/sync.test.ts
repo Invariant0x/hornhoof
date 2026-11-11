@@ -15,6 +15,8 @@ function catalogOf() {
     setting: null as string | null,
     position: '0/3000000',
     oldestWaitMs: null as number | null,
+    target: null as string | null,
+    targetAsked: 0,
     did: [] as string[],
     pulses: 0,
   };
@@ -34,6 +36,7 @@ function catalogOf() {
     },
     checkpoint: async () => void state.did.push('checkpoint'),
     pulse: async () => void (state.pulses += 1),
+    moveTarget: async () => ((state.targetAsked += 1), state.target),
   };
   return { state, catalog };
 }
@@ -134,7 +137,7 @@ describe('the sync controller', () => {
     s.state.replication[0]!.confirmed = '0/5000000';
     await s.look();
     expect(s.record()).toMatchObject({ state: 'on', copy: C.networkId, epoch: 2 });
-    expect(s.controller.copies()).toEqual([{ name: C.copyName, state: 'sync' }]);
+    expect(s.controller.copies()).toEqual([{ name: C.copyName, networkId: C.networkId, state: 'sync' }]);
     expect(s.lines).toEqual([]);
     /* It beat the pulse meanwhile, about once a second, and never faster. */
     expect(s.state.pulses).toBeGreaterThan(30);
@@ -197,7 +200,7 @@ describe('the sync controller', () => {
     expect(s.state.did.at(-1) === 'clear' || s.state.did.includes('clear')).toBe(true);
     expect(s.state.setting).toBeNull();
     expect(s.controller.flag()).toBe('relay_off');
-    expect(s.controller.copies()).toEqual([{ name: C.copyName, state: 'silent' }]);
+    expect(s.controller.copies()).toEqual([{ name: C.copyName, networkId: C.networkId, state: 'silent' }]);
   });
 
   it('stops renewing while a commit waits on a copy that cannot be dropped', async () => {
@@ -271,6 +274,34 @@ describe('the sync controller', () => {
     s.state.replication[0]!.pid = 42;
     await s.look();
     expect(s.controller.copies()[0]!.state).not.toBe('silent');
+  });
+
+  it("samples the move's target", async () => {
+    const s = await stand();
+    const D = { machine: 'd', networkId: 'd0d0d0d0'.repeat(8), number: 3, copyName: 'copy_d0d0d0d0d0d0d0d0_1', ready: true };
+    s.state.machines = [C, D];
+    s.state.replication.push({ ...s.state.replication[0]!, name: D.copyName });
+    await s.looks(2);
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 3, 1000);
+    /* With no request the lower number is named. */
+    expect(s.state.setting).toBe(C.copyName);
+    expect(s.controller.named()).toBe(C.networkId);
+    expect(s.controller.copies().map(copy => copy.networkId)).toEqual([C.networkId, D.networkId]);
+    expect(s.controller.generation()).toBe(s.controller.record()?.generation);
+    /* The request is read once a second, and the target takes the place within the looks of one. */
+    const asked = s.state.targetAsked;
+    await s.looks(8, 250);
+    expect(s.state.targetAsked - asked).toBe(2);
+    s.state.target = D.networkId;
+    await s.looks(8, 250);
+    expect(s.state.did).toContain('clear');
+    await s.looks(4, 250);
+    expect(s.state.setting).toBe(D.copyName);
+    expect(s.controller.named()).toBe(D.networkId);
+    /* A target that is none of the copies is no target for the setting. */
+    s.state.target = 'e0e0e0e0'.repeat(8);
+    await s.looks(12, 250);
+    expect(s.state.setting).toBe(C.copyName);
   });
 
   it('writes no pulse where it does not lead', async () => {

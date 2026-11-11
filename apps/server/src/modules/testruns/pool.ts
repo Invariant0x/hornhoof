@@ -81,7 +81,7 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): 
 export async function poolOf(ctx: Ctx, who: Person) {
   const { db, hub } = ctx;
   const whole = who.scopeKind === 'company';
-  const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt), shownMachine);
+  const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt), shownMachine(ctx.config));
   const rows = await db
     .select({ id: machines.id, name: machines.hostname, kind: machines.kind, lent: machines.lendsTests, owner: people.name })
     .from(machines)

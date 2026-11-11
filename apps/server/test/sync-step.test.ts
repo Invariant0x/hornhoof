@@ -15,7 +15,7 @@ const copy = (over: Partial<CopySample> = {}): CopySample => ({
 });
 const C = copy();
 const D = copy({ machine: 'd', networkId: D_ID, number: 3, name: 'copy_d0d0d0d0d0d0d0d0_1' });
-const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, ...over });
+const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, target: null, ...over });
 const memory = (over: Partial<SyncMemory> = {}): SyncMemory => ({ w: null, posting: false, flag: null, checkpointed: false, blocked: false, ...over });
 const step = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => nextSyncStep(sample(s), memory(m));
 const said = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => {
@@ -118,6 +118,32 @@ describe('the next step of the sync controller', () => {
     expect(said({ others: [D, C], listed: 2, record: OFF })).toEqual({ action: { do: 'set', name: C.name }, flag: 'relay_off', renew: true });
     expect(said({ others: [copy({ keptPaceMs: PACE_FOR_MS - 1 })], record: OFF })).toEqual({ action: NONE, flag: 'relay_off', renew: true });
     expect(said({ others: [copy({ finished: false })], record: OFF })).toEqual({ action: NONE, flag: 'relay_off', renew: true });
+  });
+
+  it("drops the named copy for the move's target once the target kept pace", () => {
+    /* C (2) is named, and the server is to move to D (3). */
+    const moving = { others: [C, D], listed: 2, setting: C.name, target: D_ID };
+    expect(said({ ...moving, record: OFF }, { w: '0/1' })).toEqual({ action: CLEAR, flag: 'relay_off', renew: true });
+    expect(said({ ...moving, record: ON_C }, { w: '0/1' })).toEqual({ action: POST_OFF, flag: 'copy', renew: true });
+    /* A target that has not kept pace long enough, or holds not every table yet, takes nobody's place. */
+    for (const not of [{ keptPaceMs: PACE_FOR_MS - 1 }, { finished: false }]) {
+      expect(said({ ...moving, others: [C, { ...D, ...not }], record: ON_C }, { w: '0/1' }).action).toEqual(NONE);
+    }
+    /* A target that is not among the copies changes nothing. */
+    expect(said({ ...moving, target: 'e0e0e0e0'.repeat(8), record: ON_C }, { w: '0/1' }).action).toEqual(NONE);
+  });
+
+  it("names the move's target over a lower number", () => {
+    expect(said({ others: [C, D], listed: 2, record: OFF, target: D_ID })).toEqual({ action: { do: 'set', name: D.name }, flag: 'relay_off', renew: true });
+    /* Until the target kept pace, the lowest-numbered copy that did is named, as with no move. */
+    expect(said({ others: [C, { ...D, keptPaceMs: PACE_FOR_MS - 1 }], listed: 2, record: OFF, target: D_ID }).action).toEqual({ do: 'set', name: C.name });
+  });
+
+  it("keeps the move's target named while a lower number keeps pace", () => {
+    const named = { others: [C, D], listed: 2, setting: D.name, record: { ...ON_C, copy: D_ID } };
+    expect(said({ ...named, target: D_ID }, { w: '0/1' }).action).toEqual(NONE);
+    /* With the request gone, the lower number takes the place again. */
+    expect(said(named, { w: '0/1' }).action).toEqual(POST_OFF);
   });
 
   it('never clears an empty setting', () => {

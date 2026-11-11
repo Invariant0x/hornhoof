@@ -39,17 +39,21 @@ const noMachineId = () => new ApiError(409, 'conflict', 'This server has no mach
 
 /* The row of the machine this app runs on, made when it has none. It is a row of its own with the role data, never the
    row of a computer someone joined, so disconnecting that computer or disabling a person never reaches it. A database
-   keeps one such live row: any other, as after a restore onto an install with another machine id, is retired with its
-   certificates, so an old identity never counts as another data machine. */
+   keeps one such live row made here: when this call makes this machine's row, any other, as after a restore onto an
+   install with another machine id, is retired with its certificates, so an old identity never counts as another data
+   machine. A machine that finds its row retires none: a copy that took the server finds the computer its owner joined,
+   and the machine the company was installed on stays a machine of the company. */
 export async function thisMachine(db: Db, config: Config, companyId: string): Promise<{ id: string }> {
   const networkId = config.machineId;
   if (!networkId) throw noMachineId();
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT 1 FROM ${companies} WHERE ${companies.id} = ${companyId} FOR UPDATE`);
     const values = { companyId, personId: await ownerOf(tx, companyId), machineKey: `${SERVER_KEY}${networkId}`, networkId, role: 'data' as const };
+    const [found] = await tx.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, networkId), live));
     /* An identity retired earlier that this install comes back to is this machine again. */
     await tx.insert(machines).values(values).onConflictDoUpdate({ target: machines.networkId, set: { revokedAt: null, role: 'data' } });
     const [mine] = await tx.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, networkId), live));
+    if (found) return mine!;
     const older = await tx.update(machines).set({ revokedAt: new Date() }).where(and(serverRow, live, ne(machines.id, mine!.id))).returning({ id: machines.id });
     for (const { id } of older) await tx.update(certificates).set({ revokedAt: new Date() }).where(and(eq(certificates.machineId, id), isNull(certificates.revokedAt)));
     return mine!;

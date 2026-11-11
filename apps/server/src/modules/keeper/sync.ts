@@ -1,4 +1,5 @@
 import type { Route, SyncPost, SyncRecord, SyncResult } from '../link/relay.js';
+import { moveTarget } from '../copies/move.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf } from './machine-keys.js';
 import { lsnAtLeast, nextSyncStep, PACE_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SLOW_WAIT_MS, type CopySample, type Flag, type SyncAction, type SyncMemory, type SyncSample } from './sync-step.js';
@@ -6,13 +7,15 @@ import { lsnAtLeast, nextSyncStep, PACE_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SL
 /* How often the relay is asked who holds the company's route, while a copy exists or something of one is left. */
 const ROUTE_EVERY_MS = 5_000;
 const PULSE_EVERY_MS = 1_000;
+/* How often the request to move the server is read. */
+const TARGET_EVERY_MS = 1_000;
 const BYTES_OVER_MS = 5_000;
 
 /* What the controller asks the leader's own Postgres. machines: the other live machines that hold the data.
    replication: the slot and the connection of each copy, by the copy's name. setting: the copy each commit waits for,
    or none. position: how far the leader has written. oldestWaitMs: for how long the oldest commit has waited on the
    copy. Each of set, clear and checkpoint ends only once Postgres has done it. pulse: the row every copy reads the
-   leader's clock from. */
+   leader's clock from. moveTarget: the network id of the machine the server is asked to move to, or none. */
 export type SyncCatalog = {
   machines(): Promise<{ machine: string; networkId: string; number: number | null; copyName: string | null; ready: boolean }[]>;
   replication(): Promise<{ name: string; confirmed: string | null; pid: number | null; replyTime: string | null; syncState: string | null }[]>;
@@ -23,9 +26,11 @@ export type SyncCatalog = {
   clear(): Promise<void>;
   checkpoint(): Promise<void>;
   pulse(): Promise<void>;
+  moveTarget(): Promise<string | null>;
 };
 
 const STANDBY = /^FIRST 1 \("([^"]+)"\)$/;
+const HAS_MOVES = `SELECT to_regclass('net.move') IS NOT NULL AS there`;
 const HAS_COPIES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'copy_name') AS there`;
 
 /* The catalog of a real Postgres. sql: the keeper's session, whose commits count once this machine wrote them, so none
@@ -35,6 +40,7 @@ export function pgCatalog(sql: Sql, slow: Sql, machineId: string): SyncCatalog {
   const one = async <R>(on: Sql, text: string, params?: unknown[]): Promise<R | undefined> => (await on.query<R>(text, params)).rows[0];
   /* Asked until the answer is yes, which no later update takes back. */
   let knowsCopies = false;
+  let knowsMoves = false;
   return {
     machines: async () => {
       knowsCopies ||= (await one<{ there: boolean }>(sql, HAS_COPIES))?.there === true;
@@ -70,6 +76,10 @@ export function pgCatalog(sql: Sql, slow: Sql, machineId: string): SyncCatalog {
     },
     checkpoint: async () => void (await slow.query('CHECKPOINT')),
     pulse: async () => void (await sql.query('INSERT INTO net.pulse (at) VALUES (clock_timestamp()) ON CONFLICT (id) DO UPDATE SET at = excluded.at')),
+    moveTarget: async () => {
+      knowsMoves ||= (await one<{ there: boolean }>(sql, HAS_MOVES))?.there === true;
+      return knowsMoves ? moveTarget(sql) : null;
+    },
   };
 }
 
@@ -99,7 +109,7 @@ type Seen = { pid: number | null; replyTime: string | null; at: number };
    record is never told of a copy that lacks a confirmed change. */
 export class SyncController {
   private memory: SyncMemory = { w: null, posting: false, flag: null, checkpointed: false, blocked: false };
-  private record: SyncRecord | null = null;
+  private stored: SyncRecord | null = null;
   private route: { client: string; generation: number } | null = null;
   private routeAt = -Infinity;
   private timer: NodeJS.Timeout | null = null;
@@ -112,8 +122,10 @@ export class SyncController {
   private bytes: { at: number; machine: string; bytes: number }[] = [];
   private slowSince: number | null = null;
   private pulsedAt = -Infinity;
+  private target: string | null = null;
+  private targetAt = -Infinity;
   private postLine = '';
-  private last: { listed: number; copies: { name: string; state: 'sync' | 'pace' | 'behind' | 'silent' }[] } = { listed: 0, copies: [] };
+  private last: { listed: number; copies: CopyView[]; named: string | null } = { listed: 0, copies: [], named: null };
 
   constructor(private readonly opts: SyncControllerOptions) {}
 
@@ -151,8 +163,23 @@ export class SyncController {
   }
 
   /* Each copy as the last look found it, for the app to show. */
-  copies(): { name: string; state: 'sync' | 'pace' | 'behind' | 'silent' }[] {
+  copies(): CopyView[] {
     return this.last.copies;
+  }
+
+  /* The network id of the machine whose copy commits wait for, as the last look found the setting. */
+  named(): string | null {
+    return this.last.named;
+  }
+
+  /* What the relay holds of which machine has the latest changes, as last read or stored. */
+  record(): SyncRecord | null {
+    return this.stored;
+  }
+
+  /* The generation of the company's route while this keeper's own client holds it, as last read. */
+  generation(): number | null {
+    return this.route?.generation ?? null;
   }
 
   /* One look at a time. A look that fails changes nothing, the flag included, and is said once an outage. */
@@ -191,7 +218,7 @@ export class SyncController {
     if (link === undefined) return;
     if (link === null) {
       this.route = null;
-      this.record = null;
+      this.stored = null;
       return;
     }
     const route = await this.opts.relay.route(link.name, link.key);
@@ -199,7 +226,7 @@ export class SyncController {
       this.route = null;
       return;
     }
-    this.record = route.sync;
+    this.stored = route.sync;
     this.route = route.state === 'held' && route.client === link.client ? { client: link.client, generation: route.generation } : null;
   }
 
@@ -208,7 +235,7 @@ export class SyncController {
     const now = this.now();
     const machines = await catalog.machines();
     const setting = await catalog.setting();
-    if (machines.length > 0 || setting !== null || this.record?.state === 'on' || this.routeAt === -Infinity) await this.readRoute();
+    if (machines.length > 0 || setting !== null || this.stored?.state === 'on' || this.routeAt === -Infinity) await this.readRoute();
     const replication = machines.length > 0 || setting !== null ? await catalog.replication() : [];
     const position = machines.length > 0 ? await catalog.position() : null;
     if (position) this.positions.push({ at: now, lsn: position });
@@ -233,11 +260,18 @@ export class SyncController {
     const oldestWaitMs = setting !== null ? await catalog.oldestWaitMs() : null;
     this.slowSince = oldestWaitMs !== null && oldestWaitMs > SLOW_WAIT_MS ? (this.slowSince ?? now) : null;
     const named = others.find(copy => copy.name === setting);
-    this.last = { listed: machines.length, copies: others.map(copy => ({ name: copy.name, state: stateOf(copy, setting) })) };
+    this.last = { listed: machines.length, copies: others.map(copy => ({ name: copy.name, networkId: copy.networkId, state: stateOf(copy, setting) })), named: named?.networkId ?? null };
+    /* The request is read only where a copy could be its target. */
+    if (machines.length === 0) this.target = null;
+    else if (now - this.targetAt >= TARGET_EVERY_MS) {
+      this.targetAt = now;
+      this.target = await catalog.moveTarget();
+    }
     return {
-      now, others, listed: machines.length, setting, route: this.route, record: this.record, oldestWaitMs,
+      now, others, listed: machines.length, setting, route: this.route, record: this.stored, oldestWaitMs,
       slowForMs: this.slowSince === null ? 0 : now - this.slowSince,
       namedBytes5s: named ? this.bytesOver(named.machine, now) : 0,
+      target: others.some(copy => copy.networkId === this.target) ? this.target : null,
     };
   }
 
@@ -287,9 +321,9 @@ export class SyncController {
       await this.readRoute(true);
       const link = await this.opts.link();
       if (!link || !this.route) throw new Error("this keeper's own link does not hold the company's route now");
-      const stored = await this.opts.relay.setSync(link.name, link.key, { client: this.route.client, generation: this.route.generation, state, copy, epoch: (this.record?.epoch ?? 0) + 1 });
+      const stored = await this.opts.relay.setSync(link.name, link.key, { client: this.route.client, generation: this.route.generation, state, copy, epoch: (this.stored?.epoch ?? 0) + 1 });
       if (!stored.stored) throw new Error(`hornhoof.org did not store it (${stored.why})`);
-      this.record = stored.sync;
+      this.stored = stored.sync;
       this.posted('');
     } catch (err) {
       this.posted(`Could not tell hornhoof.org which machine holds the latest changes: ${reasonOf(err)}`);
@@ -304,6 +338,9 @@ export class SyncController {
     this.postLine = line;
   }
 }
+
+/* A copy as the last look found it: the name of its slot, its machine's network id, and how it does. */
+export type CopyView = { name: string; networkId: string; state: 'sync' | 'pace' | 'behind' | 'silent' };
 
 /* How a copy does, as the app shows it: the one commits wait for, one that keeps pace, one that is connected and
    behind, and one that says nothing. */

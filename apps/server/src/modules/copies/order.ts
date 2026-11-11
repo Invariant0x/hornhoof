@@ -6,6 +6,7 @@ import { loggable } from '../../errors.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { storeThroughput } from './measured.js';
+import { moveTargetRow } from './move.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 import { onlineShares } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
@@ -89,7 +90,9 @@ export type Roles = { grant: string[]; retire: string | null; handover: boolean 
    With none free, a copy is handed over: the machine at 2 or 3 without one gets the data, at most one a day unless the
    CEO asked, and only while no other copy is being made. The copy that was ranked out goes only once both places hold
    an up-to-date copy, never the one commits wait for, and one that only stopped qualifying stays until a machine took
-   its place. */
+   its place. target: the machine the CEO asked the server moved to, while that request stands: when it has a number
+   it gets the data at once, beside the two copies when it is neither of them, and nothing here retires it; no other
+   copy is handed over in the run that gives it the data. */
 export function planRoles(o: {
   numbered: { id: string; number: number }[];
   data: { id: string; number: number | null; out: boolean }[];
@@ -99,20 +102,29 @@ export function planRoles(o: {
   handoverAt: Date | null;
   now: Date;
   ceo: boolean;
+  target?: string | null;
 }): Roles {
   const holding = new Set(o.data.map(row => row.id));
   const top = o.numbered.filter(row => row.number <= COPIES + 1).sort((a, b) => a.number - b.number);
+  const target = o.target != null && o.numbered.some(row => row.id === o.target) ? o.target : null;
+  /* A target that is neither of the two places holds its copy beside them, and takes no seat of theirs. */
+  const beside = target !== null && !top.some(row => row.id === target);
+  const forced = target !== null && !holding.has(target);
   const without = top.filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
-  const seats = COPIES - o.data.length;
-  const there = [...o.numbered].sort((a, b) => a.number - b.number).filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
+  const seats = COPIES - o.data.filter(row => !(beside && row.id === target)).length;
+  const there = [...o.numbered]
+    .sort((a, b) => a.number - b.number)
+    .filter(row => !holding.has(row.id) && o.eligible.has(row.id) && !(beside && row.id === target))
+    .map(row => row.id);
   const grant = seats > 0 ? there.slice(0, seats) : [];
   const made = top.filter(row => holding.has(row.id)).every(row => o.ready.has(row.id));
   const due = o.ceo || o.handoverAt === null || o.now.getTime() - o.handoverAt.getTime() >= HANDOVER_EVERY_MS;
-  const handover = seats <= 0 && without.length > 0 && made && due;
+  const handover = seats <= 0 && without.length > 0 && made && due && !forced;
   if (handover) grant.push(without[0]!);
+  if (forced && !grant.includes(target)) grant.push(target);
   const settled = top.length > 0 && top.every(row => holding.has(row.id) && o.ready.has(row.id));
   const outside = o.data
-    .filter(row => !top.some(one => one.id === row.id) && row.id !== o.sync && (top.length >= COPIES || row.out))
+    .filter(row => row.id !== target && !top.some(one => one.id === row.id) && row.id !== o.sync && (top.length >= COPIES || row.out))
     .sort((a, b) => (b.number ?? Infinity) - (a.number ?? Infinity) || (a.id < b.id ? -1 : 1));
   return { grant, retire: settled ? (outside[0]?.id ?? null) : null, handover };
 }
@@ -247,6 +259,8 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
       ready, sync,
       handoverAt: kept?.handover_at ? new Date(kept.handover_at) : null,
       now, ceo: Boolean(opts.ceo),
+      /* The machine the CEO asked the server moved to holds its copy while the request stands. */
+      target: await moveTargetRow(tx),
     });
 
     const changes = before.flatMap(row => {

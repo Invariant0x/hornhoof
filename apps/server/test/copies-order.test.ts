@@ -252,6 +252,24 @@ describe('who holds a copy after a ranking', () => {
     expect(plan({ ...over, data: [holds('A', 2), holds('C', null, true)] }).retire).toBe('C');
   });
 
+  it("keeps the target's copy", () => {
+    /* The server is to move to D (4): it gets the data at once, beside the two copies, and no ranking retires it. */
+    const copies = { numbered: [at('A', 2), at('B', 3), at('D', 4)], ready: new Set(['A', 'B']), sync: 'A' };
+    expect(plan({ ...copies, data: [holds('A', 2), holds('B', 3)], target: 'D' })).toEqual({ grant: ['D'], retire: null, handover: false });
+    const three = { ...copies, data: [holds('A', 2), holds('B', 3), holds('D', 4)], ready: new Set(['A', 'B', 'D']) };
+    expect(plan({ ...three, target: 'D' })).toEqual(NOTHING);
+    /* It does not take a seat from the machines at 2 and 3. */
+    expect(plan({ numbered: [at('A', 2), at('B', 3), at('D', 4)], data: [holds('D', 4)], target: 'D' }).grant).toEqual(['A', 'B']);
+    /* With the request gone the extra copy is retired as before. */
+    expect(plan(three)).toEqual({ grant: [], retire: 'D', handover: false });
+    /* A target with no number gets nothing. */
+    expect(plan({ numbered: [at('A', 2), at('B', 3)], data: [holds('A', 2), holds('B', 3)], ready: new Set(['A', 'B']), target: 'D' })).toEqual(NOTHING);
+    /* One of the two places itself gets its copy without waiting for the day's handover, and alone. */
+    const waiting = { numbered: [at('D', 2), at('B', 3)], data: [holds('A', 4), holds('C', 5)], ready: new Set(['A', 'C']), handoverAt: new Date(NOW.getTime() - HOUR) };
+    expect(plan(waiting)).toEqual(NOTHING);
+    expect(plan({ ...waiting, target: 'B' })).toEqual({ grant: ['B'], retire: null, handover: false });
+  });
+
   it('keeps the only copy', () => {
     expect(plan({ data: [holds('C', null, true)], ready: new Set(['C']) })).toEqual(NOTHING);
   });

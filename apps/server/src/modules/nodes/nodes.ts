@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, lte, notLike, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, notLike, or, sql } from 'drizzle-orm';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions, SUBSCRIPTION_STATUSES, type NodeStatus } from '../../db/schema.js';
@@ -68,9 +68,14 @@ export async function planNodes(db: Db, subscriptionIds: string[]): Promise<Node
 /* How the key of the row of the machine the server itself runs on begins. */
 export const SERVER_KEY = 'server:';
 
-/* A machine people see and act on: a computer someone joined. The row of the machine the server itself runs on, which its
-   keeper's certificate names, is none of those, and its key says so. */
-export const shownMachine = notLike(machines.machineKey, `${SERVER_KEY}%`);
+/* A machine people see and act on: a computer someone joined, and a machine the company was installed on while the
+   server runs elsewhere. The row of the machine this app itself runs on, when it is the row its install made, which
+   its key says, is none of those. An install with no machine id tells none of them apart and shows none. */
+export const shownMachine = (config: { machineId: string | null }) =>
+  config.machineId ? or(notLike(machines.machineKey, `${SERVER_KEY}%`), sql<boolean>`${machines.networkId} IS DISTINCT FROM ${config.machineId}`) : notLike(machines.machineKey, `${SERVER_KEY}%`);
+
+/* Whether a row is one a company's install made for its own machine, and no computer someone joined. */
+export const isServerInstall = (machineKey: string): boolean => machineKey.startsWith(SERVER_KEY);
 
 /* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
    server as its host, or as the id its keeper runs under, which is the same hash on an install of today. The pool counts

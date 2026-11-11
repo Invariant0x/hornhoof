@@ -15,7 +15,7 @@ import { releaseLeftProgram } from '../agents/left-programs.js';
 import { onAgent } from '../conversation/queue.js';
 import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
-import { disconnectMachines } from '../nodes/disconnect.js';
+import { disconnectMachines, refuseLeader } from '../nodes/disconnect.js';
 import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
@@ -317,8 +317,13 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
     Object.assign(changes, markAfter(changes.status, body), telegramChange(telegram, target));
     const { status } = changes;
-    /* Disabling has steps of its own, taken after whatever else this request changes. */
-    if (status === 'disabled') delete changes.status;
+    /* Disabling has steps of its own, taken after whatever else this request changes. A person whose machine runs the
+       company server is not disabled: the server moves first. */
+    if (status === 'disabled') {
+      delete changes.status;
+      const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
+      await refuseLeader(db, config, theirs.map(m => m.id));
+    }
 
     /* A person who no longer sees the whole company holds none of its data: their machines that hold a copy are cut from
        the server's changes first, before anything new is written, and give the data up in the same transaction. */

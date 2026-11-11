@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
@@ -365,6 +365,27 @@ describe('updates', () => {
       expect(app.ctx.updater.claimed()).toBeNull();
     }
     await db.execute(sql`UPDATE net.merges SET status = 'merged'`);
+    expect((await update()).statusCode).toBe(202);
+  });
+
+  it('refuses an update while the server moves', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const update = () => app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
+    /* The CEO asked the server moved to another machine: an update would cut the copy it is to move with. */
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const row = (hostname: string) => db.insert(machines).values({ companyId: owner!.companyId, personId: owner!.id, machineKey: `joined-${hostname}`, hostname }).returning();
+    const [[from], [to]] = [await row('rack'), await row('studio')];
+    await db.execute(sql`INSERT INTO net.move (machine_id, from_machine_id, asked_by, asked_at, state) VALUES (${to!.id}, ${from!.id}, ${owner!.id}, now(), 'preparing')`);
+    for (const state of ['preparing', 'switching']) {
+      await db.execute(sql`UPDATE net.move SET state = ${state}`);
+      const refused = await update();
+      expect([state, refused.statusCode, refused.json().error.reason, refused.json().error.message]).toEqual([state, 409, 'moving', 'The server is moving to studio. Update once it moved.']);
+      expect(app.ctx.updater.claimed()).toBeNull();
+    }
+    /* A request that failed moves nothing. */
+    await db.execute(sql`UPDATE net.move SET state = 'failed', reason = 'behind', ended_at = now()`);
     expect((await update()).statusCode).toBe(202);
   });
 

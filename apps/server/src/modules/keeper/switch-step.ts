@@ -115,10 +115,10 @@ export function nextHandStep(s: HandSample): HandAction {
   }
 }
 
-/* What the keeper that takes the server wrote down. from: the machine that offered, as its link named it leader then;
-   go, abort and state are taken from it alone. slots: the slots it made at promotion. */
+/* What the keeper that takes the server wrote down. from: the machine that offered, as its link named it leader then,
+   with the name it goes by; go, abort and state are taken from it alone. slots: the slots it made at promotion. */
 export type Taking = {
-  switch: string; from: { networkId: string }; term: Term; at: number; deadline: number;
+  switch: string; from: { networkId: string; hostname?: string }; term: Term; at: number; deadline: number;
   phase: 'offered' | 'go' | 'promoted' | 'aborted'; w: string | null; copies: string[] | null; slots: Record<string, string> | null; why: 'no_link' | null;
 };
 

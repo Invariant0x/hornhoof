@@ -199,12 +199,12 @@ const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'builtinMachine' | 'ma
   return { key: part.builtin ? builtinPlaceKey(ctx, part.builtinMachine) : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
 };
 
-async function companyComputers(db: Ctx['db'], companyId: string) {
+async function companyComputers({ db, config }: Ctx, companyId: string) {
   const rows = await db
     .select({ machine: machines, owner: people })
     .from(machines)
     .innerJoin(people, eq(people.id, machines.personId))
-    .where(and(eq(machines.companyId, companyId), eq(machines.kind, 'computer'), isNull(machines.revokedAt), shownMachine))
+    .where(and(eq(machines.companyId, companyId), eq(machines.kind, 'computer'), isNull(machines.revokedAt), shownMachine(config)))
     .orderBy(asc(machines.createdAt));
   /* A machine's own node and its plans' nodes; a removed plan's node is on its way out. */
   const live = await db
@@ -230,7 +230,7 @@ const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
   const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, builtinMachine: testParts.builtinMachine, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
-  const { rows, live } = await companyComputers(db, companyId);
+  const { rows, live } = await companyComputers(ctx, companyId);
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
     const ready = live.filter(n => n.machineId === machine.id && takesParts(ctx, nodeIdentity(n.id))).map(n => n.id);
@@ -271,7 +271,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
 
 export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<BrowserHeldPlace[]> {
   const { db, hub } = ctx;
-  const { rows, live } = await companyComputers(db, companyId);
+  const { rows, live } = await companyComputers(ctx, companyId);
   const held: BrowserHeldPlace[] = [];
   for (const { machine, owner } of rows) {
     const mine = live.filter(n => n.machineId === machine.id).map(n => nodeIdentity(n.id));
