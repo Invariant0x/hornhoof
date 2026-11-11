@@ -110,6 +110,10 @@ describe('the accepted review fixes', () => {
     const made = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true, paths: ['logic/**'] } });
     expect(made.isError).toBe(true);
     expect((made.content as { text: string }[])[0]!.text).toContain('Name the product');
+    /* The head picks the product by the repository the change goes to. */
+    expect((made.content as { text: string }[])[0]!.text).toContain(`Shop (${product!.id}): ${department!.repoUrl}`);
+    const tool = (await api.listTools()).tools.find(t => t.name === 'create_task')!;
+    expect((tool.inputSchema.properties as Record<string, { description?: string }>).product?.description).toMatch(/repository the change goes to/);
     const named = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true, paths: ['logic/**'], product: product!.id } });
     expect(named.isError).not.toBe(true);
   });

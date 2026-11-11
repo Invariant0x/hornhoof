@@ -10,7 +10,7 @@ import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
-import { BuildBody, RepoBody } from '../departments/routes.js';
+import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
 import { SHOWN_TO_CEO } from '../nodes/command.js';
 import { LendBody } from '../nodes/routes.js';
@@ -60,6 +60,7 @@ export const CEO_ONLY = new Set([
   'disconnect_machine',
   'lend_machine',
   'set_repository',
+  'add_repository',
   'remove_repository',
   'set_public_link',
   'remove_public_link',
@@ -151,6 +152,13 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       'and fullTestCommand, the command that runs its whole test suite (null takes it away): a run of exactly that sets the GitHub status hornhoof/tests on the commit it checked, for which the token needs the right to write commit statuses, and GitHub then builds images without running the tests again.',
     { department: Id('department'), ...RepoBody.shape },
     ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body, department }),
+  );
+  tool(
+    'add_repository',
+    'Adds a git repository to a department beside its own: it comes as a new product of the department, named after the end of its address unless you give a name, ' +
+      'and a task names that product to change it. The fields are those of set_repository. To connect a repository to a product the department has, use set_repository with the product\'s id.',
+    { department: Id('department'), ...RepositoryBody.shape },
+    ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories`, payload: body, department }),
   );
   tool('remove_repository', 'Disconnects a department\'s git repository.', { department: Id('department') }, ({ department }) => ({ method: 'DELETE', url: `/api/departments/${department}/repository`, department }));
 

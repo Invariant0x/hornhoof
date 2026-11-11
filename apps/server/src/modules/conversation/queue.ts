@@ -18,7 +18,7 @@ import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
-import { repoAt, repoFor } from '../departments/repository.js';
+import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
@@ -946,7 +946,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const job = await dueTurn(ctx, agent, sub);
   if (!job) return;
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
-  const at = await repoAt(ctx, [agent.productId, agent.departmentId]);
+  const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;

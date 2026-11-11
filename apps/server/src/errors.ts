@@ -119,6 +119,8 @@ export type ErrorReason =
   | 'no_turnkey_team'
   | 'repo_invalid'
   | 'repo_command_invalid'
+  | 'repo_folder_taken'
+  | 'product_taken'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'picture_invalid'

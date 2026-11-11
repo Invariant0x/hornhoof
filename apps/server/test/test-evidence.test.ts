@@ -237,6 +237,16 @@ describe('a turn has its own branch', () => {
     expect((await c.read(c.parent)).testEvidence).toMatchObject([{ run: 1, branch: 'turn-4', proves: true }]);
   });
 
+  it("shows the department's task of the turn the runs on the turn branch of each repository its products keep too", async () => {
+    const c = await company();
+    const [app] = await c.db.insert(departments).values({ companyId: c.parent.companyId, name: 'App', roleCode: 'DEV', parentId: c.parent.departmentId, repoUrl: 'https://github.com/acme/app.git' }).returning();
+    const other = await c.member('App screens');
+    await c.aRun({ branch: 'turn-4', command: 'make all' });
+    await c.aRun({ taskId: other.id, branch: 'turn-4', departmentId: app!.id, command: 'app all' });
+    await c.aRun({ taskId: other.id, branch: 'turn-4', departmentId: c.sales.id, command: 'crm all' });
+    expect((await c.read(c.parent)).testEvidence.map((e: { command: string }) => e.command)).toEqual(['app all', 'make all']);
+  });
+
   it('shows a task of the turn in no department its own runs only, and still shows it', async () => {
     const c = await company();
     await c.db.update(tasks).set({ departmentId: null }).where(eq(tasks.id, c.parent.id));

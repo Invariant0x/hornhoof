@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
-import type { Repository } from '../types';
+import type { Department, Repository } from '../types';
 import { Field } from './Field';
 
 type Props = {
@@ -106,7 +106,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     return (
       <div className="repo">
         {!compact && <p className="muted">{t.dept.noRepository}</p>}
-        <button className="btn small ghost" type="button" onClick={edit}>{t.dept.addRepository}</button>
+        <button className="btn small ghost" type="button" onClick={edit}>{t.dept.connectRepository}</button>
         {alert}
       </div>
     );
@@ -134,5 +134,102 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
       )}
       {alert}
     </div>
+  );
+}
+
+/* The name a new repository's product takes unless another is typed: the end of its address, as the server takes it. */
+const nameOf = (url: string) => (url.trim().replace(/\/+$/, '').split('/').pop() ?? '').replace(/\.git$/i, '').slice(0, 60);
+
+/* Another repository of a department: it comes as a new product of the department, which its tasks then name. */
+function AddRepository({ departmentId }: { departmentId: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState<string | null>(null);
+  const [url, setUrl] = useState('');
+  const [branch, setBranch] = useState('main');
+  const [token, setToken] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [authorEmail, setAuthorEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const shownName = name ?? nameOf(url);
+
+  function close() {
+    setOpen(false);
+    setName(null);
+    setUrl('');
+    setBranch('main');
+    setToken('');
+    setAuthorName('');
+    setAuthorEmail('');
+    setFailure(null);
+  }
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    const author = authorName.trim() ? { author: { name: authorName.trim(), email: authorEmail.trim() } } : {};
+    const body = { ...(shownName.trim() ? { name: shownName.trim() } : {}), url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author };
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post(`/api/departments/${departmentId}/repositories`, body);
+      close();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="repo-actions">
+        <button className="btn small ghost" type="button" onClick={() => setOpen(true)}>{t.dept.addRepository}</button>
+      </div>
+    );
+  }
+  return (
+    <form className="repo-form" aria-label={t.dept.addRepository} onSubmit={e => void add(e)}>
+      <p className="muted">{t.dept.addRepositoryHow}</p>
+      <Field label={t.dept.address}>{p => <input {...p} value={url} onChange={e => setUrl(e.target.value)} maxLength={500} placeholder="https://github.com/acme/shop.git" required />}</Field>
+      <Field label={t.dept.repoName} hint={t.dept.repoNameHint}>{p => <input {...p} value={shownName} onChange={e => setName(e.target.value)} maxLength={60} />}</Field>
+      <Field label={t.dept.branch}>{p => <input {...p} value={branch} onChange={e => setBranch(e.target.value)} maxLength={200} />}</Field>
+      <Field label={t.dept.token} hint={t.dept.tokenHint}>
+        {p => <input {...p} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
+      </Field>
+      <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} />}</Field>
+      <Field label={t.dept.authorEmail}>{p => <input {...p} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} />}</Field>
+      <div className="repo-actions">
+        <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.dept.addThis}</button>
+        <button className="btn small ghost" type="button" onClick={close}>{t.common.cancel}</button>
+      </div>
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </form>
+  );
+}
+
+/* The repositories a department's agents work in, for the people who set them: the department's own first, which a task
+   with no product changes, then one on each product. Another one comes as a new product. */
+export function Repositories({ department }: { department: Pick<Department, 'id' | 'repository' | 'products'> }) {
+  const t = useT();
+  const id = useId();
+  return (
+    <section aria-labelledby={`${id}-repos`}>
+      <h3 id={`${id}-repos`}>{t.dept.repositories}</h3>
+      <p className="muted">{t.dept.repositoriesAbout}</p>
+      <ul className="dv-list">
+        <li aria-labelledby={`${id}-own`}>
+          <b id={`${id}-own`}>{t.dept.ownRepository}</b>
+          <RepoSettings placeId={department.id} repository={department.repository} />
+        </li>
+        {department.products.map(p => (
+          <li key={p.id} aria-labelledby={`${id}-${p.id}`}>
+            <b id={`${id}-${p.id}`}>{p.name}</b>
+            <RepoSettings placeId={p.id} repository={p.repository} compact />
+          </li>
+        ))}
+      </ul>
+      <AddRepository departmentId={department.id} />
+    </section>
   );
 }

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { vi } from 'vitest';
 import type { Limits, NodeMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { TerminalHost } from '../src/terminal/host.js';
+import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import type { OperatorOptions } from '../src/terminal/operator-runtime.js';
 import { withProgramExit } from '../src/program-exit.js';
 import { jobDone } from '../src/runner.js';
@@ -131,11 +131,12 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   if (!options.connects) listsAtStart(host);
   await host.start();
   const results: Promise<unknown>[] = [];
-  const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt') => {
+  /* more: what else this turn's input differs in, like the environment of the repository it works in. */
+  const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt', more: Partial<TermJob['input']> = {}) => {
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: options.sessionId === undefined ? SESSION : options.sessionId, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: options.sessionId === undefined ? SESSION : options.sessionId, ...(prompt ? {} : { tools: undefined }), ...more });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
     const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));

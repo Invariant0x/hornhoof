@@ -16,7 +16,8 @@ export function registerBriefingTool(server: McpServer, ctx: Ctx, job: ToolJob):
     {
       description:
         'What your department and your product keep for their agents: their own way of working and the repositories they work in, each with its branch, rules and commit author; ' +
-        'the one cloned in your folder comes first, with where it is. Read it when you start on their work or need it again; people change it on the department screen.',
+        'the one cloned in your folder comes first, with where it is. An agent of the whole department also gets taskRepositories: the department\'s own repository and each product\'s, ' +
+          'where a task without a product and a task of that product work, each cloned in your folder at its folder when such a task starts. Read it when you start on their work or need it again; people change it on the department screen.',
     },
     async () => {
       const [me] = await ctx.db.select({ companyId: agents.companyId, departmentId: agents.departmentId, productId: agents.productId }).from(agents).where(eq(agents.id, job.agentId));

@@ -62,7 +62,7 @@ describe('/mcp', () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pause_task', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_repository', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pause_task', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
   });
 
   it('gives an employee the company view and its task tools', async () => {
@@ -79,7 +79,7 @@ describe('/mcp', () => {
     await job('running');
     await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
-    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id }).returning();
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: '2222' }).returning();
     const [sub] = await db.select().from(subscriptions);
     const [bruno, hana] = await db
       .insert(agents)
@@ -92,6 +92,7 @@ describe('/mcp', () => {
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
+    expect(raw).not.toMatch(/sealed|2222/);
     const view = JSON.parse(raw);
     expect(view).toMatchObject({
       name: 'Acme',
@@ -103,7 +104,9 @@ describe('/mcp', () => {
           name: 'Development',
           template: 'development',
           about: 'Two products',
-          products: [{ name: 'Mascot' }],
+          /* Where a task's code goes: a product's repository, else the department's own; never its token. */
+          repository: null,
+          products: [{ id: mascot!.id, name: 'Mascot', repository: { url: 'https://github.com/acme/mascot.git', branch: 'release' } }],
           employees: [
             /* The id is what create_task takes as the executor; the role id is what it takes as a gate. */
             { id: hana!.id, name: 'Hana', roleId: 'DEV-HEAD', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },

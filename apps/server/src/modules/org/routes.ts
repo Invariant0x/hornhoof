@@ -109,8 +109,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       const t = mine.find(x => !x.executorAgentId) ?? mine[0];
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
-    /* Only people who see the whole company set repositories, so only they read where they are. */
-    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole ? repoView(d) : null);
+    /* Only people who see the whole company and a department's owner set its repositories, so only they read where they are. */
+    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.parentId ?? d.id) ? repoView(d) : null);
     const [open] = await db.select({ id: turns.id, companyId: turns.companyId, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };

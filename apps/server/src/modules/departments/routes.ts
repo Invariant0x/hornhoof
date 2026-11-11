@@ -13,7 +13,7 @@ import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type 
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
-import { Repo } from '@hornhoof/protocol';
+import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
 import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
@@ -29,7 +29,7 @@ import { waitPolicyRoutes } from './wait-policy-routes.js';
 import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
-import { repoView } from './repository.js';
+import { checkFolderFree, repoView } from './repository.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
@@ -54,6 +54,9 @@ export const RepoBody = z
     fullTestCommand: z.string().trim().max(4000).nullable().optional(),
   })
   .strict();
+
+/* Another repository of a department, under the name of the product it comes as: the end of its address unless given. */
+export const RepositoryBody = RepoBody.extend({ name: z.string().trim().min(1).max(60).optional() });
 
 /* What a repository's save says of its full test command: left out, the saved one stays. */
 function fullCommandPatch(given: string | null | undefined): { repoFullTestCommand?: string | null } {
@@ -353,6 +356,18 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { created: result.fresh, removed: result.removed.map(r => r.id), hired: result.hired.map(h => h.id) };
   });
 
+  /* What a repository's save writes besides its token: the address and branch as checked, and the author and test settings
+     given; left out, a saved one stays, and a null author takes it away. */
+  function repoFields(body: z.infer<typeof RepoBody>) {
+    const checked = Repo.pick({ url: true, branch: true, author: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim(), author: body.author });
+    if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address, a plain branch name, and an author name on one line with a full email.', 'repo_invalid');
+    const given = checked.data.author;
+    const author = given === undefined ? {} : { repoAuthorName: given?.name ?? null, repoAuthorEmail: given?.email ?? null };
+    const memory = body.testMemoryGb === undefined ? {} : { repoTestMemoryGb: body.testMemoryGb };
+    return { repoUrl: checked.data.url, repoBranch: checked.data.branch, ...author, ...memory, ...fullCommandPatch(body.fullTestCommand) };
+  }
+  const sealed = (token: string) => ({ repoTokenEnc: encryptSecret(token, ctx.config.secret), repoTokenLast4: token.slice(-4) });
+
   /* The git repository the department's agents work in. The whole company or the department's owner sets it; the token
      never comes back. */
   app.put('/api/departments/:id/repository', async req => {
@@ -360,28 +375,53 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await requireDepartmentChanger(db, me, id);
     const body = RepoBody.parse(req.body);
-    const checked = Repo.pick({ url: true, branch: true, author: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim(), author: body.author });
-    if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address, a plain branch name, and an author name on one line with a full email.', 'repo_invalid');
+    const fields = repoFields(body);
     const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    await checkFolderFree(db, dept.parentId ?? dept.id, fields.repoUrl, dept.id);
     /* A new token replaces the saved one; without one the saved token stays, unless the address moves to another host. */
     const host = (url: string | null) => (url ? new URL(url).host : null);
     const token = body.token
-      ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4), repoTokenRevision: sql`${departments.repoTokenRevision} + 1` }
-      : host(dept.repoUrl) !== host(checked.data.url)
+      ? { ...sealed(body.token), repoTokenRevision: sql`${departments.repoTokenRevision} + 1` }
+      : host(dept.repoUrl) !== host(fields.repoUrl)
         ? { repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1` }
         : {};
-    /* Left out, the saved author stays; null takes it away. */
-    const given = checked.data.author;
-    const author = given === undefined ? {} : { repoAuthorName: given?.name ?? null, repoAuthorEmail: given?.email ?? null };
-    const memory = body.testMemoryGb === undefined ? {} : { repoTestMemoryGb: body.testMemoryGb };
     const [row] = await db
       .update(departments)
-      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author, ...memory, ...fullCommandPatch(body.fullTestCommand) })
+      .set({ ...fields, ...token })
       .where(eq(departments.id, id))
       .returning();
     ctx.bus.publish(me.companyId, { type: 'org' });
     return { repository: repoView(row!) };
+  });
+
+  /* Another repository of a department comes as a new product of it, named after the repository unless a name is given: a
+     task names the product whose repository it changes. Who may set the department's repository adds one. */
+  app.post('/api/departments/:id/repositories', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    await requireDepartmentChanger(db, me, id);
+    const body = RepositoryBody.parse(req.body);
+    const fields = repoFields(body);
+    const name = body.name ?? repoFolder(fields.repoUrl).slice(0, 60);
+    const product = await db.transaction(async tx => {
+      const [dept] = await tx.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
+      if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+      if (dept.parentId) throw new ApiError(400, 'validation', `${deptName(dept)} is a product. Add the repository to the department that holds it.`);
+      const products = await tx.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.parentId, dept.id));
+      const same = products.find(p => p.name?.toLowerCase() === name.toLowerCase());
+      if (same) throw new ApiError(409, 'conflict', `${deptName(dept)} has a product named ${same.name} already. Give the repository another name, or connect it to that product by set_repository with the product's id, ${same.id}.`, 'product_taken');
+      await checkFolderFree(tx, dept.id, fields.repoUrl, null);
+      const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, me.companyId));
+      const [row] = await tx
+        .insert(departments)
+        .values({ companyId: me.companyId, name, parentId: dept.id, roleCode: dept.roleCode, position: (last?.n ?? -1) + 1, ...fields, ...(body.token ? sealed(body.token) : {}) })
+        .returning();
+      return row!;
+    });
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    reply.code(201);
+    return { product: { id: product.id, name: product.name, repository: repoView(product) } };
   });
 
   app.delete('/api/departments/:id/repository', async (req, reply) => {
