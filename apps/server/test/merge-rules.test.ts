@@ -42,6 +42,10 @@ describe('the rule of each table in a merge', () => {
     const { tables } = await facts();
     const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
     expect(BOOKKEEPING.machines).toEqual(expect.arrayContaining(own));
+    /* How far a bot has read its messages is the leader's own count, and a person's layout has its own clock. */
+    expect([BOOKKEEPING.telegram_bots, BOOKKEEPING.map_layouts]).toEqual([['update_offset'], ['updated_at']]);
+    /* A bot's token is the company's way out to a person: two that differ are the CEO's to settle. */
+    expect([ceosConflict('telegram_bots'), ceosConflict('map_layouts')]).toEqual([true, false]);
     /* A place the CEO pinned is his word, so two that differ are his to settle. */
     expect(BOOKKEEPING.machines).not.toContain('server_pin');
     for (const [table, columns] of Object.entries(BOOKKEEPING)) {
@@ -63,7 +67,7 @@ describe('the rule of each table in a merge', () => {
   });
 
   it('carries over nothing that belongs to the machine that leads, and lets nothing run again', () => {
-    for (const name of ['node_codes', 'machine_tickets', 'pending_wakes', 'sign_in_attempts', 'link_tls', 'wait_notices', 'harness_builds', 'harness_products', 'program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals']) {
+    for (const name of ['node_codes', 'machine_tickets', 'pending_wakes', 'sign_in_attempts', 'link_tls', 'wait_notices', 'harness_builds', 'harness_products', 'program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals', 'telegram_replies']) {
       expect([name, ruleOf(name).kind]).toEqual([name, 'skip']);
     }
     const closes = (table: string) => (CLOSING[table] ?? []).flatMap(closing => closing.open.map(open => [open, closing.to]));

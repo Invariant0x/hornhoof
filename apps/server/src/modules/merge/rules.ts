@@ -56,6 +56,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   harness_builds: skip('machines'),
   harness_products: skip('machines'),
   ...each(['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals'], skip('work')),
+  /* An answer a bot still owed when its database was set aside is not sent later, out of its time. */
+  telegram_replies: skip('work'),
 
   /* Records that are written once: one the leader lacks is added, and none is compared. */
   applied: add('work'),
@@ -84,6 +86,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* Only a machine's owner opens computer access to it, so no merge does. */
   machine_access: rows('access', { hereOnly: ['until', 'opened_by', 'opened_at', 'grant'] }),
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
+  /* A bot's token is a way from outside to an agent of the company. */
+  telegram_bots: rows('access'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
 
@@ -95,7 +99,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates'], rows('protected')),
   ...each(OUTBOUND.filter(name => name !== 'outbound_messages'), rows('protected')),
 
-  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings'], rows('work')),
+  ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
   tasks: rows('work', { number: ['company_id'], task: 'id' }),
   turns: rows('work', { number: ['company_id'], task: 'task_id' }),
   test_runs: rows('work', { number: ['company_id'], task: 'task_id' }),
@@ -116,6 +120,8 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   task_waits: ['updated_at'],
   outbound_accounts: ['updated_at'],
   outbound_messages: ['updated_at'],
+  map_layouts: ['updated_at'],
+  telegram_bots: ['update_offset'],
   agents: ['context_used', 'timer_at'],
   nodes: ['last_seen_at', 'status', 'version', 'boot'],
   subscriptions: ['status', 'limits', 'models', 'limits_updated_at', 'lease_node_id'],
