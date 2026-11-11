@@ -24,7 +24,8 @@ export const BUNDLES_DIR = 'bundles';
 const EVERY_MS = 10_000;
 const REASONS: readonly string[] = ['timer', 'update', 'fork'] satisfies BundleReason[];
 
-export type Ask = (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; body: unknown }>;
+/* stop: the ask gives up as soon as it is aborted. */
+export type Ask = (method: 'GET' | 'POST', path: string, body?: unknown, stop?: AbortSignal) => Promise<{ status: number; body: unknown }>;
 /* What the peer link serves of backups: a bundle to a machine picked to hold it, and a bundle taken back from one. */
 export type PeerBackups = {
   get(peer: Peer, id: string): { status: 200; length: number; stream(): Readable } | { status: 403 | 404 };
@@ -72,6 +73,8 @@ export class BackupKeeper {
   private last: MakerView | null = null;
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
+  /* Ends an ask that waits for the app when the keeper stops. */
+  private readonly stopping = new AbortController();
   /* When it last asked for a dump, and when it last did so ahead of the gap for a new recovery key, and for which. */
   private askedAt: number | null = null;
   private aheadAt: number | null = null;
@@ -97,10 +100,12 @@ export class BackupKeeper {
     look();
   }
 
-  /* Waits for a round on its way, so nothing of this still asks the app once it has stopped. */
+  /* Waits for a round on its way, so nothing of this still asks the app once it has stopped; an ask that waits for the
+     app ends now, so an app that hangs does not hold the stop. */
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.stopping.abort();
     await this.running?.catch(() => undefined);
   }
 
@@ -225,7 +230,7 @@ export class BackupKeeper {
     const fork = view.fork;
     if (!fork || existsSync(join(this.dumps, `${fork.id}.json`))) return;
     const head = this.bundles.list().find(bundle => bundle.id === fork.id)?.head;
-    if (head) await this.opts.ask('POST', '/api/network/backups', { head }).catch(() => null);
+    if (head) await this.opts.ask('POST', '/api/network/backups', { head }, this.stopping.signal).catch(() => null);
   }
 
   /* A dump in the clear is never left for long: this runs first, whether the machine leads, its app answers or its keys
@@ -255,7 +260,7 @@ export class BackupKeeper {
 
   private async ask(): Promise<MakerView | null> {
     try {
-      const answer = await this.opts.ask('GET', '/api/network/backups');
+      const answer = await this.opts.ask('GET', '/api/network/backups', undefined, this.stopping.signal);
       return answer.status === 200 ? (answer.body as MakerView) : null;
     } catch {
       return null;
@@ -349,7 +354,7 @@ export class BackupKeeper {
     }
     /* Recorded, the dump goes. An app that does not take the record leaves it for the next round, which seals nothing
        again and only records. */
-    const recorded = await this.opts.ask('POST', '/api/network/backups', { head }).catch(() => null);
+    const recorded = await this.opts.ask('POST', '/api/network/backups', { head }, this.stopping.signal).catch(() => null);
     if (recorded?.status === 200 || recorded?.status === 201) this.forget(id);
   }
 }

@@ -435,7 +435,7 @@ export class Keeper {
         held: () => this.certificate(),
         age,
         secrets: () => bundleSecrets(config),
-        ask: (method, path, body) => askApp(app, method, path, body).then(answerOf),
+        ask: (method, path, body, stop) => askApp(app, method, path, body, stop).then(answerOf),
         leads: () => this.mode() === 'lead',
         log,
         everyMs: this.opts.backupsEveryMs,

@@ -430,4 +430,18 @@ describe('the keeper of backups', () => {
     expect(s.wanted()).toBeNull();
     expect(worker.view()).toMatchObject({ company: s.acme.id });
   });
+
+  it('stops at once while its app does not answer', async () => {
+    const s = await stand();
+    /* An app that answers nothing, as one that hangs: the ask ends only when its keeper stops. */
+    const silent: Ask = (_method, _path, _body, stop) => new Promise((_resolve, reject) => stop?.addEventListener('abort', () => reject(new Error('the keeper stopped')), { once: true }));
+    const keeper = new BackupKeeper({
+      dir: s.dir, controlDir: s.controlDir, key: s.key, held: () => s.held, age: { identity: s.ownIdentity, recipient: s.ownAge }, secrets: () => SECRETS,
+      ask: silent, leads: () => true, log: () => undefined,
+    });
+    const round = keeper.round();
+    const stopped = await Promise.race([keeper.stop().then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2000))]);
+    expect(stopped).toBe(true);
+    await round;
+  });
 });
