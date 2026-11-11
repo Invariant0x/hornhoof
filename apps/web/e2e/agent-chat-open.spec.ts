@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { EventView } from '../src/types';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
@@ -17,18 +17,18 @@ const HISTORY = Array.from({ length: PAGE + 100 }, (_, i) => ev(i + 1));
 const STATE = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false, canType: true, turnRefused: null };
 
 type Frame = { top: number; height: number; view: number; lines: number; moving: number };
-type Seen = { frames: Frame[]; live(message: unknown): void };
+type Seen = { chatFrames: Frame[]; live(message: unknown): void };
 
 /* Before the page loads: a stand-in for the server's live stream, and a note of every frame of the chat while it is shown. */
 function watchFrames() {
   const seen = window as unknown as Window & Seen;
-  seen.frames = [];
+  seen.chatFrames = [];
   const tick = () => {
     const log = document.querySelector<HTMLElement>('.t-log.chat');
     if (log && !log.closest('[hidden]')) {
       const lines = [...log.children].filter(c => c.classList.contains('t-line'));
       const moving = lines.filter(line => line.getAnimations().some(a => a.playState === 'running')).length;
-      seen.frames.push({ top: log.scrollTop, height: log.scrollHeight, view: log.clientHeight, lines: lines.length, moving });
+      seen.chatFrames.push({ top: log.scrollTop, height: log.scrollHeight, view: log.clientHeight, lines: lines.length, moving });
     }
     requestAnimationFrame(tick);
   };
@@ -49,12 +49,18 @@ function watchFrames() {
   seen.live = message => streams.forEach(s => s.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) })));
 }
 
-const frames = (page: Page) => page.evaluate(() => (window as unknown as Seen).frames);
+const frames = (page: Page) => page.evaluate(() => (window as unknown as Seen).chatFrames);
 const frameCount = async (page: Page) => (await frames(page)).length;
 const framesAfter = async (page: Page, from: number) => (await frames(page)).slice(from);
 /* Lets the browser draw this many more frames of the chat. */
-const drawn = (page: Page, from: number, more: number) => page.waitForFunction(n => (window as unknown as Seen).frames.length >= n, from + more);
+const drawn = (page: Page, from: number, more: number) => page.waitForFunction(n => (window as unknown as Seen).chatFrames.length >= n, from + more);
 const atEnd = (f: Frame) => f.top >= f.height - f.view - 1;
+/* The person scrolls the chat, and the browser tells of it, as it does at its next frame. */
+const scrollTo = (chat: Locator, top: number | 'end') =>
+  chat.evaluate((el, to) => new Promise<void>(done => {
+    el.addEventListener('scroll', () => done(), { once: true });
+    el.scrollTo({ top: to === 'end' ? el.scrollHeight : to });
+  }), top);
 
 async function openChat(page: Page, live: AgentFixture, releaseOnce: { held: Promise<void> | null }) {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -126,16 +132,14 @@ test('a person who scrolled up to read stays where they read while new lines com
   await openChat(page, live, { held: null });
   const chat = page.getByRole('log', { name: 'Conversation' });
   await expect(chat.locator(':scope > .t-line')).toHaveCount(60);
-  await chat.evaluate(el => el.scrollTo({ top: 200 }));
-  await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBe(200);
+  await scrollTo(chat, 200);
   await sendLine(page, live, 61);
   await expect(chat.locator(':scope > .t-line')).toHaveCount(61);
   const from = await frameCount(page);
   await drawn(page, from, 5);
-  expect((await framesAfter(page, from)).map(f => f.top)).toEqual(Array(5).fill(200));
+  expect((await framesAfter(page, from)).filter(f => f.top !== 200)).toEqual([]);
   /* Back at the end, the chat follows the next line again. */
-  await chat.evaluate(el => el.scrollTo({ top: el.scrollHeight }));
-  await expect.poll(() => chat.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 1)).toBe(true);
+  await scrollTo(chat, 'end');
   await sendLine(page, live, 62);
   await expect(chat.locator(':scope > .t-line')).toHaveCount(62);
   await expect.poll(() => chat.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 1)).toBe(true);

@@ -20,6 +20,8 @@ const PAGE = 500;
 const CATCH_UP_MS = 300;
 const LINE = 100;
 const VIEW = 300;
+/* How tall a line is now: pictures in it can load after it shows. */
+let lineHeight = LINE;
 
 const ev = (seq: number): EventView => ({ seq, kind: 'text', data: { kind: 'text', text: `Line ${seq}` }, jobId: 'j1', person: null, at: '2026-11-04T10:00:00Z' });
 const history = (from: number, count: number) => Array.from({ length: count }, (_, i) => ev(from + i));
@@ -56,7 +58,7 @@ async function until<T>(find: () => T | null): Promise<T> {
 function layOut() {
   const laidOut = (el: HTMLElement) => el.matches('.t-log.chat') && !el.closest('[hidden]');
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
-    return laidOut(this) ? Math.max(VIEW, lines(this).length * LINE) : 0;
+    return laidOut(this) ? Math.max(VIEW, lines(this).length * lineHeight) : 0;
   });
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return laidOut(this) ? VIEW : 0;
@@ -121,8 +123,8 @@ function open(routes: Record<string, unknown>, minimized = false) {
   return { calls, show: (hidden: boolean) => view.rerender(window(hidden)) };
 }
 
-/* The person scrolls the chat to a place higher up. */
-function scrollUp(log: HTMLElement, to = LINE) {
+/* The person scrolls the chat, by default to a place higher up, and the browser tells of it. */
+function scrollPerson(log: HTMLElement, to = LINE) {
   log.scrollTop = to;
   fireEvent.scroll(log);
 }
@@ -130,6 +132,7 @@ function scrollUp(log: HTMLElement, to = LINE) {
 /* The clock is fake from here to the end of the test, after cleanup has checked the timers the window left. */
 function virtualTime() {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+  lineHeight = LINE;
   onTestFinished(() => {
     vi.useRealTimers();
   });
@@ -203,7 +206,7 @@ describe('a chat that is open', () => {
       [`GET ${EVENTS}?after=10`]: () => [200, { events: more, state }],
     });
     const log = await shownLog();
-    scrollUp(log);
+    scrollPerson(log);
     stream.send({ type: 'agent_event', agentId: 'b1', event: ev(11) });
     expect(lines(log)).toHaveLength(11);
     expect(log.scrollTop).toBe(LINE);
@@ -216,13 +219,26 @@ describe('a chat that is open', () => {
     expect(log.scrollTop).toBe(LINE);
   });
 
+  it('keeps following new lines when its lines grew under it at its end, as pictures that loaded', async () => {
+    virtualTime();
+    const stream = fakeStream();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    const log = await shownLog();
+    lineHeight = LINE + LINE / 2;
+    /* The browser tells of the chat's own move at its next frame, after the lines grew: the person did not move. */
+    fireEvent.scroll(log);
+    stream.send({ type: 'agent_event', agentId: 'b1', event: ev(11) });
+    expect(atEnd(log)).toBe(true);
+  });
+
   it('follows new lines again once the person scrolled back down to the end', async () => {
     virtualTime();
     const stream = fakeStream();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
-    scrollUp(log);
-    scrollUp(log, log.scrollHeight - log.clientHeight);
+    scrollPerson(log);
+    /* A browser can stop a fraction of a pixel short of the end. */
+    scrollPerson(log, log.scrollHeight - log.clientHeight - 0.5);
     stream.send({ type: 'agent_event', agentId: 'b1', event: ev(11) });
     expect(atEnd(log)).toBe(true);
   });
@@ -250,7 +266,7 @@ describe('switching back to a chat', () => {
     virtualTime();
     const { show } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
-    scrollUp(log);
+    scrollPerson(log);
     show(true);
     const sight = firstSight(atEnd);
     show(false);
