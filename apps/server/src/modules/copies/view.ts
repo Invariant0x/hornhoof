@@ -5,8 +5,10 @@ import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from '../network/store.js';
 import { candidates } from './order.js';
-import { REPORT_FRESH_MS, unfit, type Unfit } from './qualify.js';
+import { unfit, type Unfit } from './qualify.js';
 
+/* A copy whose machine has not reported for this long is said to sleep. */
+const REPORT_FRESH_MS = 120_000;
 /* A copy this far behind the leader's last pulse is said to be behind, in whole minutes. */
 const BEHIND_MS = 60_000;
 

@@ -18,48 +18,60 @@ const CEO = { isOwner: true, company: true, active: true, name: 'Ivan' };
 const WHOLE = { isOwner: false, company: true, active: true, name: 'Maria' };
 const LISTED = { isOwner: false, company: false, active: true, name: 'Zed' };
 
-/* A computer with the core whose report is fresh and fits. */
+/* Made so long before now: within the last three days a machine is a newcomer, after them an established one. */
+const hoursAgo = (hours: number): Date => new Date(NOW.getTime() - hours * 3_600_000);
+const daysAgo = (days: number): Date => hoursAgo(24 * days);
+/* What earns every point but the online share's: 60 of them. */
+const FULL = { linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100, fsyncP99Ms: 2, memory: 16 * GIB, cores: 8 };
+/* A share of a half, which is not the 95% class, with so many points in all: 70, 74, 75, 80 or 90. */
+const POINTS: Record<number, Partial<Candidate>> = {
+  70: { ...FULL, share: 0.5, memory: 4 * GIB, cores: 0 },
+  74: { ...FULL, share: 0.5, memory: 4 * GIB, cores: 6.4 },
+  75: { ...FULL, share: 0.5, memory: 4 * GIB },
+  80: { ...FULL, share: 0.5 },
+  90: { ...FULL, share: 0.75 },
+};
+
+/* A computer with the core that fits, joined two days ago, with the same measures as every other unless a case says. */
 const candidate = (id: string, over: Partial<Candidate> = {}): Candidate => ({
-  id, kind: 'computer', networkId: `${id}`.padEnd(32, '0'), server: false, role: 'worker', createdAt: day(1), reportAt: new Date(NOW.getTime() - 20_000),
-  memory: 8 * GIB, diskFree: 100 * GIB, fsyncP99Ms: 3, owner: CEO, ...over,
+  id, kind: 'computer', networkId: `${id}`.padEnd(32, '0'), server: false, role: 'worker', createdAt: hoursAgo(48), reportAt: new Date(NOW.getTime() - 20_000),
+  memory: 8 * GIB, diskFree: 100 * GIB, fsyncP99Ms: 3, cores: 8, share: 1, linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100, pin: null, number: null, owner: CEO, ...over,
 });
 const LEADER = candidate('l', { server: true, role: 'data' });
-const OPTS = { leader: 'l', dbSize: GIB, link: true, now: NOW };
+const OPTS = { leader: 'l', dbSize: GIB, link: true, now: NOW, rescore: true };
 const ranked = (all: Candidate[], over: Partial<typeof OPTS> = {}) => Object.fromEntries(rankOf(all, { ...OPTS, ...over }).map(({ id, ...rest }) => [id, rest]));
+const numbers = (all: Candidate[], over: Partial<typeof OPTS> = {}) => Object.fromEntries(rankOf(all, { ...OPTS, ...over }).map(place => [place.id, place.number]));
 
 describe('the order of the machines that may hold the data', () => {
   it('numbers the leader 1 and fit machines from 2 by owner, then age', () => {
-    const a = candidate('a', { createdAt: day(3) });
-    const b = candidate('b', { createdAt: day(1), owner: WHOLE });
-    const c = candidate('c', { createdAt: day(5) });
+    /* Newcomers with the same measures: only whose they are and their age tell them apart. */
+    const a = candidate('a', { createdAt: hoursAgo(30) });
+    const b = candidate('b', { createdAt: hoursAgo(60), owner: WHOLE });
+    const c = candidate('c', { createdAt: hoursAgo(10) });
     expect(ranked([b, c, LEADER, a])).toEqual({
       l: { number: 1, why: 'server', data: true },
-      a: { number: 2, why: null, data: true },
-      c: { number: 3, why: null, data: true },
+      a: { number: 2, why: 'new', data: true },
+      c: { number: 3, why: 'new', data: true },
       b: { number: 4, why: 'next', data: false },
     });
   });
 
-  it('keeps the machines that hold a copy ahead', () => {
-    const a = candidate('a', { createdAt: day(3) });
-    const b = candidate('b', { createdAt: day(1), owner: WHOLE, role: 'data' });
-    const c = candidate('c', { createdAt: day(5) });
-    expect(ranked([a, b, c, LEADER])).toMatchObject({ b: { number: 2, data: true }, a: { number: 3, data: true }, c: { number: 4, why: 'next', data: false } });
-    /* A copy keeps its data wherever it stands, and whatever its machine measures now. */
-    const d = candidate('d', { createdAt: day(2), role: 'data', memory: GIB });
-    const e = candidate('e', { createdAt: day(4), role: 'data', owner: WHOLE, reportAt: null });
-    expect(ranked([a, b, d, e, LEADER])).toMatchObject({ d: { number: 2, data: true }, b: { number: 3, data: true }, e: { number: 4, why: null, data: true }, a: { number: 5, why: 'next', data: false } });
+  it('numbers the leader 1 whatever it measures', () => {
+    const leader = candidate('l', { server: true, role: 'data', reportAt: null, memory: GIB, fsyncP99Ms: null, share: 0 });
+    expect(ranked([leader, candidate('a')]).l).toEqual({ number: 1, why: 'server', data: true });
+    /* A pin ends when its machine becomes number 1. */
+    expect(ranked([{ ...leader, pin: '3' }, candidate('a')]).l).toEqual({ number: 1, why: 'server', data: true, clearPin: true });
   });
 
   it('marks a copy whose person no longer sees the whole company', () => {
-    const a = candidate('a', { createdAt: day(3) });
+    const a = candidate('a', { createdAt: hoursAgo(30) });
     const b = candidate('b', { owner: LISTED, role: 'data' });
-    const c = candidate('c', { createdAt: day(5) });
+    const c = candidate('c', { createdAt: hoursAgo(10) });
     expect(ranked([a, b, c, LEADER])).toEqual({
       l: { number: 1, why: 'server', data: true },
       b: { number: null, why: null, data: false, leave: true },
-      a: { number: 2, why: null, data: true },
-      c: { number: 3, why: null, data: true },
+      a: { number: 2, why: 'new', data: true },
+      c: { number: 3, why: 'new', data: true },
     });
     expect(ranked([candidate('b', { owner: { ...WHOLE, active: false }, role: 'data' }), LEADER]).b).toEqual({ number: null, why: null, data: false, leave: true });
   });
@@ -70,11 +82,11 @@ describe('the order of the machines that may hold the data', () => {
       [{ kind: 'browser' }, { why: 'phone' }],
       [{ networkId: null }, { why: 'no_core' }],
       [{ owner: LISTED }, { why: 'scope', person: 'Zed' }],
+      [{ owner: { ...LISTED, departments: 2 } }, { why: 'scope', person: 'Zed', departments: 2 }],
       [{ owner: { ...WHOLE, active: false } }, { why: 'scope', person: 'Maria' }],
-      [{ reportAt: new Date(NOW.getTime() - 180_000) }, { why: 'measuring' }],
-      [{ reportAt: null }, { why: 'measuring' }],
       [{ fsyncP99Ms: null }, { why: 'measuring' }],
       [{ memory: null }, { why: 'measuring' }],
+      [{ diskFree: null }, { why: 'measuring' }],
       [{ memory: 3 * GIB }, { why: 'memory', memory: 3 * GIB }],
       [{ diskFree: 12 * GIB }, { why: 'disk', free: 12 * GIB, need: 13 * GIB }],
       [{ fsyncP99Ms: 50 }, { why: 'fsync', p99: 50 }],
@@ -90,6 +102,9 @@ describe('the order of the machines that may hold the data', () => {
     expect(unfit(candidate('x'), OPTS)).toBeNull();
     /* The server's own row has no joined computer's id, and is one all the same. */
     expect(unfit(candidate('x', { networkId: null, server: true }), OPTS)).toBeNull();
+    /* A machine is taken on what it last measured, however long ago: a laptop asleep keeps its place. */
+    expect(unfit(candidate('x', { reportAt: new Date(NOW.getTime() - 7 * 86_400_000) }), OPTS)).toBeNull();
+    expect(unfit(candidate('x', { reportAt: null }), OPTS)).toBeNull();
   });
 
   it('takes 4 GB as Docker reports it', () => {
@@ -111,6 +126,66 @@ describe('the order of the machines that may hold the data', () => {
       b: { number: null, why: null, data: false },
     });
     expect(unfit(a, { ...OPTS, link: false })).toEqual({ why: 'no_link' });
+  });
+
+  it('ranks by the score once established', () => {
+    /* A and B are nearly always there and measure little else; C is there half the time and has the most points. */
+    const sparse = { linkRttMs: null, linkMbps: null, internetRttMs: null, internetMbps: null, createdAt: daysAgo(10) };
+    const a = candidate('a', { ...sparse, share: 1 });
+    const b = candidate('b', { ...sparse, share: 0.96, cores: 4 });
+    const c = candidate('c', { ...FULL, share: 0.5, createdAt: daysAgo(10) });
+    expect(numbers([c, b, a, LEADER])).toEqual({ l: 1, a: 2, b: 3, c: 4 });
+    expect(ranked([c, b, a, LEADER]).c).toEqual({ number: 4, why: 'next', data: false });
+    /* An established machine at 2 or 3 says how often it is there and what it is best or worst at. */
+    expect(ranked([c, b, a, LEADER]).a!.why).toBe('always.slow_internet');
+  });
+
+  it('ranks newcomers by class and points, after every established machine', () => {
+    const e = candidate('e', { ...POINTS[70], createdAt: daysAgo(10) });
+    const n1 = candidate('n1', { ...POINTS[70], share: 1, owner: WHOLE });
+    const n2 = candidate('n2', { ...FULL, share: 0.1 });
+    expect(numbers([n2, n1, e, LEADER])).toEqual({ l: 1, e: 2, n1: 3, n2: 4 });
+    /* Two of one class within five points keep the order they had. */
+    const n3 = candidate('n3', { ...POINTS[70], number: 3 });
+    const n4 = candidate('n4', { ...POINTS[74], number: 4 });
+    expect(numbers([n4, n3, e, LEADER])).toEqual({ l: 1, e: 2, n3: 3, n4: 4 });
+    /* With no place yet and the same points, the CEO's comes first. */
+    const m1 = candidate('m1', { ...POINTS[70], owner: WHOLE });
+    const m2 = candidate('m2', { ...POINTS[70] });
+    expect(numbers([m1, m2, LEADER])).toEqual({ l: 1, m2: 2, m1: 3 });
+  });
+
+  it('keeps the order without a scoring', () => {
+    const a = candidate('a', { ...POINTS[90], createdAt: daysAgo(10), number: 3 });
+    const b = candidate('b', { ...POINTS[70], createdAt: daysAgo(10), number: 2 });
+    expect(numbers([a, b, LEADER], { rescore: false })).toEqual({ l: 1, b: 2, a: 3 });
+    expect(numbers([a, b, LEADER])).toEqual({ l: 1, a: 2, b: 3 });
+  });
+
+  it('keeps a place for a pinned machine', () => {
+    const a = candidate('a', { ...POINTS[90], createdAt: daysAgo(10) });
+    const b = candidate('b', { ...POINTS[70], createdAt: daysAgo(10), pin: '2' });
+    expect(ranked([a, b, LEADER])).toMatchObject({ b: { number: 2, why: 'pinned', data: true }, a: { number: 3 } });
+  });
+
+  it('settles around a pin', () => {
+    const a = candidate('a', { ...POINTS[70], createdAt: daysAgo(10), number: 2 });
+    const p = candidate('p', { ...POINTS[75], createdAt: daysAgo(10), number: 3, pin: '3' });
+    const b = candidate('b', { ...POINTS[80], createdAt: daysAgo(10), number: 4 });
+    /* The pinned one is set aside, and B leads A by ten. */
+    expect(numbers([a, p, b, LEADER])).toEqual({ l: 1, b: 2, p: 3, a: 4 });
+  });
+
+  it('leaves out a machine that does not take the server', () => {
+    const b = candidate('b', { pin: 'none' });
+    expect(ranked([candidate('a'), b, LEADER])).toMatchObject({ a: { number: 2 }, b: { number: null, why: 'out', data: false } });
+    /* A copy that is kept out keeps its copy until the ranking hands it on. */
+    expect(ranked([candidate('a'), { ...b, role: 'data' }, LEADER]).b).toEqual({ number: null, why: 'out', data: true });
+  });
+
+  it('says why a machine waits for its place', () => {
+    const all = [candidate('a', { createdAt: hoursAgo(40) }), candidate('b', { createdAt: hoursAgo(30) }), candidate('c', { createdAt: hoursAgo(20) }), candidate('d', { createdAt: hoursAgo(10), role: 'data' }), LEADER];
+    expect(ranked(all)).toMatchObject({ a: { number: 2, why: 'new' }, b: { number: 3, why: 'new' }, c: { number: 4, why: 'next', data: false }, d: { number: 5, why: 'handing', data: true } });
   });
 });
 
@@ -150,7 +225,7 @@ describe('the ranking on the server', () => {
     await c.joined(c.ownerId, 5);
     /* The server's row, and the two that get a place among the first three; the fourth gets a place too. */
     expect(await rank(c.ctx)).toEqual({ changed: 4 });
-    expect(await c.places()).toEqual({ server: [1, 'server', 'data'], m1: [2, null, 'data'], m3: [3, null, 'data'], m2: [4, 'next', 'worker'] });
+    expect(await c.places()).toEqual({ server: [1, 'server', 'data'], m1: [2, expect.any(String), 'data'], m3: [3, expect.any(String), 'data'], m2: [4, 'next', 'worker'] });
     expect(await rank(c.ctx)).toEqual({ changed: 0 });
   });
 
@@ -160,22 +235,24 @@ describe('the ranking on the server', () => {
     await c.joined(c.ownerId, 5);
     await c.joined(c.mariaId, 1);
     await rank(c.ctx);
-    expect(await c.places()).toMatchObject({ m1: [2, null, 'data'], m2: [3, null, 'data'], m3: [4, 'next', 'worker'] });
-    /* Both hold a copy now, so only their ages decide between them. */
-    await c.db.update(machines).set({ createdAt: day(7) }).where(eq(machines.id, a.id));
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'], m3: [4, 'next', 'worker'] });
+    /* Both hold a copy and measure the same. Then the second measures far more than the first, and passes it. */
+    expect(a.hostname).toBe('m1');
+    await c.db.update(machines).set({ cores: 8, linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100 }).where(eq(machines.hostname, 'm2'));
     expect(await rank(c.ctx)).toEqual({ changed: 2 });
-    expect(await c.places()).toMatchObject({ m2: [2, null, 'data'], m1: [3, null, 'data'], m3: [4, 'next', 'worker'] });
+    expect(await c.places()).toMatchObject({ m2: [2, expect.any(String), 'data'], m1: [3, expect.any(String), 'data'], m3: [4, 'next', 'worker'] });
   });
 
   it('gives no place to a machine that does not fit, and none at all without the row of this server', async () => {
     const c = await company();
     const phone = await c.joined(c.ownerId, 2, { kind: 'phone' });
-    const stale = await c.joined(c.ownerId, 3, { reportAt: new Date(Date.now() - 180_000) });
+    /* One that never reported its memory is still being measured. */
+    const stale = await c.joined(c.ownerId, 3, { memory: null });
     expect(await rank(c.ctx)).toEqual({ changed: 1 });
     expect(await c.places()).toEqual({ server: [1, 'server', 'data'], m1: [null, null, 'worker'], m2: [null, null, 'worker'] });
     await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.networkId, MACHINE_ID));
     await c.db.update(machines).set({ kind: 'computer', reportAt: new Date() }).where(eq(machines.id, phone.id));
-    await c.db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, stale.id));
+    await c.db.update(machines).set({ memory: 8 * GIB }).where(eq(machines.id, stale.id));
     expect(await rank(c.ctx)).toEqual({ changed: 0 });
   });
 
@@ -185,7 +262,7 @@ describe('the ranking on the server', () => {
     await c.joined(c.ownerId, 5);
     const waiting = await c.joined(c.mariaId, 7);
     await rank(c.ctx);
-    expect(await c.places()).toMatchObject({ m1: [2, null, 'data'], m2: [3, null, 'data'], m3: [4, 'next', 'worker'] });
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'], m3: [4, 'next', 'worker'] });
     /* A machine goes with its number still on its row, as one that waited for a place does when it is disconnected,
        and as the server's own row does when the company is restored onto another install. */
     await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, waiting.id));
@@ -207,7 +284,7 @@ describe('the ranking on the server', () => {
     /* Once it holds nothing of before, it is a machine like any other. */
     await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, leaving.id));
     await rank(c.ctx);
-    expect(await c.places()).toMatchObject({ m1: [2, null, 'data'] });
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'] });
   });
 
   it('keeps the last throughput', async () => {
@@ -241,13 +318,13 @@ describe('the ranking on the server', () => {
 
   it('ranks every minute while it leads', async () => {
     const c = await company();
-    const late = await c.joined(c.ownerId, 2, { reportAt: null });
+    const late = await c.joined(c.ownerId, 2, { fsyncP99Ms: null });
     const ranking = new Ranking(c.ctx, { everyMs: 100 });
     onTestFinished(() => ranking.stop());
     ranking.start();
     await until(async () => (await c.places()).server?.[0] === 1);
     expect((await c.places()).m1).toEqual([null, null, 'worker']);
-    await c.db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, late.id));
+    await c.db.update(machines).set({ fsyncP99Ms: 3 }).where(eq(machines.id, late.id));
     await until(async () => (await c.places()).m1?.[0] === 2);
     ranking.stop();
     const other = await c.joined(c.mariaId, 3);
