@@ -12,9 +12,15 @@ import { ApiError } from '../../errors.js';
 import type { AgentRow } from '../agents/find.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
+import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { sendForOwner } from './messages.js';
+import { waitingFor } from './requests.js';
 
 const MessageBody = z.object({ agentId: z.uuid(), text: z.string().trim().min(1).max(20_000) }).strict();
+/* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
+export const LONGEST_WAIT_S = 50;
+const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
+const IdParams = z.object({ id: z.uuid() });
 
 /* Whether the assistant may write to this agent: its owner may in the agent's window, and the orchestrator only for an owner
    who sees the whole company. */
@@ -86,5 +92,24 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
     const id = await sendForOwner(ctx, me, agent, text);
     reply.code(202);
     return { message: { id, agentId: agent.id } };
+  });
+
+  /* A long poll: the events after a number at once, or the first that comes within the wait. */
+  app.get('/api/assistant/events', async (req, reply) => {
+    const me = await requireAssistant(req, db);
+    const { after, wait } = EventsQuery.parse(req.query);
+    const gone = new AbortController();
+    reply.raw.once('close', () => gone.abort());
+    const events = await ctx.assistants.read(me.assistant!.id, after, wait * 1000, gone.signal);
+    return { events, next: events.at(-1)?.seq ?? after };
+  });
+
+  app.get('/api/assistant/requests', async req => ({ requests: await waitingFor(ctx, await requireAssistant(req, db)) }));
+
+  /* The same answer the owner gives on their screen, recorded as given by the assistant for them. */
+  app.post('/api/assistant/requests/:id/answer', async req => {
+    const me = await requireAssistant(req, db);
+    const { id } = IdParams.parse(req.params);
+    return answerRequest(ctx, me, id, AnswerBody.parse(req.body));
   });
 }

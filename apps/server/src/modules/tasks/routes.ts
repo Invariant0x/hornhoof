@@ -64,7 +64,7 @@ const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
 const TurnParams = z.object({ number: z.coerce.number().int().positive() });
 const TurnPatch = z.strictObject({ mode: z.enum(TURN_MODES) });
-const AnswerBody = z.union([
+export const AnswerBody = z.union([
   z.object({ answer: Text.trim().min(1) }).strict(),
   z.object({ approve: z.boolean(), answer: Text.optional() }).strict(),
   z.object({ retry: z.literal(true) }).strict(),
@@ -72,6 +72,35 @@ const AnswerBody = z.union([
 ]);
 
 const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
+
+const assistantRefused = (message: string) => new ApiError(403, 'forbidden', message, 'assistant_not_allowed');
+
+/* What administers the company is answered by a person themselves: never by their assistant, nor by the orchestrator on
+   their assistant's word. */
+async function guardAdministration(db: Ctx['db'], me: Person, found: typeof requests.$inferSelect, on: ReturnType<typeof delegationOf>): Promise<void> {
+  if (!administers(found.decisionTopic)) return;
+  if (me.assistant) throw assistantRefused(`This request is about administering the company, so only ${me.name} answers it, in Hornhoof.`);
+  if (on && (await onAssistantWord(db, on.jobId))) throw assistantRefused(ON_ASSISTANT_WORD);
+}
+
+/* A person's answer to an open request, given on their screen, by the orchestrator for them or by their assistant. */
+export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.infer<typeof AnswerBody>) {
+  const { db } = ctx;
+  const [found] = await db.select().from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
+  if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
+  if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
+  if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
+  /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
+  const on = delegationOf(me);
+  await guardAdministration(db, me, found, on);
+  requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
+  const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on, me.assistant ? { assistant: me.assistant.id } : {}));
+  await wakeAll(ctx, done.wakes);
+  /* An agent switched off while it waited for this answer leaves the work now. */
+  await leaveIfOff(ctx, done.request.agentId);
+  return { request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } };
+}
 
 /* The requests among these the orchestrator was asked to put into words, in a turn that waits or runs now. */
 async function explainingOf(db: Ctx['db'], companyId: string, ids: string[]): Promise<Set<string>> {
@@ -398,22 +427,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/requests/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const body = AnswerBody.parse(req.body);
-    const [found] = await db.select().from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
-    if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
-    if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
-    if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-    /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept, and
-       what administers the company never on their assistant's word. */
-    const on = delegationOf(me);
-    if (on && administers(found.decisionTopic) && (await onAssistantWord(db, on.jobId))) throw new ApiError(403, 'forbidden', ON_ASSISTANT_WORD, 'assistant_not_allowed');
-    requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
-    const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on));
-    await wakeAll(ctx, done.wakes);
-    /* An agent switched off while it waited for this answer leaves the work now. */
-    await leaveIfOff(ctx, done.request.agentId);
-    return { request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } };
+    return answerRequest(ctx, me, id, AnswerBody.parse(req.body));
   });
 
   /* The orchestrator puts what an employee asks into plain words for the people who answer it. */

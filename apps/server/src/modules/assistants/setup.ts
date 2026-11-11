@@ -101,6 +101,8 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const key = fresh(KEY_PREFIX);
     const signingSecret = fresh(SECRET_PREFIX);
     await db.update(assistants).set({ keyHash: hashToken(key), keyCreatedAt: new Date(), wakeSecretEnc: encryptSecret(signingSecret, ctx.config.secret) }).where(eq(assistants.personId, id));
+    /* What waits for the owner already is told to the assistant once it has a key. */
+    ctx.assistants.collect(me.companyId);
     reply.code(201);
     return { key, signingSecret, person: await personView(db, person) };
   });
