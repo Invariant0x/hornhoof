@@ -11,6 +11,7 @@ import { agents, certificates, computerRuns, departments, invites, machineAccess
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
+import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { as, invitePerson, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
 import { backupCompany, from, MACHINE_ID, OWN } from './helpers-backups.js';
 
@@ -111,16 +112,13 @@ describe('a restore from a backup', () => {
     const second = (again.json() as { attempt: string }).attempt;
     expect(second).not.toBe(first);
     expect((await s.view<MakerView>()).order).toMatchObject({ attempt: second, id: s.made.id });
-    /* The status of the attempt before says nothing of this one. */
+    /* The order is out before its keeper wrote a word: it runs, whatever the attempt before left. */
     const listed = (await s.app.inject({ url: '/api/backups', ...as(s.ceo) })).json() as { restore: RestoreStatus | null; bundles: { id: string; restorable: boolean; why: string | null }[] };
-    expect(listed.restore).toMatchObject({ attempt: first, state: 'failed' });
+    expect(listed.restore).toMatchObject({ attempt: second, id: s.made.id, state: 'running', step: 'fetch', kept: null });
     expect(listed.bundles.find(bundle => bundle.id === s.made.id)).toMatchObject({ restorable: true, why: null });
-    /* A status at a step of the keeper's counts as running only while its order is out. */
-    s.says({ attempt: randomUUID(), state: 'running', step: 'open' });
-    const stale = (await s.app.inject({ url: '/api/backups', ...as(s.ceo) })).json() as { restore: RestoreStatus };
-    expect(stale.restore).toMatchObject({ state: 'failed', line: 'The restore was called off.' });
+    const shown = async () => ((await s.app.inject({ url: '/api/backups', ...as(s.ceo) })).json() as { restore: RestoreStatus }).restore;
     s.says({ attempt: second, state: 'running', step: 'open' });
-    expect(((await s.app.inject({ url: '/api/backups', ...as(s.ceo) })).json() as { restore: RestoreStatus }).restore).toMatchObject({ attempt: second, state: 'running', step: 'open' });
+    expect(await shown()).toMatchObject({ attempt: second, state: 'running', step: 'open' });
     /* After its hour the order is gone, and the updater free. */
     const realNow = Date.now;
     Date.now = () => realNow() + ORDER_MS;
@@ -130,6 +128,8 @@ describe('a restore from a backup', () => {
       Date.now = realNow;
     }
     expect(s.app.ctx.updater.claimed()).toBeNull();
+    /* A status at a step of the keeper's counts as running only while its order is out. */
+    expect(await shown()).toMatchObject({ attempt: second, state: 'failed', line: 'The restore was called off.' });
   });
 
   it('asks the holder for a bundle the leader lacks', async () => {
@@ -200,13 +200,15 @@ describe('a restore from a backup', () => {
     const [hereRow] = await db.select().from(recoveryKeys).where(eq(recoveryKeys.recipient, here.recipient));
     const newer = { id: randomUUID(), recipient: `age1${'q'.repeat(58)}`, linkPrint: null, linkName: null, linkUrl: null, madeBy: s.owner.id, madeAt: new Date().toISOString(), retiredAt: null };
 
+    /* Eli was the CEO's delegate when the bundle was made, and the CEO took the mark off since. */
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, eli!.row.id));
     const asCarried = (person: typeof people.$inferSelect, over: Partial<Carry['people'][number]> = {}): Carry['people'][number] =>
-      ({ id: person.id, status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind, isOwner: person.isOwner, access: [], ...over });
+      ({ id: person.id, status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind, isOwner: person.isOwner, isCeoDelegate: person.isCeoDelegate, access: [], ...over });
     const carry: Carry = {
       people: [
         asCarried((await db.select().from(people).where(eq(people.id, s.owner.id)))[0]!),
         asCarried(dana!.row, { status: 'disabled' }),
-        asCarried(eli!.row, { passwordHash: 'a-new-hash', scopeKind: 'listed', access: [{ departmentId: sales!.id, teamId: null }, { departmentId: randomUUID(), teamId: null }] }),
+        asCarried(eli!.row, { passwordHash: 'a-new-hash', scopeKind: 'listed', isCeoDelegate: false, access: [{ departmentId: sales!.id, teamId: null }, { departmentId: randomUUID(), teamId: null }] }),
         asCarried(finn!.row, { scopeKind: 'listed', access: [] }),
         asCarried({ ...finn!.row, id: randomUUID() }),
       ],
@@ -229,7 +231,7 @@ describe('a restore from a backup', () => {
     expect((await person(dana!.row.id)).status).toBe('disabled');
     expect((await db.select().from(machines).where(eq(machines.id, danas)))[0]!.revokedAt).not.toBeNull();
     /* Eli's password and reach are as they were when the old database closed, as far as this one has the places. */
-    expect(await person(eli!.row.id)).toMatchObject({ passwordHash: 'a-new-hash', scopeKind: 'listed', status: 'active' });
+    expect(await person(eli!.row.id)).toMatchObject({ passwordHash: 'a-new-hash', scopeKind: 'listed', status: 'active', isCeoDelegate: false });
     expect((await db.select().from(personAccess).where(eq(personAccess.personId, eli!.row.id))).map(row => row.departmentId)).toEqual([sales!.id]);
     expect(await db.select().from(personAccess).where(eq(personAccess.personId, finn!.row.id))).toEqual([]);
     expect((await person(s.owner.id)).isOwner).toBe(true);
@@ -306,6 +308,29 @@ describe('a restore from a backup', () => {
     expect(sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }))).toBeTruthy();
     void setUpCompany;
     void MACHINE_ID;
+  });
+
+  it('serves nobody on a restored database that does not lead yet, and everybody on one that was not restored', async () => {
+    /* The keeper holds the app in maintenance while the restored company starts, or in read while it has no lease:
+       what was carried over waits, so the sessions the bundle brought back open nothing. */
+    for (const mode of ['maintenance', 'read'] as const) {
+      const control = folder();
+      writeFileSync(join(control, RESTORE_CARRY), JSON.stringify({ attempt: randomUUID(), carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
+      writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
+      const { app } = await testApp({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
+      for (const url of ['/api/people', '/api/version', '/api/updates/current']) {
+        const refused = await app.inject({ url });
+        expect([mode, url, refused.statusCode, (refused.json() as Refusal).error.reason]).toEqual([mode, url, 503, 'starting']);
+      }
+      expect((await app.inject({ method: 'POST', url: '/mcp', payload: {} })).statusCode).toBe(503);
+      expect((await app.inject({ url: '/api/health' })).statusCode).toBe(200);
+    }
+    /* An app that only reads and was never restored serves what it can read, as before. */
+    const control = folder();
+    writeKeeperState(control, { mode: 'read', at: new Date().toISOString(), link: null });
+    const plain = await testApp({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
+    expect((await plain.app.inject({ url: '/api/version' })).statusCode).toBe(200);
+    expect((await plain.app.inject({ url: '/api/setup' })).statusCode).toBe(200);
   });
 
   it('names what the restore undoes', async () => {

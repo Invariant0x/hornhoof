@@ -42,7 +42,7 @@ export type HolderView = { keeps: boolean; hold: Pick<Manifest, 'id' | 'size' | 
    one: a restore never brings back a person who was disabled, a machine that was disconnected or a key that was
    replaced since the bundle. */
 export type Carry = {
-  people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; scopeKind: string; isOwner: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
+  people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; scopeKind: string; isOwner: boolean; isCeoDelegate: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
   /* The hashes of the invites open now. */
   invites: string[];
   machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean }[];

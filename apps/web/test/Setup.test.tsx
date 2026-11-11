@@ -484,6 +484,46 @@ describe('Setup from a recovery file', () => {
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/');
   });
 
+  it('offers the backups again after a restore that did not go through', async () => {
+    let restore: object | null = null;
+    let has = true;
+    mockApi({
+      'POST /api/recovery': [200, view({ bundles: [BUNDLE] })],
+      'GET /api/recovery?code=LINK-CODE-123': () => (has ? [200, view({ bundles: [BUNDLE], restore })] : [404, { error: { code: 'not_found', reason: 'not_recovering' } }]),
+      'POST /api/recovery/restore': () => {
+        restore = { attempt: 'a1', id: ID, state: 'running', step: 'fetch', line: '', at: BUNDLE.dumpedAt, kept: null };
+        return [202, { attempt: 'a1' }];
+      },
+      'GET /api/setup': [200, { needed: true, linkDomain: 'hornhoof.org', recovering: false }],
+    });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
+    await user.upload(screen.getByLabelText('Recovery file'), new File([FILE], 'hornhoof-recovery.txt', { type: 'text/plain' }));
+    await user.click(await screen.findByRole('button', { name: /^Restore the backup of / }));
+    expect(await screen.findByText('Getting the backup')).toHaveAttribute('aria-current', 'step');
+    expect(screen.queryByRole('button', { name: 'Set up a new company instead' })).not.toBeInTheDocument();
+    /* The keeper could not open it: the server still has the file, so the backups and the way out are back. */
+    restore = { attempt: 'a1', id: ID, state: 'failed', step: 'open', line: 'This backup could not be opened.', at: BUNDLE.dumpedAt, kept: null };
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await screen.findByText('This backup could not be opened.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Restore the backup of / })).toBeInTheDocument();
+    expect(screen.getByLabelText('Or upload a backup file')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set up a new company instead' })).toBeInTheDocument();
+    /* A restore that got as far as the databases restarts the server, which then has no file any more and no company
+       either: the person is asked for the file again. */
+    await user.click(screen.getByRole('button', { name: /^Restore the backup of / }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await screen.findByText('Getting the backup')).toBeInTheDocument();
+    has = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await screen.findByText('The server started again and no longer has the recovery file. If a restore was running, it did not finish. Choose the file again.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Recovery file')).toBeInTheDocument();
+    expect(screen.queryByText('Getting the backup')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set up a new company instead' })).toBeInTheDocument();
+  });
+
   it('asks for the setup code when the link brought none, says why a file was refused, and goes back', async () => {
     window.history.replaceState(null, '', '/setup');
     const calls = mockApi({ 'POST /api/recovery': [400, { error: { code: 'validation', message: 'This is not a Hornhoof recovery file.', reason: 'recovery_file_invalid' } }] });

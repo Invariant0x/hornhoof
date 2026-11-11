@@ -198,17 +198,20 @@ describe('Shell', () => {
 
 describe('the recovery file banner', () => {
   const BACKUPS = { last: null, recovery: null, recoveryNeeded: true, linkChanged: false, restore: null, kept: [], bundles: [] };
+  /* The banner asks only what it shows, not the whole list. */
+  const asked = (backups: { recoveryNeeded?: boolean; linkChanged?: boolean }) => ({ recoveryNeeded: backups.recoveryNeeded, linkChanged: backups.linkChanged });
   const LINK = { link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org' };
-  const shown = (me = ME, backups: object = BACKUPS) => {
-    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/backups': [200, backups], 'GET /api/link': [200, LINK] });
+  const shown = (me = ME, backups: typeof BACKUPS | object = BACKUPS) => {
+    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/backups/recovery': [200, asked(backups)], 'GET /api/backups': [200, backups], 'GET /api/link': [200, LINK] });
     render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
     return calls;
   };
 
   it('asks the CEO to save the recovery file while there is none, and opens the company settings', async () => {
-    shown();
+    const calls = shown();
     const banner = await screen.findByRole('status', { name: 'Backups' });
     expect(banner).toHaveTextContent('Save the recovery file, so the company can be restored if this server is lost.');
+    expect(calls.filter(call => call.path.startsWith('/api/backups')).map(call => call.path)).toEqual(['/api/backups/recovery']);
     const user = userEvent.setup();
     await user.click(within(banner).getByRole('button', { name: 'Open company settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
@@ -222,12 +225,12 @@ describe('the recovery file banner', () => {
 
   it('shows nothing once the file is saved, and nothing to anyone but the CEO', async () => {
     const saved = shown(ME, { ...BACKUPS, recovery: { madeAt: '2026-11-10T08:00:00.000Z', madeBy: 'Ivan' }, recoveryNeeded: false });
-    await waitFor(() => expect(saved.some(call => call.path === '/api/backups')).toBe(true));
+    await waitFor(() => expect(saved.some(call => call.path === '/api/backups/recovery')).toBe(true));
     expect(screen.queryByRole('status', { name: 'Backups' })).not.toBeInTheDocument();
     const calls = shown({ ...ME, person: { ...ME.person, id: 'p2', isOwner: false } });
     await screen.findAllByRole('navigation');
     await act(async () => { await Promise.resolve(); });
-    expect(calls.some(call => call.path === '/api/backups')).toBe(false);
+    expect(calls.some(call => call.path.startsWith('/api/backups'))).toBe(false);
     expect(screen.queryByRole('status', { name: 'Backups' })).not.toBeInTheDocument();
   });
 });

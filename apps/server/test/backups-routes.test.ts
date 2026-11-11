@@ -120,6 +120,11 @@ describe('the backups routes', () => {
     ]);
     const zed = await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     expect((await c.app.inject({ url: '/api/backups', ...as(zed) })).statusCode).toBe(403);
+    /* What the CEO's banner asks, in a few words. */
+    expect((await c.app.inject({ url: '/api/backups/recovery', ...as(c.ceo) })).json()).toEqual({ recoveryNeeded: false, linkChanged: false });
+    expect((await c.app.inject({ url: '/api/backups/recovery', ...as(zed) })).statusCode).toBe(403);
+    await saveLink(c.db, c.config, c.acme.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test' } });
+    expect((await c.app.inject({ url: '/api/backups/recovery', ...as(c.ceo) })).json()).toEqual({ recoveryNeeded: true, linkChanged: true });
   });
 
   it("stores a machine's age key and what it holds, and takes no other word for either", async () => {

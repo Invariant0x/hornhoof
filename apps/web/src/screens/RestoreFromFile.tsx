@@ -30,20 +30,24 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
   const { language } = useLanguage();
   const [code, setCode] = useState(linkCode);
   const [view, setView] = useState<RecoveryView | null>(null);
-  const [started, setStarted] = useState(false);
+  /* The server answered that it has no recovery file any more, while this page had given it one. */
+  const [forgotten, setForgotten] = useState(false);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const asked = encodeURIComponent(code);
 
-  /* What came in so far; and once a restore was started, whether the company is back, which ends the waiting. */
+  /* What came in so far. A server that knows of no recovery has its company back, which ends the waiting; or it started
+     again with none, as after a restore that failed once the databases were touched, and is given the file again. */
   const look = useCallback(async () => {
     try {
       setView(await api.get<RecoveryView>(`/api/recovery?code=${asked}`));
     } catch (err) {
       if (!(err instanceof ApiFailure) || err.status !== 404) return;
       const { needed } = await api.get<{ needed: boolean }>('/api/setup');
-      if (!needed) setDone(true);
+      if (!needed) return setDone(true);
+      setView(null);
+      setForgotten(true);
     }
   }, [asked]);
 
@@ -53,10 +57,10 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
 
   /* While the server restarts on the restored database a look fails, which is no news. */
   useEffect(() => {
-    if ((!view && !started) || done) return;
+    if (!view || done) return;
     const timer = setInterval(() => void look().catch(() => undefined), LOOK_MS);
     return () => clearInterval(timer);
-  }, [view, started, done, look]);
+  }, [view, done, look]);
 
   async function act(work: () => Promise<void>) {
     setBusy(true);
@@ -70,7 +74,11 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
     }
   }
 
-  const give = (file: File) => act(async () => setView(await api.post<RecoveryView>('/api/recovery', { code, file: await textOf(file) })));
+  const give = (file: File) =>
+    act(async () => {
+      setView(await api.post<RecoveryView>('/api/recovery', { code, file: await textOf(file) }));
+      setForgotten(false);
+    });
   const upload = (file: File) =>
     act(async () => {
       const id = await bundleId(file);
@@ -81,7 +89,6 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
   const restore = (id: string) =>
     act(async () => {
       await api.post('/api/recovery/restore', { code, id });
-      setStarted(true);
       await look();
     });
 
@@ -94,13 +101,14 @@ export function RestoreFromFile({ code: linkCode, recovering = false, onBack }: 
       </>
     );
   }
-  const running = started || view?.restore?.state === 'running';
+  const running = view?.restore?.state === 'running';
   return (
     <>
       <h1>{t.setup.restore.link}</h1>
       {!view && (
         <>
           <p className="muted">{t.setup.restore.choose}</p>
+          {forgotten && <p className="update-note">{t.setup.restore.again}</p>}
           {!linkCode && (
             <Field label={t.setup.code} hint={t.setup.codeHint}>
               {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}

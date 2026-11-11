@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, max, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, notExists, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -340,19 +341,18 @@ export class Computers {
 
   /* Ends the commands of a machine that waited too long for its keeper: they were never run, and are not run later. A
      command also waits its turn behind one that is out, since a machine runs one at a time, and that wait is no keeper's
-     fault: nothing is given up while a command of the machine is out, nor until that long after its last one ended. */
-  private async endStale(machineId: string, tx: Db = this.ctx.db): Promise<void> {
+     fault: nothing is given up while a command of the machine is out, nor until that long after the last one its
+     keeper took ended. One given up here was never taken, so it puts off none behind it. */
+  private async endStale(machineId: string, tx: Db = this.ctx.db, known?: Pick<Row, 'hostname' | 'networkId' | 'id'>): Promise<void> {
     const now = this.now();
-    const ofMachine = eq(computerRuns.machineId, machineId);
-    const [out] = await tx.select({ id: computerRuns.id }).from(computerRuns).where(and(ofMachine, eq(computerRuns.state, 'sent'))).limit(1);
-    if (out) return;
-    const [ended] = await tx.select({ at: max(computerRuns.doneAt) }).from(computerRuns).where(and(ofMachine, isNotNull(computerRuns.doneAt)));
-    if (ended?.at && now.getTime() - ended.at.getTime() < WAITING_MS) return;
-    const [row] = await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
+    const since = new Date(now.getTime() - WAITING_MS);
+    const [row] = known ? [known] : await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
+    const taken = alias(computerRuns, 'taken');
+    const inTheWay = tx.select({ id: taken.id }).from(taken).where(and(eq(taken.machineId, machineId), or(eq(taken.state, 'sent'), and(isNotNull(taken.sentAt), gt(taken.doneAt, since)))));
     await tx
       .update(computerRuns)
       .set({ state: 'done', exit: CLOSED_EXIT, output: staleLine(row ? this.nameOf(row) : 'The machine'), doneAt: now })
-      .where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'waiting'), lt(computerRuns.createdAt, new Date(now.getTime() - WAITING_MS + 1))));
+      .where(and(eq(computerRuns.machineId, machineId), eq(computerRuns.state, 'waiting'), lt(computerRuns.createdAt, new Date(since.getTime() + 1)), notExists(inTheWay)));
   }
 
   /* The machine a command is for, for what the orchestrator is told of it. */
@@ -385,7 +385,7 @@ export class Computers {
         this.clearedAt = now.getTime();
         await tx.delete(computerRuns).where(and(eq(computerRuns.companyId, row.companyId), inArray(computerRuns.state, ['done', 'lost']), lt(computerRuns.doneAt, new Date(now.getTime() - RUN_KEEP_MS))));
       }
-      await this.endStale(machineId, tx);
+      await this.endStale(machineId, tx, row);
       const [access] = await tx.select().from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
       if (!access?.until || access.until <= now) {
         await endRuns(tx, [machineId], new Map([[machineId, this.nameOf(row)]]), now, false);

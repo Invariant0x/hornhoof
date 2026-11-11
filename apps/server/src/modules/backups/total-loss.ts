@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -35,7 +35,11 @@ export type RecoveryView = {
   restore: RestoreStatus | null;
 };
 
-const sameText = (a: string, b: string): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+/* By their bytes: two texts of one length in letters may differ in length there. */
+function sameText(a: string, b: string): boolean {
+  const [one, other] = [Buffer.from(a), Buffer.from(b)];
+  return one.length === other.length && timingSafeEqual(one, other);
+}
 
 /* A server set up anew after the old one was lost, before it has a company: whoever has its setup code gives it the
    recovery file, the machines that survived find it by a challenge only that file answers and send it their bundles,
@@ -52,12 +56,12 @@ export class TotalLoss {
     private readonly now: () => Date = () => new Date(Date.now()),
   ) {}
 
-  /* Another file than the one before takes its place, and what was taken for that one goes. */
+  /* Another file than the one before takes its place, and what was taken for that one goes: of what lies here, also
+     from before this app started, only the bundles this file opens stay. */
   begin(file: RecoveryFile): void {
-    if (this.file && this.file.identity !== file.identity) {
-      this.answered.clear();
-      this.incoming().keepOnly([]);
-    }
+    if (this.file && this.file.identity !== file.identity) this.answered.clear();
+    const store = this.incoming();
+    store.keepOnly(store.list().filter(bundle => bundle.manifest.recovery === file.recipient).map(bundle => bundle.id));
     this.file = file;
     const path = join(this.ctx.config.controlDir, RECOVERY_LINK);
     if (!file.link) return rmSync(path, { force: true });
@@ -65,11 +69,17 @@ export class TotalLoss {
     renameSync(`${path}.new`, path);
   }
 
-  /* A company exists: there is nothing to recover any more. */
+  /* A company exists: there is nothing to recover any more, and what was sent for it goes. */
   end(): void {
     this.file = null;
     this.answered.clear();
     rmSync(join(this.ctx.config.controlDir, RECOVERY_LINK), { force: true });
+    if (existsSync(join(this.ctx.config.controlDir, ...INCOMING))) this.incoming().keepOnly([]);
+  }
+
+  /* At the app's first lead: a server that has its company, restored or set up anew, keeps nothing of a recovery. */
+  async tidy(): Promise<void> {
+    if (!(await setupNeeded(this.ctx.db))) this.end();
   }
 
   active(): RecoveryFile | null {

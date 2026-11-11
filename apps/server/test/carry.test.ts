@@ -24,6 +24,7 @@ describe('the carry of a restore', () => {
     const byName = async (name: string) => (await db.select().from(people).where(eq(people.name, name)))[0]!;
     const [dana, eli, finn] = [await byName('Dana'), await byName('Eli'), await byName('Finn')];
     await db.update(people).set({ status: 'disabled' }).where(eq(people.id, dana.id));
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, eli.id));
     await db.delete(personAccess).where(eq(personAccess.personId, eli.id));
     await db.insert(personAccess).values({ companyId: acme!.id, personId: eli.id, departmentId: department!.id });
     /* An invite that ran out is as closed as one that was used. */
@@ -48,7 +49,8 @@ describe('the carry of a restore', () => {
 
     const person = (id: string) => carry.people.find(one => one.id === id)!;
     expect(carry.people).toHaveLength(4);
-    expect(person(owner!.id)).toMatchObject({ status: 'active', isOwner: true, passwordHash: owner!.passwordHash, scopeKind: owner!.scopeKind });
+    expect(person(owner!.id)).toMatchObject({ status: 'active', isOwner: true, isCeoDelegate: false, passwordHash: owner!.passwordHash, scopeKind: owner!.scopeKind });
+    expect(person(eli.id).isCeoDelegate).toBe(true);
     expect(person(dana.id)).toMatchObject({ status: 'disabled', isOwner: false, passwordHash: dana.passwordHash });
     expect(person(eli.id).access).toEqual([{ departmentId: department!.id, teamId: null }]);
     expect(person(finn.id)).toMatchObject({ status: 'invited', passwordHash: null });

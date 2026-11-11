@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -112,6 +112,40 @@ describe('Backups in Settings', () => {
     expect(screen.getByText(/^The database from before the restore of .+ is kept on this server\.$/)).toBeInTheDocument();
     /* Ended, another can be started. */
     expect(screen.getByRole('button', { name: /^Restore the backup of / })).toBeInTheDocument();
+  });
+
+  it('says how a restore ended in the language of the person, whose server writes in English', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      mockApi({ 'GET /api/backups': [200, viewOf({ restore: status({ state: 'failed', step: 'check', line: 'This backup does not match what the company recorded.' }) })] });
+      const failed = shown();
+      expect(await screen.findByText('Восстановление остановилось на шаге «Проверяем ее». Компания осталась такой, как была.')).toBeInTheDocument();
+      expect(screen.queryByText('This backup does not match what the company recorded.')).not.toBeInTheDocument();
+      failed.unmount();
+      mockApi({ 'GET /api/backups': [200, viewOf({ restore: status({ state: 'done', step: 'start', line: 'Restored the backup of 2026-11-10T08:00:00.000Z.' }) })] });
+      shown();
+      expect(await screen.findByText('Компания восстановлена из копии.')).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('says that the session ended once the restore finished', async () => {
+    let over = false;
+    mockApi({ 'GET /api/backups': () => (over ? [401, { error: { code: 'unauthorized', message: 'Sign in to continue.', reason: 'signed_out' } }] : [200, viewOf({ restore: status({ step: 'start' }) })]) });
+    shown();
+    expect(await screen.findByText('Starting the company')).toHaveAttribute('aria-current', 'step');
+    /* The restored company ends every session: the next look is refused, which is how the page learns of it. */
+    over = true;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(await screen.findByText('Your session has ended, as it does when a restore finishes. Sign in again.')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/');
+      expect(screen.queryByText('Starting the company')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('asks for the recovery file when it must', async () => {

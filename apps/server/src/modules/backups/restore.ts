@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, gt, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
+import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
 import { certificates, companies, computerRuns, departments, invites, machineAccess, machines, people, personAccess, recoveryKeys, sessions, teams } from '../../db/schema.js';
@@ -28,9 +29,12 @@ const CALLED_OFF = 'The restore was called off.';
 
 export type NotRestorable = 'newer_build' | 'not_held' | 'needs_recovery_file';
 
-/* How many migrations this build knows: a backup of a database with more was made by a newer one. */
+/* How many migrations this build knows: a backup of a database with more was made by a newer one. Read once, as a
+   build's migrations never change while it runs. */
+let known: number | undefined;
 export function knownMigrations(): number {
-  return (JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: unknown[] }).entries.length;
+  known ??= (JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: unknown[] }).entries.length;
+  return known;
 }
 
 /* A file of the control folder as JSON. Null when there is none; it throws when one is there and cannot be read. */
@@ -73,7 +77,8 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
       continue;
     }
     await db.transaction(async tx => {
-      await tx.update(people).set({ status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind as Person['scopeKind'], isOwner: person.isOwner }).where(eq(people.id, person.id));
+      const now = { status: person.status, passwordHash: person.passwordHash, scopeKind: person.scopeKind as Person['scopeKind'], isOwner: person.isOwner, isCeoDelegate: person.isCeoDelegate };
+      await tx.update(people).set(now).where(eq(people.id, person.id));
       await tx.delete(personAccess).where(eq(personAccess.personId, person.id));
       const rows = person.access
         .filter(place => (place.departmentId === null || placesD.has(place.departmentId)) && (place.teamId === null || placesT.has(place.teamId)))
@@ -141,8 +146,13 @@ const LINES: Record<NotRestorable, string> = {
 export class Restores {
   private current: { order: RestoreOrder; at: number; from: string | null } | null = null;
   private applied = false;
+  /* Whether this app started with something carried over that it has not dealt with: the updater writes that while
+     the app is down, so one look at the start tells. */
+  private carried: boolean;
 
-  constructor(private readonly ctx: Ctx) {}
+  constructor(private readonly ctx: Ctx) {
+    this.carried = existsSync(join(ctx.config.controlDir, RESTORE_CARRY));
+  }
 
   /* Why this bundle cannot be restored here now, or who holds it: this server itself (null) or the machine to ask. */
   private async held(row: BackupRow): Promise<{ from: string | null } | NotRestorable> {
@@ -247,17 +257,28 @@ export class Restores {
     return here ? [] : [{ id: order.id, from }];
   }
 
-  /* What a person is shown. A status at one of the keeper's steps counts as running only while its order is out: a
+  /* What a person is shown. An order its keeper has not said a word of yet runs at its first step, whatever the
+     attempt before left. A status at one of the keeper's steps counts as running only while its order is out: a
      keeper whose app restarted calls the restore off itself within a round. */
   status(): RestoreStatus | null {
     const status = readRestoreStatus(this.ctx.config.controlDir);
+    const order = this.order();
+    if (order && this.current && status?.attempt !== order.attempt) {
+      return { attempt: order.attempt, id: order.id, state: 'running', step: 'fetch', line: '', at: new Date(this.current.at).toISOString(), kept: null };
+    }
     if (!status || status.state !== 'running' || !KEEPER_STEPS.includes(status.step)) return status;
-    return this.order()?.attempt === status.attempt ? status : { ...status, state: 'failed', line: CALLED_OFF };
+    return order?.attempt === status.attempt ? status : { ...status, state: 'failed', line: CALLED_OFF };
   }
 
   /* Whether the restored database, if this is one, has taken over who may get in now: before that nobody is served. */
   ready(): boolean {
     return this.applied;
+  }
+
+  /* Whether nobody is served in this mode yet: a leader until it has looked at what was carried over, and an app in
+     any other mode while what was carried over still waits for it to lead. */
+  holds(mode: Mode): boolean {
+    return !this.applied && (mode === 'lead' || this.carried);
   }
 
   /* At the app's first lead after its start. When the databases were swapped for good, which the status says with the
@@ -273,6 +294,7 @@ export class Restores {
       if (swapped && carried.carry) await applyCarry(this.ctx, carried.carry);
       rmSync(join(dir, RESTORE_CARRY), { force: true });
     }
+    this.carried = false;
     this.applied = true;
   }
 }

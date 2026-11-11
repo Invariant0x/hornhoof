@@ -15,7 +15,7 @@ export function RecoveryBanner({ me, again, onOpen }: { me: Me; again?: unknown;
     if (!owner) return;
     let current = true;
     /* A server from before backups, or one that is busy, says nothing: then there is nothing to ask for. */
-    api.get<BackupsView>('/api/backups').then(said => current && setView(said), () => current && setView(null));
+    api.get<Pick<BackupsView, 'recoveryNeeded' | 'linkChanged'>>('/api/backups/recovery').then(said => current && setView(said), () => current && setView(null));
     return () => {
       current = false;
     };

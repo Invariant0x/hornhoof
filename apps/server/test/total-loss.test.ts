@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { answerProof, makeChallenge, uploadProof } from '../src/modules/backups/bundle.js';
 import type { RecoveryFile } from '../src/modules/backups/recovery.js';
 import { knownMigrations } from '../src/modules/backups/restore.js';
+import { BundleStore } from '../src/modules/backups/store.js';
 import { NONCE_MS, RECOVERY_LINK, UPLOADS_AT_ONCE, type RecoveryView } from '../src/modules/backups/total-loss.js';
 import type { MakerView } from '../src/modules/backups/types.js';
 import { saveLink } from '../src/modules/link/link.js';
@@ -114,7 +115,7 @@ describe('a restore after the server was lost', () => {
     const good = await s.bundle();
     /* Without a proof, with the proof of another bundle, with one made from another number. */
     const other = randomUUID();
-    for (const how of [{}, { proof: uploadProof(nonce, other) }, { proof: uploadProof('A'.repeat(43), good.id) }, { code: 'wrong' }]) expect((await s.put(good.id, good.travels(), how)).statusCode).toBe(403);
+    for (const how of [{}, { proof: uploadProof(nonce, other) }, { proof: uploadProof('A'.repeat(43), good.id) }, { proof: `${'A'.repeat(42)}\u00e9` }, { code: 'wrong' }]) expect((await s.put(good.id, good.travels(), how)).statusCode).toBe(403);
     const taken = await s.put(good.id, good.travels(), { proof: uploadProof(nonce, good.id) });
     expect([taken.statusCode, taken.json()]).toEqual([201, { id: good.id }]);
     expect((await s.view()).bundles).toEqual([{ id: good.id, dumpedAt: good.manifest.dumpedAt, reason: 'timer', size: good.manifest.size, from: good.manifest.signer }]);
@@ -234,10 +235,45 @@ describe('a restore after the server was lost', () => {
     expect((await s.put(good.id, good.travels(), { code: s.code })).statusCode).toBe(400);
   });
 
+  it('keeps of what came in before only what the file it is given opens', async () => {
+    /* The app restarted and lost the file; bundles of two companies lie there from before. */
+    const s = await stand();
+    const other = await stand();
+    const store = new BundleStore(join(s.control, 'restore', 'incoming'));
+    const [mine, theirs] = [await s.bundle(), await other.bundle()];
+    for (const bundle of [mine, theirs]) store.put(bundle.head, bundle.manifest, bundle.out);
+    expect(store.list()).toHaveLength(2);
+    expect((await s.begin()).json()).toMatchObject({ bundles: [{ id: mine.id }] });
+    expect(store.list().map(bundle => bundle.id)).toEqual([mine.id]);
+  });
+
+  it('empties what was sent for a recovery once the company is back', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    const s = await stand();
+    const left = await s.bundle();
+    /* A restored server starts: the bundles the survivors sent still lie in its control folder. */
+    const lying = new BundleStore(join(control, 'restore', 'incoming'));
+    lying.put(left.head, left.manifest, left.out);
+    writeFileSync(join(control, RECOVERY_LINK), '{}');
+    const restored = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost' });
+    await restored.app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    await restored.app.ctx.totalLoss.tidy();
+    expect([lying.list(), existsSync(join(control, RECOVERY_LINK))]).toEqual([[], false]);
+    /* A server with no company yet keeps what it was sent. */
+    const waiting = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    const kept = await s.bundle();
+    new BundleStore(join(waiting, 'restore', 'incoming')).put(kept.head, kept.manifest, kept.out);
+    const fresh = await testApp({ HORNHOOF_CONTROL_DIR: waiting, TUNNEL_HOST: 'localhost' });
+    await fresh.app.ctx.totalLoss.tidy();
+    expect(new BundleStore(join(waiting, 'restore', 'incoming')).list()).toHaveLength(1);
+  });
+
   it('closes once a company exists', async () => {
     const s = await stand();
     await s.begin();
     const nonce = await s.answered();
+    const sent = await s.bundle();
+    expect((await s.put(sent.id, sent.travels(), { code: s.code })).statusCode).toBe(201);
     expect((await s.app.inject({ method: 'POST', url: `/api/setup?code=${s.code}`, payload: { ...SETUP, code: s.code } })).statusCode).toBe(201);
     expect(existsSync(join(s.control, RECOVERY_LINK))).toBe(false);
     const good = await s.bundle();
@@ -249,6 +285,8 @@ describe('a restore after the server was lost', () => {
       await s.app.inject({ method: 'POST', url: '/api/recovery/restore', payload: { code: s.code, id: good.id } }),
     ];
     expect(asked.map(answer => [answer.statusCode, reasonOf(answer)])).toEqual(asked.map(() => [404, 'not_recovering']));
+    /* What was sent for the recovery goes with it. */
+    expect(readdirSync(join(s.control, 'restore', 'incoming'))).toEqual([]);
     expect((await s.app.inject({ url: '/api/setup' })).json()).toMatchObject({ needed: false, recovering: false });
   });
 });

@@ -78,6 +78,13 @@ export function errorText(t: Messages, err: unknown): string {
   return codes[err.code] ?? t.errors.codes.internal;
 }
 
+/* How a restore ended. The server writes its own line in English, so that is shown in English alone, as with a failure
+   it names no reason for; any other language says what the last step tells. */
+export function restoreEnded(t: Messages, status: { state: 'running' | 'done' | 'failed'; step: keyof Messages['backups']['steps']; line: string }): string {
+  if (t === en && status.line) return status.line;
+  return status.state === 'done' ? t.backups.done : t.backups.failedAt(t.backups.steps[status.step]);
+}
+
 /* A typed name as typed; a template department without one by its template's name in the person's language. */
 export function deptLabel(t: Messages, d: { name: string | null; templateKey: keyof Messages['templates'] | null }): string {
   return d.name ?? (d.templateKey ? t.templates[d.templateKey].name : '');

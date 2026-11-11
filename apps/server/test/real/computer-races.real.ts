@@ -108,7 +108,7 @@ describe("a machine's access between requests that come at once", () => {
     await untilWaiting(2);
     await holder.query('COMMIT');
     await closing;
-    expect(await asking).toEqual({ access: null, runs: [] });
+    expect(await asking).toEqual({ access: null, runs: [], forget: [] });
     expect((await runsOf(machine)).map(run => [run.id, run.state, run.exit])).toEqual([[id, 'done', 126]]);
   });
 

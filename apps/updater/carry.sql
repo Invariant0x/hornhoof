@@ -3,7 +3,7 @@
 -- replaced. One line of JSON.
 SELECT jsonb_build_object(
   'people', COALESCE((SELECT jsonb_agg(jsonb_build_object(
-      'id', p.id, 'status', p.status, 'passwordHash', p.password_hash, 'scopeKind', p.scope_kind, 'isOwner', p.is_owner,
+      'id', p.id, 'status', p.status, 'passwordHash', p.password_hash, 'scopeKind', p.scope_kind, 'isOwner', p.is_owner, 'isCeoDelegate', p.is_ceo_delegate,
       'access', COALESCE((SELECT jsonb_agg(jsonb_build_object('departmentId', a.department_id, 'teamId', a.team_id)) FROM person_access a WHERE a.person_id = p.id), '[]'::jsonb)))
     FROM people p), '[]'::jsonb),
   'invites', COALESCE((SELECT jsonb_agg(token_hash) FROM invites WHERE used_at IS NULL AND expires_at > now()), '[]'::jsonb),

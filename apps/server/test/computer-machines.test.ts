@@ -314,6 +314,17 @@ describe('computer access to a machine of the company', () => {
     now += WAITING_MS + 1000;
     await stillOpen();
     expect(await computer.wait(lonely, c.acme.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
+    /* A command given up puts off none that waits behind it: each has its own time from when it was asked. */
+    const [early, late] = [await c.start(c.mac, 'one'), await c.start(c.mac, 'two')];
+    await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, early));
+    await c.db.update(computerRuns).set({ createdAt: new Date(now + WAITING_MS / 2) }).where(eq(computerRuns.id, late));
+    now += WAITING_MS + 1000;
+    await stillOpen();
+    expect(await computer.wait(early, c.acme.id)).toMatchObject({ exit: 126 });
+    expect(await computer.wait(late, c.acme.id)).toBe('running');
+    now += WAITING_MS / 2;
+    await stillOpen();
+    expect(await computer.wait(late, c.acme.id)).toMatchObject({ exit: 126 });
   });
 
   it('gives up a command that waited or was out too long, and tells the keeper what to let go of', async () => {

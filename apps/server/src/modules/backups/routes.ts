@@ -139,6 +139,15 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.header('cache-control', 'no-store').send(file);
   });
 
+  /* Whether the company has a recovery file that opens its backups, for the line the CEO is shown on every screen. */
+  app.get('/api/backups/recovery', async req => {
+    const me = ceo(await requirePerson(req, db));
+    const active = await activeRecovery(db, config);
+    const [newest] = active ? [] : await db.select({ id: recoveryKeys.id }).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
+    /* A key that is not retired and is not the company's now was saved with another link. */
+    return { recoveryNeeded: !active, linkChanged: Boolean(newest) };
+  });
+
   /* The bundles and where each is held, for the CEO. */
   app.get('/api/backups', async req => {
     const me = ceo(await requirePerson(req, db));

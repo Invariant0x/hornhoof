@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { api, ApiFailure } from '../api';
-import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { errorText, restoreEnded, useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { BackupBundle, BackupsView, RestoreStatus, RestoreStep, RestoreWarning } from '../types';
 
 /* A backup older than this is worth a look at the server's disk. */
@@ -108,10 +108,10 @@ function RestoreAsk({ bundle, warning, busy, onYes, onNo }: { bundle: BackupBund
   );
 }
 
-/* A restore as it goes: the steps it has reached, the one it is at, and how it ended in the server's own words. */
+/* A restore as it goes: the steps it has reached, the one it is at, and how it ended. */
 export function RestoreProgress({ status }: { status: RestoreStatus }) {
   const t = useT();
-  if (status.state !== 'running') return <p className="update-note">{status.line}</p>;
+  if (status.state !== 'running') return <p className="update-note">{restoreEnded(t, status)}</p>;
   const at = STEPS.indexOf(status.step);
   return (
     <div className="settings-part" role="status">
@@ -155,6 +155,8 @@ export function Backups() {
   const [asking, setAsking] = useState<{ bundle: BackupBundle; warning: RestoreWarning } | null>(null);
   const [busy, setBusy] = useState(false);
   const [absent, setAbsent] = useState(false);
+  /* The session ended under a restore that ran: the restored company signs everyone out. */
+  const [signedOut, setSignedOut] = useState(false);
   const running = view?.restore?.state === 'running';
 
   const load = useCallback(async () => {
@@ -166,12 +168,13 @@ export function Backups() {
     load().catch((err: unknown) => (err instanceof ApiFailure && err.status === 404 ? setAbsent(true) : setFailure(err)));
   }, [load]);
 
-  /* While a restore runs the server restarts on the restored database: a look that fails then is no news. */
+  /* While a restore runs the server restarts on the restored database: a look that fails then is no news, but for the
+     one that says the session is over, which is how a restore that went through ends for this page. */
   useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => void load().catch(() => undefined), LOOK_MS);
+    if (!running || signedOut) return;
+    const timer = setInterval(() => void load().catch((err: unknown) => err instanceof ApiFailure && err.status === 401 && setSignedOut(true)), LOOK_MS);
     return () => clearInterval(timer);
-  }, [running, load]);
+  }, [running, signedOut, load]);
 
   async function ask(bundle: BackupBundle) {
     setFailure(null);
@@ -197,6 +200,15 @@ export function Backups() {
   }
 
   if (absent) return null;
+  if (signedOut) {
+    return (
+      <section className="settings-part">
+        <h3>{t.backups.title}</h3>
+        <p role="status">{t.backups.sessionEnded}</p>
+        <div className="settings-actions"><a className="btn small" href="/">{t.setup.restore.signIn}</a></div>
+      </section>
+    );
+  }
   return (
     <section className="settings-part">
       <h3>{t.backups.title}</h3>

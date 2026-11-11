@@ -197,7 +197,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   /* A database that was restored takes over who may get in now before this app serves anybody on it: the first thing
      it does when it first leads. Until that has gone through, every request but for its health is turned away as
-     while it starts; a failure is one line, and is tried again every ten seconds while it leads. */
+     while it starts, in whatever mode, since the sessions the backup brought back would else still read; a failure is
+     one line, and is tried again every ten seconds while it leads. Then what was sent for a recovery goes. */
   let carryTimer: NodeJS.Timeout | undefined;
   const settleRestore = async (): Promise<void> => {
     if (ctx.restores.ready()) return;
@@ -206,7 +207,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     } catch (err) {
       ctx.log.warn({ error: loggable(err) }, 'Could not carry over who may get in to the restored database. Nobody is served until it is.');
       if (ctx.mode.current() === 'lead') carryTimer = setTimeout(() => void settleRestore(), RESTORE_RETRY_MS).unref();
+      return;
     }
+    await ctx.totalLoss.tidy().catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not clear what was sent for a recovery.'));
   };
   ctx.mode.whenLead(settleRestore, () => clearTimeout(carryTimer));
   app.addHook('onClose', async () => clearTimeout(carryTimer));
@@ -258,7 +261,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.addHook('onRequest', modeGate(ctx.mode));
   app.addHook('onRequest', async req => {
     const path = req.url.split('?')[0]!;
-    if (ctx.mode.current() === 'lead' && !ctx.restores.ready() && path.startsWith('/api/') && path !== '/api/health') {
+    if (ctx.restores.holds(ctx.mode.current()) && (path.startsWith('/api/') || path === '/mcp') && path !== '/api/health') {
       throw new ApiError(503, 'unavailable', 'Hornhoof is starting.', 'starting');
     }
   });
