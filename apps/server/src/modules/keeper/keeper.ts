@@ -24,6 +24,7 @@ import { ageKey } from './age-key.js';
 import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
+import { DataLinks, type DataLinksOptions } from './data-links.js';
 import { KEEPER_DIR, reasonOf } from './machine-keys.js';
 import type { LeaseStore } from './lease-store.js';
 import type { Clocks } from './lease.js';
@@ -80,6 +81,9 @@ export type KeeperOptions = {
   /* How often the keeper looks after the backups, and tries again for the keys it makes them with. */
   backupsEveryMs?: number;
   backupKeysRetryMs?: number;
+  /* What the keeper keeps toward the machines that hold copies: where its doors to their databases listen and who may
+     use them, its paces, and the way into its own database for the role copies read with. */
+  copies?: Pick<DataLinksOptions, 'dial' | 'sessions' | 'doorHost' | 'allowed' | 'everyMs' | 'replicaEveryMs' | 'visitClientFor' | 'visitPort'> & { replica?: DataLinksOptions['replica'] };
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -178,6 +182,7 @@ export class Keeper {
   private backupKeysSaid = false;
   private stopped = false;
   private peers: PeerLink | null = null;
+  private links: DataLinks | null = null;
   private guardTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
   private fencesTimer: NodeJS.Timeout | null = null;
@@ -204,7 +209,8 @@ export class Keeper {
           leading: () => this.mode() === 'lead',
           log: opts.log,
           reportEveryMs: opts.reportEveryMs,
-          addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: [] }),
+          /* The addresses the copies saw this machine come from count too, so a machine that moved is found again. */
+          addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: this.links?.seen() ?? [] }),
           hostname: opts.hostname,
           reportAs: opts.reportAs,
           os: opts.config.hostOs,
@@ -281,7 +287,7 @@ export class Keeper {
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = null;
     this.stopped = true;
     if (this.backupsTimer) clearTimeout(this.backupsTimer);
-    await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.links?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
   }
 
@@ -307,6 +313,23 @@ export class Keeper {
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
+    const peers = this.peers;
+    const identity = this.identity;
+    this.links = new DataLinks({
+      machineId: config.machineId,
+      dir: this.opts.dir ?? KEEPER_DIR,
+      held: () => identity.certificate(),
+      key: () => identity.machineKey(),
+      peers: () => peers.current(),
+      revoked: () => peers.revoked(),
+      own: () => this.opts.addresses ?? [],
+      settings,
+      leads: () => this.mode() === 'lead',
+      replica: null,
+      log,
+      ...this.opts.copies,
+    });
+    this.links.start();
   }
 
   /* The link's settings: the database's own; and while it has none, on a server that is being restored from a recovery
@@ -367,7 +390,7 @@ export class Keeper {
   private giveWord(): void {
     const dir = this.opts.config.controlDir;
     try {
-      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link });
+      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {} });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);

@@ -620,6 +620,27 @@ describe('PeerServer', () => {
     expect(await statusOf(session.request(CONNECT_APP))).toBe(502);
   });
 
+  it("counts the bytes to each machine's db", async () => {
+    const stand = await standUp();
+    const door = await stand.open('peer');
+    expect(stand.server.dbBytes(DATA_ID)).toBe(0);
+    const toDb = clientOf(stand, door.port, stand.data).request(CONNECT_DB);
+    expect(await statusOf(toDb)).toBe(200);
+    const sent = randomBytes(2 * 1024 * 1024);
+    let back = 0;
+    toDb.on('data', (chunk: Buffer) => (back += chunk.length));
+    toDb.write(sent);
+    await vi.waitFor(() => expect(back).toBe(sent.length), { timeout: 10_000 });
+    expect(stand.server.dbBytes(DATA_ID)).toBeGreaterThanOrEqual(sent.length);
+    expect(stand.server.dbBytes(WORKER_ID)).toBe(0);
+    /* What its other streams carry counts with it. */
+    const second = clientOf(stand, door.port, stand.data).request(CONNECT_DB);
+    expect(await statusOf(second)).toBe(200);
+    second.write('more');
+    await once(second, 'data');
+    expect(stand.server.dbBytes(DATA_ID)).toBeGreaterThanOrEqual(sent.length + 4);
+  });
+
   it('answers 502 when the database does not take the connection', async () => {
     const stand = await standUp({ db: { host: '127.0.0.1', port: await freePort() } });
     const door = await stand.open('peer');

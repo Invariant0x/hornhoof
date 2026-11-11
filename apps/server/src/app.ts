@@ -108,6 +108,8 @@ export type Ctx = Deps & {
   ranking: Ranking;
   /* The slots of the copies in this server's Postgres. */
   replication: Replication;
+  /* The network ids of the machines whose database a merge is to read: the keeper opens a door to each. */
+  doorsWanted: () => Promise<string[]>;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -201,6 +203,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
   ctx.ranking = new Ranking(ctx);
   ctx.replication = replicationOf(deps.db);
+  ctx.doorsWanted = async () => [];
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);

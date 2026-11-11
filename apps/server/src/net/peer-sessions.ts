@@ -8,7 +8,7 @@ import type { HeldCertificate } from '../modules/keeper/certificate.js';
 import type { MachineKey } from '../modules/keeper/machine-keys.js';
 import { certFacts } from '../modules/network/authority.js';
 import { sameSubnet } from '../modules/network/ids.js';
-import { APP_AUTHORITY, PEER_PATHS } from './peer-server.js';
+import { APP_AUTHORITY, DB_AUTHORITY, PEER_PATHS } from './peer-server.js';
 
 /* A data machine to keep a session to. machine: its row's id, which its certificate names. networkId: its keeper's id,
    which its services at the relay are named after. relayPort: the loopback port this keeper's visitor frpc opens to it,
@@ -48,6 +48,7 @@ const WINDOW = 1024 * 1024;
 const HELLO_BYTES = 64 * 1024;
 const LOOPBACK = '127.0.0.1';
 const NO_LEADER = 'No leader of the company is in reach.';
+const NO_SESSION = 'No session to that machine.';
 
 const HelloBody = z.object({ machine: z.string(), role: z.enum(MACHINE_ROLES), lead: z.boolean(), commit: z.string(), seen: z.string() });
 
@@ -150,6 +151,29 @@ export class PeerSessions {
         reject(new Error(`The leader did not open its app: ${String(headers[':status'])}.`));
       });
       stream.once('close', () => reject(new Error(NO_LEADER)));
+    });
+  }
+
+  /* Whether a session to this data machine is open now. */
+  reaches(machine: string): boolean {
+    return Boolean(this.kept.find(kept => kept.target.machine === machine)?.session);
+  }
+
+  /* A stream to a data machine's database, as a connection to it: the leader's, or that of the machine named. Only a
+     machine that keeps data is let through there. Nothing ends it for standing still: a database connection may. */
+  connectDb(machine?: string): Promise<Duplex> {
+    const session = machine === undefined ? this.leading()?.session : this.kept.find(kept => kept.target.machine === machine)?.session;
+    if (!session) return Promise.reject(new Error(machine === undefined ? NO_LEADER : NO_SESSION));
+    return new Promise((resolve, reject) => {
+      /* A session that ended since throws here, and the promise rejects with it. */
+      const stream = session.h2.request({ ':method': 'CONNECT', ':authority': DB_AUTHORITY });
+      stream.on('error', ignore);
+      stream.once('response', headers => {
+        if (headers[':status'] === 200) return resolve(stream);
+        stream.close();
+        reject(new Error(`The machine did not open its database: ${String(headers[':status'])}.`));
+      });
+      stream.once('close', () => reject(new Error(NO_SESSION)));
     });
   }
 

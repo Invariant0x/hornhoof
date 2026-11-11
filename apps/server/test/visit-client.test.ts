@@ -46,6 +46,18 @@ bindPort = 7090
 `);
   });
 
+  it('visits a data service with the data secret', () => {
+    const dataSecret = 'd'.repeat(43);
+    const config = visitConfigFor({ ...LINK, dataSecret }, { machineId: MACHINE_ID, targets: [SERVER_ID, COPY_ID], kind: 'data' });
+    expect(config.match(/^name = .*$/gm)).toEqual(['name = "acme-ab12cd34-to-77aa0011-data"', 'name = "acme-ab12cd34-to-99bb2233-data"']);
+    expect(config.match(/^serverName = .*$/gm)).toEqual(['serverName = "acme-77aa0011-data"', 'serverName = "acme-99bb2233-data"']);
+    expect(config.match(/^secretKey = .*$/gm)).toEqual([`secretKey = "${dataSecret}"`, `secretKey = "${dataSecret}"`]);
+    expect(config).not.toContain(APP_SECRET);
+    /* Without the secret there is no way to the data, and the kind a worker uses stays as it was. */
+    expect(() => visitConfigFor(LINK, { machineId: MACHINE_ID, targets: [SERVER_ID], kind: 'data' })).toThrow('the link has no data secret');
+    expect(visitConfigFor({ ...LINK, dataSecret }, { machineId: MACHINE_ID, targets: [SERVER_ID], kind: 'app' })).toBe(visitConfigFor(LINK, { machineId: MACHINE_ID, targets: [SERVER_ID] }));
+  });
+
   it('gives each data machine a local port of its own, in their order', () => {
     const config = visitConfigFor(LINK, { machineId: MACHINE_ID, targets: [SERVER_ID, COPY_ID] });
     expect(config.match(/^serverName = .*$/gm)).toEqual(['serverName = "acme-77aa0011-app"', 'serverName = "acme-99bb2233-app"']);

@@ -2,7 +2,7 @@ import { generateKeyPairSync, X509Certificate } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import http2, { type ClientHttp2Session, type ClientHttp2Stream } from 'node:http2';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TLSSocket } from 'node:tls';
@@ -21,9 +21,11 @@ import { machineKey, type MachineKey } from '../src/modules/keeper/machine-keys.
 import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
-import { certFacts, issueCertificate, makeAuthority } from '../src/modules/network/authority.js';
+import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { authorityOf } from '../src/modules/network/store.js';
-import { APP_AUTHORITY } from '../src/net/peer-server.js';
+import { readKeeperState } from '../src/modules/keeper/state.js';
+import { PeerDoor } from '../src/net/peer-door.js';
+import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
 import { setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
@@ -319,6 +321,53 @@ describe('the peer link in the keeper', () => {
     expect(await statusOf(`/peer/backups/${id}`)).toBe(403);
     expect(await statusOf(`/peer/backups/${id.replace(/^./, id.startsWith('0') ? '1' : '0')}`)).toBe(404);
     expect(await statusOf(`/peer/backups/${id}`, 'PUT')).toBe(403);
+  });
+
+  it('opens a door to a copy its app names', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    /* A copy of the company: its row, its certificate, and its peer link with a database that sends back what it gets. */
+    const copyNetworkId = `99bb2233${'2'.repeat(24)}`;
+    const key = ed25519();
+    const db = net.createServer(socket => void socket.on('error', ignore).on('data', chunk => socket.write(`copy: ${String(chunk)}`)));
+    await new Promise<void>(resolve => db.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => void db.close());
+    const { keeper, controlDir } = await keeperBeside(c, target, folder(), { copies: { doorHost: '127.0.0.1', allowed: async () => ['127.0.0.1'], everyMs: 20, sessions: { everyMs: 20, helloMs: 20 } } });
+    await until(() => keeper.certificate() !== null);
+    const authority = (await authorityOf(c.db, c.config))!;
+    const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'copy-1', role: 'data', networkId: copyNetworkId, signKey: key.publicPem }).returning();
+    const issued = await issueCertificate(authority, { machineId: row!.id, role: 'data', signKey: key.publicPem });
+    const door = new PeerDoor({ app: target });
+    await door.start();
+    onTestFinished(() => door.stop());
+    const peers = new PeerServer({
+      held: () => ({ machine: row!.id, role: 'data', certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() }), key,
+      crl: () => crlPem, revoked: () => new Set<string>(), door, db: { host: '127.0.0.1', port: (db.address() as AddressInfo).port },
+      hello: () => ({ machine: row!.id, role: 'data', lead: false, commit: 'c0ffee' }), log: ignore,
+    });
+    const crlPem = await makeCrl(authority, []);
+    onTestFinished(() => peers.close());
+    const peerPort = await peers.listen(0, 'peer', '127.0.0.1');
+    await c.db.update(machines).set({ addresses: ['127.0.0.1'], peerPort }).where(eq(machines.id, row!.id));
+    const doorsSaid = () => readKeeperState(controlDir)?.doors ?? {};
+    expect(doorsSaid()).toEqual({});
+
+    c.app.ctx.doorsWanted = async () => [copyNetworkId];
+    await until(() => copyNetworkId in doorsSaid());
+    const said = (port: number): Promise<string> =>
+      new Promise(resolve => {
+        const socket = net.connect({ host: '127.0.0.1', port });
+        socket.on('error', () => resolve('closed'));
+        socket.once('close', () => resolve('closed'));
+        socket.once('data', chunk => (resolve(String(chunk)), socket.destroy()));
+        socket.write('ping');
+      });
+    const port = doorsSaid()[copyNetworkId]!;
+    await until(async () => (await said(port)) === 'copy: ping');
+    /* Named no more, the door closes and the word forgets it. */
+    c.app.ctx.doorsWanted = async () => [];
+    await until(() => Object.keys(doorsSaid()).length === 0);
+    expect(await said(port)).toBe('closed');
   });
 
   it('keeps the list of revoked certificates where only the keeper reads it', async () => {

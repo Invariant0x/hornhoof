@@ -12,6 +12,8 @@ const KeeperStateShape = z.object({
   mode: z.enum(MODES),
   at: z.string(),
   link: z.object({ host: z.string().nullable(), fingerprint256: z.string().nullable() }).nullable(),
+  /* The doors the keeper holds open to other machines' databases: the port of each, by the machine's network id. */
+  doors: z.record(z.string(), z.number().int().min(1).max(65535)).optional(),
 });
 export type KeeperState = z.infer<typeof KeeperStateShape>;
 

@@ -126,9 +126,10 @@ function answerEmpty(stream: ServerHttp2Stream, status: number): void {
    may still hold back that socket's last bytes. A far side that finished ends the stream the clean way, and only one that
    broke resets it, so the peer can tell them apart. The stream itself stays until the peer ends its own side: a reset here
    would reach Node's client as an abort even with every byte delivered. */
-function joinBothWays(stream: ServerHttp2Stream, far: Duplex): void {
+function joinBothWays(stream: ServerHttp2Stream, far: Duplex, sent?: (bytes: number) => void): void {
   stream.pipe(far);
   far.pipe(stream);
+  if (sent) far.on('data', (chunk: Buffer) => sent(chunk.length));
   stream.once('close', () => far.destroy());
   far.once('close', () => {
     if (!far.readableEnded) stream.close(http2.constants.NGHTTP2_CONNECT_ERROR);
@@ -137,7 +138,7 @@ function joinBothWays(stream: ServerHttp2Stream, far: Duplex): void {
   });
 }
 
-async function tunnel(stream: ServerHttp2Stream, opening: Promise<Duplex>): Promise<void> {
+async function tunnel(stream: ServerHttp2Stream, opening: Promise<Duplex>, sent?: (bytes: number) => void): Promise<void> {
   const far = await opening.catch(() => null);
   if (!far) return answerEmpty(stream, 502);
   far.on('error', ignore);
@@ -146,7 +147,7 @@ async function tunnel(stream: ServerHttp2Stream, opening: Promise<Duplex>): Prom
     return;
   }
   stream.respond({ ':status': 200 });
-  joinBothWays(stream, far);
+  joinBothWays(stream, far, sent);
 }
 
 function closeServer(server: Http2SecureServer): Promise<void> {
@@ -159,6 +160,8 @@ export class PeerServer {
   private readonly sessions = new Map<Http2Session, Peer>();
   private readonly sockets = new Set<net.Socket>();
   private readonly lineGate = new OncePerMinute();
+  /* What this machine's database sent each peer, by the peer's machine. */
+  private readonly toDb = new Map<string, number>();
   private sweeper: NodeJS.Timeout | undefined;
   /* Node ends a refused certificate's socket before it says so, and the socket no longer knows its address by then. The
      plain socket under it closes just before, in the same turn of the loop, so this is that address. */
@@ -180,6 +183,12 @@ export class PeerServer {
       for (const waiting of this.waiting.splice(0)) this.open(waiting, context);
     }
     this.sweep();
+  }
+
+  /* The bytes this machine's database sent that machine on its streams since this server started: whether a copy still
+     takes what it is sent. */
+  dbBytes(machine: string): number {
+    return this.toDb.get(machine) ?? 0;
   }
 
   close(): Promise<void> {
@@ -288,7 +297,7 @@ export class PeerServer {
   private answer(route: Route, stream: ServerHttp2Stream, peer: Peer): void {
     if (route.to === 'hello') return this.sayHello(stream, peer);
     if (route.to === 'app') return void tunnel(stream, this.opts.door.connect(peer));
-    if (route.to === 'db') return void tunnel(stream, openTcp(route.db));
+    if (route.to === 'db') return void tunnel(stream, openTcp(route.db), bytes => this.toDb.set(peer.machine, (this.toDb.get(peer.machine) ?? 0) + bytes));
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
     answerEmpty(stream, route.status);
   }

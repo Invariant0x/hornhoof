@@ -143,7 +143,7 @@ describe('the network routes the keeper calls', () => {
   it('hands the peer secrets to the machine that offers them', async () => {
     const c = await company();
     const before = (await c.peers()).json();
-    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [] });
+    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [], doors: [] });
 
     const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
     await saveLink(c.db, c.config, c.companyId, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel });
@@ -212,6 +212,18 @@ describe('the network routes the keeper calls', () => {
     expect((await report({ uptimeS: 7 }, from(worker.id))).statusCode).toBe(204);
     expect((await c.db.select().from(machines).where(eq(machines.id, worker.id)))[0]!.uptimeS).toBe(7);
     expect((await report({ uptimeS: 7 }, from('00000000-0000-4000-8000-000000000000'))).statusCode).toBe(404);
+  });
+
+  it('names the doors its app wants, and what reaches the copies through the relay', async () => {
+    const c = await company();
+    await c.certificate(newKey());
+    type Own = { doors?: string[]; link: { visitorKey?: string } | null };
+    expect(((await c.peers()).json() as Own).doors).toEqual([]);
+    c.app.ctx.doorsWanted = async () => ['f'.repeat(64)];
+    expect(((await c.peers()).json() as Own).doors).toEqual(['f'.repeat(64)]);
+    /* Only the machine's own keeper opens doors: a peer hears of none. */
+    const worker = await c.joined('worker', newKey());
+    expect((await c.peers(from(worker.id))).json()).not.toHaveProperty('doors');
   });
 
   it('stores memory and cores', async () => {

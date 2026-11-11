@@ -27,7 +27,10 @@ const Answer = z.object({
   authorityPem: z.string().nullable(),
   revoked: z.array(z.string()),
   crlPem: z.string().nullable(),
-  link: z.object({ name: z.string(), appSecret: z.string(), dataSecret: z.string().optional() }).nullable(),
+  link: z.object({ name: z.string(), appSecret: z.string(), dataSecret: z.string().optional(), visitorKey: z.string().optional() }).nullable(),
+  /* The machines that keep data and the doors to open to them, which an app of the build before does not say. */
+  data: z.array(z.object({ machine: z.string(), networkId: z.string(), addresses: z.array(z.string()), peerPort: z.number().nullable() })).default([]),
+  doors: z.array(z.string()).default([]),
 });
 type Answer = z.infer<typeof Answer>;
 /* The authority's list as the keeper holds it: the list, and the serials it names. */
@@ -100,6 +103,21 @@ export class PeerLink {
     this.timer = setInterval(() => this.read(), this.opts.everyMs ?? PEER_EVERY_MS);
     this.timer.unref();
     this.read();
+  }
+
+  /* What the app last said of the network; null before its first answer. */
+  current(): Answer | null {
+    return this.answer;
+  }
+
+  /* The serials the app named revoked, else the held list's. */
+  revoked(): ReadonlySet<string> {
+    return new Set(this.answer?.revoked ?? this.crl?.serials ?? []);
+  }
+
+  /* The bytes this machine's database sent that machine over the peer link. */
+  dbBytes(machine: string): number {
+    return this.server?.dbBytes(machine) ?? 0;
   }
 
   /* The ports the peer link listens on, once it does. */
@@ -181,7 +199,7 @@ export class PeerLink {
       held: () => this.opts.identity.certificate(),
       key,
       crl: () => this.crl?.crlPem ?? null,
-      revoked: () => new Set(this.answer?.revoked ?? this.crl?.serials ?? []),
+      revoked: () => this.revoked(),
       door: this.door,
       db: this.opts.db,
       hello: () => this.hello(),

@@ -17,7 +17,8 @@ async function dataKeeper(): Promise<Running> {
   const { KEEPER_NAME, openDb } = await import('./db/client.js');
   const { publishedFrom } = await import('./modules/keeper/identity.js');
   const { Keeper } = await import('./modules/keeper/keeper.js');
-  const { leaseOfMachine } = await import('./modules/keeper/lease-store.js');
+  const { keeperSql, leaseOfMachine } = await import('./modules/keeper/lease-store.js');
+  const { replicaPassword } = await import('./modules/keeper/replica.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -29,6 +30,8 @@ async function dataKeeper(): Promise<Running> {
   return new Keeper({
     config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log),
     published: publishedFrom(process.env), dbTarget: dbTarget(), addresses: addressesIn(process.env), hostname: process.env.HORNHOOF_HOSTNAME || null,
+    /* The role copies read this machine's database with, made on a connection of its own each time. */
+    copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
   });
 }
 

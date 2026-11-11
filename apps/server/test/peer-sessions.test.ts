@@ -1,7 +1,8 @@
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
+import { once } from 'node:events';
+import { Readable, type Duplex } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import tls from 'node:tls';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -63,7 +64,7 @@ async function echoApp() {
 }
 
 /* A data machine's peer link as its keeper serves it, and a worker of the same company with its certificate. */
-async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBackups } = {}) {
+async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBackups; db?: { host: string; port: number } } = {}) {
   const authority = await makeAuthority(COMPANY);
   const server = await machineOf(authority, as.id ?? SERVER_ID, as.role ?? 'data');
   const worker = await machineOf(authority, WORKER_ID, 'worker');
@@ -78,7 +79,7 @@ async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBack
     crl: () => state.crl,
     revoked: () => state.revoked,
     door,
-    db: null,
+    db: as.db ?? null,
     hello: (peer: Peer) => (state.hellos++, { machine: server.id, role: server.role, lead: state.lead, commit: 'c0ffee', asked: peer.machine }),
     backups: as.backups,
     log: line => lines.push(line),
@@ -115,6 +116,17 @@ async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBack
 }
 
 type Echo = { method: string; url: string; headers: Record<string, string>; length: number; sha256: string };
+
+/* A machine's database, for these tests: it sends back what it gets, with its own word first. */
+async function tcpEcho(word: string): Promise<{ host: string; port: number }> {
+  const server = net.createServer(socket => {
+    socket.on('error', () => undefined);
+    socket.on('data', chunk => socket.write(word + String(chunk)));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  onTestFinished(() => void server.close());
+  return { host: '127.0.0.1', port: (server.address() as AddressInfo).port };
+}
 
 function ask(port: number, options: http.RequestOptions = {}, body?: Buffer): Promise<{ status: number; echo: Echo }> {
   return new Promise((resolve, reject) => {
@@ -254,6 +266,45 @@ describe("a worker's sessions to the company's data machines", () => {
     await expect(buffer(stalled.body)).rejects.toThrow('stopped moving');
     /* And the session is as good as before. */
     expect((await sessions.stream('GET', `/peer/backups/${BUNDLE}`)).status).toBe(200);
+  });
+
+  it("reaches a data machine's db", async () => {
+    const leaderDb = await tcpEcho('leader: ');
+    const copyDb = await tcpEcho('copy: ');
+    const stand = await standUp({ db: leaderDb });
+    /* A second data machine of the same company, which does not lead. */
+    const copy = await machineOf(stand.authority, OTHER_ID, 'data');
+    const copyDoor = new PeerDoor({ app: await echoApp() });
+    await copyDoor.start();
+    onTestFinished(() => copyDoor.stop());
+    const copyPeers = new PeerServer({
+      held: () => heldOf(copy, stand.authority), key: copy.key, crl: () => stand.state.crl, revoked: () => stand.state.revoked, door: copyDoor, db: copyDb,
+      hello: () => ({ machine: copy.id, role: 'data', lead: false, commit: 'c0ffee' }), log: () => undefined,
+    });
+    onTestFinished(() => copyPeers.close());
+    const copyPort = await copyPeers.listen(0, 'peer', '127.0.0.1');
+    const targets = [stand.target(), stand.target({ machine: OTHER_ID, peerPort: copyPort })];
+    const said = async (stream: Duplex, text: string): Promise<string> => {
+      stream.write(text);
+      const [chunk] = (await once(stream, 'data')) as [Buffer];
+      stream.destroy();
+      return String(chunk);
+    };
+
+    /* A machine that keeps data: the leader's database when it names none, else the one it names. */
+    const data = await machineOf(stand.authority, 'dddddddd-0000-4000-8000-00000000000d', 'data');
+    const sessions = stand.sessionsWith({ held: () => heldOf(data, stand.authority), key: data.key });
+    sessions.use(targets);
+    await until(() => sessions.leader() !== null && sessions.reaches(OTHER_ID));
+    expect(await said(await sessions.connectDb(), 'ping')).toBe('leader: ping');
+    expect(await said(await sessions.connectDb(OTHER_ID), 'ping')).toBe('copy: ping');
+    await expect(sessions.connectDb(WORKER_ID)).rejects.toThrow('No session to that machine.');
+
+    /* A worker's certificate opens no database. */
+    const worker = stand.sessionsWith();
+    worker.use(targets);
+    await until(() => worker.leader() !== null);
+    await expect(worker.connectDb()).rejects.toThrow('The machine did not open its database: 403.');
   });
 
   it('follows what the hello says of who leads', async () => {

@@ -12,7 +12,7 @@ import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
 import { followOf, installs, releaseHeld } from './follow.js';
 import { NETWORK_ID } from './ids.js';
-import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, viewFor, workerLink, workerView } from './join.js';
+import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, viewFor, visitorKeyOf, workerLink, workerView } from './join.js';
 import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
 import { keeperAsker, type Asker } from './via.js';
 
@@ -130,29 +130,37 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
-     and none while a secret is missing where the app does not lead and so makes none. */
-  async function linkOf(machine: Holder | null) {
+     and none while a secret is missing where the app does not lead and so makes none. visit: the key that logs a
+     visitor in at the relay goes with it, for a machine that reaches other data machines there; it is asked of the
+     relay only once there is another such machine. */
+  async function linkOf(machine: Holder | null, visit: boolean) {
     const [link] = machine ? await db.select({ name: publicLinks.name }).from(publicLinks).limit(1) : [];
     if (!machine || !link) return null;
     const appSecret = await peerSecret(db, config, 'app', leading());
     const dataSecret = await peerSecret(db, config, 'data', leading());
-    return appSecret && dataSecret ? { name: link.name, appSecret, dataSecret } : null;
+    if (!appSecret || !dataSecret) return null;
+    const visitorKey = visit ? await visitorKeyOf(ctx) : null;
+    return { name: link.name, appSecret, dataSecret, ...(visitorKey ? { visitorKey } : {}) };
   }
 
   /* A worker gets the link as it uses it, with the visitor key and never the way to the data; either kind also learns
      where the data machines are. */
   app.get('/api/network/peers', async req => {
-    const machine = await machineOf(await requireKeeper(req));
+    const who = await requireKeeper(req);
+    const machine = await machineOf(who);
     const authority = await authorityOf(db, config);
     const revoked = await revokedSerials(db);
     /* Only the leader signs, so only it uses the authority's key. */
     const crlPem = authority && leading() ? await makeCrl(authority, revoked) : null;
+    const data = await dataMachines(db);
     /* A link that cannot be told now is left out, and a worker keeps the one it has. */
     const worker = machine?.role === 'worker' ? machine : null;
-    const link = worker ? await workerLink(ctx) : await linkOf(machine);
+    const link = worker ? await workerLink(ctx) : await linkOf(machine, data.length > 1);
     /* A worker also hears of the server's build, and when it may install it. */
     const follow = worker ? await followOf(ctx, worker.id) : {};
-    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data: await dataMachines(db), ...follow };
+    /* The machine's own keeper also hears which copies' databases a merge is to read, and opens a door to each. */
+    const doors = who.own ? { doors: await ctx.doorsWanted() } : {};
+    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
