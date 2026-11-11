@@ -79,7 +79,7 @@ describe('/mcp', () => {
     await job('running');
     await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
-    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id }).returning();
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id, repoUrl: 'https://github.com/acme/mascot.git', repoBranch: 'release', repoTokenEnc: 'sealed', repoTokenLast4: '2222' }).returning();
     const [sub] = await db.select().from(subscriptions);
     const [bruno, hana] = await db
       .insert(agents)
@@ -92,6 +92,7 @@ describe('/mcp', () => {
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
+    expect(raw).not.toMatch(/sealed|2222/);
     const view = JSON.parse(raw);
     expect(view).toMatchObject({
       name: 'Acme',
@@ -103,7 +104,9 @@ describe('/mcp', () => {
           name: 'Development',
           template: 'development',
           about: 'Two products',
-          products: [{ name: 'Mascot' }],
+          /* Where a task's code goes: a product's repository, else the department's own; never its token. */
+          repository: null,
+          products: [{ id: mascot!.id, name: 'Mascot', repository: { url: 'https://github.com/acme/mascot.git', branch: 'release' } }],
           employees: [
             /* The id is what create_task takes as the executor; the role id is what it takes as a gate. */
             { id: hana!.id, name: 'Hana', roleId: 'DEV-HEAD', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },

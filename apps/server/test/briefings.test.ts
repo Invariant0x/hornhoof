@@ -67,14 +67,39 @@ describe('what a department and its products keep for their agents', () => {
     expect(bruno.read().repositoryRules).toContain('never rank above your skills');
     for (const other of ['Billing keeps its own plan', 'billing.git', 'Marketing speaks plainly', 'ghp_']) expect(bruno.text).not.toContain(other);
 
-    /* An agent of the department outside a product gets the department's record only. */
+    /* An agent of the department outside a product gets the department's record, and where each task's code goes: it may
+       work on any product's task, whose repository is cloned in its folder when the task starts. */
     const pia = (await briefing((await agent('Pia', dev.id, null)).client)).read();
-    expect(pia).toEqual({ department: { name: 'Development', text: 'We work by gates: review, security, tests.', repositories: [] }, product: null });
+    expect(pia).toEqual({
+      repositoryRules: expect.stringContaining('read its own rules first'),
+      department: { name: 'Development', text: 'We work by gates: review, security, tests.', repositories: [] },
+      product: null,
+      taskRepositories: [{ product: { id: shop.id, name: 'Shop' }, url: 'https://github.com/acme/shop.git', branch: 'release', folder: './shop' }],
+    });
+    expect(JSON.stringify(pia)).not.toMatch(/ghp_|Billing keeps/);
 
     /* A department without a repository keeps its own way of working, and its agents read only that. */
     const mia = await briefing((await agent('Mia', marketing.id, null)).client);
     expect(mia.read()).toEqual({ department: { name: 'Marketing', text: 'Marketing speaks plainly and posts twice a week.', repositories: [] }, product: null });
     expect(mia.text).not.toContain('gates');
+  });
+
+  it("lists for a head every repository of its department and its products, the department's own first, and where each is cloned", async () => {
+    const { app, ceo, dev, shop, billing, agent } = await company();
+    const connect = (id: string, url: string) => app.inject({ method: 'PUT', url: `/api/departments/${id}/repository`, payload: { url, branch: 'main', token: 'ghp_secret9999' }, ...as(ceo) });
+    await connect(billing.id, 'https://github.com/acme/billing.git');
+    await connect(dev.id, 'https://github.com/acme/platform.git');
+    await connect(shop.id, 'https://github.com/acme/shop.git');
+    const head = (await briefing((await agent('Hana', dev.id, null)).client)).read();
+    expect(head.taskRepositories).toEqual([
+      { product: null, url: 'https://github.com/acme/platform.git', branch: 'main', folder: './platform' },
+      { product: { id: shop.id, name: 'Shop' }, url: 'https://github.com/acme/shop.git', branch: 'main', folder: './shop' },
+      { product: { id: billing.id, name: 'Billing' }, url: 'https://github.com/acme/billing.git', branch: 'main', folder: './billing' },
+    ]);
+    /* An agent of one product works on that product's tasks only, and reads nothing of another's. */
+    const bruno = await briefing((await agent('Bruno', dev.id, shop.id)).client);
+    expect(bruno.read()).not.toHaveProperty('taskRepositories');
+    expect(bruno.text).not.toContain('billing');
   });
 
   it("never gives an agent a product of another department, whatever its card names", async () => {

@@ -9,6 +9,8 @@ import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 import type { Templates } from '../templates/load.js';
 import { servesWholeCompany } from './staff.js';
 
+const repositoryOf = (d: { repoUrl: string | null; repoBranch: string | null }) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main' } : null);
+
 /* What the company tool shows an agent: names and roles, never emails or keys. */
 export async function companyView(db: Db, templates: Templates, companyId: string) {
   const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
@@ -55,7 +57,9 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         name: deptName(d),
         template: d.templateKey,
         about: d.about,
-        products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
+        /* Where a task's code goes: its product's repository, else the department's own. Never a token. */
+        repository: repositoryOf(d),
+        products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p), repository: repositoryOf(p) })),
         teams: allTeams.filter(t => t.departmentId === d.id).map(t => ({ id: t.id, name: t.name, urgentOnly: t.urgentOnly, turnkey: t.turnkey })),
         employees: employeesOf(d),
       })),

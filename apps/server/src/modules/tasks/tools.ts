@@ -66,6 +66,8 @@ function fitted<T extends TaskDetail>(detail: T): string {
 
 const Title = z.string().trim().min(1).max(120);
 const Brief = z.string().max(600).describe('One to three sentences people read on the map and in the tracker.');
+/* A department may keep several repositories: its own, and one on each product. */
+const Product = z.uuid().describe("The product whose repository the change goes to, as taskRepositories in your briefing lists them; without one the task works in the department's own repository.");
 const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the checking stages check), product, constraints. Rewrite it as the current truth.');
 const After = z
   .array(Ref)
@@ -301,8 +303,8 @@ class TaskTools {
       return;
     }
     if (input.product) return;
-    const products = await this.db.select({ name: departments.name }).from(departments).where(and(eq(departments.parentId, agent.departmentId!), isNotNull(departments.repoUrl)));
-    if (products.length) throw refuse(400, 'task_invalid', `Name the product: the code of your department lives in the repositories of its products (${products.map(product => product.name ?? 'unnamed').join(', ')}). Without one the task has no repository and closes by a report.`);
+    const products = await this.db.select({ id: departments.id, name: departments.name, url: departments.repoUrl }).from(departments).where(and(eq(departments.parentId, agent.departmentId!), isNotNull(departments.repoUrl)));
+    if (products.length) throw refuse(400, 'task_invalid', `Name the product whose repository the change goes to: the code of your department lives in the repositories of its products (${products.map(product => `${product.name ?? 'unnamed'} (${product.id}): ${product.url}`).join('; ')}). Without one the task has no repository and closes by a report.`);
   }
 
   private async createdTaskText(task: Task, executor: Agent): Promise<string> {
@@ -582,8 +584,8 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and where only the products of the department keep code, its product; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         this.run(async () => {

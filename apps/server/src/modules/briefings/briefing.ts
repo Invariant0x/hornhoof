@@ -1,5 +1,5 @@
 import { repoFolder } from '@hornhoof/protocol';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { briefings, departments, people, type BriefingRepository } from '../../db/schema.js';
@@ -73,6 +73,21 @@ async function forAgent(db: Reader, dept: Dept) {
   return { name: deptName(dept), text: row?.text ?? '', repositories };
 }
 
+/* Where the code of a task of the department goes, for an agent of the whole department, who may work on any product's
+   task: the department's own repository for a task without a product, a product's for a task of that product. Each is
+   cloned in the agent's folder, in a folder of its own, when a task of it starts. Never a token. */
+async function taskRepositories(db: Reader, dept: Dept) {
+  const family = await db
+    .select()
+    .from(departments)
+    .where(and(eq(departments.companyId, dept.companyId), or(eq(departments.id, dept.id), eq(departments.parentId, dept.id))))
+    .orderBy(asc(departments.position), asc(departments.createdAt));
+  const holders = [...family.filter(d => d.id === dept.id), ...family.filter(d => d.id !== dept.id)];
+  return holders.flatMap(d =>
+    d.repoUrl ? [{ product: d.id === dept.id ? null : { id: d.id, name: deptName(d) }, url: d.repoUrl, branch: d.repoBranch ?? 'main', folder: `./${repoFolder(d.repoUrl)}` }] : [],
+  );
+}
+
 /* What an agent's department and its product keep for it, and nothing of any other: none for an agent outside a
    department. Who it is comes from its turn's token, never from what it asks. */
 export async function agentBriefing(db: Reader, agent: { companyId: string; departmentId: string | null; productId: string | null }) {
@@ -84,6 +99,7 @@ export async function agentBriefing(db: Reader, agent: { companyId: string; depa
   const product = rows.find(d => d.id === agent.productId && d.parentId === dept.id);
   const department = await forAgent(db, dept);
   const ofProduct = product ? await forAgent(db, product) : null;
-  const any = department.repositories.length > 0 || (ofProduct?.repositories.length ?? 0) > 0;
-  return { ...(any ? { repositoryRules: REPOSITORY_RULES } : {}), department, product: ofProduct };
+  const tasks = agent.productId ? [] : await taskRepositories(db, dept);
+  const any = department.repositories.length > 0 || (ofProduct?.repositories.length ?? 0) > 0 || tasks.length > 0;
+  return { ...(any ? { repositoryRules: REPOSITORY_RULES } : {}), department, product: ofProduct, ...(tasks.length ? { taskRepositories: tasks } : {}) };
 }
