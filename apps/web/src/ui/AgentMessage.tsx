@@ -36,7 +36,7 @@ function serviceLine(t: Messages, language: Language, m: AgentMessageView, to: s
 }
 
 /* "Message from … to …" for what came in, "Message to … from …" for what went out, and a notice for what Hornhoof said.
-   A person's message from Telegram says so. */
+   A person's message from Telegram says so, and one their assistant wrote for them names the assistant. */
 export function messageLine(t: Messages, language: Language, m: AgentMessageView): string {
   const from = partyName(t, language, m.from);
   const to = partyName(t, language, m.to);
@@ -44,6 +44,7 @@ export function messageLine(t: Messages, language: Language, m: AgentMessageView
   if (m.from.kind === 'hornhoof') return serviceLine(t, language, m, to);
   const senders = m.senders?.length ? m.senders.map(p => partyName(t, language, p)).join(', ') : from;
   if (m.notification) return t.window.messageVia(senders, to);
+  if (m.channel === 'assistant' && m.assistant) return t.window.messageAssistant(from, m.assistant.name, to);
   return m.channel === 'telegram' ? t.window.messageTelegram(from, to) : t.window.messageFrom(from, to);
 }
 

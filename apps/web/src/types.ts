@@ -38,7 +38,8 @@ export type Me = { person: Person; company: Company; canDecideCompany?: boolean 
 export type PersonView = {
   id: string;
   name: string;
-  email: string;
+  /* None for an assistant, which never signs in. */
+  email: string | null;
   title: string;
   status: Person['status'];
   isOwner: boolean;
@@ -48,7 +49,13 @@ export type PersonView = {
   telegram?: { username: string | null; id: number | null } | null;
   /* On the map: how many decisions wait for this person among those the viewer sees; null when the viewer cannot see them. */
   pendingDecisions?: number | null;
+  /* When this is an agent that acts for another person: whom for, its program, where it is woken and when its key was made. */
+  assistant?: AssistantView | null;
 };
+
+export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'other'] as const;
+export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
+export type AssistantView = { owner: { id: string; name: string }; program: AssistantProgram; eventsUrl: string | null; key: { createdAt: string } | null };
 
 /* What a person reaches: the whole company, or departments and teams, in the order of the map. */
 export type AccessView = { whole: boolean; departments: { id: string; name: string }[]; teams: { id: string; name: string; departmentId: string }[] };
@@ -338,7 +345,7 @@ export type EventView = {
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
-  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' };
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' | 'assistant'; assistant?: { id: string; name: string } };
 };
 
 /* What the browser hears live from /api/stream. */
