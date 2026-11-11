@@ -1033,7 +1033,7 @@ restore_swap() {
 # Everything a restore changed goes back, from wherever it got to: it looks at what is there, so it may run again from
 # its start. The database that was in use is told by its number, never by a name. While it goes by another name, the
 # one named hornhoof is the restored one, which is dropped, and it takes its name back; while it cannot be found,
-# nothing is dropped at all. Then the company starts as it was.
+# nothing is dropped at all.
 restore_back() {
   local names name kept="$SERVER_DIR/backups/env-before-$R_STAMP"
   if [ -n "$R_OLD" ]; then
@@ -1060,11 +1060,10 @@ restore_back() {
   if [ -n "$R_STAMP" ] && [ -f "$kept" ]; then
     (umask 077 && cp "$kept" "$SERVER_DIR/.env.new") && as_env "$SERVER_DIR/.env.new" && rm -f "$kept" || return 1
   fi
-  restore_up || true
 }
 
-# restore_undo <line> <step>: the restore ends failed, with everything as it was. A way back that fails itself leaves
-# the journal and the status, and is tried again.
+# restore_undo <line> <step>: the restore ends failed, with everything as it was and the company started again. A way
+# back that fails itself leaves the journal and the status, and is tried again.
 restore_undo() {
   if ! restore_back; then
     [ -n "$BACK_SAID" ] || printf 'Could not put the database back as it was yet. The updater tries again.\n'
@@ -1073,7 +1072,10 @@ restore_undo() {
   fi
   BACK_SAID=''
   restore_wipe
+  # What was carried over is for the restored database alone: it goes before the company starts on the old one, whose
+  # app would else take it for its own.
   rm -f "$CONTROL/restore-carry.json" "$CONTROL/restore-carry.json.new"
+  restore_up || true
   restore_ended failed "$2" "$1"
 }
 

@@ -136,6 +136,7 @@ function expectAsBefore(s: Stand, calls: string[]) {
   expect(existsSync(join(s.server, 'backups')) ? readdirSync(join(s.server, 'backups')) : []).toEqual([]);
   expect(readdirSync(file(s, 'restore'))).toEqual([]);
   for (const gone of ['restore.json', 'restore-journal.json', 'restore-carry.json']) expect(existsSync(file(s, gone)), gone).toBe(false);
+  /* The company starts last, on the old database, with nothing of what was carried over for the restored one. */
   expect(calls.at(-1)).toBe('docker compose up -d --no-build app node');
 }
 
@@ -227,6 +228,8 @@ describe('updater, restore', () => {
     const r = await runOnce(s, null, WITH_CARRY);
     expect(statusOf(s)).toMatchObject({ state: 'failed', step: 'start', line: 'The restored company did not start, so it is back as it was.', kept: null });
     expectAsBefore(s, r.calls);
+    /* The restored company started with what was carried over for it; the old one, after it failed, without. */
+    expect(r.calls.filter(call => call === 'up with the carry')).toHaveLength(1);
     /* The restored one went only while the old one was kept under its own name. */
     expect(at(r.calls, 'docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c DROP DATABASE hornhoof WITH (FORCE)')).toBeGreaterThan(at(r.calls, 'docker compose up'));
   });

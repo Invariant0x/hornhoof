@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -12,6 +12,7 @@ import { BundleRefused, checkHead, MAX_HEAD } from './bundle.js';
 import { pickHolders } from './holders.js';
 import { activeRecovery, linkChanged, makeRecoveryFile } from './recovery.js';
 import { bundleRow, bundleRows, recordBundle } from './records.js';
+import { warningOf } from './restore.js';
 import type { HolderView, MakerView } from './types.js';
 
 /* A bundle is recorded only while it is new: one made longer ago than this is some old file sent again. */
@@ -23,6 +24,14 @@ const HELD_NEWEST = 2;
 const ONLINE_MS = 2 * 60_000;
 
 const RecordBody = z.object({ head: z.string().min(2).max(MAX_HEAD) });
+const BundleParams = z.object({ id: z.uuid() });
+/* A recovery file is a comment line and one line of JSON. */
+const MAX_RECOVERY_FILE = 16 * 1024;
+const RestoreBody = z.object({ recoveryFile: z.string().min(1).max(MAX_RECOVERY_FILE).optional() });
+/* The stamp in the name of a database a restore kept, as the updater writes it. */
+const KEPT_NAME = /^hornhoof_before_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/;
+
+const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
@@ -61,8 +70,8 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
       recovery: recovery ? { id: recovery.id, recipient: recovery.recipient, link: recovery.link } : null,
       last: last ? { id: last.id, madeAt: last.madeAt, recovery: last.recovery } : null,
       holders: Object.fromEntries(held.map(row => [row.id, row.holders])),
-      wanted: [],
-      order: null,
+      wanted: await ctx.restores.wanted(),
+      order: ctx.restores.order(),
     };
   }
 
@@ -71,10 +80,22 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const row = await networkMachine(db, machineId);
     if (!row) throw notAMachine();
     const held = await bundleRows(db, { limit: HELD_NEWEST, withRecovery: true });
-    return { keeps: row.keepsBackups, hold: held.filter(bundle => bundle.holders.includes(machineId)).map(({ id, size, sha256 }) => ({ id, size, sha256 })), want: [] };
+    const want = (await ctx.restores.wanted()).filter(wanted => wanted.from === machineId).map(wanted => wanted.id);
+    return { keeps: row.keepsBackups, hold: held.filter(bundle => bundle.holders.includes(machineId)).map(({ id, size, sha256 }) => ({ id, size, sha256 })), want };
   }
 
-  app.get('/api/network/backups', async req => {
+  /* The databases a restore replaced and kept on this machine, newest first. */
+  async function keptDatabases(): Promise<{ name: string; at: string }[]> {
+    const found = rowsOf<{ name: string }>(await db.execute(sql`SELECT datname AS name FROM pg_database WHERE datname LIKE 'hornhoof_before_%' ORDER BY datname DESC`));
+    return found.flatMap(({ name }) => {
+      const stamp = KEPT_NAME.exec(name);
+      return stamp ? [{ name, at: `${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}.000Z` }] : [];
+    });
+  }
+
+  /* The answer to the server's own keeper may carry a recovery identity, which lives in memory alone: this route logs
+     neither the request nor the answer. */
+  app.get('/api/network/backups', { logLevel: 'silent' }, async req => {
     const who = await requireKeeper(req);
     leads();
     return who.own ? makerView() : holderView(who.machine);
@@ -128,6 +149,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const cored = await db.select().from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), isNotNull(machines.networkId)));
     const own = await findThisMachine(db, config);
     const online = (reportAt: Date | null) => reportAt !== null && Date.now() - reportAt.getTime() < ONLINE_MS;
+    const bundles = await Promise.all(rows.map(async row => ({ row, why: await ctx.restores.restorable(row) })));
     const where = (id: string) =>
       cored
         .filter(machine => machine.heldBackups.includes(id))
@@ -138,7 +160,29 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
       recovery: active ? { madeAt: active.madeAt.toISOString(), madeBy: maker?.name ?? '' } : null,
       recoveryNeeded: !active,
       linkChanged: Boolean(newest) && (await linkChanged(db, config)),
-      bundles: rows.map(row => ({ id: row.id, dumpedAt: row.dumpedAt, reason: row.reason, size: row.size, recovery: row.recovery === null ? 'none' : row.recovery === active?.recipient ? 'current' : 'older', where: where(row.id) })),
+      restore: ctx.restores.status(),
+      kept: await keptDatabases(),
+      bundles: bundles.map(({ row, why }) => ({
+        id: row.id, dumpedAt: row.dumpedAt, reason: row.reason, size: row.size, recovery: row.recovery === null ? 'none' : row.recovery === active?.recipient ? 'current' : 'older', where: where(row.id),
+        restorable: why === null || why === 'needs_recovery_file', why,
+      })),
     };
+  });
+
+  /* What a restore of this bundle undoes, for the CEO to read before it starts. */
+  app.get('/api/backups/:id/warning', async req => {
+    const me = ceo(await requirePerson(req, db));
+    const row = await bundleRow(db, BundleParams.parse(req.params).id);
+    if (!row || row.company !== me.companyId) throw new ApiError(404, 'not_found', 'There is no such backup.');
+    return warningOf(db, new Date(row.dumpedAt));
+  });
+
+  /* The CEO restores the company from a bundle. The recovery file, when one is added, is kept in memory for the hour
+     the order lives, and is never logged. */
+  app.post('/api/backups/:id/restore', { bodyLimit: MAX_RECOVERY_FILE + 1024, logLevel: 'silent' }, async (req, reply) => {
+    const me = ceo(await requirePerson(req, db));
+    const { id } = BundleParams.parse(req.params);
+    const { recoveryFile } = RestoreBody.parse(req.body ?? {});
+    return reply.code(202).send({ attempt: await ctx.restores.start(me, id, recoveryFile) });
   });
 }

@@ -4,7 +4,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
-import { loggable, registerErrorHandling } from './errors.js';
+import { ApiError, loggable, registerErrorHandling } from './errors.js';
 import { AppMode, modeGate, whileLeading } from './modules/keeper/app-mode.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
@@ -39,6 +39,7 @@ import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
 import { refreshHolders } from './modules/backups/holders.js';
+import { Restores } from './modules/backups/restore.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
@@ -91,6 +92,8 @@ export type Ctx = Deps & {
   terminals: TerminalRelay;
   updates: UpdateCheck;
   updater: UpdaterControl;
+  /* Restores of the company from a backup, and what follows one. */
+  restores: Restores;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -134,6 +137,8 @@ function closeOpenSockets(app: FastifyInstance): void {
 
 /* How often the holders of the newest bundles are looked at again. */
 const HOLDERS_EVERY_MS = 3_600_000;
+/* How soon the carry of a restore is tried again after it could not be applied. */
+const RESTORE_RETRY_MS = 10_000;
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
@@ -174,6 +179,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
   ctx.updater = new UpdaterControl(config.controlDir);
+  ctx.restores = new Restores(ctx);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
@@ -182,6 +188,21 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.tls = new LinkTls(ctx);
   app.addHook('onClose', async () => ctx.tls.stop());
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+  /* A database that was restored takes over who may get in now before this app serves anybody on it: the first thing
+     it does when it first leads. Until that has gone through, every request but for its health is turned away as
+     while it starts; a failure is one line, and is tried again every ten seconds while it leads. */
+  let carryTimer: NodeJS.Timeout | undefined;
+  const settleRestore = async (): Promise<void> => {
+    if (ctx.restores.ready()) return;
+    try {
+      await ctx.restores.afterSwap();
+    } catch (err) {
+      ctx.log.warn({ error: loggable(err) }, 'Could not carry over who may get in to the restored database. Nobody is served until it is.');
+      if (ctx.mode.current() === 'lead') carryTimer = setTimeout(() => void settleRestore(), RESTORE_RETRY_MS).unref();
+    }
+  };
+  ctx.mode.whenLead(settleRestore, () => clearTimeout(carryTimer));
+  app.addHook('onClose', async () => clearTimeout(carryTimer));
   /* Its own build, for the machines that follow it, asked for off the path of any request. A server told to ask the
      registry only when asked waits for the first machine that wants to know. */
   ctx.mode.whenLead(() => void (config.updateCheckMs > 0 && refreshBuild(ctx)), () => undefined);
@@ -223,6 +244,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   /* After the socket plugin, so a refused socket is closed by it. */
   app.addHook('onRequest', modeGate(ctx.mode));
+  app.addHook('onRequest', async req => {
+    const path = req.url.split('?')[0]!;
+    if (ctx.mode.current() === 'lead' && !ctx.restores.ready() && path.startsWith('/api/') && path !== '/api/health') {
+      throw new ApiError(503, 'unavailable', 'Hornhoof is starting.', 'starting');
+    }
+  });
   /* Again after the routes' own checks, which wait for the database: a socket that passed the gate above and crossed a
      step-down there is refused here, and from here to its upgrade nothing waits, so none opens outside lead. */
   app.addHook('preHandler', modeGate(ctx.mode));

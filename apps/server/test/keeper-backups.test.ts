@@ -10,6 +10,7 @@ import { bundleRows } from '../src/modules/backups/records.js';
 import { BackupKeeper, BUNDLE_EVERY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
 import { bundleSecrets } from '../src/modules/keeper/keeper.js';
 import { saveLink } from '../src/modules/link/link.js';
+import { until } from './helpers-basic.js';
 import { backupCompany, OWN } from './helpers-backups.js';
 
 const MINUTE = 60_000;
@@ -27,7 +28,7 @@ async function stand(over: { secrets?: () => BundleSecrets } = {}) {
   const lines: string[] = [];
   /* record: what the app answers to a bundle's record in place of its own answer. down: it answers nothing. holders:
      which machines it says hold which bundles, in place of what it says itself. */
-  const said = { record: null as number | null, down: false, leads: true, holders: null as Record<string, string[]> | null };
+  const said = { record: null as number | null, down: false, leads: true, holders: null as Record<string, string[]> | null, order: null as object | null };
   const asked: string[] = [];
   const ask: Ask = async (method, path, body) => {
     asked.push(`${method} ${path}`);
@@ -36,7 +37,7 @@ async function stand(over: { secrets?: () => BundleSecrets } = {}) {
     const res = await c.app.inject({ method, url: path, ...(body === undefined ? {} : { payload: body as object }), ...OWN });
     try {
       const answer = res.json() as Record<string, unknown>;
-      return { status: res.statusCode, body: method === 'GET' && said.holders ? { ...answer, holders: said.holders } : answer };
+      return { status: res.statusCode, body: method === 'GET' ? { ...answer, ...(said.holders ? { holders: said.holders } : {}), ...(said.order ? { order: said.order } : {}) } : answer };
     } catch {
       return { status: res.statusCode, body: null };
     }
@@ -244,6 +245,32 @@ describe('the keeper of backups', () => {
     s.said.holders = null;
     await s.keeper.round();
     expect(s.keeper.held()).toEqual([ids[3], ids[2]]);
+  });
+
+  it("opens the bundle its app orders restored, and keeps it however old it is", async () => {
+    const s = await stand();
+    const ids: string[] = [];
+    for (let made = 0; made < 3; made += 1) {
+      ids.push(await s.bundle());
+      s.advance(BUNDLE_EVERY_MS);
+    }
+    expect(s.keeper.held()).toEqual([ids[2], ids[1]]);
+    /* The app orders the newest but one restored, and two more are made meanwhile: it stays. */
+    const held = s.keeper.store().list().find(bundle => bundle.id === ids[1])!.manifest;
+    const order = { attempt: randomUUID(), id: ids[1], dumpedAt: held.dumpedAt, source: 'store', identity: null, expect: { sha256: held.sha256, size: held.size, signer: held.signer }, company: s.acme.id, authorityPem: s.held.authorityPem, carry: true };
+    s.said.order = order;
+    await s.keeper.round();
+    const asked = join(s.controlDir, 'restore.json');
+    await until(() => existsSync(asked));
+    expect(JSON.parse(readFileSync(asked, 'utf8'))).toEqual({ attempt: order.attempt, id: ids[1], dumpedAt: held.dumpedAt, carry: true });
+    expect(readFileSync(join(s.controlDir, 'restore', `${order.attempt}.sql.gz`)).equals(DUMP)).toBe(true);
+    for (let made = 0; made < 2; made += 1) {
+      ids.push(await s.bundle());
+      s.advance(BUNDLE_EVERY_MS);
+    }
+    expect(s.keeper.held()).toEqual([ids[4], ids[3], ids[1]]);
+    /* No line of the keeper holds the order. */
+    expect(s.lines.filter(line => line.includes(order.attempt) || line.includes('authorityPem'))).toEqual([]);
   });
 
   it('makes nothing while it does not lead', async () => {

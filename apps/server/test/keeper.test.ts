@@ -266,6 +266,26 @@ describe('the keeper', () => {
     expect((await send(front, { path: '/tasks' })).status).toBe(503);
   });
 
+  it('shows maintenance during the swap of a restore', async () => {
+    const { keeper, dir, front } = await keeperOn(await appIsDown(), { ...FAST, holdMs: 30, holdEveryMs: 5 });
+    const restoreSays = (state: string, step: string) => writeFileSync(join(dir, 'restore-status.json'), JSON.stringify({ attempt: 'a1', id: 'b1', state, step, line: '', at: '2026-01-01T00:00:00.000Z', kept: null }));
+    /* While the keeper still opens the bundle the company works on. */
+    restoreSays('running', 'open');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(keeper.mode()).toBe('lead');
+    for (const step of ['load', 'swap', 'start']) {
+      restoreSays('running', step);
+      await until(() => keeper.mode() === 'maintenance');
+      const page = await send(front, { path: '/tasks' });
+      expect([step, page.status, page.headers['retry-after']]).toEqual([step, 503, '10']);
+      restoreSays('done', 'start');
+      await until(() => keeper.mode() === 'lead');
+    }
+    restoreSays('failed', 'swap');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(keeper.mode()).toBe('lead');
+  });
+
   it('holds a request while the app is down, and ends the hold with maintenance once an update begins', async () => {
     const down = await appIsDown();
     const { keeper, dir, front } = await keeperOn(down, { ...FAST, holdEveryMs: 5 });

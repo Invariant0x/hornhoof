@@ -11,6 +11,7 @@ import { sealBundle } from '../src/modules/backups/bundle.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { hostIdOf } from '../src/modules/network/join.js';
+import type { Deps } from '../src/app.js';
 import { as, setUpCompany, testApp } from './helpers.js';
 
 /* What the tests of backups share: a company whose server's keeper took its certificate, and the keeper's own asks. */
@@ -28,8 +29,8 @@ export function machineKey(): MachineKey {
 export const ageRecipient = async () => age.identityToRecipient(await age.generateX25519Identity());
 
 /* A company whose server's keeper took its certificate, and what it seals bundles with. */
-export async function backupCompany() {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
+export async function backupCompany(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']) {
+  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID, ...env }, logger);
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));

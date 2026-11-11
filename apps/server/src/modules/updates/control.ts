@@ -38,9 +38,48 @@ function statusWithBuild(dir: string): UpdaterStatus | null {
 /* The updater touches alive every few seconds; older than this, it is not running. */
 const ALIVE_MS = 30_000;
 
+/* What holds the updater: an update or a restore. */
+export type UpdaterWork = 'update' | 'restore';
+/* The steps of a restore that are the updater's own: from there its status file says the restore runs. */
+const RESTORE_SWAP_STEPS = new Set<unknown>(['load', 'swap', 'start']);
+
 /* The app's side of the control folder it shares with the updater. */
 export class UpdaterControl {
+  /* What was promised the updater and is not in its hands yet: an update that waits for idle or reads the registry, or
+     a restore its keeper still prepares. */
+  private held: { kind: UpdaterWork; id: string } | null = null;
+
   constructor(private readonly dir: string) {}
+
+  /* Restores and updates share one claim on the updater, taken in one step so two asked at once never both go on. It
+     claims for this id and answers null; or it answers what holds the updater and changes nothing. An update takes the
+     place of an update that still waits, as it always did. */
+  claim(kind: UpdaterWork, id: string): UpdaterWork | null {
+    const holder = this.holder(kind);
+    if (holder) return holder;
+    this.held = { kind, id };
+    return null;
+  }
+
+  /* Frees the claim when it is this id's. */
+  free(id: string): void {
+    if (this.held?.id === id) this.held = null;
+  }
+
+  claimed(): { kind: UpdaterWork; id: string } | null {
+    return this.held;
+  }
+
+  private holder(asking: UpdaterWork): UpdaterWork | null {
+    if (this.held && !(asking === 'update' && this.held.kind === 'update')) return this.held.kind;
+    const restore = controlJson<{ state?: unknown; step?: unknown }>(this.dir, 'restore-status.json');
+    if (restore?.state === 'running' && RESTORE_SWAP_STEPS.has(restore.step)) return 'restore';
+    const status = controlJson<UpdaterStatus>(this.dir, 'status.json');
+    if (status?.state === 'running') return 'update';
+    /* A request the updater has not taken yet. */
+    const waiting = controlJson<UpdateRequest>(this.dir, 'request.json');
+    return asking === 'restore' && waiting?.id && waiting.id !== status?.id ? 'update' : null;
+  }
 
   present(): boolean {
     try {

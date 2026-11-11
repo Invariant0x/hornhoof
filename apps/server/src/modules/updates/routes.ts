@@ -45,11 +45,14 @@ async function requireConfirmed(ctx: Ctx, confirmed: number): Promise<void> {
   if (turns > confirmed) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
 }
 
-function requireFreeUpdater(ctx: Ctx): void {
+/* The updater is claimed for this update in one step, so an update and a restore asked at once never both go on. */
+function claimUpdater(ctx: Ctx, id: string): void {
   if (!ctx.updater.present()) {
     throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
   }
-  if (ctx.updater.status()?.state === 'running') throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
+  const holder = ctx.updater.claim('update', id);
+  if (holder === 'restore') throw new ApiError(409, 'conflict', 'A restore is running.', 'restore_running');
+  if (holder) throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
 }
 
 async function publishedBuild(ctx: Ctx, wanted: string): Promise<Build> {
@@ -91,14 +94,22 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requireCompanyPerson(req, ctx.db);
     const body = UpdateBody.parse(req.body);
     if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
-    requireFreeUpdater(ctx);
-    const request = { ...(await requestFor(ctx, await publishedBuild(ctx, body.version), randomUUID())), ...howFast(body) };
-    /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
-    await modeGate(ctx.mode)(req);
-    wait.callOff();
-    if (request.urgent || request.immediate) sendToUpdater(ctx, request);
-    else await wait.sendWhenIdle(me.companyId, request);
-    return reply.code(202).send({ id: request.id });
+    const id = randomUUID();
+    claimUpdater(ctx, id);
+    try {
+      const request = { ...(await requestFor(ctx, await publishedBuild(ctx, body.version), id)), ...howFast(body) };
+      /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
+      await modeGate(ctx.mode)(req);
+      wait.callOff();
+      if (request.urgent || request.immediate) sendToUpdater(ctx, request);
+      else await wait.sendWhenIdle(me.companyId, request);
+    } catch (err) {
+      ctx.updater.free(id);
+      /* An update that waited before this one still waits, and holds the updater as it did. */
+      wait.keepClaim();
+      throw err;
+    }
+    return reply.code(202).send({ id });
   });
 
   app.delete('/api/updates', STARTS_FIRST, async (req, reply) => {

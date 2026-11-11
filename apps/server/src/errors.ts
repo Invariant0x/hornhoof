@@ -151,6 +151,11 @@ export type ErrorReason =
   | 'key_not_held'
   | 'no_key'
   | 'recovery_file_invalid'
+  | 'restore_busy'
+  | 'restore_running'
+  | 'newer_build'
+  | 'not_held'
+  | 'needs_recovery_file'
   | 'no_authority'
   | 'not_owner_session'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`

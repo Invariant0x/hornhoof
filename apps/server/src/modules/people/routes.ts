@@ -142,6 +142,23 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
   if (freed) ctx.bus.publish(owner.companyId, { type: 'org' });
 }
 
+/* A person's account ends: their sessions go, their machines leave the company, and their plans stop serving it. by:
+   who did it; the company's owner when nobody acts, as when a restore carries over that the person was disabled. */
+export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Promise<void> {
+  const { db } = ctx;
+  const person = await db.transaction(async tx => {
+    await tx.update(people).set({ status: 'disabled', isCeoDelegate: false }).where(eq(people.id, personId));
+    await tx.delete(sessions).where(eq(sessions.personId, personId));
+    const [row] = await tx.select(personColumns).from(people).where(eq(people.id, personId));
+    return row;
+  });
+  if (!person) return;
+  const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, personId), isNull(machines.revokedAt)));
+  await disconnectMachines(ctx, theirs.map(m => m.id));
+  const [owner] = by ? [by] : await db.select(personColumns).from(people).where(and(eq(people.companyId, person.companyId), eq(people.isOwner, true)));
+  if (owner) await releasePlansOf(ctx, person, owner);
+}
+
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
   const acceptAttempts = limiter();
@@ -267,24 +284,24 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
     Object.assign(changes, markAfter(changes.status, body));
+    const { status } = changes;
+    /* Disabling has steps of its own, taken after whatever else this request changes. */
+    if (status === 'disabled') delete changes.status;
 
-    const person = await db.transaction(async tx => {
+    const changed = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
       if (body.name !== undefined && body.name !== target.name) {
         await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
       }
       if (body.access) await saveAccess(tx, target, body.access);
-      if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
       const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
       return row!;
     });
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
-    if (changes.status === 'disabled') {
-      const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
-      await disconnectMachines(ctx, theirs.map(m => m.id));
-    }
-    if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
-    tellOfChange(ctx, me.companyId, Boolean(changes.status || body.access), person.name !== target.name);
+    if (status === 'disabled') await disablePerson(ctx, id, me);
+    else if (body.access) await releasePlansOf(ctx, changed, me);
+    const person = status === 'disabled' ? (await db.select(personColumns).from(people).where(eq(people.id, id)))[0]! : changed;
+    tellOfChange(ctx, me.companyId, Boolean(status || body.access), person.name !== target.name);
     return { person: await personView(db, person) };
   });
 

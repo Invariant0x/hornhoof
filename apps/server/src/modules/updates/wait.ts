@@ -12,9 +12,11 @@ const HELD_AFTER_MS = 10 * 60_000;
 
 type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
 
+/* From here the request file and then the updater's own status say that an update is out, so its claim is let go. */
 export function sendToUpdater(ctx: Ctx, request: UpdateRequest): void {
   const { id, ...rest } = request;
   ctx.updater.request(rest, id);
+  ctx.updater.free(id);
 }
 
 /* The update that waits for a company's agents to finish, and the company's turns held meanwhile and for a while after. */
@@ -32,8 +34,14 @@ export class UpdateWait {
   /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
   callOff(release = true): void {
     this.waiting?.stop();
+    if (this.waiting) this.ctx.updater.free(this.waiting.request.id);
     if (this.waiting && release) this.letTurnsGo(this.waiting.companyId);
     this.waiting = null;
+  }
+
+  /* The update that waits holds the updater, also after a request that would have taken its place failed. */
+  keepClaim(): void {
+    if (this.waiting) this.ctx.updater.claim('update', this.waiting.request.id);
   }
 
   /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader

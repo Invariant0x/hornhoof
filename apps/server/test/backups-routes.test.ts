@@ -103,7 +103,7 @@ describe('the backups routes', () => {
     const holder = await c.worker('mac');
     type Listed = { last: string | null; recovery: { madeAt: string; madeBy: string } | null; recoveryNeeded: boolean; linkChanged: boolean; bundles: { id: string; reason: string; size: number; recovery: string; where: { machine: string | null; name: string; online: boolean }[] }[] };
     const list = async () => (await c.app.inject({ url: '/api/backups', ...as(c.ceo) })).json() as Listed;
-    expect(await list()).toEqual({ last: null, recovery: null, recoveryNeeded: true, linkChanged: false, bundles: [] });
+    expect(await list()).toEqual({ last: null, recovery: null, recoveryNeeded: true, linkChanged: false, restore: null, kept: [], bundles: [] });
     const older = await c.head();
     await c.record(older.head);
     const file = JSON.parse(((await c.recoveryFile()).json() as { text: string }).text.split('\n')[1]!) as { recipient: string };

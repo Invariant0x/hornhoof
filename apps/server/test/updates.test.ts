@@ -349,6 +349,69 @@ describe('updates', () => {
     expect(again.json().error.reason).toBe('update_running');
   });
 
+  it('one restore or update at a time', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const bundle = '0f0f0f0f-0000-4000-8000-00000000000a';
+    const update = (payload: object = { version: 'latest', whenIdle: false }) => app.inject({ method: 'POST', url: '/api/updates', payload, ...as(ceo) });
+    /* A restore of a bundle nobody recorded: it claims the updater first, and is refused for the bundle only after. */
+    const restore = async () => {
+      const answer = await app.inject({ method: 'POST', url: `/api/backups/${bundle}/restore`, payload: {}, ...as(ceo) });
+      return answer.statusCode === 404 ? 'free' : (answer.json().error.reason as string);
+    };
+    const reasonOf = async (asked: ReturnType<typeof update>) => (await asked).json().error?.reason as string | undefined;
+    const restoreSays = (state: string, step: string) => writeFileSync(join(control, 'restore-status.json'), JSON.stringify({ attempt: 'a1', id: bundle, state, step, line: '', at: '2026-11-10T08:00:00Z', kept: null }));
+
+    /* A restore its keeper still prepares. */
+    expect(app.ctx.updater.claim('restore', 'a1')).toBeNull();
+    expect(await reasonOf(update())).toBe('restore_running');
+    expect(await restore()).toBe('restore_busy');
+    app.ctx.updater.free('a1');
+    /* A restore the updater runs, which its status says. */
+    restoreSays('running', 'swap');
+    expect(await reasonOf(update())).toBe('restore_running');
+    expect(await restore()).toBe('restore_busy');
+    /* At a step of the keeper's the status alone holds nothing: only an order does. */
+    restoreSays('running', 'open');
+    expect(await restore()).toBe('free');
+    restoreSays('failed', 'swap');
+    expect(await restore()).toBe('free');
+    expect(app.ctx.updater.claimed()).toBeNull();
+
+    /* An update that waits for the agents. */
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [orchestrator] = await db.select().from(agents);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build', status: 'running', timeoutMs: 1000 }).returning();
+    expect((await update({ version: 'latest', whenIdle: true })).statusCode).toBe(202);
+    expect(await restore()).toBe('restore_busy');
+    /* Another update takes its place, as it always did; one that fails leaves the first waiting, and holding. */
+    expect((await update({ version: 'latest', whenIdle: true })).statusCode).toBe(202);
+    expect((await update({ version: 'no-such-build', whenIdle: true })).statusCode).toBe(400);
+    expect(await restore()).toBe('restore_busy');
+    /* Called off, it holds nothing. */
+    expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
+    expect(await restore()).toBe('free');
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+
+    /* Asked in the same tick, exactly one of the two is taken, whichever comes first. */
+    expect([app.ctx.updater.claim('restore', 'r2'), app.ctx.updater.claim('update', 'u2')]).toEqual([null, 'restore']);
+    app.ctx.updater.free('u2');
+    expect(app.ctx.updater.claimed()).toEqual({ kind: 'restore', id: 'r2' });
+    app.ctx.updater.free('r2');
+    expect([app.ctx.updater.claim('update', 'u3'), app.ctx.updater.claim('restore', 'r3')]).toEqual([null, 'update']);
+    app.ctx.updater.free('u3');
+    /* A request the updater has not taken yet holds it too. */
+    expect((await update()).statusCode).toBe(202);
+    expect(request(control)).not.toBeNull();
+    expect(app.ctx.updater.claimed()).toBeNull();
+    expect(await restore()).toBe('restore_busy');
+    /* Taken and done, the updater is free again. */
+    writeFileSync(join(control, 'status.json'), JSON.stringify({ id: request(control).id, version: '0.4.1', state: 'done', step: 'finished', log: '', at: '2026-10-30T01:00:00Z' }));
+    expect(await restore()).toBe('free');
+  });
+
   it('leaves out an image a build does not have, so the updater takes it by its tag', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } }, ['hornhoof-updater']);
     const { app, ceo, control } = await company(registry);

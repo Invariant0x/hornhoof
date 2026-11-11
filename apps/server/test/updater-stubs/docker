@@ -213,6 +213,8 @@ case "$1 $2" in
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
           *' config --services '*) services_in "$(compose_file "$@")" ;;
+          # Whether what a restore carried over is there for the app that starts now.
+          *' up -d --no-build app '*) [ ! -f "$HORNHOOF_CONTROL_DIR/restore-carry.json" ] || printf 'up with the carry\n' >> "$STUB_LOG" ;;
           # STUB_UPDATER_UP=fail: this build's updater does not start, the one named by HORNHOOF_UPDATER_REF does;
           # never: no updater starts.
           *' up '*' updater '*)

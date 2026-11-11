@@ -8,6 +8,7 @@ import { BundleStore } from '../backups/store.js';
 import type { MakerView } from '../backups/types.js';
 import type { HeldCertificate } from './certificate.js';
 import { reasonOf, type MachineKey } from './machine-keys.js';
+import { INCOMING_DIR, RESTORE_DIR, RestoreRunner } from './restore.js';
 
 export const BUNDLE_EVERY_MS = 6 * 3_600_000;
 /* At most one dump is asked for in this long, but for the first after a new recovery file. */
@@ -64,6 +65,8 @@ function readDump(path: string, id: string): Dump | null {
    to the machines its app picked to hold it. No dump stays in the clear for longer than a day, whatever else fails. */
 export class BackupKeeper {
   private readonly bundles: BundleStore;
+  /* The keeper's part of a restore its app orders. */
+  private readonly restores: RestoreRunner;
   private readonly dumps: string;
   private readonly request: string;
   private last: MakerView | null = null;
@@ -76,6 +79,9 @@ export class BackupKeeper {
 
   constructor(private readonly opts: BackupKeeperOptions) {
     this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
+    this.restores = new RestoreRunner({
+      controlDir: opts.controlDir, own: this.bundles, incoming: new BundleStore(join(opts.controlDir, RESTORE_DIR, INCOMING_DIR)), identity: opts.age.identity, log: opts.log, now: opts.now,
+    });
     this.dumps = join(opts.controlDir, 'dumps');
     this.request = join(opts.controlDir, 'dump.json');
   }
@@ -152,6 +158,8 @@ export class BackupKeeper {
     const view = await this.ask();
     if (!view) return;
     this.last = view;
+    /* The order may carry a recovery identity: it is handed on in memory, and nothing here writes a view anywhere. */
+    this.restores.take(view.order);
     const held = this.opts.held();
     if (view.company && held?.role === 'data') {
       this.askForDump(view);
