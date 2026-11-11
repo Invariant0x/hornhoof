@@ -22,7 +22,8 @@ async function prepare(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', w
   }, { lang, theme });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  /* Calls the test does not answer, as the version and the updates, fail as the server fails them; only the page's own errors count. */
+  page.on('console', message => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text()); });
   await taskStream(page);
   await serveApi(page);
   return errors;
@@ -87,6 +88,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(part.getByRole('alert')).toHaveText(t.errors.repo_host_invalid);
         await expect(part.getByLabel(t.repoHost.owner, { exact: true })).toHaveValue('github.com/acme');
         await fits(page, '.dialog', width);
+        await part.getByRole('alert').scrollIntoViewIfNeeded();
         await capture(dialog, 'settings-refused', info);
 
         await part.getByLabel(t.repoHost.owner, { exact: true }).fill(OWNER);
@@ -100,7 +102,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(part.getByText(t.repoHost.removeAsk)).toBeVisible();
         await fits(page, '.dialog', width);
         await capture(dialog, 'settings-remove', info);
-        expect(errors.filter(e => !/400/.test(e))).toEqual([]);
+        expect(errors).toEqual([]);
       });
 
       test(`a department's screen names the key it uses and takes one of its own, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
