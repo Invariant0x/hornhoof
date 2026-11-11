@@ -289,6 +289,25 @@ describe('a restore from a backup', () => {
     }
   });
 
+  it('restores a fork after newer bundles', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, status, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', 'merged', ${fork})`);
+    const set = await s.head({ reason: 'fork', id: fork });
+    expect((await s.record(set.head)).statusCode).toBe(201);
+    const newer: string[] = [];
+    for (let made = 0; made < 17; made += 1) {
+      const head = await s.head({ now: new Date(Date.now() + (made + 1) * 1000) });
+      expect((await s.record(head.head)).statusCode).toBe(201);
+      newer.push(head.id);
+    }
+    /* The server's keeper says it holds the newest sixteen and the fork beside them. */
+    expect((await s.report({ heldBackups: [...[...newer].reverse().slice(0, 16), fork] })).statusCode).toBe(204);
+    const answer = await s.restore(fork);
+    expect(answer.statusCode).toBe(202);
+    expect((await s.view<MakerView>()).order).toMatchObject({ id: fork, source: 'store', expect: { sha256: set.manifest.sha256, size: set.manifest.size } });
+  });
+
   it("remembers the CEO's choice across the swap", async () => {
     const s = await stand();
     const file = join(s.control, CHOICE_FILE);

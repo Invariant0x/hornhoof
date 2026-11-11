@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js';
 import { bundleRows } from '../src/modules/backups/records.js';
+import { FORK_KEEP_MS, REPORT_MAX, REPORTED_BUNDLES } from '../src/modules/backups/types.js';
 import { BackupKeeper, BUNDLE_EVERY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
 import { bundleSecrets } from '../src/modules/keeper/keeper.js';
 import { saveLink } from '../src/modules/link/link.js';
@@ -271,6 +273,127 @@ describe('the keeper of backups', () => {
     expect(s.keeper.held()).toEqual([ids[4], ids[3], ids[1]]);
     /* No line of the keeper holds the order. */
     expect(s.lines.filter(line => line.includes(order.attempt) || line.includes('authorityPem'))).toEqual([]);
+  });
+
+  it('makes the fork bundle first', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    const database = 'hornhoof_before_20261110_090000';
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES (${`kept:${database}`}, 'a database', ${fork})`);
+    /* A timer dump is due as well, as on a server that was just restored. */
+    await s.keeper.round();
+    expect(JSON.parse(readFileSync(s.request, 'utf8'))).toEqual({ id: fork, database, reason: 'fork' });
+    /* The updater dumps that database, and says so. */
+    s.dumped(fork, { reason: 'fork' });
+    rmSync(s.request);
+    await s.keeper.round();
+    const [recorded] = await bundleRows(s.db, { limit: 5 });
+    expect(recorded).toMatchObject({ id: fork, reason: 'fork' });
+    expect((await s.opened(fork)).manifest.reason).toBe('fork');
+    expect(s.waiting()).toEqual([]);
+    /* Then the dump that was due, of the database in use. */
+    await s.keeper.round();
+    expect(JSON.parse(readFileSync(s.request, 'utf8'))).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+    expect(s.wanted()).not.toBe(fork);
+  });
+
+  it('asks for a fork again only after a while when its dump failed', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', ${fork})`);
+    await s.keeper.round();
+    expect(s.wanted()).toBe(fork);
+    mkdirSync(s.dumps, { recursive: true });
+    writeFileSync(join(s.dumps, `${fork}.failed`), 'The database could not be dumped.\n');
+    rmSync(s.request);
+    await s.keeper.round();
+    expect(s.lines.at(-1)).toBe('The updater could not dump the database for a backup: The database could not be dumped.');
+    /* The timer dump goes on meanwhile, and the fork is asked for again once the gap is over. */
+    expect(s.wanted()).not.toBe(fork);
+    s.updater();
+    await s.keeper.round();
+    s.advance(DUMP_GAP_MS);
+    await s.keeper.round();
+    expect(s.wanted()).toBe(fork);
+  });
+
+  it('records a fork again until it is recorded', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', ${fork})`);
+    await s.keeper.round();
+    s.dumped(fork, { reason: 'fork' });
+    rmSync(s.request);
+    s.said.record = 503;
+    await s.keeper.round();
+    expect([s.keeper.held(), await bundleRows(s.db, { limit: 5 })]).toEqual([[fork], []]);
+    /* The dump is gone by its day, and the app still has no record: the stored head goes again, with no new dump. */
+    s.advance(DUMP_LIFE_MS);
+    await s.keeper.round();
+    expect(s.waiting().filter(name => name.startsWith(fork))).toEqual([]);
+    s.said.record = null;
+    const before = s.asked.length;
+    await s.keeper.round();
+    expect(s.asked.slice(before)).toContain('POST /api/network/backups');
+    expect((await bundleRows(s.db, { limit: 5 })).map(row => row.id)).toContain(fork);
+    expect(s.wanted()).not.toBe(fork);
+    const after = s.asked.length;
+    await s.keeper.round();
+    await s.keeper.round();
+    expect(s.asked.slice(after).filter(line => line.startsWith('POST'))).toEqual([]);
+  });
+
+  it('keeps fork bundles 30 days', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', ${fork})`);
+    await s.keeper.round();
+    s.dumped(fork, { reason: 'fork' });
+    rmSync(s.request);
+    await s.keeper.round();
+    const madeAt = s.now();
+    const timers: string[] = [];
+    for (let made = 0; made < 3; made += 1) {
+      timers.push(await s.bundle());
+      s.advance(BUNDLE_EVERY_MS);
+    }
+    /* The latest two of the timer's, and the fork outside that count. */
+    expect(s.keeper.held()).toEqual([timers[2], timers[1], fork]);
+    s.advance(madeAt + FORK_KEEP_MS - s.now() - 1000);
+    await s.keeper.round();
+    expect(s.keeper.held()).toContain(fork);
+    s.advance(2000);
+    await s.keeper.round();
+    expect(s.keeper.held()).not.toContain(fork);
+  });
+
+  it('reports every fork it holds', async () => {
+    const s = await stand();
+    const fork = randomUUID();
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', ${fork})`);
+    await s.keeper.round();
+    s.dumped(fork, { reason: 'fork' });
+    rmSync(s.request);
+    await s.keeper.round();
+    /* Seventeen newer bundles, all still named by the app for machines that hold them. The app is made to say there is
+       none yet, so one is due each time, ten minutes apart: it records none that is a day from its own clock. */
+    const newer: string[] = [];
+    const holders: Record<string, string[]> = {};
+    s.said.last = null;
+    for (let made = 0; made < 17; made += 1) {
+      s.advance(DUMP_GAP_MS);
+      const id = await s.bundle();
+      newer.push(id);
+      holders[id] = [randomUUID()];
+      s.said.holders = { ...holders };
+    }
+    await s.keeper.round();
+    expect(s.keeper.held()).toHaveLength(18);
+    const reported = s.keeper.reported();
+    expect(reported).toHaveLength(REPORTED_BUNDLES + 1);
+    expect(reported.slice(0, REPORTED_BUNDLES)).toEqual([...newer].reverse().slice(0, REPORTED_BUNDLES));
+    expect(reported.at(-1)).toBe(fork);
+    expect(REPORT_MAX).toBe(32);
   });
 
   it('makes a bundle at once after the company was restored to an earlier time', async () => {

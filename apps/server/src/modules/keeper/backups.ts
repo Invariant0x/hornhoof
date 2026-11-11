@@ -6,7 +6,7 @@ import type { Peer } from '../../net/peer-server.js';
 import { UUID } from '../../net/proxy.js';
 import { checkHead, sealBundle, type BundleReason, type BundleSecrets } from '../backups/bundle.js';
 import { BundleStore } from '../backups/store.js';
-import type { MakerView } from '../backups/types.js';
+import { FORK_KEEP_MS, type MakerView } from '../backups/types.js';
 import type { HeldCertificate } from './certificate.js';
 import { reasonOf, type MachineKey } from './machine-keys.js';
 import { INCOMING_DIR, RESTORE_DIR, RestoreRunner } from './restore.js';
@@ -22,7 +22,7 @@ export const KEEP_OWN = 2;
 export const BUNDLES_DIR = 'bundles';
 
 const EVERY_MS = 10_000;
-const REASONS: readonly string[] = ['timer', 'update'] satisfies BundleReason[];
+const REASONS: readonly string[] = ['timer', 'update', 'fork'] satisfies BundleReason[];
 
 export type Ask = (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; body: unknown }>;
 /* What the peer link serves of backups: a bundle to a machine picked to hold it, and a bundle taken back from one. */
@@ -78,6 +78,8 @@ export class BackupKeeper {
   private askedFor: string | null = null;
   /* When the newest bundle the app last named was made. */
   private newestSeen: number | null = null;
+  /* When it last asked for the dump of each database set aside before a merge. */
+  private readonly forkAskedAt = new Map<string, number>();
 
   constructor(private readonly opts: BackupKeeperOptions) {
     this.bundles = new BundleStore(join(opts.dir, BUNDLES_DIR));
@@ -127,6 +129,11 @@ export class BackupKeeper {
     return this.bundles.list().map(bundle => bundle.id);
   }
 
+  /* What its report says it holds. */
+  reported(): string[] {
+    return this.bundles.reported();
+  }
+
   peer(): PeerBackups {
     return {
       get: (peer, id) => {
@@ -164,10 +171,61 @@ export class BackupKeeper {
     this.restores.take(view.order);
     const held = this.opts.held();
     if (view.company && held?.role === 'data') {
-      this.askForDump(view);
+      /* A database set aside before a merge is saved before it goes: its dump is asked for before one that is due. */
+      if (!this.askForFork(view)) this.askForDump(view);
       await this.sealDumps(view, view.company, held);
+      await this.recordFork(view);
     }
-    this.bundles.keepOnly([...this.held().slice(0, KEEP_OWN), ...Object.keys(view.holders), ...(view.order ? [view.order.id] : [])]);
+    this.bundles.keepOnly([...this.ownToKeep(), ...Object.keys(view.holders), ...(view.order ? [view.order.id] : [])]);
+  }
+
+  /* Its latest bundles of the database in use, and beside them every fork bundle until its 30 days end. */
+  private ownToKeep(): string[] {
+    const all = this.bundles.list();
+    const now = this.now();
+    const latest = all.filter(bundle => bundle.manifest.reason !== 'fork').slice(0, KEEP_OWN);
+    const forks = all.filter(bundle => bundle.manifest.reason === 'fork' && now - Date.parse(bundle.manifest.madeAt) < FORK_KEEP_MS);
+    return [...latest, ...forks].map(bundle => bundle.id);
+  }
+
+  /* Asks the updater for the dump of the database the app names, under the id its merge gave it, when this machine has
+     neither its bundle nor its dump and no dump is on its way. Outside the gap between dumps, but for one that failed,
+     which is asked for again only after it. True when the request is the fork's now. */
+  private askForFork(view: MakerView): boolean {
+    const fork = view.fork;
+    if (!fork || this.bundles.has(fork.id)) return false;
+    const files = this.files();
+    if (existsSync(this.request) || files.some(name => name.endsWith('.json'))) return files.some(name => name.startsWith(fork.id)) || this.wantedNow() === fork.id;
+    const now = this.now();
+    const asked = this.forkAskedAt.get(fork.id);
+    if (asked !== undefined && now - asked < DUMP_GAP_MS) return false;
+    try {
+      writeFileSync(`${this.request}.new`, JSON.stringify({ id: fork.id, database: fork.database, reason: 'fork' }));
+      renameSync(`${this.request}.new`, this.request);
+    } catch (err) {
+      this.opts.log(`The keeper could not ask the updater for a dump of the database: ${reasonOf(err)}`);
+      return false;
+    }
+    this.forkAskedAt.set(fork.id, now);
+    return true;
+  }
+
+  private wantedNow(): string | null {
+    try {
+      const id = (JSON.parse(readFileSync(this.request, 'utf8')) as { id?: unknown }).id;
+      return typeof id === 'string' ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /* A fork the app still has no record of, though this machine holds its bundle and its dump is gone: its stored head
+     goes again, each round, until the app has it. */
+  private async recordFork(view: MakerView): Promise<void> {
+    const fork = view.fork;
+    if (!fork || existsSync(join(this.dumps, `${fork.id}.json`))) return;
+    const head = this.bundles.list().find(bundle => bundle.id === fork.id)?.head;
+    if (head) await this.opts.ask('POST', '/api/network/backups', { head }).catch(() => null);
   }
 
   /* A dump in the clear is never left for long: this runs first, whether the machine leads, its app answers or its keys

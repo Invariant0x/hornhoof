@@ -3,8 +3,8 @@ import type { Db } from '../../db/client.js';
 import { machines, people } from '../../db/schema.js';
 import { subnetOf } from '../network/ids.js';
 import { onlineShare } from '../network/join.js';
-import { bundleRows, setHolders } from './records.js';
-import { ROOM } from './types.js';
+import { bundleRows, setHolders, type BackupRow } from './records.js';
+import { FORK_KEEP_MS, ROOM } from './types.js';
 
 /* How many other machines keep each bundle. */
 export const HOLDERS = 3;
@@ -64,11 +64,19 @@ export async function pickHolders(db: Db, opts: { size: number; keep: string[]; 
   return picks.map(c => c.id);
 }
 
-/* Looks again at who holds the newest two bundles that a recovery file opens: a holder that was ticked off, disconnected
-   or silent for a day gives its place to the next, and so does one that still has not fetched the bundle and has no room
-   for it or is not heard from now. */
+/* The bundles that are named for the machines that hold them: the newest two of the database in use that a recovery
+   file opens, and every bundle of a database set aside before a merge that one opens, for 30 days from when it was
+   made. */
+export async function namedBundles(db: Db, now = new Date()): Promise<BackupRow[]> {
+  const newest = await bundleRows(db, { limit: 2, withRecovery: true, forks: 'none' });
+  return [...newest, ...(await bundleRows(db, { withRecovery: true, forks: { since: new Date(now.getTime() - FORK_KEEP_MS) } }))];
+}
+
+/* Looks again at who holds the bundles that are named: a holder that was ticked off, disconnected or silent for a day
+   gives its place to the next, and so does one that still has not fetched the bundle and has no room for it or is not
+   heard from now. */
 export async function refreshHolders(db: Db, now = new Date()): Promise<void> {
-  for (const row of await bundleRows(db, { limit: 2, withRecovery: true })) {
+  for (const row of await namedBundles(db, now)) {
     const holders = await pickHolders(db, { size: row.size, keep: row.holders, now, id: row.id });
     if (holders.join() !== row.holders.join()) await setHolders(db, row.id, holders);
   }

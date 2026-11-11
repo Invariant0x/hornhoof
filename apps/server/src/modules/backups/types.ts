@@ -10,6 +10,11 @@ export const ROOM = 3;
 export const RECOVERY_LINK = 'recovery-link.json';
 /* How many of the bundles a machine holds its report names, newest first. */
 export const REPORTED_BUNDLES = 16;
+/* A bundle of a database set aside before a merge is kept this long from when it was made, outside the usual
+   rotation, on the data machine and on its holders. */
+export const FORK_KEEP_MS = 30 * 86_400_000;
+/* The most a machine reports: its newest REPORTED_BUNDLES, and every fork it holds besides. */
+export const REPORT_MAX = 32;
 
 /* What the leading app tells its own keeper to restore. attempt: new for each start, so the same bundle can be tried
    again. source: the keeper's own store, or what a holder or a browser sent it. identity: the recovery file's, held in

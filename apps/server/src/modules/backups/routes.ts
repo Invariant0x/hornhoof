@@ -9,19 +9,18 @@ import { notAMachine } from '../network/join.js';
 import { authorityOf, findThisMachine, networkMachine } from '../network/store.js';
 import { keeperAsker } from '../network/via.js';
 import { BundleRefused, checkHead, MAX_HEAD } from './bundle.js';
-import { pickHolders } from './holders.js';
+import { namedBundles, pickHolders } from './holders.js';
 import { activeRecovery, makeRecoveryFile } from './recovery.js';
 import { bundleRow, bundleRows, recordBundle } from './records.js';
 import { forkWanted } from '../merge/merger.js';
 import { KEPT_NAME } from '../merge/source.js';
 import { warningOf } from './restore.js';
-import type { HolderView, MakerView } from './types.js';
+import { FORK_KEEP_MS, type HolderView, type MakerView } from './types.js';
 
 /* A bundle is recorded only while it is new: one made longer ago than this is some old file sent again. */
 const RECORD_WITHIN_MS = 24 * 3_600_000;
-/* How many bundles the CEO's list shows, and of how many the holders are told. */
+/* How many bundles of the database in use the CEO's list shows. */
 const LISTED = 10;
-const HELD_NEWEST = 2;
 /* A machine that reported within this is online, as its card says. */
 const ONLINE_MS = 2 * 60_000;
 
@@ -66,8 +65,9 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
     const data = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.ageKey)));
     const recovery = company ? await activeRecovery(db, config) : null;
-    const [last] = await bundleRows(db, { limit: 1 });
-    const held = await bundleRows(db, { limit: HELD_NEWEST, withRecovery: true });
+    /* The last backup of the database in use: a database set aside before a merge is none of it. */
+    const [last] = await bundleRows(db, { limit: 1, forks: 'none' });
+    const held = await namedBundles(db);
     return {
       company: company?.id ?? null,
       recipients: [...new Set(data.map(row => row.ageKey!))].sort(),
@@ -84,7 +84,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function holderView(machineId: string): Promise<HolderView> {
     const row = await networkMachine(db, machineId);
     if (!row) throw notAMachine();
-    const held = await bundleRows(db, { limit: HELD_NEWEST, withRecovery: true });
+    const held = await namedBundles(db);
     const want = (await ctx.restores.wanted()).filter(wanted => wanted.from === machineId).map(wanted => wanted.id);
     return { keeps: row.keepsBackups, hold: held.filter(bundle => bundle.holders.includes(machineId)).map(({ id, size, sha256 }) => ({ id, size, sha256 })), want };
   }
@@ -168,14 +168,16 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The bundles and where each is held, for the CEO. */
   app.get('/api/backups', async req => {
     const me = ceo(await requirePerson(req, db));
-    const rows = await bundleRows(db, { limit: LISTED });
+    /* The newest of the database in use, and beside them every database set aside before a merge while it is kept. */
+    const rows = await bundleRows(db, { limit: LISTED, forks: 'none' });
+    const forks = await bundleRows(db, { forks: { since: new Date(Date.now() - FORK_KEEP_MS) } });
     const active = await activeRecovery(db, config);
     const [newest] = await db.select({ id: recoveryKeys.id }).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
     const [maker] = active ? await db.select({ name: people.name }).from(people).where(eq(people.id, active.madeBy)) : [];
     const cored = await db.select().from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), isNotNull(machines.networkId)));
     const own = await findThisMachine(db, config);
     const online = (reportAt: Date | null) => reportAt !== null && Date.now() - reportAt.getTime() < ONLINE_MS;
-    const bundles = await Promise.all(rows.map(async row => ({ row, why: await ctx.restores.restorable(row) })));
+    const bundles = await Promise.all([...rows, ...forks].map(async row => ({ row, why: await ctx.restores.restorable(row) })));
     const where = (id: string) =>
       cored
         .filter(machine => machine.heldBackups.includes(id))

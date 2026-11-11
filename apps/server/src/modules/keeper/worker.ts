@@ -13,7 +13,6 @@ import { keyPrint } from '../computer/owner-key.js';
 import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
-import { REPORTED_BUNDLES } from '../backups/types.js';
 import { ownAddresses } from './addresses.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp, type AppAnswer } from './app-call.js';
@@ -608,7 +607,7 @@ export class WorkerKeeper {
         pin: this.pinPrint(),
         ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
       };
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.held().slice(0, REPORTED_BUNDLES) };
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported() };
       let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
       /* A leader an update took back to the build before refuses words it does not know: the report goes again at once
          without them. */

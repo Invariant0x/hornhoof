@@ -145,7 +145,7 @@ export const en = {
     notSaved: 'Not saved yet. Without it the company cannot be restored if this server is lost.',
     savedNow: (time: string) => `Saved. Keep it like a password: it opens every backup made for it. Older recovery files open only backups made before ${time}.`,
     restoreFrom: 'Restore from a backup',
-    reasons: { timer: 'every 6 hours', update: 'before an update' },
+    reasons: { timer: 'every 6 hours', update: 'before an update', fork: 'Set aside before a merge' },
     heldBy: (names: string) => `Held by: ${names}`,
     thisServer: 'this server',
     offline: (name: string) => `${name} (offline)`,

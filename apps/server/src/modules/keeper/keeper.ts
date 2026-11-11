@@ -19,7 +19,7 @@ import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
-import { RECOVERY_LINK, REPORTED_BUNDLES } from '../backups/types.js';
+import { RECOVERY_LINK } from '../backups/types.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
@@ -209,7 +209,7 @@ export class Keeper {
           reportAs: opts.reportAs,
           os: opts.config.hostOs,
           ownerKey: opts.config.ownerKey,
-          backups: () => (this.backups ? { ageKey: this.backups.ageRecipient(), heldBackups: this.backups.held().slice(0, REPORTED_BUNDLES) } : null),
+          backups: () => (this.backups ? { ageKey: this.backups.ageRecipient(), heldBackups: this.backups.reported() } : null),
         })
       : null;
     /* The server's own keeper takes its app's word while it holds no key of its owner: the database is its own. */

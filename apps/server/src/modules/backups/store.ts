@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { UUID } from '../../net/proxy.js';
 import { BundleRefused, headLine, readHead, type Manifest } from './bundle.js';
-import { ROOM } from './types.js';
+import { ROOM, REPORT_MAX, REPORTED_BUNDLES } from './types.js';
 
 export type StoredBundle = { id: string; manifest: Manifest; head: string; size: number };
 /* A transfer that moves no byte for this long is cut. */
@@ -51,6 +51,15 @@ export class BundleStore {
       .map(id => this.read(id))
       .filter(bundle => bundle !== null)
       .sort((a, b) => Date.parse(b.manifest.madeAt) - Date.parse(a.manifest.madeAt) || a.id.localeCompare(b.id));
+  }
+
+  /* What a machine reports of what it holds: its newest bundles, and every bundle of a database set aside before a
+     merge besides, so a restore of one still finds who holds it when many were made since. */
+  reported(): string[] {
+    const all = this.list();
+    const newest = all.slice(0, REPORTED_BUNDLES);
+    const forks = all.slice(REPORTED_BUNDLES).filter(bundle => bundle.manifest.reason === 'fork');
+    return [...newest, ...forks].slice(0, REPORT_MAX).map(bundle => bundle.id);
   }
 
   has(id: string): boolean {

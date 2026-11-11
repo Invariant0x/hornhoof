@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { FORK_KEEP_MS } from '../src/modules/backups/types.js';
 import { describe, expect, it } from 'vitest';
 import { companies, machineOnline, machines, people } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { pickHolders, refreshHolders, sameHome } from '../src/modules/backups/holders.js';
+import { pickHolders, refreshHolders, sameHome, namedBundles } from '../src/modules/backups/holders.js';
 import { bundleRow, recordBundle, type BackupRow } from '../src/modules/backups/records.js';
 import { invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -95,6 +96,39 @@ describe('the machines that keep a bundle', () => {
     await c.db.update(machines).set({ reportAt: new Date(NOW.getTime() - DAY_MS - 60_000) }).where(eq(machines.id, old));
     await refreshHolders(c.db, NOW);
     expect((await bundleRow(c.db, row.id))!.holders).toEqual([a, b, d]);
+  });
+
+  it('keeps a fork named for its holders 30 days', async () => {
+    const c = await company();
+    const [a, b] = [await c.worker('a', { online: 0.8 }), await c.worker('b', { online: 0.7 })];
+    const row = (reason: 'timer' | 'fork', madeAt: Date, recovery: string | null = 'age1recovery'): BackupRow => ({
+      v: 1, id: randomUUID(), company: c.acme.id, dumpedAt: madeAt.toISOString(), madeAt: madeAt.toISOString(), reason, size: SIZE, sha256: 'a'.repeat(64),
+      recipients: ['age1x'], recovery, recoveryLink: null, migrations: 106, signer: randomUUID(), serial: 'ab', head: '', holders: [a, b],
+    });
+    const record = async (made: BackupRow) => {
+      const { v: _v, head: _head, holders, ...manifest } = made;
+      void _v;
+      void _head;
+      await recordBundle(c.db, { ...made, head: JSON.stringify({ manifest: JSON.stringify({ v: 1, ...manifest }), signature: 'x', certPem: 'x' }), holders });
+      return made.id;
+    };
+    const hours = (n: number) => new Date(NOW.getTime() + n * 3_600_000);
+    const fork = await record(row('fork', hours(0)));
+    /* A fork no recovery file opens stays on the data machine, as any such bundle does. */
+    await record(row('fork', hours(1), null));
+    const old = await record(row('timer', hours(2)));
+    const [first, second] = [await record(row('timer', hours(3))), await record(row('timer', hours(4)))];
+    const named = async (now: Date) => (await namedBundles(c.db, now)).map(found => found.id);
+    /* The newest two of the timer's, and the fork beside them, whatever was made since. */
+    expect(await named(hours(5))).toEqual([second, first, fork]);
+    expect(await named(hours(5))).not.toContain(old);
+    expect(await named(new Date(NOW.getTime() + FORK_KEEP_MS - 1000))).toContain(fork);
+    expect(await named(new Date(NOW.getTime() + FORK_KEEP_MS + 1000))).toEqual([second, first]);
+    /* Its holders are looked at again like the others': both hold it, and one fell silent a day ago. */
+    await c.db.update(machines).set({ heldBackups: [fork] });
+    await c.db.update(machines).set({ reportAt: new Date(NOW.getTime() - DAY_MS - 60_000) }).where(eq(machines.id, a));
+    await refreshHolders(c.db, NOW);
+    expect((await bundleRow(c.db, fork))!.holders).toEqual([b]);
   });
 
   it('gives the place of a holder that never fetched the bundle and no longer can to the next', async () => {

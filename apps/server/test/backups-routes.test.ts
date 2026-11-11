@@ -137,6 +137,31 @@ describe('the backups routes', () => {
     expect((await c.view<MakerView>()).fork).toBeNull();
   });
 
+  it('lists forks beyond the newest ten, and never counts one as the last backup', async () => {
+    const c = await company();
+    const fork = randomUUID();
+    await c.db.execute(sql`INSERT INTO net.merges (source, label, status, fork) VALUES ('kept:hornhoof_before_20261110_090000', 'a database', 'merged', ${fork})`);
+    type Listed = { last: string | null; bundles: { id: string; reason: string }[] };
+    const list = async () => (await c.app.inject({ url: '/api/backups', ...as(c.ceo) })).json() as Listed;
+    /* The database in use has no backup yet: one of a database that was set aside is none of it. */
+    const set = await c.head({ reason: 'fork', id: fork });
+    expect((await c.record(set.head)).statusCode).toBe(201);
+    expect((await list()).last).toBeNull();
+    expect((await c.view<MakerView>()).last).toBeNull();
+    const newer: string[] = [];
+    for (let made = 0; made < 12; made += 1) {
+      /* Each a moment after the one before, all after the fork. */
+      const head = await c.head({ now: new Date(Date.now() + (made + 1) * 1000) });
+      expect((await c.record(head.head)).statusCode).toBe(201);
+      newer.push(head.id);
+    }
+    const listed = await list();
+    expect(listed.bundles.map(bundle => bundle.id)).toEqual([...[...newer].reverse().slice(0, 10), fork]);
+    expect(listed.bundles.at(-1)).toMatchObject({ id: fork, reason: 'fork' });
+    expect(listed.last).not.toBeNull();
+    expect((await c.view<MakerView>()).last!.id).toBe(newer.at(-1));
+  });
+
   it('lists the bundles with where they are, for the CEO', async () => {
     const c = await company();
     const holder = await c.worker('mac');
@@ -170,7 +195,8 @@ describe('the backups routes', () => {
     const c = await company();
     const worker = await c.worker('mac');
     const key = await ageRecipient();
-    const ids = Array.from({ length: 16 }, () => randomUUID());
+    /* The newest sixteen, and every bundle set aside before a merge beside them: thirty-two at most. */
+    const ids = Array.from({ length: 32 }, () => randomUUID());
     expect((await c.report({ ageKey: key, heldBackups: ids }, from(worker))).statusCode).toBe(204);
     const [row] = await c.db.select().from(machines).where(eq(machines.id, worker));
     expect(row).toMatchObject({ ageKey: key, heldBackups: ids });

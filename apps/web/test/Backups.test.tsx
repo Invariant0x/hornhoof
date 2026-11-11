@@ -44,6 +44,13 @@ describe('Backups in Settings', () => {
     expect(screen.queryByText('Restore from a backup')).not.toBeInTheDocument();
   });
 
+  it('names a database set aside before a merge among the backups', async () => {
+    mockApi({ 'GET /api/backups': [200, viewOf({ bundles: [bundle(), bundle({ id: OTHER, dumpedAt: '2026-11-09T08:00:00.000Z', reason: 'fork' })] })] });
+    shown();
+    expect(await screen.findByText(/, Set aside before a merge, 5 MB$/)).toBeInTheDocument();
+    expect(screen.getByText(/, every 6 hours, 5 MB$/)).toBeInTheDocument();
+  });
+
   it('saves the recovery file', async () => {
     const calls = mockApi({
       'GET /api/backups': [200, viewOf({ recovery: null, recoveryNeeded: true })],

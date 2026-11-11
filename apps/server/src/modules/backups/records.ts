@@ -24,9 +24,12 @@ export async function recordBundle(tx: Tx, row: BackupRow): Promise<boolean> {
 }
 
 /* Newest first. */
-export async function bundleRows(db: Tx, opts: { limit?: number; withRecovery?: boolean } = {}): Promise<BackupRow[]> {
-  const only = opts.withRecovery ? sql`WHERE recovery IS NOT NULL` : sql``;
-  const found = await db.execute(sql`SELECT head, holders FROM net.backups ${only} ORDER BY made_at DESC, id LIMIT ${opts.limit ?? 100}`);
+/* The bundles there are, newest first. forks: none leaves out the bundles of databases set aside before a merge, which
+   are no backup of the database in use; only gives those alone, made since that time. */
+export async function bundleRows(db: Tx, opts: { limit?: number; withRecovery?: boolean; forks?: 'none' | { since: Date } } = {}): Promise<BackupRow[]> {
+  const opened = opts.withRecovery ? sql`recovery IS NOT NULL` : sql`true`;
+  const kind = opts.forks === 'none' ? sql`reason <> 'fork'` : opts.forks ? sql`reason = 'fork' AND made_at > ${opts.forks.since.toISOString()}::timestamptz` : sql`true`;
+  const found = await db.execute(sql`SELECT head, holders FROM net.backups WHERE ${opened} AND ${kind} ORDER BY made_at DESC, id LIMIT ${opts.limit ?? 100}`);
   return rowsOf<Stored>(found).map(rowOf);
 }
 

@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
 import { agents, companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { REPORTED_BUNDLES } from '../backups/types.js';
+import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
@@ -43,7 +43,7 @@ const ReportBody = z.object({
   os: z.enum(['linux', 'darwin']).optional(),
   /* The public half of the age key its keeper made, and the bundles it holds: its newest sixteen at most. */
   ageKey: z.string().regex(/^age1[02-9ac-hj-np-z]{58}$/).optional(),
-  heldBackups: z.array(z.uuid()).max(REPORTED_BUNDLES).optional(),
+  heldBackups: z.array(z.uuid()).max(REPORT_MAX).optional(),
   /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });

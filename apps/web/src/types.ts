@@ -567,7 +567,7 @@ export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'd
 export type BackupBundle = {
   id: string;
   dumpedAt: string;
-  reason: 'timer' | 'update';
+  reason: 'timer' | 'update' | 'fork';
   size: number;
   recovery: 'none' | 'current' | 'older';
   where: { machine: string | null; name: string; online: boolean }[];

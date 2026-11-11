@@ -39,6 +39,40 @@ describe('updater, backups', () => {
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
   });
 
+  it('dumps a kept database for its fork bundle', async () => {
+    const s = stand();
+    const kept = 'hornhoof_before_20261103_210000';
+    /* A database a restore set aside, with its connections off, as of 19 migrations. */
+    writeFileSync(join(s.dir, `db-${kept}`), '19');
+    writeFileSync(join(s.dir, `closed-${kept}`), '');
+    const asks = (said: object) => writeFileSync(join(s.control, 'dump.json'), JSON.stringify(said));
+    asks({ id: ID, database: kept, reason: 'fork' });
+    const r = await runOnce(s, null);
+    expect(r.code).toBe(0);
+    const [opened, dumped] = [r.calls.findIndex(call => call.includes(`ALTER DATABASE "${kept}" WITH ALLOW_CONNECTIONS true`)), r.calls.findIndex(call => call.includes(`pg_dump -U hornhoof -d ${kept}`))];
+    expect([opened >= 0, dumped > opened]).toEqual([true, true]);
+    expect(existsSync(join(s.dir, `closed-${kept}`))).toBe(false);
+    expect(said(join(dumps(s), `${ID}.json`))).toMatchObject({ id: ID, reason: 'fork', migrations: 19 });
+    expect(gunzipSync(readFileSync(join(dumps(s), `${ID}.sql.gz`))).toString()).toContain(`-- a dump of the ${kept} database`);
+    expect([mode(join(dumps(s), `${ID}.sql.gz`)), mode(join(dumps(s), `${ID}.json`))]).toEqual([0o600, 0o600]);
+    expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
+
+    /* No other database is ever dumped this way, and a name is never part of a command it could change. */
+    const refused: object[] = [
+      { database: 'hornhoof', reason: 'fork' }, { database: 'x;rm -rf /', reason: 'fork' }, { database: 'hornhoof_before_', reason: 'fork' }, { database: `hornhoof_before_${'a'.repeat(48)}`, reason: 'fork' },
+      { reason: 'fork' }, { database: kept, reason: 'timer' }, { database: kept },
+    ];
+    for (const [index, wrong] of refused.entries()) {
+      const id = `0f0f0f0f-0000-4000-8000-0000000000${String(index + 10)}`;
+      asks({ id, ...wrong });
+      const again = await runOnce(s, null);
+      /* The calls so far hold the one dump above, and no other is ever made. */
+      expect([JSON.stringify(wrong), again.calls.filter(call => call.includes('pg_dump')).length]).toEqual([JSON.stringify(wrong), 1]);
+      expect(readFileSync(join(dumps(s), `${id}.failed`), 'utf8').trim()).toBe('Not a kept database.');
+      expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
+    }
+  });
+
   it('says so when the database cannot be dumped, and leaves nothing half made', async () => {
     const s = stand();
     wants(s, ID);

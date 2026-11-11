@@ -397,27 +397,56 @@ make_dump() {
   owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$1" timer "$n"
 }
 
-# dump_failed <id>: nothing of the dump stays, and the keeper reads why.
+# kept_name <name>: the name of a database a restore set aside, and of no other. Only such a name ever goes into a
+# statement, and between quotes, as the database server folds the letters of a name without them.
+kept_name() {
+  case "$1" in hornhoof_before_*) ;; *) return 1 ;; esac
+  local rest=${1#hornhoof_before_}
+  case "$rest" in '' | *[!A-Za-z0-9_]*) return 1 ;; esac
+  [ "${#rest}" -le 47 ]
+}
+
+# make_fork_dump <id> <db container> <database>: a database a restore set aside, before it goes. A restore leaves its
+# connections off, so they are turned on first.
+make_fork_dump() {
+  local file="$CONTROL/dumps/$1.sql.gz" n
+  dumps_dir || return 1
+  docker exec "$2" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c "ALTER DATABASE \"$3\" WITH ALLOW_CONNECTIONS true" > /dev/null 2>&1 || return 1
+  n=$(docker exec "$2" psql -U hornhoof -d "$3" -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null | tr -d ' ') || return 1
+  (umask 077 && docker exec "$2" pg_dump -U hornhoof -d "$3" | gzip > "$file.part") || return 1
+  owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$1" fork "$n"
+}
+
+# dump_failed <id> [line]: nothing of the dump stays, and the keeper reads why.
 dump_failed() {
   local file="$CONTROL/dumps/$1.failed"
   drop_dump "$1"
-  dumps_dir && (umask 077 && printf '%s\n' 'The database could not be dumped.' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+  dumps_dir && (umask 077 && printf '%s\n' "${2:-The database could not be dumped.}" > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
 }
 
-# The data keeper asks for a dump with dump.json {id}. The request goes once the dump is there, whole or failed; a
-# dump that is there is not made again, so the keeper asks anew under another id.
+# The data keeper asks for a dump with dump.json {id}, or with {id, database, reason: "fork"} for a database a restore
+# set aside. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
+# keeper asks anew under another id.
 dump_request() {
-  local id db
+  local id db database reason
   [ -f "$CONTROL/dump.json" ] || return 0
   if worker || [ -z "$SERVER_DIR" ]; then return 0; fi
   id=$(jq -r '.id // empty' "$CONTROL/dump.json" 2> /dev/null || true)
   plain_id "$id" || return 0
+  database=$(jq -r '.database // empty' "$CONTROL/dump.json" 2> /dev/null || true)
+  reason=$(jq -r '.reason // empty' "$CONTROL/dump.json" 2> /dev/null || true)
   if [ ! -f "$CONTROL/dumps/$id.json" ] && [ ! -f "$CONTROL/dumps/$id.failed" ]; then
     db=$(compose ps -q db 2> /dev/null || true)
     [ -n "$db" ] || return 0
     # The request goes also when not even the failure could be written, as on a full disk: the keeper asks anew in its
     # own time, and no pass dumps the database again by itself.
-    make_dump "$id" "$db" || dump_failed "$id" || drop_dump "$id"
+    if [ -z "$database" ] && [ -z "$reason" ]; then
+      make_dump "$id" "$db" || dump_failed "$id" || drop_dump "$id"
+    elif [ "$reason" = fork ] && kept_name "$database"; then
+      make_fork_dump "$id" "$db" "$database" || dump_failed "$id" || drop_dump "$id"
+    else
+      dump_failed "$id" 'Not a kept database.' || drop_dump "$id"
+    fi
   fi
   rm -f "$CONTROL/dump.json"
 }
