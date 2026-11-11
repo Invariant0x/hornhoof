@@ -27,7 +27,7 @@ export class MergeRefused extends Error {}
 
 type Listed = { kind: 'differs' | 'changed_removed' | 'removed_changed'; cols: string[]; there: Row | null };
 /* One row of the source and what the merge does with it. */
-type Unit = {
+export type Unit = {
   table: string;
   /* The source's key. */
   key: Record<string, unknown>;
@@ -104,6 +104,250 @@ export async function withNamedKeys(q: Query, rows: (Row | null)[]): Promise<voi
   for (const row of rows) if (row && typeof row.source_key === 'string') row.source_key = named.get(row.source_key) ?? row.source_key;
 }
 
+/* Writes one unit at a time as this side takes it: each under its own savepoint, with the rules of its table on a row
+   it writes, and the check of what a written row points at. A merge writes its units with it, and so does a pick of a
+   conflict later. */
+export class UnitWriter {
+  /* The turn open here when a pass begins, and the source's turns that are added closed because of it. */
+  private openTurn: string | null = null;
+  private closing = new Set<string>();
+
+  constructor(
+    readonly q: Query,
+    readonly facts: Facts,
+    private readonly opts: { now: string; label: string; afterRestore: boolean },
+  ) {}
+
+  /* Before a pass over these units: what is open here now. */
+  async begin(writes: Unit[]): Promise<void> {
+    const [open] = await this.q<{ id: string }>("SELECT id FROM public.turns WHERE status = 'open' LIMIT 1");
+    this.openTurn = open?.id ?? null;
+    this.closing = new Set(writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && this.openTurn && unit.x!.status === 'open').map(unit => String(unit.x!.id)));
+  }
+
+  /* Why a row the source left running did not end here. */
+  private ranWhere(): string {
+    return this.opts.afterRestore ? 'Ran before the restore; how it ended was not kept.' : `Ran on ${this.opts.label} while it was cut off.`;
+  }
+
+  async attempt(unit: Unit): Promise<void> {
+    const { q } = this;
+    const t = this.facts.tables.get(unit.table)!;
+    await q(`SAVEPOINT ${UNIT}`);
+    try {
+      if (unit.op === 'insert') await this.insert(t, unit);
+      else if (unit.op === 'update') await this.update(t, unit);
+      else await this.delete(t, unit);
+      await q(`RELEASE SAVEPOINT ${UNIT}`);
+    } catch (err) {
+      /* A constraint takes the unit back alone; anything else is a fault, which ends the whole merge unchanged. */
+      if (!CLASS_23.test(codeOf(err))) throw err;
+      await q(`ROLLBACK TO SAVEPOINT ${UNIT}`);
+      await q(`RELEASE SAVEPOINT ${UNIT}`);
+      Object.assign(unit, { done: null, written: null, rewritten: null });
+      if (!(await this.samePlace(t, unit, err))) unit.refused = refusalOf(err);
+    }
+  }
+
+  /* A person's place that this side holds under another id, as a restore's carry writes them: the same row. */
+  private async samePlace(t: TableFacts, unit: Unit, err: unknown): Promise<boolean> {
+    const said = ((err as { cause?: unknown }).cause ?? err) as { constraint?: string };
+    if (unit.table !== 'person_access' || unit.op !== 'insert' || said.constraint !== 'person_access_place') return false;
+    const x = unit.x!;
+    const [found] = await this.q<{ row: Row }>(
+      'SELECT to_jsonb(t) AS row FROM public.person_access t WHERE t.person_id = $1::uuid AND t.department_id IS NOT DISTINCT FROM $2::uuid AND t.team_id IS NOT DISTINCT FROM $3::uuid',
+      [x.person_id, x.department_id ?? null, x.team_id ?? null],
+    );
+    if (!found || differing(t, x, found.row).some(column => column !== 'id' && column !== 'created_at')) return false;
+    unit.done = 'matched';
+    unit.matched = keyOf(t, found.row);
+    return true;
+  }
+
+  /* The row as this side takes it, with what was written otherwise than the source has it. */
+  private async prepared(t: TableFacts, rule: TableRule, unit: Unit): Promise<Row | null> {
+    const { q } = this;
+    const row: Row = { ...unit.x! };
+    const was: Row = {};
+    const put = (column: string, value: unknown): void => {
+      if (!(column in was)) was[column] = unit.x![column] ?? null;
+      row[column] = value;
+    };
+    if (rule.number) {
+      const scope = (first: number): string => rule.number!.map((column, index) => `t.${quote(column)} IS NOT DISTINCT FROM $${index + first}::${typeOf(t, column)}`).join(' AND ');
+      const values = rule.number.map(column => row[column] ?? null);
+      const [taken] = await q(`SELECT 1 AS found FROM public.${quote(t.name)} t WHERE t.number = $1::int AND ${scope(2)} LIMIT 1`, [row.number, ...values]);
+      if (taken) {
+        /* The next free one: above every row of its scope, and above the numbers the company gave to rows it removed. */
+        const used = TASK_NUMBERS[t.name] ? `COALESCE((SELECT ${quote(TASK_NUMBERS[t.name]!)} FROM public.companies LIMIT 1), 0)` : '0';
+        const [next] = await q<{ n: number }>(`SELECT GREATEST(COALESCE(max(t.number), 0), ${used}) + 1 AS n FROM public.${quote(t.name)} t WHERE ${scope(1)}`, values);
+        put('number', next!.n);
+      }
+    }
+    if (t.name === 'turns' && this.closing.has(String(row.id))) {
+      put('status', 'closed');
+      put('closed_at', this.opts.now);
+    }
+    if (t.name === 'tasks' && row.turn_id && this.closing.has(String(row.turn_id)) && !ENDED_TASKS.includes(String(row.status))) put('turn_id', this.openTurn);
+    if (t.name === 'agents' && !row.removed_at && (row.kind === 'head' || row.kind === 'orchestrator')) {
+      const where = row.kind === 'head' ? 'department_id = $1::uuid' : 'company_id = $1::uuid';
+      const [live] = await q(`SELECT 1 AS found FROM public.agents WHERE kind = $2 AND removed_at IS NULL AND id <> $3::uuid AND ${where} LIMIT 1`, [row.kind === 'head' ? row.department_id : row.company_id, row.kind, row.id]);
+      if (live) put('kind', 'worker');
+    }
+    for (const closing of CLOSING[t.name] ?? []) {
+      if (!closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
+      put(closing.column, closing.to);
+      put(closing.at, this.opts.now);
+      if (closing.error) put(closing.error, this.ranWhere());
+      for (const [column, value] of Object.entries(closing.also ?? {})) put(column, value);
+      break;
+    }
+    for (const column of rule.hereOnly ?? []) if (row[column] !== null && row[column] !== undefined) put(column, null);
+    /* A row never points at what is never merged. */
+    for (const fk of t.fks) {
+      const [column] = fk.columns;
+      if (fk.columns.length === 1 && ruleOf(fk.parent).kind === 'skip' && row[column!] !== null && row[column!] !== undefined && t.columns.find(found => found.name === column)!.nullable) put(column!, null);
+    }
+    if (rule.sequence) {
+      const [next] = await q<{ n: string }>(`SELECT nextval(pg_get_serial_sequence($1, $2))::text AS n`, [`public.${quote(t.name)}`, rule.sequence]);
+      row[rule.sequence] = Number(next!.n);
+    }
+    if (t.name === 'map_returns' && typeof row.source_key === 'string') {
+      const numbered = await numberOf(q, row.source_key);
+      if (numbered && numbered.key === null) {
+        unit.refused = `Its ${numbered.table} row is not here.`;
+        return null;
+      }
+      if (numbered) row.source_key = numbered.key;
+    }
+    if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
+    return row;
+  }
+
+  private async insert(t: TableFacts, unit: Unit): Promise<void> {
+    const row = await this.prepared(t, ruleOf(t.name), unit);
+    if (!row) return;
+    await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
+    unit.written = row;
+    unit.done = 'added';
+  }
+
+  /* The columns the journal proves, written in one statement. A row the leader holds open stays as it is, with nothing
+     of the source's run of it; any other row is never written open. The bookkeeping stays this side's, but for the
+     later of the two times and a version above both. */
+  private async update(t: TableFacts, unit: Unit): Promise<void> {
+    const row: Row = { ...unit.x! };
+    let set = [...unit.set];
+    const was: Row = {};
+    for (const closing of CLOSING[t.name] ?? []) {
+      if (!set.includes(closing.column) || !closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
+      const own = [closing.column, closing.at, ...(closing.error ? [closing.error] : []), ...Object.keys(closing.also ?? {})];
+      if (closing.open.includes((unit.y![closing.column] ?? null) as string | null)) {
+        for (const column of set) was[column] = unit.x![column] ?? null;
+        set = [];
+      } else {
+        for (const column of own) if (set.includes(column)) was[column] = unit.x![column] ?? null;
+        row[closing.column] = closing.to;
+        row[closing.at] = this.opts.now;
+        if (closing.error) row[closing.error] = this.ranWhere();
+        Object.assign(row, closing.also ?? {});
+        set = [...new Set([...set, ...own])];
+        for (const column of own) if (!(column in was)) was[column] = unit.x![column] ?? null;
+      }
+      break;
+    }
+    if (t.name === 'map_returns' && set.includes('source_key') && typeof row.source_key === 'string') {
+      const numbered = await numberOf(this.q, row.source_key);
+      if (numbered && numbered.key === null) return void (unit.refused = `Its ${numbered.table} row is not here.`);
+      if (numbered) row.source_key = numbered.key;
+    }
+    if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
+    unit.written = { ...unit.y!, ...Object.fromEntries(set.map(column => [column, row[column]])) };
+    unit.done = 'changed';
+    if (set.length === 0) return;
+    const kept = BOOKKEEPING[t.name] ?? [];
+    const more = [
+      ...(kept.includes('updated_at') && t.columns.some(column => column.name === 'updated_at') ? ['"updated_at" = GREATEST(t."updated_at", r."updated_at")'] : []),
+      ...(t.name === 'tasks' ? ['"version" = GREATEST(t."version", r."version") + 1'] : []),
+    ];
+    const taken = set.map(column => `${quote(column)} = r.${quote(column)}`);
+    const changed = await this.q(
+      `UPDATE public.${quote(t.name)} t SET ${[...taken, ...more].join(', ')} FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb) r, jsonb_to_record($2::jsonb) AS k(${typed(t, t.key)}) WHERE ${matches('t', t.key)} RETURNING 1 AS found`,
+      [JSON.stringify(row), JSON.stringify(keyOf(t, unit.y!))],
+    );
+    if (changed.length !== 1) throw new Error(`The merge found no row of ${t.name} to change.`);
+  }
+
+  /* A row something here still points at stays, so nothing the merge deletes cascades. */
+  private async delete(t: TableFacts, unit: Unit): Promise<void> {
+    const y = unit.y!;
+    if (await this.pointedAt(t, y)) return void (unit.done = 'still_used');
+    await this.q(`DELETE FROM public.${quote(t.name)} t USING jsonb_to_record($1::jsonb) AS k(${typed(t, t.key)}) WHERE ${matches('t', t.key)}`, [JSON.stringify(keyOf(t, y))]);
+    unit.done = 'deleted';
+  }
+
+  async pointedAt(t: TableFacts, y: Row): Promise<boolean> {
+    for (const fk of t.referencedBy) {
+      const where = fk.columns.map((column, index) => `c.${quote(column)} = $${index + 1}::${typeOf(t, fk.parentColumns[index]!)}`).join(' AND ');
+      const self = fk.table === t.name ? ` AND NOT (${t.key.map((column, index) => `c.${quote(column)} = $${fk.columns.length + index + 1}::${typeOf(t, column)}`).join(' AND ')})` : '';
+      const [found] = await this.q(`SELECT 1 AS found FROM public.${quote(fk.table)} c WHERE ${where}${self} LIMIT 1`, [...fk.parentColumns.map(column => y[column]), ...(self ? t.key.map(column => y[column]) : [])]);
+      if (found) return true;
+    }
+    for (const soft of SOFT_REFS.filter(ref => ref.parent === t.name)) {
+      const when = soft.when ? ` AND c.${quote(soft.when.column)} = $2` : '';
+      const holds = soft.list ? `c.${quote(soft.column)} @> jsonb_build_array($1::text)` : `c.${quote(soft.column)}::text = $1::text`;
+      const [found] = await this.q(`SELECT 1 AS found FROM public.${quote(soft.table)} c WHERE ${holds}${when} LIMIT 1`, [String(y.id), ...(soft.when ? [soft.when.value] : [])]);
+      if (found) return true;
+    }
+    return false;
+  }
+
+  /* How many units this pass refuses for a row they point at that is not here: by a foreign key, or by an id in a column
+     no foreign key checks. */
+  async references(writes: Unit[]): Promise<number> {
+    let refused = 0;
+    const live = writes.filter(unit => !unit.refused && unit.written && (unit.done === 'added' || unit.done === 'changed'));
+    const byTable = new Map<string, Unit[]>();
+    for (const unit of live) byTable.set(unit.table, [...(byTable.get(unit.table) ?? []), unit]);
+    for (const [name, units] of byTable) {
+      const t = this.facts.tables.get(name)!;
+      for (const fk of t.fks) {
+        const asked = units.filter(unit => !unit.refused && (unit.done === 'added' || fk.columns.some(column => unit.set.includes(column))) && fk.columns.every(column => unit.written![column] !== null && unit.written![column] !== undefined));
+        for (const lost of await this.lost(t, fk, asked)) {
+          lost.refused = `Its ${fk.parent} row is not here.`;
+          refused += 1;
+        }
+      }
+      for (const soft of SOFT_REFS.filter(ref => ref.table === name)) {
+        for (const unit of units) {
+          if (unit.refused || !(unit.done === 'added' || unit.set.includes(soft.column))) continue;
+          if (soft.when && unit.written![soft.when.column] !== soft.when.value) continue;
+          const value = unit.written![soft.column];
+          const ids = (soft.list ? (Array.isArray(value) ? value : []) : value === null || value === undefined ? [] : [value]).map(String);
+          if (ids.length === 0) continue;
+          const [found] = await this.q<{ n: number }>(`SELECT count(*)::int AS n FROM public.${quote(soft.parent)} p WHERE p.id::text IN (SELECT jsonb_array_elements_text($1::jsonb))`, [JSON.stringify([...new Set(ids)])]);
+          if (found!.n === new Set(ids).size) continue;
+          unit.refused = `Its ${soft.parent} row is not here.`;
+          refused += 1;
+        }
+      }
+    }
+    return refused;
+  }
+
+  private async lost(t: TableFacts, fk: ForeignKey, asked: Unit[]): Promise<Unit[]> {
+    if (asked.length === 0) return [];
+    const parent = this.facts.tables.get(fk.parent)!;
+    const values = asked.map((unit, index) => ({ ord: index, ...Object.fromEntries(fk.columns.map(column => [column, unit.written![column]])) }));
+    const where = fk.columns.map((column, index) => `p.${quote(fk.parentColumns[index]!)} = k.${quote(column)}`).join(' AND ');
+    const rows = await this.q<{ ord: number }>(
+      `SELECT k.ord FROM jsonb_to_recordset($1::jsonb) AS k(ord int, ${typed(t, fk.columns)}) WHERE NOT EXISTS (SELECT 1 FROM public.${quote(parent.name)} p WHERE ${where})`,
+      [JSON.stringify(values)],
+    );
+    return rows.map(row => asked[row.ord]!);
+  }
+}
+
 /* The merge of one source, inside its transaction. */
 class Merge {
   readonly units: Unit[] = [];
@@ -114,9 +358,6 @@ class Merge {
   private cutoff: Date | null = null;
   private facts!: Facts;
   private proving: JournalRow[] = [];
-  /* The turn open here when a pass begins, and the source's turns that are added closed because of it. */
-  private openTurn: string | null = null;
-  private closing = new Set<string>();
   private asked = 0;
   private now = '';
 
@@ -267,237 +508,19 @@ class Merge {
     const numbered = (unit: Unit): number => Number(unit.x?.[ruleOf(unit.table).sequence ?? ''] ?? 0);
     const writes = this.units.filter(unit => unit.op === 'insert' || unit.op === 'update').sort((a, b) => order.get(a.table)! - order.get(b.table)! || numbered(a) - numbered(b));
     const deletes = this.units.filter(unit => unit.op === 'delete').sort((a, b) => order.get(b.table)! - order.get(a.table)!);
+    const writer = new UnitWriter(q, this.facts, { now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare' });
     await q(`SAVEPOINT ${UNITS}`);
     for (let pass = 0; ; pass += 1) {
       if (pass > 0) await q(`ROLLBACK TO SAVEPOINT ${UNITS}`);
       for (const unit of this.units) Object.assign(unit, { done: null, written: null, rewritten: null, matched: null });
-      const [open] = await q<{ id: string }>("SELECT id FROM public.turns WHERE status = 'open' LIMIT 1");
-      this.openTurn = open?.id ?? null;
-      this.closing = new Set(writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && this.openTurn && unit.x!.status === 'open').map(unit => String(unit.x!.id)));
+      await writer.begin(writes);
       for (const unit of [...writes, ...deletes]) {
         if (pass === 0) await this.onUnit?.((this.asked += 1));
-        if (!unit.refused) await this.attempt(unit);
+        if (!unit.refused) await writer.attempt(unit);
       }
-      if ((await this.references(writes)) === 0) break;
+      if ((await writer.references(writes)) === 0) break;
     }
     await q(`RELEASE SAVEPOINT ${UNITS}`);
-  }
-
-  private async attempt(unit: Unit): Promise<void> {
-    const { q } = this;
-    const t = this.facts.tables.get(unit.table)!;
-    await q(`SAVEPOINT ${UNIT}`);
-    try {
-      if (unit.op === 'insert') await this.insert(t, unit);
-      else if (unit.op === 'update') await this.update(t, unit);
-      else await this.delete(t, unit);
-      await q(`RELEASE SAVEPOINT ${UNIT}`);
-    } catch (err) {
-      /* A constraint takes the unit back alone; anything else is a fault, which ends the whole merge unchanged. */
-      if (!CLASS_23.test(codeOf(err))) throw err;
-      await q(`ROLLBACK TO SAVEPOINT ${UNIT}`);
-      await q(`RELEASE SAVEPOINT ${UNIT}`);
-      Object.assign(unit, { done: null, written: null, rewritten: null });
-      if (!(await this.samePlace(t, unit, err))) unit.refused = refusalOf(err);
-    }
-  }
-
-  /* A person's place that this side holds under another id, as a restore's carry writes them: the same row. */
-  private async samePlace(t: TableFacts, unit: Unit, err: unknown): Promise<boolean> {
-    const said = ((err as { cause?: unknown }).cause ?? err) as { constraint?: string };
-    if (unit.table !== 'person_access' || unit.op !== 'insert' || said.constraint !== 'person_access_place') return false;
-    const x = unit.x!;
-    const [found] = await this.q<{ row: Row }>(
-      'SELECT to_jsonb(t) AS row FROM public.person_access t WHERE t.person_id = $1::uuid AND t.department_id IS NOT DISTINCT FROM $2::uuid AND t.team_id IS NOT DISTINCT FROM $3::uuid',
-      [x.person_id, x.department_id ?? null, x.team_id ?? null],
-    );
-    if (!found || differing(t, x, found.row).some(column => column !== 'id' && column !== 'created_at')) return false;
-    unit.done = 'matched';
-    unit.matched = keyOf(t, found.row);
-    return true;
-  }
-
-  /* The row as this side takes it, with what was written otherwise than the source has it. */
-  private async prepared(t: TableFacts, rule: TableRule, unit: Unit): Promise<Row | null> {
-    const { q } = this;
-    const row: Row = { ...unit.x! };
-    const was: Row = {};
-    const put = (column: string, value: unknown): void => {
-      if (!(column in was)) was[column] = unit.x![column] ?? null;
-      row[column] = value;
-    };
-    if (rule.number) {
-      const scope = (first: number): string => rule.number!.map((column, index) => `t.${quote(column)} IS NOT DISTINCT FROM $${index + first}::${typeOf(t, column)}`).join(' AND ');
-      const values = rule.number.map(column => row[column] ?? null);
-      const [taken] = await q(`SELECT 1 AS found FROM public.${quote(t.name)} t WHERE t.number = $1::int AND ${scope(2)} LIMIT 1`, [row.number, ...values]);
-      if (taken) {
-        /* The next free one: above every row of its scope, and above the numbers the company gave to rows it removed. */
-        const used = TASK_NUMBERS[t.name] ? `COALESCE((SELECT ${quote(TASK_NUMBERS[t.name]!)} FROM public.companies LIMIT 1), 0)` : '0';
-        const [next] = await q<{ n: number }>(`SELECT GREATEST(COALESCE(max(t.number), 0), ${used}) + 1 AS n FROM public.${quote(t.name)} t WHERE ${scope(1)}`, values);
-        put('number', next!.n);
-      }
-    }
-    if (t.name === 'turns' && this.closing.has(String(row.id))) {
-      put('status', 'closed');
-      put('closed_at', this.now);
-    }
-    if (t.name === 'tasks' && row.turn_id && this.closing.has(String(row.turn_id)) && !ENDED_TASKS.includes(String(row.status))) put('turn_id', this.openTurn);
-    if (t.name === 'agents' && !row.removed_at && (row.kind === 'head' || row.kind === 'orchestrator')) {
-      const where = row.kind === 'head' ? 'department_id = $1::uuid' : 'company_id = $1::uuid';
-      const [live] = await q(`SELECT 1 AS found FROM public.agents WHERE kind = $2 AND removed_at IS NULL AND id <> $3::uuid AND ${where} LIMIT 1`, [row.kind === 'head' ? row.department_id : row.company_id, row.kind, row.id]);
-      if (live) put('kind', 'worker');
-    }
-    for (const closing of CLOSING[t.name] ?? []) {
-      if (!closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
-      put(closing.column, closing.to);
-      put(closing.at, this.now);
-      if (closing.error) put(closing.error, this.merge.kept || this.path === 'compare' ? 'Ran before the restore; how it ended was not kept.' : `Ran on ${this.merge.label} while it was cut off.`);
-      for (const [column, value] of Object.entries(closing.also ?? {})) put(column, value);
-      break;
-    }
-    for (const column of rule.hereOnly ?? []) if (row[column] !== null && row[column] !== undefined) put(column, null);
-    /* A row never points at what is never merged. */
-    for (const fk of t.fks) {
-      const [column] = fk.columns;
-      if (fk.columns.length === 1 && ruleOf(fk.parent).kind === 'skip' && row[column!] !== null && row[column!] !== undefined && t.columns.find(found => found.name === column)!.nullable) put(column!, null);
-    }
-    if (rule.sequence) {
-      const [next] = await q<{ n: string }>(`SELECT nextval(pg_get_serial_sequence($1, $2))::text AS n`, [`public.${quote(t.name)}`, rule.sequence]);
-      row[rule.sequence] = Number(next!.n);
-    }
-    if (t.name === 'map_returns' && typeof row.source_key === 'string') {
-      const numbered = await numberOf(q, row.source_key);
-      if (numbered && numbered.key === null) {
-        unit.refused = `Its ${numbered.table} row is not here.`;
-        return null;
-      }
-      if (numbered) row.source_key = numbered.key;
-    }
-    if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
-    return row;
-  }
-
-  private async insert(t: TableFacts, unit: Unit): Promise<void> {
-    const row = await this.prepared(t, ruleOf(t.name), unit);
-    if (!row) return;
-    await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
-    unit.written = row;
-    unit.done = 'added';
-  }
-
-  /* The columns the journal proves, written in one statement. A row the leader holds open stays as it is, with nothing
-     of the source's run of it; any other row is never written open. The bookkeeping stays this side's, but for the
-     later of the two times and a version above both. */
-  private async update(t: TableFacts, unit: Unit): Promise<void> {
-    const row: Row = { ...unit.x! };
-    let set = [...unit.set];
-    const was: Row = {};
-    for (const closing of CLOSING[t.name] ?? []) {
-      if (!set.includes(closing.column) || !closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
-      const own = [closing.column, closing.at, ...(closing.error ? [closing.error] : []), ...Object.keys(closing.also ?? {})];
-      if (closing.open.includes((unit.y![closing.column] ?? null) as string | null)) {
-        for (const column of set) was[column] = unit.x![column] ?? null;
-        set = [];
-      } else {
-        for (const column of own) if (set.includes(column)) was[column] = unit.x![column] ?? null;
-        row[closing.column] = closing.to;
-        row[closing.at] = this.now;
-        if (closing.error) row[closing.error] = `Ran on ${this.merge.label} while it was cut off.`;
-        Object.assign(row, closing.also ?? {});
-        set = [...new Set([...set, ...own])];
-        for (const column of own) if (!(column in was)) was[column] = unit.x![column] ?? null;
-      }
-      break;
-    }
-    if (t.name === 'map_returns' && set.includes('source_key') && typeof row.source_key === 'string') {
-      const numbered = await numberOf(this.q, row.source_key);
-      if (numbered && numbered.key === null) return void (unit.refused = `Its ${numbered.table} row is not here.`);
-      if (numbered) row.source_key = numbered.key;
-    }
-    if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
-    unit.written = { ...unit.y!, ...Object.fromEntries(set.map(column => [column, row[column]])) };
-    unit.done = 'changed';
-    if (set.length === 0) return;
-    const kept = BOOKKEEPING[t.name] ?? [];
-    const more = [
-      ...(kept.includes('updated_at') && t.columns.some(column => column.name === 'updated_at') ? ['"updated_at" = GREATEST(t."updated_at", r."updated_at")'] : []),
-      ...(t.name === 'tasks' ? ['"version" = GREATEST(t."version", r."version") + 1'] : []),
-    ];
-    const taken = set.map(column => `${quote(column)} = r.${quote(column)}`);
-    const changed = await this.q(
-      `UPDATE public.${quote(t.name)} t SET ${[...taken, ...more].join(', ')} FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb) r, jsonb_to_record($2::jsonb) AS k(${typed(t, t.key)}) WHERE ${matches('t', t.key)} RETURNING 1 AS found`,
-      [JSON.stringify(row), JSON.stringify(keyOf(t, unit.y!))],
-    );
-    if (changed.length !== 1) throw new Error(`The merge found no row of ${t.name} to change.`);
-  }
-
-  /* A row something here still points at stays, so nothing the merge deletes cascades. */
-  private async delete(t: TableFacts, unit: Unit): Promise<void> {
-    const y = unit.y!;
-    if (await this.pointedAt(t, y)) return void (unit.done = 'still_used');
-    await this.q(`DELETE FROM public.${quote(t.name)} t USING jsonb_to_record($1::jsonb) AS k(${typed(t, t.key)}) WHERE ${matches('t', t.key)}`, [JSON.stringify(keyOf(t, y))]);
-    unit.done = 'deleted';
-  }
-
-  private async pointedAt(t: TableFacts, y: Row): Promise<boolean> {
-    for (const fk of t.referencedBy) {
-      const where = fk.columns.map((column, index) => `c.${quote(column)} = $${index + 1}::${typeOf(t, fk.parentColumns[index]!)}`).join(' AND ');
-      const self = fk.table === t.name ? ` AND NOT (${t.key.map((column, index) => `c.${quote(column)} = $${fk.columns.length + index + 1}::${typeOf(t, column)}`).join(' AND ')})` : '';
-      const [found] = await this.q(`SELECT 1 AS found FROM public.${quote(fk.table)} c WHERE ${where}${self} LIMIT 1`, [...fk.parentColumns.map(column => y[column]), ...(self ? t.key.map(column => y[column]) : [])]);
-      if (found) return true;
-    }
-    for (const soft of SOFT_REFS.filter(ref => ref.parent === t.name)) {
-      const when = soft.when ? ` AND c.${quote(soft.when.column)} = $2` : '';
-      const holds = soft.list ? `c.${quote(soft.column)} @> jsonb_build_array($1::text)` : `c.${quote(soft.column)}::text = $1::text`;
-      const [found] = await this.q(`SELECT 1 AS found FROM public.${quote(soft.table)} c WHERE ${holds}${when} LIMIT 1`, [String(y.id), ...(soft.when ? [soft.when.value] : [])]);
-      if (found) return true;
-    }
-    return false;
-  }
-
-  /* How many units this pass refuses for a row they point at that is not here: by a foreign key, or by an id in a column
-     no foreign key checks. */
-  private async references(writes: Unit[]): Promise<number> {
-    let refused = 0;
-    const live = writes.filter(unit => !unit.refused && unit.written && (unit.done === 'added' || unit.done === 'changed'));
-    const byTable = new Map<string, Unit[]>();
-    for (const unit of live) byTable.set(unit.table, [...(byTable.get(unit.table) ?? []), unit]);
-    for (const [name, units] of byTable) {
-      const t = this.facts.tables.get(name)!;
-      for (const fk of t.fks) {
-        const asked = units.filter(unit => !unit.refused && (unit.done === 'added' || fk.columns.some(column => unit.set.includes(column))) && fk.columns.every(column => unit.written![column] !== null && unit.written![column] !== undefined));
-        for (const lost of await this.lost(t, fk, asked)) {
-          lost.refused = `Its ${fk.parent} row is not here.`;
-          refused += 1;
-        }
-      }
-      for (const soft of SOFT_REFS.filter(ref => ref.table === name)) {
-        for (const unit of units) {
-          if (unit.refused || !(unit.done === 'added' || unit.set.includes(soft.column))) continue;
-          if (soft.when && unit.written![soft.when.column] !== soft.when.value) continue;
-          const value = unit.written![soft.column];
-          const ids = (soft.list ? (Array.isArray(value) ? value : []) : value === null || value === undefined ? [] : [value]).map(String);
-          if (ids.length === 0) continue;
-          const [found] = await this.q<{ n: number }>(`SELECT count(*)::int AS n FROM public.${quote(soft.parent)} p WHERE p.id::text IN (SELECT jsonb_array_elements_text($1::jsonb))`, [JSON.stringify([...new Set(ids)])]);
-          if (found!.n === new Set(ids).size) continue;
-          unit.refused = `Its ${soft.parent} row is not here.`;
-          refused += 1;
-        }
-      }
-    }
-    return refused;
-  }
-
-  private async lost(t: TableFacts, fk: ForeignKey, asked: Unit[]): Promise<Unit[]> {
-    if (asked.length === 0) return [];
-    const parent = this.facts.tables.get(fk.parent)!;
-    const values = asked.map((unit, index) => ({ ord: index, ...Object.fromEntries(fk.columns.map(column => [column, unit.written![column]])) }));
-    const where = fk.columns.map((column, index) => `p.${quote(fk.parentColumns[index]!)} = k.${quote(column)}`).join(' AND ');
-    const rows = await this.q<{ ord: number }>(
-      `SELECT k.ord FROM jsonb_to_recordset($1::jsonb) AS k(ord int, ${typed(t, fk.columns)}) WHERE NOT EXISTS (SELECT 1 FROM public.${quote(parent.name)} p WHERE ${where})`,
-      [JSON.stringify(values)],
-    );
-    return rows.map(row => asked[row.ord]!);
   }
 
   /* The conflicts an earlier merge left open in the source: each may hold the only copy of a value the company wrote. */
@@ -619,7 +642,7 @@ class Merge {
     return [...tasks];
   }
 
-  /* The touched tasks that have a repository: where the source's work on each lies. */
+  /* The touched tasks that have a repository and that the source's turns worked on: where that work lies. */
   private async codeOf(tasks: string[]): Promise<CodeLine[]> {
     if (tasks.length === 0) return [];
     const listed = JSON.stringify(tasks);
@@ -638,7 +661,7 @@ class Merge {
          WHERE j.task_id = $1::uuid GROUP BY 1 HAVING max(COALESCE(j.finished_at, j.started_at)) IS NOT NULL ORDER BY 1`,
         [id],
       );
-      lines.push({ task: id, number: there.number, branch: `task-${there.number}`, machines: machines.map(machine => ({ name: machine.name, at: new Date(machine.at).toISOString() })) });
+      if (machines.length > 0) lines.push({ task: id, number: there.number, branch: `task-${there.number}`, machines: machines.map(machine => ({ name: machine.name, at: new Date(machine.at).toISOString() })) });
     }
     return lines;
   }

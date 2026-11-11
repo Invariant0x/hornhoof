@@ -14,6 +14,7 @@ import { jobOf, type ToolJob } from './job.js';
 import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
 import { registerControlTools } from './control.js';
 import { registerComputerTools } from '../computer/tools.js';
+import { registerMergeTools } from '../merge/tools.js';
 import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
@@ -151,6 +152,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerReleaseTool(server, ctx, job);
   registerDatabaseTool(server, ctx, job, 'write');
   registerOrchestratorImprovementTools(server, ctx, job);
+  registerMergeTools(server, ctx, job);
   return server;
 }
 

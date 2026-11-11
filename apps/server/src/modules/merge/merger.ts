@@ -8,6 +8,7 @@ import { complete } from './check.js';
 import { dropChoice, readChoice, type KeptDatabases } from './kept.js';
 import { queryOf } from './leader.js';
 import { KEPT_NAME, type MergeSource } from './source.js';
+import { taskFor } from './task.js';
 import { timeWords } from './words.js';
 
 /* How often the merges are looked at while the app leads, and the longest a failed one waits for its next try. */
@@ -122,6 +123,7 @@ export class Merger {
       await this.discover();
       await this.drops();
       await this.next();
+      await this.tasks();
     } catch (err) {
       this.ctx.log.warn({ error: loggable(err) }, 'Could not look at the merges. Trying again in a minute.');
     }
@@ -177,6 +179,23 @@ export class Merger {
     }
     if (checked.ok) await q("UPDATE net.merges SET status = 'merged', merged_at = now(), error = NULL WHERE id = $1::uuid AND status = 'applied'", [row.id]);
     else await q('UPDATE net.merges SET error = $2 WHERE id = $1::uuid', [row.id, `Not complete yet: ${checked.missing.map(lost => `${lost.table} ${JSON.stringify(lost.key)}`).join(', ')}`]);
+  }
+
+  /* The orchestrator's task for each merge that left him something. A merge that left nothing wants none any more; with
+     no orchestrator that can take one now it is asked again at the next look. Neither the drop of the database nor
+     the CEO's conflicts wait for it. */
+  private async tasks(): Promise<void> {
+    const q = queryOf(this.ctx.db);
+    const wanting = await q<{ id: string }>("SELECT id FROM net.merges WHERE task_wanted AND task_id IS NULL AND status IN ('applied', 'merged', 'done') ORDER BY created_at, source");
+    for (const row of wanting) {
+      try {
+        const task = await taskFor(this.ctx, row.id);
+        if (task) await q('UPDATE net.merges SET task_id = $2::uuid WHERE id = $1::uuid', [row.id, task]);
+        else await q('UPDATE net.merges SET task_wanted = false WHERE id = $1::uuid', [row.id]);
+      } catch (err) {
+        this.ctx.log.warn({ error: loggable(err) }, 'Could not give the orchestrator the task of a merge. Trying again in a minute.');
+      }
+    }
   }
 
   /* A database that was merged, or is left out, goes once it is saved as a bundle, or holds nothing to save. */
