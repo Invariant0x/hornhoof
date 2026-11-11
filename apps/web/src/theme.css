@@ -683,9 +683,16 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-tray { flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .t-tray-pic { position: relative; width: 56px; height: 56px; }
 .t-tray-pic img { display: block; width: 100%; height: 100%; object-fit: cover; border: 1px solid var(--line2); border-radius: 4px; box-sizing: border-box; }
-.t-tray-pic button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line2); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: 13px; line-height: 16px; cursor: pointer; }
-.t-tray-pic button:disabled { cursor: default; opacity: .6; }
-.t-tray[aria-busy="true"] img { opacity: .6; }
+.t-tray-pic button, .t-tray-file button { position: absolute; top: -6px; inset-inline-end: -6px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line2); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: 13px; line-height: 16px; cursor: pointer; }
+.t-tray-pic button:disabled, .t-tray-file button:disabled { cursor: default; opacity: .6; }
+.t-tray[aria-busy="true"] img, .t-tray[aria-busy="true"] .t-tray-file > span { opacity: .6; }
+/* A file that is no picture, by its name: at the line before it goes, and in the conversation to download. */
+.t-tray-file, .t-file { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 32px; margin: 0; padding-block: 6px; padding-inline: 8px 10px; border: 1px solid var(--line2); border-radius: 4px; box-sizing: border-box; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; line-height: 1.35; text-decoration: none; }
+.t-tray-file { position: relative; padding-inline-end: 16px; }
+.t-tray-file > span, .t-file > span { min-width: 0; overflow-wrap: anywhere; }
+.t-tray-file > svg, .t-file > svg { display: block; flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.t-file:hover { border-color: var(--cyan); }
+.t-file:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .t-add { flex: none; display: inline-flex; width: 22px; height: 22px; color: var(--muted); cursor: pointer; }
 .t-add:hover, .t-add:focus-within { color: var(--ink); }
 .t-add svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

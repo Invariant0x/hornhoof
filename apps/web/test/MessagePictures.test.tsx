@@ -24,6 +24,7 @@ const TERMINAL = { ...READY, terminal: true, canType: true };
 const LINE = 'Write to the orchestrator';
 
 const png = (name = 'screen.png', size = 64) => new File([new Uint8Array(size)], name, { type: 'image/png' });
+const pdf = (name = 'report.pdf', size = 64) => new File([new Uint8Array(size)], name, { type: 'application/pdf' });
 const dragged = (...files: File[]) => ({ dataTransfer: { types: ['Files'], files, dropEffect: 'none' } });
 const copied = (files: File[], text = '') => ({ clipboardData: { files, types: [...(files.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])], getData: (type: string) => (type === 'text/plain' ? text : '') } });
 const uploaded = (id: string, name = 'screen.png') => [201, { id, name }] as [number, unknown];
@@ -59,6 +60,8 @@ const settled = () => act(() => new Promise(done => setImmediate(done)));
 const line = () => screen.findByRole('textbox', { name: LINE });
 const preview = (name = 'screen.png') => screen.findByRole('img', { name });
 const remove = (name = 'screen.png') => screen.findByRole('button', { name: `Remove ${name}` });
+/* A file that is no picture waits at the line as its name, with no preview. */
+const waiting = (name: string) => screen.findByText(name, { selector: '.t-tray-file span' });
 
 beforeEach(() => {
   let n = 0;
@@ -218,9 +221,10 @@ describe('a picture pasted into the window', () => {
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
   });
 
-  it('leaves a file that is no picture alone', async () => {
+  it('takes a file that is no picture as well', async () => {
     open();
-    expect(fireEvent.paste(await line(), copied([new File(['x'], 'report.pdf', { type: 'application/pdf' })]))).toBe(true);
+    expect(fireEvent.paste(await line(), copied([pdf()]))).toBe(false);
+    expect(await waiting('report.pdf')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -268,32 +272,69 @@ describe('a picture pasted into the window', () => {
   });
 });
 
-describe('a picture from the button', () => {
-  it('is added through the picker, which offers only what can go', async () => {
+describe('a picture or a file from the button', () => {
+  it('is added through the picker, which offers a file of any kind', async () => {
     const user = userEvent.setup();
     open();
     await line();
     const picker = screen.getByLabelText(en.window.addPicture);
-    expect(picker).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp');
+    expect(picker).not.toHaveAttribute('accept');
     await user.upload(picker, png());
     expect(await preview()).toBeInTheDocument();
     /* The same file again must count as a change. */
     expect(picker).toHaveValue('');
+    await user.upload(picker, pdf());
+    expect(await waiting('report.pdf')).toBeInTheDocument();
+  });
+});
+
+describe('a file that is no picture', () => {
+  it('goes with the message as a picture does, waiting by its name with no preview', async () => {
+    const user = userEvent.setup();
+    const { messages, uploads } = open({
+      [`POST ${AGENT}/pictures?name=report.pdf`]: uploaded('f1', 'report.pdf'),
+      [`POST ${AGENT}/pictures?name=logo.svg`]: uploaded('f2', 'logo.svg'),
+      [`POST ${AGENT}/pictures?name=notes.txt`]: uploaded('f3', 'notes.txt'),
+    });
+    await line();
+    fireEvent.drop(windowBox(), dragged(pdf(), new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' }), new File(['words'], 'notes.txt', { type: 'text/plain' })));
+    expect(await waiting('notes.txt')).toBeInTheDocument();
+    expect(screen.getByText('report.pdf')).toBeInTheDocument();
+    expect(screen.getByText('logo.svg')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    await user.click(await remove('logo.svg'));
+    expect(screen.queryByText('logo.svg')).not.toBeInTheDocument();
+    await user.type(await line(), 'The numbers{Enter}');
+    await waitFor(() => expect(messages()).toEqual([{ text: 'The numbers', pictures: ['f1', 'f3'] }]));
+    expect(uploads()).toEqual([`${AGENT}/pictures?name=report.pdf`, `${AGENT}/pictures?name=notes.txt`]);
+    await waitFor(() => expect(screen.queryByText('report.pdf', { selector: '.t-tray-file span' })).not.toBeInTheDocument());
+  });
+
+  it('waits by its name once a preview shows it is no picture, and goes', async () => {
+    const user = userEvent.setup();
+    const { messages } = open({ [`POST ${AGENT}/pictures?name=notes.png`]: uploaded('f1', 'notes.png') });
+    await line();
+    fireEvent.drop(windowBox(), dragged(png('notes.png')));
+    fireEvent.error(await preview('notes.png'));
+    expect(await waiting('notes.png')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'notes.png' })).not.toBeInTheDocument();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.type(await line(), '{Enter}');
+    await waitFor(() => expect(messages()).toEqual([{ text: '', pictures: ['f1'] }]));
   });
 });
 
 describe('what the window turns away', () => {
   const refusedAlert = (text: string) => screen.findByRole('alert').then(a => expect(a).toHaveTextContent(text));
 
-  it('refuses an SVG and a file of no picture type, says why and sends nothing', async () => {
+  it('refuses an empty file, as a folder is, says why and sends nothing', async () => {
     open();
     await line();
-    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
-    await refusedAlert(en.errors.picture_invalid);
-    expect(screen.queryByRole('img', { name: 'logo.svg' })).not.toBeInTheDocument();
-    fireEvent.drop(windowBox(), dragged(new File(['words'], 'notes.txt', { type: 'text/plain' })));
-    await refusedAlert(en.errors.picture_invalid);
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    fireEvent.drop(windowBox(), dragged(new File([], 'Reports', { type: '' })));
+    await refusedAlert(en.errors.file_empty);
+    expect(screen.queryByText('Reports')).not.toBeInTheDocument();
   });
 
   it('stops saying why once the picture is taken back or another comes', async () => {
@@ -302,34 +343,28 @@ describe('what the window turns away', () => {
     await line();
     fireEvent.drop(windowBox(), dragged(png()));
     await preview();
-    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
-    await refusedAlert(en.errors.picture_invalid);
+    fireEvent.drop(windowBox(), dragged(new File([], 'Reports', { type: '' })));
+    await refusedAlert(en.errors.file_empty);
     await user.click(await remove());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
-    await refusedAlert(en.errors.picture_invalid);
+    fireEvent.drop(windowBox(), dragged(new File([], 'Reports', { type: '' })));
+    await refusedAlert(en.errors.file_empty);
     fireEvent.drop(windowBox(), dragged(png()));
     await preview();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('refuses a renamed file as soon as it turns out to be no picture', async () => {
-    open();
-    await line();
-    fireEvent.drop(windowBox(), dragged(png('notes.png')));
-    fireEvent.error(await preview('notes.png'));
-    await refusedAlert(en.errors.picture_invalid);
-    expect(screen.queryByRole('img', { name: 'notes.png' })).not.toBeInTheDocument();
-  });
-
-  it('refuses a picture too big that it cannot make smaller', async () => {
+  it('sends a picture too big to make smaller as it is, and refuses a file over 10 MB', async () => {
     open();
     await line();
     vi.stubGlobal('createImageBitmap', undefined);
     fireEvent.drop(windowBox(), dragged(png('big.png', 3 * 1024 * 1024 + 1)));
-    await refusedAlert(en.errors.picture_too_big);
-    fireEvent.drop(windowBox(), dragged(png('exact.png', 3 * 1024 * 1024)));
-    expect(await preview('exact.png')).toBeInTheDocument();
+    expect(await preview('big.png')).toBeInTheDocument();
+    fireEvent.drop(windowBox(), dragged(pdf('scan.pdf', 10 * 1024 * 1024 + 1)));
+    await refusedAlert(en.errors.file_too_big);
+    expect(screen.queryByText('scan.pdf')).not.toBeInTheDocument();
+    fireEvent.drop(windowBox(), dragged(pdf('exact.pdf', 10 * 1024 * 1024)));
+    expect(await waiting('exact.pdf')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -347,13 +382,13 @@ describe('what the window turns away', () => {
     let refuse = true;
     const { messages, uploads } = open({
       [`POST ${AGENT}/pictures?name=a.png`]: uploaded('a', 'a.png'),
-      [`POST ${AGENT}/pictures?name=b.png`]: () => (refuse ? [400, { error: { code: 'validation', message: 'Send a PNG.', reason: 'picture_invalid' } }] : uploaded('b', 'b.png')),
+      [`POST ${AGENT}/pictures?name=b.png`]: () => (refuse ? [413, { error: { code: 'validation', message: 'A file is at most 10 MB.', reason: 'file_too_big' } }] : uploaded('b', 'b.png')),
     });
     await line();
     fireEvent.drop(windowBox(), dragged(png('a.png'), png('b.png')));
     await preview('b.png');
     await user.type(await line(), 'Both{Enter}');
-    await refusedAlert(en.errors.picture_invalid);
+    await refusedAlert(en.errors.file_too_big);
     expect(messages()).toEqual([]);
     expect(await line()).toHaveValue('Both');
     expect(await preview('a.png')).toBeInTheDocument();
@@ -475,6 +510,15 @@ describe('a picture in the conversation', () => {
     expect(screen.queryByRole('link', { name: 'Open screen.png' })).not.toBeInTheDocument();
   });
 
+  it('offers a file that is no picture to download under its name', async () => {
+    open({}, READY, [{ ...said, data: { text: 'The numbers', pictures: [{ id: 'f1', name: 'Q3 report.xlsx', file: true }] } }]);
+    const link = await screen.findByRole('link', { name: en.window.downloadFile('Q3 report.xlsx') });
+    expect(link).toHaveAttribute('href', '/api/attachments/f1');
+    expect(link).toHaveAttribute('download', 'Q3 report.xlsx');
+    expect(link).toHaveTextContent('Q3 report.xlsx');
+    expect(within(link).queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('shows nothing extra for a message without pictures', async () => {
     open({}, READY, [{ ...said, data: { text: 'Look at this' } }]);
     await screen.findByText('Look at this');
@@ -486,12 +530,14 @@ describe('a picture in the conversation', () => {
 describe('the words about pictures', () => {
   it('exist in both languages', () => {
     for (const t of [en, ru]) {
-      for (const text of [t.window.dropPictures, t.window.addPicture, t.window.chat.send, t.window.removePicture('a.png'), t.window.openPicture('a.png'), t.window.pictureGone('a.png'), t.errors.picture_invalid, t.errors.picture_too_big, t.errors.pictures_too_many, t.errors.attachment_invalid, t.errors.attachment_unknown]) {
+      for (const text of [t.window.dropPictures, t.window.addPicture, t.window.chat.send, t.window.removePicture('a.png'), t.window.openPicture('a.png'), t.window.downloadFile('a.pdf'), t.window.pictureGone('a.png'), t.window.pictureUploading, t.window.pictureUploaded, t.errors.file_empty, t.errors.file_too_big, t.errors.pictures_too_many, t.errors.attachment_invalid, t.errors.attachment_unknown]) {
         expect(text).toBeTruthy();
         expect(text).not.toMatch(/[—ё]/);
       }
     }
     expect(ru.window.dropPictures).not.toBe(en.window.dropPictures);
-    expect(ru.errors.picture_too_big).not.toBe(en.errors.picture_too_big);
+    expect(ru.errors.file_too_big).not.toBe(en.errors.file_too_big);
+    expect([en.window.addPicture, en.window.dropPictures, en.errors.file_too_big]).toEqual([expect.stringContaining('file'), expect.stringContaining('files'), expect.stringContaining('10 MB')]);
+    expect([ru.window.addPicture, ru.window.dropPictures, ru.errors.file_too_big]).toEqual([expect.stringContaining('файл'), expect.stringContaining('файлы'), expect.stringContaining('10 МБ')]);
   });
 });

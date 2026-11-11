@@ -7,7 +7,8 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, attachments, departments, jobs, people } from '../src/db/schema.js';
-import { dropOldFiles, PICTURE_BYTES } from '../src/modules/tasks/attachments.js';
+import { MESSAGE_FILE_BYTES } from '../src/modules/conversation/pictures.js';
+import { dropOldFiles } from '../src/modules/tasks/attachments.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 import { nextOf as next } from './helpers.js';
 
@@ -15,6 +16,8 @@ const NODE_KEY = 'k'.repeat(40);
 const HH_FETCH = fileURLToPath(new URL('../../node/hh-fetch.cjs', import.meta.url));
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 2)]);
+/* A spreadsheet, as a zip archive starts. */
+const SHEET = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(64, 3)]);
 
 /* Acme: Bruno in Development and Sam in Sales run on one plan with the orchestrator. Maria has Development; Lisa is the CEO
    delegate. */
@@ -72,35 +75,49 @@ describe('a picture a person sends an agent', () => {
     expect((await send(PNG, '')).json().name).toBe('picture.png');
     expect((await send(JPEG, '')).json().name).toBe('picture.jpg');
     expect((await send(JPEG, '?name=..')).json().name).toBe('picture.jpg');
+    expect((await send(SHEET, '')).json().name).toBe('file');
   });
 
-  it('is judged by what it holds, not by its name or the type it says', async () => {
+  it('is judged by what it holds, not by its name or the type it says, and any other file is kept as bytes of no type', async () => {
     const { app, db, ceo, bruno } = await company();
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
-    for (const [bytes, name, type] of [
-      [svg, 'drawing.svg', 'image/svg+xml'],
-      [svg, 'drawing.png', 'image/png'],
-      [Buffer.from('Just some words in a file.'), 'words.png', 'application/octet-stream'],
-      [Buffer.from('GIF89a'), 'moving.gif', 'image/gif'],
-      [Buffer.alloc(0), 'empty.png', 'application/octet-stream'],
+    for (const [bytes, sent, name, type] of [
+      [svg, 'drawing.svg', 'drawing.svg', 'image/svg+xml'],
+      [svg, 'drawing.png', 'drawing.png', 'image/png'],
+      [Buffer.from('Just some words in a file.'), 'words.png', 'words.png', 'application/octet-stream'],
+      [Buffer.from('GIF89a'), 'moving.gif', 'moving.gif', 'image/gif'],
+      [Buffer.from('<html><script>alert(1)</script></html>'), 'page.html', 'page.html', 'text/html'],
+      [SHEET, '../tables/sales\u0007.xlsx', 'sales.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     ] as const) {
-      const res = await upload(app, ceo, bruno.id, bytes, name, type);
-      expect([name, res.statusCode, res.json().error.reason]).toEqual([name, 400, 'picture_invalid']);
+      const res = await upload(app, ceo, bruno.id, bytes, sent, type);
+      expect([sent, res.statusCode, res.json()]).toEqual([sent, 201, { id: expect.any(String), name }]);
+      const [row] = await db.select().from(attachments).where(eq(attachments.id, res.json().id));
+      expect(row).toMatchObject({ name, mediaType: 'application/octet-stream', size: bytes.length });
     }
-    expect(await db.select().from(attachments)).toEqual([]);
     const jpeg = await upload(app, ceo, bruno.id, JPEG, 'named-wrong.png', 'image/png');
     expect(jpeg.statusCode).toBe(201);
-    expect((await db.select().from(attachments))[0]).toMatchObject({ mediaType: 'image/jpeg', name: 'named-wrong.png' });
+    const [row] = await db.select().from(attachments).where(eq(attachments.id, jpeg.json().id));
+    expect(row).toMatchObject({ mediaType: 'image/jpeg', name: 'named-wrong.png' });
   });
 
-  it('is turned away above the limit, far above it too, and fits at the limit', async () => {
+  it('is turned away when it holds nothing, as a folder does', async () => {
+    const { app, db, ceo, bruno } = await company();
+    const res = await upload(app, ceo, bruno.id, Buffer.alloc(0), 'Reports');
+    expect([res.statusCode, res.json().error.reason]).toEqual([400, 'file_empty']);
+    expect(await db.select().from(attachments)).toEqual([]);
+  });
+
+  it('is turned away above 10 MB, far above it too, and fits at the limit, a picture and any other file alike', async () => {
     const { app, ceo, bruno } = await company();
-    const big = (size: number) => Buffer.concat([PNG, Buffer.alloc(size - PNG.length, 1)]);
-    expect((await upload(app, ceo, bruno.id, big(PICTURE_BYTES))).statusCode).toBe(201);
-    for (const size of [PICTURE_BYTES + 1, PICTURE_BYTES * 4]) {
-      const res = await upload(app, ceo, bruno.id, big(size));
-      expect([res.statusCode, res.json().error.reason]).toEqual([413, 'picture_too_big']);
-      expect(res.json().error.message).toContain('3 MB');
+    expect(MESSAGE_FILE_BYTES).toBe(10 * 1024 * 1024);
+    const big = (head: Buffer, size: number) => Buffer.concat([head, Buffer.alloc(size - head.length, 1)]);
+    for (const head of [PNG, SHEET]) {
+      expect((await upload(app, ceo, bruno.id, big(head, MESSAGE_FILE_BYTES))).statusCode).toBe(201);
+      for (const size of [MESSAGE_FILE_BYTES + 1, MESSAGE_FILE_BYTES * 2]) {
+        const res = await upload(app, ceo, bruno.id, big(head, size));
+        expect([res.statusCode, res.json().error.reason]).toEqual([413, 'file_too_big']);
+        expect(res.json().error.message).toContain('10 MB');
+      }
     }
   });
 
@@ -141,6 +158,33 @@ describe('a message with pictures', () => {
     expect(got).toMatchObject({ code: 0, err: '' });
     expect(readFileSync(join(folder, got.out.trim()))).toEqual(PNG);
     expect(got.out.trim()).toBe(`${shot.id.slice(0, 8)}-screen.png`);
+  });
+
+  it('tells the agent of a file of any kind the same way, and the agent gets its bytes', async () => {
+    const { app, db, url, ceo, builtin, bruno } = await company();
+    const report = await uploaded(app, ceo, bruno.id, SHEET, 'Q3 report.xlsx');
+    const said = await send(app, ceo, bruno.id, { text: 'Check the numbers', pictures: [report.id] });
+    expect(said.statusCode).toBe(202);
+    const run = await next(builtin, 'job.run');
+    expect(run.prompt).toContain(`Q3 report.xlsx: hh-fetch message ${report.id}`);
+    expect(run.prompt).toContain('A file came with this message. To open one, run its command, then open the file it prints:');
+    expect(run.prompt).not.toContain('A picture came');
+    const folder = mkdtempSync(join(tmpdir(), 'hh-files-'));
+    const got = await hhFetch(['message', report.id], url, run.toolToken!, folder);
+    expect(got).toMatchObject({ code: 0, err: '' });
+    expect(got.out.trim()).toBe(`${report.id.slice(0, 8)}-Q3 report.xlsx`);
+    expect(readFileSync(join(folder, got.out.trim()))).toEqual(SHEET);
+    const [event] = await db.select().from(agentEvents).where(eq(agentEvents.jobId, said.json().jobId));
+    expect(event).toMatchObject({ data: { text: 'Check the numbers', pictures: [{ id: report.id, name: 'Q3 report.xlsx', file: true }] } });
+  });
+
+  it('names files, not pictures, when a picture comes with a file', async () => {
+    const { app, ceo, builtin, bruno } = await company();
+    const shot = await uploaded(app, ceo, bruno.id, PNG, 'screen.png');
+    const report = await uploaded(app, ceo, bruno.id, SHEET, 'report.xlsx');
+    expect((await send(app, ceo, bruno.id, { text: 'Both', pictures: [shot.id, report.id] })).statusCode).toBe(202);
+    const run = await next(builtin, 'job.run');
+    expect(run.prompt).toContain(`Files came with this message. To open one, run its command, then open the file it prints:\nscreen.png: hh-fetch message ${shot.id}\nreport.xlsx: hh-fetch message ${report.id}`);
   });
 
   it('goes into the turn the agent runs with the same command', async () => {
@@ -238,6 +282,25 @@ describe("getting a message's picture", () => {
     }
     expect((await shown(toOrchestrator.id, lisa)).statusCode).toBe(200);
     expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(404);
+  });
+
+  it('downloads as a file under its name for people who see the agent, when it is no picture', async () => {
+    const { app, ceo, maria, bruno, sam } = await company();
+    const report = await uploaded(app, ceo, bruno.id, SHEET, 'Q3 report.xlsx');
+    const page = await uploaded(app, ceo, bruno.id, Buffer.from('<html><script>alert(1)</script></html>'), 'page.html');
+    const res = await app.inject({ url: `/api/attachments/${report.id}`, ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/octet-stream');
+    expect(res.headers['content-disposition']).toBe("attachment; filename*=UTF-8''Q3%20report.xlsx");
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toBe("default-src 'none'");
+    expect(res.rawPayload).toEqual(SHEET);
+    const html = await app.inject({ url: `/api/attachments/${page.id}`, ...as(ceo) });
+    expect([html.headers['content-type'], html.headers['content-disposition']]).toEqual(['application/octet-stream', "attachment; filename*=UTF-8''page.html"]);
+    const shot = await app.inject({ url: `/api/attachments/${(await uploaded(app, ceo, bruno.id)).id}`, ...as(ceo) });
+    expect(shot.headers['content-disposition']).toBeUndefined();
+    const toSam = await uploaded(app, ceo, sam.id, SHEET, 'sales.xlsx');
+    expect((await app.inject({ url: `/api/attachments/${toSam.id}`, ...as(maria) })).statusCode).toBe(404);
   });
 
   it('goes after 30 days, with what was never sent', async () => {

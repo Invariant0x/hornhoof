@@ -1009,7 +1009,7 @@ describe('pictures directly in the live terminal', () => {
     act(() => ws.opened(false, true));
     fireEvent.paste(container.querySelector<HTMLElement>('.t-xterm')!, copied([png()]));
     await waitFor(() => expect(pictureUploads(calls)).toHaveLength(1));
-    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
+    expect(await screen.findByText('The file path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
     expect(ws.sent).toEqual([{ type: 'input', data: "'/home/agent/screen.png' " }]);
     expect(pictureUploads(calls)).toHaveLength(1);
   });
@@ -1021,7 +1021,7 @@ describe('pictures directly in the live terminal', () => {
     const ws = await socket();
     act(() => ws.opened(false, true));
     fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
-    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toBeInTheDocument();
+    expect(await screen.findByText('The file path is in the terminal. Press Enter to send it.')).toBeInTheDocument();
     expect(ws.sent).toEqual([{ type: 'input', data: 'screen.png: hh-fetch message p1' }]);
     expect(pictureUploads(calls)).toHaveLength(1);
   });

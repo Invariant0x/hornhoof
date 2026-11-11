@@ -724,7 +724,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
             void send();
           }}
         >
-          <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.notPicture} />
+          <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.asFile} />
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>
