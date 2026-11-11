@@ -6,7 +6,8 @@ import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/scr
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
-import { DEV_ORG, FINISHED_TURN, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, PLANNED_TURN, SUBS, TASKS, TURN } from './api-mock';
+import { arcEnd } from '../src/hub-turns';
+import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const claude = SUBS[0]!;
@@ -60,7 +61,9 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('No departments yet. Tell the orchestrator about the company and he will propose a structure.')).toBeInTheDocument();
     expect(container.querySelector('.hub-num')).toHaveTextContent('0/1');
-    expect(screen.getByText('agents working')).toHaveClass('hub-lbl');
+    /* The hub says what its number counts on hover, without a caption under it. */
+    expect(screen.getByTitle('agents working')).toHaveClass('hub-num');
+    expect(container.querySelector('.hub-lbl')).toBeNull();
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
@@ -144,7 +147,7 @@ describe('Map', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     up = true;
     stream.send({ type: 'reconnected' });
-    expect(await screen.findByText('agents working')).toBeInTheDocument();
+    expect(await screen.findByTitle('agents working')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -187,19 +190,23 @@ describe('Map', () => {
     }
   });
 
-  it('fills the half gauge one segment of 24 per share of working agents', async () => {
+  it('fills the upper gauge one segment of 24 per share of working agents, clear of both ends of the middle line', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 4, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/4');
-    expect(container.querySelector('.gauge-bg')).toHaveAttribute('pathLength', '24');
-    expect(container.querySelector('.gauge')).toHaveAttribute('pathLength', '6');
+    expect(container.querySelector('.gauge-bg')).toHaveAttribute('pathLength', '23.72');
+    expect(container.querySelector('.gauge-bg')).toHaveAttribute('d', `M ${arcEnd(186)} A 103 103 0 0 1 ${arcEnd(354)}`);
+    expect(container.querySelector('.gauge')).toHaveAttribute('pathLength', '5.72');
+    expect(container.querySelector('.gauge')!.getAttribute('d')).toBe(`M ${arcEnd(186)} A 103 103 0 0 1 ${arcEnd(186 + (168 * 5.72) / 23.72)}`);
+    /* The middle line stops 32 short of the inner circle on both sides. */
+    expect(container.querySelector('.hub-hz')).toHaveAttribute('d', 'M 64 120 L 176 120');
   });
 
   it('joins the people to the orchestrator with a trace, even before any department', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     expect(container.querySelector('.wires [data-wire="people"]')).toBeInTheDocument();
     expect(container.querySelectorAll('.wires .via')).toHaveLength(1);
   });
@@ -347,7 +354,7 @@ describe('Map', () => {
   it('moves the dot along the gauge while an agent works', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     expect(container.querySelector('.hub animateMotion')).toBeInTheDocument();
   });
 
@@ -358,7 +365,7 @@ describe('Map', () => {
     });
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     expect(container.querySelector('.hub circle.pt animateMotion')).toBeInTheDocument();
   });
 
@@ -529,7 +536,7 @@ describe('Map', () => {
       departments: [dept({ id: 'd1', name: 'Sales', employees: [head('h1')] })],
     }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     /* The refresh waits on its timer only as the test moves it. */
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     onTestFinished(() => { vi.useRealTimers(); });
@@ -634,7 +641,7 @@ describe('Map', () => {
     let loads = 0;
     mockApi({ 'GET /api/org': () => [200, ++loads === 1 ? ORG : { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     /* The order the server sends them in when the CEO builds the company. */
     stream.send({ type: 'org' });
     stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
@@ -647,7 +654,7 @@ describe('Map', () => {
     const stream = fakeStream();
     mockApi({ 'GET /api/org': [200, ORG] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     vi.useFakeTimers();
     onTestFinished(() => { vi.useRealTimers(); });
     stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
@@ -667,7 +674,7 @@ describe('Map', () => {
     let working = 0;
     const calls = mockApi({ 'GET /api/org': () => [200, { ...ORG, agents: { ...ORG.agents, working } }] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     working = 1;
     stream.send({ type: 'working', working: 1 });
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
@@ -682,7 +689,7 @@ describe('Map', () => {
     const stream = fakeStream();
     const calls = mockApi({ 'GET /api/org': [200, ORG] });
     render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     const loads = () => calls.filter(c => c.path === '/api/org').length;
     stream.send({ type: 'computer' });
     await vi.waitFor(() => expect(loads()).toBe(2));
@@ -706,7 +713,7 @@ describe('Map', () => {
       },
     });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
+    await screen.findByTitle('agents working');
     hold = true;
     stream.send({ type: 'org' });
     working = 1;
@@ -729,81 +736,126 @@ describe('Map', () => {
     expect(screen.getByRole('button', { name: /^Support/ })).toHaveTextContent('No agents yet');
   });
 
-  it.each(['en', 'ru'] as const)("shows the tracker progress under the hub in %s, between the traces", async language => {
+  /* Development and Sales work in turn 3; Operations works all the time and has no strip. */
+  const turnOrg = (progress: Record<string, [number, number] | null>) => ({
+    ...ORG,
+    turn: { id: TURN.id, number: 3, goal: TURN.goal },
+    departments: Object.entries(progress).map(([id, p]) =>
+      dept({ id, name: id, roleCode: id.slice(0, 3).toUpperCase(), workMode: p ? 'turns' : 'continuous', turnProgress: p && { turnNumber: 3, done: p[0], total: p[1] } }),
+    ),
+  });
+  const card = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });
+  const strip = (name: string) => card(name).querySelector<HTMLElement>('.dept-turn');
+  const lit = (bar: Element) => [...bar.querySelectorAll('i')].map(i => i.classList.contains('on'));
+  const hubTag = (container: HTMLElement) => container.querySelector('.hub-focus-tag');
+
+  it.each(['en', 'ru'] as const)('shows the turn inside the card of each department that works in it, in %s', async language => {
     localStorage.setItem('hh-lang', language);
     onTestFinished(() => localStorage.removeItem('hh-lang'));
-    mockApi({
-      'GET /api/org': [200, { ...ORG_WITH_TEAMS, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
-      'GET /api/turns': [200, { turns: [FINISHED_TURN, PLANNED_TURN, TURN] }],
-      'GET /api/tasks?status=all': [200, { tasks: [{ ...TASKS[0]!, status: 'done' }, { ...TASKS[1]!, status: 'working' }] }],
-    });
+    const calls = mockApi({ 'GET /api/org': [200, turnOrg({ Operations: null, Development: [3, 17], Sales: [0, 4] })] });
     const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
-    const text = language === 'en' ? '2 of 5 tasks done' : 'Готово 2 из 5 задач';
-    await screen.findByText(text);
-    /* Traces to the lower rows leave the hub 84 to each side of its middle (600); the turn stays between them. */
-    const box = container.querySelector('.hub-turn') as HTMLElement;
-    expect(box.querySelector('b')).toHaveTextContent(language === 'en' ? 'Turn 3' : 'Ход 3');
-    expect(box).not.toHaveTextContent(TURN.goal);
-    expect(box.title).toContain(TURN.title);
-    expect(box.title).toContain(TURN.goal);
-    expect(within(box).getByRole('progressbar', { name: text })).toHaveAttribute('aria-valuenow', '40');
-    expect(parseFloat(box.style.left)).toBeGreaterThanOrEqual(600 - 84);
-    expect(parseFloat(box.style.left) + parseFloat(box.style.width)).toBeLessThanOrEqual(600 + 84);
+    const label = language === 'en' ? '3 of 17 tasks done' : 'Готово 3 из 17 задач';
+    const bar = await screen.findByRole('progressbar', { name: label });
+    const dev = strip('Development')!;
+    expect(dev).toContainElement(bar);
+    expect(dev.querySelector('.dt-turn')).toHaveTextContent(language === 'en' ? 'Turn 3' : 'Ход 3');
+    expect(dev.querySelector('.dt-cnt')).toHaveTextContent(label);
+    expect(bar).toHaveAttribute('aria-valuenow', '18');
+    expect(bar).toHaveAttribute('aria-valuemin', '0');
+    expect(bar).toHaveAttribute('aria-valuemax', '100');
+    expect(lit(bar)).toEqual([...Array(4).fill(true), ...Array(16).fill(false)]);
+    expect(lit(within(strip('Sales')!).getByRole('progressbar'))).toEqual(Array(20).fill(false));
+    expect(strip('Operations')).toBeNull();
+    /* The strip is part of the card: one button, which opens the department. */
+    expect(within(card('Development')).queryAllByRole('button')).toEqual([]);
+    /* Every card grows for the strip, so the rows stay even. */
+    expect(['Operations', 'Development', 'Sales'].map(n => card(n).style.height)).toEqual(['196px', '196px', '196px']);
+    expect(card('Development')).toHaveClass('tall', 'with-turn');
+    expect(card('Operations')).toHaveClass('tall');
+    expect(card('Operations')).not.toHaveClass('with-turn');
+    expect(container.querySelector('.hub-turn')).toBeNull();
+    /* The cards take the numbers from the company itself, with no request of their own. */
+    expect(calls.some(c => c.path.startsWith('/api/turns'))).toBe(false);
   });
 
-  it('updates progress when tasks close or are added without reopening the map', async () => {
-    const stream = fakeStream();
-    let tasks = { done: 2, total: 5 };
-    mockApi({
-      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
-      'GET /api/turns': () => [200, { turns: [{ ...TURN, tasks }] }],
-    });
-    render(<MapScreen {...PROPS} />);
-    await screen.findByText('2 of 5 tasks done');
-    tasks = { done: 3, total: 5 };
-    stream.send({ type: 'task' });
-    await screen.findByText('3 of 5 tasks done');
-    tasks = { done: 3, total: 7 };
-    stream.send({ type: 'task' });
-    expect(await screen.findByRole('progressbar', { name: '3 of 7 tasks done' })).toHaveAttribute('aria-valuenow', '43');
-  });
-
-  it('keeps the map usable while its tracker numbers load', async () => {
-    let finish!: (reply: [number, unknown]) => void;
-    const pending = new Promise<[number, unknown]>(resolve => { finish = resolve; });
-    mockApi({
-      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
-      'GET /api/turns': () => pending,
-    });
-    render(<MapScreen {...PROPS} />);
-    await screen.findByText('agents working');
-    expect(screen.queryByRole('progressbar')).toBeNull();
-    await act(async () => finish([200, { turns: [TURN] }]));
-    await screen.findByRole('progressbar', { name: '2 of 5 tasks done' });
-  });
-
-  it('reports a tracker failure without replacing the rest of the map', async () => {
-    mockApi({
-      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
-      'GET /api/turns': [503, { error: { code: 'unavailable', message: 'Progress unavailable.' } }],
-    });
-    render(<MapScreen {...PROPS} />);
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText('agents working')).toBeInTheDocument();
-  });
-
-  it.each(['none', 'closed', 'planned'] as const)('omits the hub turn when the tracker has %s', async state => {
-    const stream = fakeStream();
-    let turns = [TURN];
-    mockApi({
-      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
-      'GET /api/turns': () => [200, { turns }],
-    });
+  it('runs one working department along the lower half of the hub in twenty segments, its turn always named', async () => {
+    mockApi({ 'GET /api/org': [200, turnOrg({ Operations: null, Development: [3, 17] })] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('2 of 5 tasks done');
-    turns = state === 'none' ? [] : [{ ...TURN, status: state }];
+    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    const hub = container.querySelector('.hub')!;
+    expect(hub.querySelectorAll('.turn-sec-bg')).toHaveLength(1);
+    expect(hub.querySelector('.turn-sec-bg')).toHaveAttribute('d', `M ${arcEnd(174)} A 103 103 0 0 0 ${arcEnd(6)}`);
+    expect(hub.querySelector('.turn-sec-bg')).toHaveAttribute('pathLength', '19.72');
+    expect(hub.querySelector('.turn-sec-fill')).toHaveAttribute('pathLength', '3.72');
+    expect(hub.querySelectorAll('.turn-sec-sep')).toHaveLength(0);
+    expect(hub.querySelector('.hub-eq')).toBeInTheDocument();
+    expect(hubTag(container)).toHaveTextContent(/^Turn 3$/);
+    expect(hub).toHaveClass('has-tag');
+    fireEvent.mouseEnter(card('Operations'));
+    expect(hubTag(container)).toHaveTextContent(/^Turn 3$/);
+  });
+
+  it('gives each working department a sector of its own, lit when its card is pointed at or focused', async () => {
+    mockApi({ 'GET /api/org': [200, turnOrg({ Development: [3, 17], Operations: null, Sales: [4, 4], Marketing: [1, 2] })] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    const hub = container.querySelector('.hub')!;
+    const sectors = [...hub.querySelectorAll('.turn-sec')];
+    expect(sectors.map(s => s.getAttribute('data-dept'))).toEqual(['Development', 'Sales', 'Marketing']);
+    expect(sectors.map(s => s.querySelector('.turn-sec-bg')!.getAttribute('pathLength'))).toEqual(['5.72', '5.72', '5.72']);
+    expect(sectors.map(s => s.querySelector('.turn-sec-fill')?.getAttribute('pathLength') ?? null)).toEqual(['0.72', '5.72', '2.72']);
+    expect(hub.querySelectorAll('.turn-sec-sep')).toHaveLength(2);
+    /* At rest the hub adds up nothing: no tag, no share of all. */
+    expect(hubTag(container)).toBeNull();
+    expect(hub).not.toHaveTextContent('%');
+    fireEvent.mouseEnter(card('Sales'));
+    expect(hubTag(container)).toHaveTextContent(/^SAL · Turn 3$/);
+    expect(sectors.map(s => s.getAttribute('class'))).toEqual(['turn-sec dim', 'turn-sec active', 'turn-sec dim']);
+    fireEvent.mouseLeave(card('Sales'));
+    expect(hubTag(container)).toBeNull();
+    expect(sectors.map(s => s.getAttribute('class'))).toEqual(['turn-sec', 'turn-sec', 'turn-sec']);
+    fireEvent.focus(card('Marketing'));
+    expect(hubTag(container)).toHaveTextContent(/^MAR · Turn 3$/);
+    fireEvent.blur(card('Marketing'));
+    fireEvent.focus(card('Operations'));
+    expect(hubTag(container)).toBeNull();
+  });
+
+  it.each([
+    ['no department works in the turn', { Development: null, Sales: null }],
+    ['the turn gave the departments no tasks', { Development: [0, 0], Sales: [0, 0] }],
+  ] as const)('keeps the cards and the hub as they were when %s', async (_, progress) => {
+    mockApi({ 'GET /api/org': [200, turnOrg(progress as Record<string, [number, number] | null>)] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByTitle('agents working');
+    expect(container.querySelector('.dept-turn')).toBeNull();
+    expect(card('Development').style.height).toBe('160px');
+    expect(card('Development')).not.toHaveClass('tall');
+    expect(container.querySelector('.turn-sec-bg, .turn-sec-fill, .hub-eq')).toBeNull();
+    expect(hubTag(container)).toBeNull();
+    expect(container.querySelector('.hub')).not.toHaveClass('has-tag');
+  });
+
+  it('follows the tasks of the turn live, and lets the strip go when the turn closes', async () => {
+    const stream = fakeStream();
+    let progress: [number, number] | null = [3, 17];
+    mockApi({ 'GET /api/org': () => [200, turnOrg({ Development: progress, Operations: null })] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    progress = [4, 17];
     stream.send({ type: 'task' });
-    await waitFor(() => expect(container.querySelector('.hub-turn')).toBeNull());
+    const bar = await screen.findByRole('progressbar', { name: '4 of 17 tasks done' });
+    expect(bar).toHaveAttribute('aria-valuenow', '24');
+    expect(lit(bar).filter(Boolean)).toHaveLength(5);
+    progress = [1000, 1000];
+    stream.send({ type: 'task' });
+    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 tasks done' })).toHaveAttribute('aria-valuenow', '100');
+    expect(container.querySelector('.turn-sec-fill')).toHaveAttribute('pathLength', '19.72');
+    progress = null;
+    stream.send({ type: 'org' });
+    await waitFor(() => expect(container.querySelector('.dept-turn')).toBeNull());
+    expect(container.querySelector('.turn-sec-bg, .hub-eq, .hub-focus-tag')).toBeNull();
+    expect(card('Development').style.height).toBe('160px');
   });
 
   it('tells when the orchestrator has no subscription', async () => {
@@ -913,7 +965,7 @@ describe('Map', () => {
       };
       mockApi({ 'GET /api/org': [200, org] });
       const { container, unmount } = render(<MapScreen {...PROPS} />);
-      await screen.findByText('agents working');
+      await screen.findByTitle('agents working');
       const mapEl = container.querySelector('.map') as HTMLElement;
       Object.defineProperty(mapEl, 'clientWidth', { value: 1100, configurable: true });
       Object.defineProperty(mapEl, 'clientHeight', { value: 900, configurable: true });
@@ -1022,5 +1074,23 @@ describe('deptLayout', () => {
   it('stacks more rows evenly around the hub instead of hanging them below', () => {
     expect(rows(6)).toEqual([-220, 0, 220]);
     expect(rows(8)).toEqual([-330, -110, 110, 330]);
+  });
+
+  it('makes the cards taller for a turn strip and keeps 32 between rows that would come closer', () => {
+    const tall = (n: number) => {
+      const spots = deptLayout(n, 196);
+      const hy = spots[0]!.path[0]![1];
+      return { spots, rows: [...new Set(spots.map(s => s.y + s.h / 2 - hy))] };
+    };
+    expect(tall(4).rows).toEqual([-220, 220]);
+    expect(tall(6).rows).toEqual([-228, 0, 228]);
+    expect(tall(12).rows).toEqual([-570, -342, -114, 114, 342, 570]);
+    expect(tall(5).spots.map(s => [s.w, s.h])).toEqual(Array(5).fill([280, 196]));
+    for (const n of [2, 5, 6, 12]) {
+      const { spots } = tall(n);
+      for (const a of spots)
+        for (const b of spots)
+          if (a !== b && a.x === b.x) expect(Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)).toBeGreaterThanOrEqual(32);
+    }
   });
 });

@@ -656,6 +656,16 @@ export const en = {
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
+    /* Whether a department works in the company's turns, which count its tasks on the map, or all the time. */
+    workMode: {
+      title: 'How it works',
+      turns: 'Works in turns',
+      turnsHint: 'Its tasks are counted on the map: on its card and on the circle in the middle.',
+      continuous: 'Works all the time',
+      continuousHint: 'Without turns. Its card on the map shows no turn.',
+      isTurns: 'Works in turns: its tasks are counted on the map.',
+      isContinuous: 'Works all the time, without turns.',
+    },
     approvals: {
       title: 'Approvals',
       owner: 'Department owner',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeMap, deptKey, deptLayout, HUB_KEY, personKey, type MapArrangement } from '../src/map-arrange';
+import { arrangedBounds, arrangeMap, deptKey, deptLayout, HUB_KEY, personKey, type MapArrangement } from '../src/map-arrange';
 import { peopleLayout } from '../src/map-people';
 import { departmentPeople } from '../src/org';
 import { pulsePath } from '../src/screens/Map';
@@ -41,6 +41,56 @@ describe('the map as nobody moved it', () => {
     expect(arr.hub).toEqual({ x: 480, y: 300, w: 240, h: 240 });
     /* Ivan's way runs from the top of the hub up to the bus and across to his card, as before. */
     expect(arr.top[0]!.path.slice(0, 2)).toEqual([[600, 300], [600, arr.bus!.via[1]]]);
+  });
+});
+
+describe('the map while departments work in the turn', () => {
+  const turn = (done: number, total: number) => ({ turnNumber: 3, done, total });
+  /* Sales works in the turn; Operations, in the next corner, works all the time. */
+  const working = (progress: Department['turnProgress']): Org => ({
+    ...ORG4,
+    turn: { id: 'u3', number: 3, goal: 'Ship payments' },
+    departments: ORG4.departments.map((d, i) => ({ ...d, workMode: i === 1 ? 'continuous' as const : 'turns' as const, turnProgress: i === 0 ? progress : null })),
+  });
+
+  it('gives every card room for its turn strip while any department works in the turn, and keeps the people clear above', () => {
+    const arr = arrangeMap(working(turn(3, 17)));
+    expect(arr.depts.map(d => [d.w, d.h])).toEqual(Array(4).fill([280, 196]));
+    expect(arr.depts.map(d => d.y + d.h / 2 - 420)).toEqual([-220, -220, 220, 220]);
+    for (const d of arr.depts) expect(arr.blocks.find(b => b.key === deptKey(d.id))!.rect).toEqual({ x: d.x, y: d.y, w: 280, h: 196 });
+    /* Each trace still ends in the middle of its card's near side. */
+    for (const d of arr.depts) expect(d.path[d.path.length - 1]).toEqual([d.x < 600 ? d.x + d.w : d.x, d.y + d.h / 2]);
+    const topRow = Math.min(...arr.depts.map(d => d.y));
+    for (const p of arr.top) expect(topRow - (p.y + p.h)).toBe(28);
+    for (const pts of lines(arr)) expect(square(pts)).toBe(true);
+  });
+
+  it('keeps the cards as they were while no department has tasks in the turn', () => {
+    for (const progress of [null, turn(0, 0)]) {
+      const arr = arrangeMap(working(progress));
+      expect(arr.depts.map(d => d.h)).toEqual(Array(4).fill(160));
+      expect(arr.depts.map(d => [d.x, d.y, d.path])).toEqual(arrangeMap(ORG4).depts.map(d => [d.x, d.y, d.path]));
+    }
+  });
+
+  it('keeps a moved card where it was put when it grows for the turn, its line still at right angles', () => {
+    const arr = arrangeMap(working(turn(1, 2)), { [deptKey(D1)]: { x: 100, y: 700 } });
+    const sales = blockOf(arr, deptKey(D1));
+    expect(sales).toEqual({ x: 100, y: 700, w: 280, h: 196 });
+    const trace = arr.depts.find(d => d.id === D1)!.path;
+    expect(square(trace)).toBe(true);
+    expect(onEdge(trace[trace.length - 1]!, sales)).toBe(true);
+    expect(crossesOthers(arr, trace, [HUB_KEY, deptKey(D1)])).toBe(false);
+  });
+
+  it('leaves nothing under the hub for the turn: Fit shows the hub, its glow and the blocks', () => {
+    const empty: Org = { ...ORG, turn: { id: 'u3', number: 3, goal: 'Ship payments' } };
+    const arr = arrangeMap(empty);
+    expect('turn' in arr).toBe(false);
+    expect(arrangedBounds(arr, empty).y1).toBe(540 + 28 + 120);
+    const alone = working(turn(3, 17));
+    const four: Org = { ...alone, people: ORG.people, departments: alone.departments.map(d => ({ ...d, people: [] })) };
+    expect(arrangedBounds(arrangeMap(four), four).y1).toBe(420 + 220 + 98);
   });
 });
 

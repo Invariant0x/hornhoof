@@ -3,7 +3,7 @@ import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, DepartmentWorkMode, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -171,7 +171,14 @@ export type Department = {
   repository?: Repository | null;
   /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
   ownerPersonId?: string | null;
+  /* Whether it works in the company's turns or all the time, and the tasks of the open turn it has done out of all it has, as
+     far as this person sees them; none for a department that works all the time, while no turn is open or out of reach. */
+  workMode?: DepartmentWorkMode;
+  turnProgress?: DepartmentTurnProgress | null;
 };
+
+/* A department's way of working as its settings show it, and whether this person may change it. */
+export type WorkModeView = { departmentId: string; workMode: DepartmentWorkMode; canChangeWorkMode: boolean };
 
 export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
