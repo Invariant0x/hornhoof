@@ -30,12 +30,3 @@ export function PeopleBridgeMasks({ placed, prefix }: { placed: PeopleLayout; pr
     </defs>
   );
 }
-
-export function PeopleWires({ placed }: { placed: PeopleLayout }) {
-  return (
-    <>
-      {placed.wires.map(w => <path key={w.id} className="tr" data-person={w.personId} data-wire={w.id} d={toD(w.pts)} />)}
-      {placed.vias.map(([x, y]) => <circle key={`${x}:${y}`} className="via" cx={x} cy={y} r="4" />)}
-    </>
-  );
-}

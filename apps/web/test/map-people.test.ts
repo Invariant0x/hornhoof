@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PH, PW, peopleLayout, rowCenters, wirePeople, type DeptPersonInput, type Spot } from '../src/map-people';
+import { bridgeWires } from '../src/map-people-bridges';
 import { deptLayout } from '../src/screens/Map';
 import type { Point } from '../src/ui/wires';
 
@@ -295,5 +296,17 @@ describe('peopleLayout', () => {
     const low = Math.max(...spots.map(s => s.y + s.h));
     const stripIds = layout.chips.filter(c => c.y > low).map(c => c.id);
     expect(stripIds).toEqual(['ines', 'p4']);
+  });
+});
+
+describe('bridges between the lines of different people', () => {
+  const wire = (personId: string, pts: Point[]) => ({ id: personId, personId, deptId: 'd', pts });
+
+  it('cut a line only where it crosses another, not where it joins or leaves a road the other runs on', () => {
+    const road = wire('a', [[0, 0], [100, 0]]);
+    expect(bridgeWires([road, wire('b', [[50, 0], [50, 50]])]).gaps).toEqual([]);
+    expect(bridgeWires([road, wire('b', [[0, 0], [70, 0], [70, 30]])]).gaps).toEqual([]);
+    expect(bridgeWires([road, wire('b', [[50, 50], [50, 0], [80, 0]])]).gaps).toEqual([]);
+    expect(bridgeWires([road, wire('c', [[50, -50], [50, 50]])]).gaps).toEqual([{ personId: 'c', pts: [[50, -6], [50, expect.closeTo(6)]] }]);
   });
 });

@@ -32,6 +32,37 @@ const crossesOthers = (arr: MapArrangement, pts: Point[], ends: string[]) =>
 /* Every line on the map: the traces of departments, the people's row and their own lines, and the department people's wires. */
 const lines = (arr: MapArrangement) => [...arr.depts.map(d => d.path), ...arr.top.map(t => t.path), ...(arr.bus ? [...arr.bus.lines, arr.bus.drop] : []), ...arr.people.wires.map(w => w.pts), ...arr.people.routes.map(r => r.pts)];
 
+/* Ivan's map: six departments, three people with the whole company, Dan beside Sales and four people who look after several
+   departments each from the strip under them. */
+const SIX = ['Sales', 'Development', 'Design', 'Finance', 'Support', 'Marketing'].map((name, i) => ({ id: `00000000-0000-4000-8000-0000000001${i}0`, name }));
+const deputy = (id: string, name: string, of: number[]) => ({
+  ...PEOPLE[2]!, id, name, title: '', status: 'active' as const, deputy: true, departments: of.map(i => SIX[i]!.id),
+  access: { whole: false, departments: of.map(i => SIX[i]!), teams: [] },
+});
+const IVANS: Org = {
+  ...ORG,
+  people: [...ORG.people, { ...PEOPLE[1]!, id: 'p9', name: 'Alex' }, deputy(ID(6), 'Oleg', [0, 4]), deputy('n1', 'Nina', [1, 2, 5]), deputy('n2', 'Petr', [1, 3]), deputy('n3', 'Lena', [0, 1])],
+  departments: SIX.map((d, i) => dept({ ...d, people: i ? [] : [dan] })),
+};
+const IVANS_MOVES = { [deptKey(SIX[1]!.id)]: { x: 860, y: 980 }, [personKey('n1')]: { x: 1200, y: 600 } };
+
+/* Each line the map draws, with the blocks it joins when it joins two. */
+const ways = (arr: MapArrangement): { pts: Point[]; ends?: string[] }[] => [
+  ...arr.depts.map(d => ({ pts: d.path })),
+  ...arr.top.filter(t => t.apart).map(t => ({ pts: t.path })),
+  ...(arr.bus ? [...arr.bus.lines, arr.bus.drop].map(pts => ({ pts })) : []),
+  ...arr.people.routes.map(r => ({ pts: r.pts, ends: [deptKey(r.deptId), personKey(r.personId)] })),
+];
+/* Runs of different lines side by side closer than a road, for at least a road's length: they should have joined into one. */
+function sideBySide(all: { pts: Point[] }[]): string[] {
+  const runs = all.flatMap(({ pts }, line) => segments(pts).map(([p, q]) => {
+    const across = p[1] === q[1], at = across ? p[1] : p[0], [a, b] = across ? [p[0], q[0]] : [p[1], q[1]];
+    return { line, across, at, lo: Math.min(a, b), hi: Math.max(a, b) };
+  }));
+  return runs.flatMap((r, i) => runs.slice(i + 1).filter(o => o.line !== r.line && o.across === r.across && o.at !== r.at && Math.abs(o.at - r.at) < 28 && Math.min(o.hi, r.hi) - Math.max(o.lo, r.lo) >= 28)
+    .map(o => `${r.across ? 'across' : 'down'} ${r.at} [${r.lo}, ${r.hi}] and ${o.at} [${o.lo}, ${o.hi}]`));
+}
+
 describe('the map as nobody moved it', () => {
   it('stands where the map places everything, with the department people as they are laid out today', () => {
     const arr = arrangeMap(ORG4);
@@ -175,6 +206,28 @@ describe('a block moved on the map', () => {
       const arr = arrangeMap(ORG4, placed);
       for (const pts of lines(arr)) expect(square(pts), `${JSON.stringify(placed)}: ${JSON.stringify(pts)}`).toBe(true);
     }
+  });
+
+  it('joins the lines of people who look after several departments into roads, as laid out and wherever blocks are put', () => {
+    for (const placed of [{}, IVANS_MOVES, { [HUB_KEY]: { x: 420, y: 330 }, [personKey(OLEG)]: { x: 40, y: 1000 } }]) {
+      const arr = arrangeMap(IVANS, placed);
+      const all = ways(arr);
+      expect(sideBySide(all), JSON.stringify(placed)).toEqual([]);
+      for (const { pts, ends } of all) {
+        expect(square(pts)).toBe(true);
+        if (ends) expect(crossesOthers(arr, pts, ends), JSON.stringify(pts)).toBe(false);
+      }
+      for (const r of arr.people.routes) {
+        expect(onEdge(r.pts[0]!, blockOf(arr, deptKey(r.deptId)))).toBe(true);
+        expect(onEdge(r.pts[r.pts.length - 1]!, blockOf(arr, personKey(r.personId)))).toBe(true);
+      }
+    }
+  });
+
+  it('marks where a road forks with a dot, outside the blocks', () => {
+    const arr = arrangeMap(IVANS);
+    expect(arr.forks.length).toBeGreaterThan(0);
+    for (const [x, y] of arr.forks) expect(arr.blocks.some(({ rect: r }) => x > r.x && x < right(r) && y > r.y && y < bottom(r))).toBe(false);
   });
 
   it('sends a message along the lines as they are drawn', () => {

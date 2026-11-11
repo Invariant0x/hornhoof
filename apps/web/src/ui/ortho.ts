@@ -18,14 +18,14 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const inset = (size: number) => Math.min(CORNER, size / 2);
 
 /* Whether the segment a-b runs through the inside of r grown by pad on every side. */
-function through(a: Point, b: Point, r: Rect, pad: number): boolean {
+export function through(a: Point, b: Point, r: Rect, pad: number): boolean {
   return Math.max(a[0], b[0]) > r.x - pad && Math.min(a[0], b[0]) < right(r) + pad && Math.max(a[1], b[1]) > r.y - pad && Math.min(a[1], b[1]) < bottom(r) + pad;
 }
 
 const segmentsOf = (pts: Point[]) => pts.slice(1).map((b, i): [Point, Point] => [pts[i]!, b]);
 
 /* Drops repeated points and points in the middle of a straight run. */
-function tidy(pts: Point[]): Point[] {
+export function tidy(pts: Point[]): Point[] {
   const out: Point[] = [];
   for (const p of pts) {
     const last = out[out.length - 1];
