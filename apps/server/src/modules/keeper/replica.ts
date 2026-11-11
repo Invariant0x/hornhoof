@@ -5,6 +5,9 @@ export const REPLICA_ROLE = 'hornhoof_replica';
 export const PUBLICATION = 'hornhoof';
 const SCHEMAS = ['public', 'net', 'net_local', 'drizzle'];
 const ITERATIONS = 4096;
+/* What a subscription and pg_dump both call first, to clear their search path. The app takes it from everyone at its
+   start, so the role is given it by name. */
+const SET_CONFIG = 'pg_catalog.set_config(text, text, boolean)';
 
 type Closable = Sql & { close(): Promise<void> };
 
@@ -24,21 +27,23 @@ export function scramVerifier(password: string, salt: Buffer = randomBytes(16)):
   return `SCRAM-SHA-256$${ITERATIONS}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }
 
-/* Whether the role is there and may enter each of the company's schemas this database has. The role belongs to the
-   whole server and its rights to one database, so a database made since has none of them. */
+/* Whether the role is there, may enter each of the company's schemas this database has, and may clear its search
+   path. The role belongs to the whole server and its rights to one database, so a database made since has none of them. */
 export async function replicaReady(sql: Sql): Promise<boolean> {
   const { rows } = await sql.query<{ ready: boolean }>(
     `SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = $1)
-       AND NOT EXISTS (SELECT FROM pg_namespace n WHERE n.nspname = ANY($2::text[]) AND NOT has_schema_privilege($1, n.oid, 'USAGE')) AS ready`,
-    [REPLICA_ROLE, SCHEMAS],
+       AND NOT EXISTS (SELECT FROM pg_namespace n WHERE n.nspname = ANY($2::text[]) AND NOT has_schema_privilege($1, n.oid, 'USAGE'))
+       AND COALESCE((SELECT has_function_privilege(r.oid, $3::regprocedure, 'EXECUTE') FROM pg_roles r WHERE r.rolname = $1), false) AS ready`,
+    [REPLICA_ROLE, SCHEMAS, SET_CONFIG],
   );
   return rows[0]?.ready === true;
 }
 
 /* One statement that makes the role or sets it right, and lets it read every table of the company's schemas, now and
    later, and where their sequences stand, which a dump of a table's rows reads too. It reads through row level
-   security, since the tables the app hides keep it with no policy and a copy would else get them empty. It writes
-   nothing, makes nothing and moves no sequence. */
+   security, since the tables the app hides keep it with no policy and a copy would else get them empty. It may clear
+   its own search path, as a subscription and pg_dump do before anything else. It writes nothing, makes nothing and
+   moves no sequence. */
 const replicaStatement = (verifier: string): string => `DO $replica$
 DECLARE
   verifier text := '${verifier}';
@@ -50,6 +55,7 @@ BEGIN
   ELSE
     EXECUTE format('CREATE ROLE ${REPLICA_ROLE} LOGIN REPLICATION BYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD %L', verifier);
   END IF;
+  GRANT EXECUTE ON FUNCTION ${SET_CONFIG} TO ${REPLICA_ROLE};
   FOREACH wanted IN ARRAY ARRAY[${SCHEMAS.map(name => `'${name}'`).join(', ')}] LOOP
     IF EXISTS (SELECT FROM pg_catalog.pg_namespace WHERE nspname = wanted) THEN
       EXECUTE format('GRANT USAGE ON SCHEMA %I TO ${REPLICA_ROLE}', wanted);

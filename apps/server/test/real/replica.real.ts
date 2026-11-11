@@ -1,6 +1,7 @@
 /* eslint-disable hornhoof/no-ddl-on-shared-database -- These run on Postgres databases the file makes and drops, shared with no other test. */
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PUBLIC_REVOKES } from '../../src/db/agent-sql.js';
 import { migrateDb } from '../../src/db/client.js';
 import { keeperSql } from '../../src/modules/keeper/lease-store.js';
 import { ensurePublication, ensureReplica, PUBLICATION, REPLICA_ROLE, replicaPassword, replicaReady } from '../../src/modules/keeper/replica.js';
@@ -136,6 +137,31 @@ describe("the role a copy reads another machine's database with", () => {
     expect(await asReplica(empty.url, PASSWORD, 'SELECT count(*)::int AS n FROM net.journal')).toEqual([{ n: 0 }]);
     await there.close();
     await elsewhere.close();
+  });
+
+  it('clears its search path where the app took that from everyone else', async () => {
+    const taken = await realDatabase();
+    try {
+      await taken.admin.query('CREATE SCHEMA net; CREATE TABLE net.journal (id int PRIMARY KEY)');
+      const there = keeperSql(taken.url, { timeoutMs: 20_000 });
+      /* The app's start takes this function from everyone, and a subscription and pg_dump both call it first. */
+      await taken.admin.query(PUBLIC_REVOKES);
+      const CLEAR = "SELECT pg_catalog.set_config('search_path', '', false) AS path";
+      await make(taken.url, PASSWORD);
+      expect(await asReplica(taken.url, PASSWORD, CLEAR)).toEqual([{ path: '' }]);
+      expect(await replicaReady(there)).toBe(true);
+      /* A database whose role lost the right, as one made ready by a build before, is not ready, and is set right. */
+      await taken.admin.query(`REVOKE EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) FROM ${REPLICA_ROLE}`);
+      expect(await asReplica(taken.url, PASSWORD, CLEAR)).toBe('42501');
+      expect(await replicaReady(there)).toBe(false);
+      await make(taken.url, PASSWORD);
+      expect(await replicaReady(there)).toBe(true);
+      /* Nothing else the app refuses comes back with it. */
+      expect(await asReplica(taken.url, PASSWORD, 'SELECT pg_reload_conf()')).toBe('42501');
+      await there.close();
+    } finally {
+      await taken.drop();
+    }
   });
 
   it('publishes only tables a copy can follow', async () => {
