@@ -173,9 +173,14 @@ export class TelegramBots {
 
   constructor(private readonly ctx: Ctx) {}
 
+  /* A server that cannot read its bots still starts, without them, as it does without its public link's settings. */
   async start(): Promise<void> {
     this.started = true;
-    for (const bot of await this.ctx.db.select().from(telegramBots)) this.listen(bot);
+    try {
+      for (const bot of await this.ctx.db.select().from(telegramBots)) this.listen(bot);
+    } catch (err) {
+      this.ctx.log.error({ error: loggable(err) }, 'Could not start the Telegram bots.');
+    }
   }
 
   async stop(): Promise<void> {
