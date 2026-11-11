@@ -1,6 +1,5 @@
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { administers } from '../../auth/decision-owner.js';
 import { personColumns, type Person } from '../../auth/session.js';
 import { agents, assistantRequests, assistants, departments, people, requests } from '../../db/schema.js';
 import { departmentParty } from '../events/parties.js';
@@ -31,7 +30,7 @@ function viewOf(r: Seen, names: Map<string, string>, depts: Map<string, typeof d
     agent: r.known ? { id: request.agentId, name: names.get(request.agentId) ?? '' } : null,
     department: dept ? departmentParty(dept) : null,
     askedAt: request.createdAt.toISOString(),
-    answerable: r.canAnswer && !administers(request.decisionTopic),
+    answerable: r.canAnswer,
   };
 }
 

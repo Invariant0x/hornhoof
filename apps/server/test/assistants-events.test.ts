@@ -5,6 +5,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { agents, assistantEvents, companies, departments, people, requests } from '../src/db/schema.js';
 import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
+import { cardPrincipal } from '../src/modules/conversation/decision-context.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
 
@@ -123,17 +124,18 @@ describe("an assistant's events", () => {
     expect((await c.app.inject({ url: '/api/assistant/requests', ...bearer(ava.key) })).json().requests).toEqual([]);
   });
 
-  it('show a request about administering the company, which only the owner answers', async () => {
+  it('show a request about administering the company, which the assistant answers as its owner would', async () => {
     const c = await company();
     const task = await aTask(c);
     const asked = (await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'May I use the Mac mini?', topic: 'machines' })).request;
     const ava = await assistantOf(c, c.owner.id);
     await until(async () => (await eventsOf(c, ava.key)).length > 0);
-    expect((await eventsOf(c, ava.key))[0]!.data).toMatchObject({ request: { id: asked.id, topic: 'machines', answerable: false } });
-    const refused = await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Yes.' }, ...bearer(ava.key) });
-    expect(refused.statusCode).toBe(403);
-    expect(refused.json().error.reason).toBe('assistant_not_allowed');
-    expect((await c.db.select().from(requests).where(eq(requests.id, asked.id)))[0]!.status).toBe('open');
+    expect((await eventsOf(c, ava.key))[0]!.data).toMatchObject({ request: { id: asked.id, topic: 'machines', answerable: true } });
+    const answered = await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Yes.' }, ...bearer(ava.key) });
+    expect(answered.statusCode).toBe(200);
+    expect((await c.db.select().from(requests).where(eq(requests.id, asked.id)))[0]).toMatchObject({ status: 'answered', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
+    /* The machine's card goes by the owner's answer, as when they gave it themselves. */
+    expect(await cardPrincipal(c.db, c.acme.id, asked.id)).toBe(c.owner.id);
   });
 
   it('go to their own assistant alone, and a request only to the assistant of the person it waits for', async () => {

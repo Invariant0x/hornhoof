@@ -9,7 +9,7 @@ import { orchestratorHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { decisionPrincipal, ON_ASSISTANT_WORD, withInputLock } from '../conversation/decision-context.js';
+import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
 import { departmentWaitPolicies } from '../departments/wait-policy-routes.js';
 import { personParty } from '../events/parties.js';
@@ -201,9 +201,7 @@ const NO_PERSON = 'This turn answers no person who may change this: the last mes
 export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
   const asPerson = (url: string, payload: object) =>
     withInputLock(ctx, job.agentId, async () => {
-      const principal = await decisionPrincipal(ctx.db, job.id);
-      if (principal?.byAssistant) return say(ON_ASSISTANT_WORD, true);
-      const personId = principal?.personId;
+      const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
       if (!personId) return say(NO_PERSON, true);
       const res = await app.inject({ method: 'PUT', url, headers: orchestratorHeaders(personId, job.agentId), payload });
       if (res.statusCode < 400) return say(res.body);

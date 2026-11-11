@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
-import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, ON_ASSISTANT_WORD, onAssistantWord, withInputLock } from '../conversation/decision-context.js';
+import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
@@ -83,8 +83,6 @@ const PERMISSION = {
 
 /* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
-/* The decisions that administer the company: never on an assistant's word. */
-const ADMINISTERS = new Set(['build_structure', 'hire']);
 const NO_PRINCIPAL =
   'This turn answers no person who may take a decision now: the last message in it came from an employee or from Hornhoof, or words for it are still on their way. ' +
   'Nothing was changed. Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it, or to tell you so in this window.';
@@ -389,7 +387,6 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
    in a task's card it names. */
 function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
   return withInputLock(ctx, job.agentId, async () => {
-    if (await onAssistantWord(ctx.db, job.id)) return say(ON_ASSISTANT_WORD, true);
     if (made.department) {
       const runs = await departmentPrincipal(ctx.db, job.id, made.department);
       return runs ? send(ctx, app, job, made, runs) : say(ONLY_DEPARTMENT_OWNER, true);
@@ -415,7 +412,7 @@ async function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string,
       return say(err instanceof Error ? err.message : 'The internal stuck answer did not go through.', true);
     }
   }
-  if (DECIDES.has(name)) return decide(ctx, app, job, made, ADMINISTERS.has(name));
+  if (DECIDES.has(name)) return decide(ctx, app, job, made);
   return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made) : send(ctx, app, job, made);
 }
 
@@ -424,10 +421,9 @@ const REFUSED: Record<string, string> = { decision_not_allowed: NOT_THEIRS, deci
 
 /* A decision goes as the person this turn answers, found from the turn itself; the route checks the turn again and that
    person's right while it keeps the decision. */
-async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call, administers: boolean) {
+async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call) {
   const principal = await decisionPrincipal(ctx.db, job.id);
   if (!principal) return say(NO_PRINCIPAL, true);
-  if (administers && principal.byAssistant) return say(ON_ASSISTANT_WORD, true);
   const headers = orchestratorDecisionHeaders({ ...principal, agentId: job.agentId, jobId: job.id });
   const res = await app.inject({ method, url, headers, ...(payload === undefined ? {} : { payload: payload as object }) });
   const refused = REFUSED[reasonOf(res.body) ?? ''];

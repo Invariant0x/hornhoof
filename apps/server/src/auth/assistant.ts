@@ -31,6 +31,5 @@ export async function requireAssistant(req: FastifyRequest, db: Db): Promise<Per
   return { ...owner, assistant: { id: row.id, name: row.name } };
 }
 
-/* Whether the person sees the whole company: the CEO, the CEO delegate, or access to all of it. Only then does their
-   assistant write to the orchestrator. */
+/* Whether the person sees the whole company: the CEO, the CEO delegate, or access to all of it. */
 export const wholeCompany = (me: Person): boolean => actsAsCeo(me) || me.scopeKind === 'company';

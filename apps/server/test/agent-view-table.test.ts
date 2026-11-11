@@ -143,11 +143,11 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/outbound': 'outbound-views.test.ts: channels and messages of the departments the person may see',
   'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
   'GET /api/assistant/me': "assistants-rights.test.ts: an assistant key, read with its owner's rights as they are now",
-  'GET /api/assistant/agents': "assistants-rights.test.ts: the agents its owner may write to, the orchestrator only with the whole company",
+  'GET /api/assistant/agents': "assistants-rights.test.ts: exactly the agents its owner may write to in the agent's window",
   'POST /api/assistant/messages': "assistants-rights.test.ts, assistants-messages.test.ts: an agent its owner may write to, 403 otherwise",
   'GET /api/assistant/events': 'assistants-events.test.ts: the events of this assistant alone',
   'GET /api/assistant/requests': 'assistants-events.test.ts: the requests that wait for its owner',
-  'POST /api/assistant/requests/:id/answer': 'assistants-events.test.ts: what its owner may answer, never administration, 403 otherwise',
+  'POST /api/assistant/requests/:id/answer': 'assistants-events.test.ts: what its owner may answer, 403 otherwise',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */

@@ -19,8 +19,7 @@ import { departmentNames, visibleDecisions, type Decisions } from './decisions.j
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
-import { delegationOf, lockedFor, ON_ASSISTANT_WORD, onAssistantWord } from '../conversation/decision-context.js';
-import { administers } from '../../auth/decision-owner.js';
+import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { departmentOf } from '../tools/staff.js';
@@ -73,16 +72,6 @@ export const AnswerBody = z.union([
 
 const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
 
-const assistantRefused = (message: string) => new ApiError(403, 'forbidden', message, 'assistant_not_allowed');
-
-/* What administers the company is answered by a person themselves: never by their assistant, nor by the orchestrator on
-   their assistant's word. */
-async function guardAdministration(db: Ctx['db'], me: Person, found: typeof requests.$inferSelect, on: ReturnType<typeof delegationOf>): Promise<void> {
-  if (!administers(found.decisionTopic)) return;
-  if (me.assistant) throw assistantRefused(`This request is about administering the company, so only ${me.name} answers it, in Hornhoof.`);
-  if (on && (await onAssistantWord(db, on.jobId))) throw assistantRefused(ON_ASSISTANT_WORD);
-}
-
 /* A person's answer to an open request, given on their screen, by the orchestrator for them or by their assistant. */
 export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.infer<typeof AnswerBody>) {
   const { db } = ctx;
@@ -93,7 +82,6 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
   /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
   const on = delegationOf(me);
-  await guardAdministration(db, me, found, on);
   requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
   const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on, me.assistant ? { assistant: me.assistant.id } : {}));
   await wakeAll(ctx, done.wakes);

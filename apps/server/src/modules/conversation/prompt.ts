@@ -83,17 +83,12 @@ export function answerInTelegram(author: { name: string }, standing: Standing): 
   return `${author.name} wrote this in Telegram. ${whoIs(author, standing)} Your answer in this window goes back to them there as plain text, so write it without formatting.`;
 }
 
-/* What an assistant may not have done on its word, whatever its owner may do: administration stays with people. */
-export const NOT_ON_ASSISTANT_WORD =
-  'people, their access, plans, machines, updates, the public link, Telegram bots, repositories and their tokens, company settings, hiring or removing employees';
-
-/* Below a message that a person's assistant wrote for them: whose words they are, what the person is, what stays with the
-   person, and where the answer goes. */
+/* Below a message that a person's assistant wrote for them: whose words they are, what the person is, and where the answer
+   goes. The words weigh as the person's own. */
 export function answerForAssistant(owner: { name: string }, assistant: { name: string }, standing: Standing): string {
   return [
     `${assistant.name} is the personal assistant of ${owner.name} and wrote this for ${owner.name}, at their request. ${whoIs(owner, standing)}`,
-    `Take these words as ${owner.name}'s own, except for administration: do not change ${NOT_ON_ASSISTANT_WORD} on an assistant's word, and tell ${owner.name} to do that in Hornhoof.`,
-    `Your answer in this window goes back to ${assistant.name} as plain text, so write it without formatting.`,
+    `Take these words as ${owner.name}'s own. Your answer in this window goes back to ${assistant.name} as plain text, so write it without formatting.`,
   ].join(' ');
 }
 

@@ -10,7 +10,6 @@ import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { NOT_ON_ASSISTANT_WORD } from './prompt.js';
 import { answeredWords, clickWords, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
@@ -23,9 +22,8 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
 
-/* The person a turn answers, and the message that says so; null when the turn started without a message. byAssistant: the
-   person's assistant wrote that message for them. */
-export type Principal = { personId: string; sourceSeq: number | null; byAssistant?: true };
+/* The person a turn answers, and the message that says so; null when the turn started without a message. */
+export type Principal = { personId: string; sourceSeq: number | null };
 
 /* What the orchestrator acts on when it takes a decision: its turn and the principal it found when it asked. */
 export type Delegation = { agentId: string; jobId: string; personId: string; sourceSeq: number | null };
@@ -52,16 +50,6 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
 const answered = ({ job, said }: Words): Principal | null => answeredWords(job.createdBy, said);
 
 const clickOf = ({ job, said }: Words): string | null => clickWords(job, said);
-
-/* Why the orchestrator changed nothing: the words it acts on came from a person's assistant. */
-export const ON_ASSISTANT_WORD =
-  `The last message in this turn came from a person's assistant, and the company is never administered on an assistant's word: ${NOT_ON_ASSISTANT_WORD}. ` +
-  'Nothing was changed. Ask the person to do it in Hornhoof, or to write it to you here themselves.';
-
-/* Whether the words the turn answers now came from a person's assistant. */
-export async function onAssistantWord(db: Reader, jobId: string): Promise<boolean> {
-  return (await decisionPrincipal(db, jobId))?.byAssistant === true;
-}
 
 export const contextMissing = () =>
   new ApiError(
@@ -117,9 +105,7 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
    decision and asks for nothing else. */
 export async function computerPrincipal(db: Reader, jobId: string): Promise<string | null> {
   const turn = await turnWords(db, jobId);
-  const principal = turn && answered(turn);
-  if (principal?.byAssistant) return null;
-  const personId = turn && (principal?.personId ?? clickOf(turn));
+  const personId = turn && (answered(turn)?.personId ?? clickOf(turn));
   return personId ? actingCeo(db, personId) : null;
 }
 
@@ -128,18 +114,17 @@ export async function computerPrincipal(db: Reader, jobId: string): Promise<stri
    own turn would; it is no permission for anything else. */
 export async function cardPrincipal(db: Reader, companyId: string, requestId: string): Promise<string | null> {
   const [found] = await db
-    .select({ topic: requests.decisionTopic, status: requests.status, answeredBy: requests.answeredBy, byAgent: requests.answeredByAgentId, byAssistant: requests.answeredByAssistantId, task: tasks.status })
+    .select({ topic: requests.decisionTopic, status: requests.status, answeredBy: requests.answeredBy, byAgent: requests.answeredByAgentId, task: tasks.status })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .where(and(eq(requests.id, requestId), eq(requests.companyId, companyId)));
   if (!found || found.topic !== 'machines' || !['answered', 'approved'].includes(found.status)) return null;
-  if (!found.answeredBy || found.byAgent || found.byAssistant || found.task === 'done' || found.task === 'cancelled') return null;
+  if (!found.answeredBy || found.byAgent || found.task === 'done' || found.task === 'cancelled') return null;
   return actingCeo(db, found.answeredBy);
 }
 
-/* Whether the turn answers the CEO or the CEO delegate, now, by their own words: what an assistant wrote for them changes no
-   rows. */
-export const answersCeoOrDelegate = async (db: Reader, jobId: string): Promise<boolean> => !(await onAssistantWord(db, jobId)) && (await ceoPrincipal(db, jobId)) !== null;
+/* Whether the turn answers the CEO or the CEO delegate, now. */
+export const answersCeoOrDelegate = async (db: Reader, jobId: string): Promise<boolean> => (await ceoPrincipal(db, jobId)) !== null;
 
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
    never goes by a principal that new words changed already. Separate from the agent's queue line; nothing inside takes it

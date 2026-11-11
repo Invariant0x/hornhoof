@@ -49,8 +49,9 @@ describe("an assistant's message", () => {
     expect(run.prompt).toContain('From Ivan (CEO) through the assistant Ava to Orchestrator:');
     expect(run.prompt).toContain('Plan the launch for next week.');
     expect(run.prompt).toContain("Ava is the personal assistant of Ivan and wrote this for Ivan, at their request. Ivan is the company's owner (the CEO).");
-    expect(run.prompt).toContain("Take these words as Ivan's own, except for administration");
-    expect(run.prompt).toContain('hiring or removing employees');
+    expect(run.prompt).toContain("Take these words as Ivan's own. Your answer in this window goes back to Ava as plain text");
+    expect(run.prompt).not.toContain('except for administration');
+    expect(run.prompt).not.toContain('hiring or removing employees');
     const events = (await c.app.inject({ url: '/api/agents/orchestrator/events', ...as(c.ceo) })).json().events;
     expect(events[0]).toMatchObject({ kind: 'message', person: { id: c.owner.id }, data: { text: 'Plan the launch for next week.' }, message: { channel: 'assistant', assistant: { id: ava.id, name: 'Ava' } } });
   });
@@ -67,7 +68,7 @@ describe("an assistant's message", () => {
     expect(run.prompt).toContain("Max is the personal assistant of Sara and wrote this for Sara, at their request. Sara is responsible for your department.");
   });
 
-  it('answers the questions its owner takes, but never one about administering the company', async () => {
+  it('answers the questions its owner takes, one about administering the company too, recorded as the assistant\'s', async () => {
     const c = await company();
     const { task } = await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Leads', brief: '', body: 'Find leads.', departmentId: c.sales.id, assigneeAgentId: c.worker.id, executor: true });
     const work = (await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which region first?', topic: 'task' })).request;
@@ -76,9 +77,9 @@ describe("an assistant's message", () => {
     expect((await write(c, ava.key, c.worker.id, 'Start with Europe.')).statusCode).toBe(202);
     const [answered] = await c.db.select().from(requests).where(eq(requests.id, work.id));
     expect(answered).toMatchObject({ status: 'answered', answer: 'Start with Europe.', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
-    expect((await c.db.select().from(requests).where(eq(requests.id, machine.id)))[0]!.status).toBe('open');
-    const [line] = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));
-    expect(line!.data).toMatchObject({ requestId: work.id, assistantId: ava.id });
+    expect((await c.db.select().from(requests).where(eq(requests.id, machine.id)))[0]).toMatchObject({ status: 'answered', answeredBy: c.owner.id, answeredByAssistantId: ava.id });
+    const lines = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));
+    expect(lines.map(l => l.data)).toEqual(expect.arrayContaining([expect.objectContaining({ requestId: work.id, assistantId: ava.id }), expect.objectContaining({ requestId: machine.id, assistantId: ava.id })]));
   });
 
   it('is refused while the agent cannot answer, and for no words', async () => {

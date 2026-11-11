@@ -23,7 +23,7 @@ import { agents, attachments, companies, jobs, people, requests, subscriptions, 
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
-import { administers, type DecisionSubject } from '../../auth/decision-owner.js';
+import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
@@ -1423,9 +1423,8 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     .orderBy(asc(requests.createdAt));
   const wakes: Wake[] = [];
   for (const r of open) {
-    /* Only what this person may take: the words still reach the agent, and someone else's question stays open. What
-       administers the company waits for the person themselves, whatever their assistant wrote. */
-    if (!takes(person, access, r) || (assistant && administers(r.decisionTopic))) continue;
+    /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
+    if (!takes(person, access, r)) continue;
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
       wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);

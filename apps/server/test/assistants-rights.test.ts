@@ -97,7 +97,7 @@ describe('whom an assistant may write to', () => {
     expect(await reach(c, (await assistantOf(c, 'lisa')).key)).toEqual({ crew: (Object.keys(c.crew) as Crew[]).sort(), orchestrator: true });
   });
 
-  it("a department owner's: that department's head and employees, never the orchestrator nor another department", async () => {
+  it("a department owner's: that department's head and employees, as the owner's window has it", async () => {
     const c = await aclCompany();
     const { key } = await assistantOf(c, 'olga');
     expect(await reach(c, key)).toEqual({ crew: ['head', 'mine', 'other', 'owned'], orchestrator: false });
@@ -110,6 +110,19 @@ describe('whom an assistant may write to', () => {
   it("a listed person's: the employees on their plan where they work, as their window has it", async () => {
     const c = await aclCompany();
     expect(await reach(c, (await assistantOf(c, 'ann')).key)).toEqual({ crew: ['mine'], orchestrator: false });
+  });
+
+  it("is exactly whom its owner writes to in the agent's window, for everyone", async () => {
+    const c = await aclCompany();
+    const everyone = [c.orchestrator, ...Object.values(c.crew)];
+    for (const owner of Object.keys(c.tokens) as Viewer[]) {
+      const { key } = await assistantOf(c, owner);
+      const listed = new Set((await asAssistant(c, key, '/api/assistant/agents')).json().agents.map((a: { id: string }) => a.id));
+      for (const agent of everyone) {
+        const window = (await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.tokens[owner]) })).statusCode === 200;
+        expect(listed.has(agent.id), `${owner}: ${agent.name}`).toBe(window);
+      }
+    }
   });
 
   it('names each agent with its kind, role and department', async () => {

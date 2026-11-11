@@ -103,9 +103,11 @@ describe('templates', () => {
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) for (const skill of ['dev-tdd', 'dev-worktrees']) expect(templates.roles.get(id)!.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
   });
 
-  it("has heads take a person's assistant's words as the person's own, except for administering the company", () => {
-    expect(body('hh-lead-tasks')).toMatch(/"through the assistant"[^\n]*as its owner's own[^\n]*with one exception/);
-    expect(body('hh-lead-tasks')).toMatch(/on an assistant's word never change people or their access[^\n]*never hire or remove employees[^\n]*in Hornhoof themselves/);
+  it("has heads take a person's assistant's words as the person's own, with nothing left out", () => {
+    const paragraph = body('hh-lead-tasks').split('\n').find(line => line.includes('"through the assistant"'));
+    expect(paragraph).toMatch(/weigh them as you weigh that person's words in your window/);
+    expect(paragraph).toMatch(/goes back to the assistant as plain text/);
+    expect(paragraph).not.toMatch(/exception|never change|never hire/);
   });
 
   it('keeps task tools, waits, evidence and communication available without a role workflow', () => {

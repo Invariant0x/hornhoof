@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot } from '../../auth/access.js';
-import { seesAgent, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
+import { canViewAgent, seesAgent, viewerOf } from '../../auth/agent-view.js';
 import { requireAssistant, wholeCompany } from '../../auth/assistant.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
@@ -22,18 +22,12 @@ export const LONGEST_WAIT_S = 50;
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
 const IdParams = z.object({ id: z.uuid() });
 
-/* Whether the assistant may write to this agent: its owner may in the agent's window, and the orchestrator only for an owner
-   who sees the whole company. */
-function mayWrite(me: Person, viewer: AgentViewer, agent: AgentRow, spot: Awaited<ReturnType<typeof agentSpot>>): boolean {
-  if (agent.kind === 'orchestrator' && !wholeCompany(me)) return false;
-  return seesAgent(viewer, { subscriptionId: agent.subscriptionId, spot });
-}
-
-/* The agents of the company the assistant may write to now, in the order they were hired. */
+/* The assistant writes to exactly the agents its owner writes to in the agent's window: the window's own check, with the
+   owner's rights as they are now. The agents of the company it may write to, in the order they were hired. */
 async function writable(ctx: Ctx, me: Person): Promise<AgentRow[]> {
   const viewer = await viewerOf(ctx.db, me);
   const all = await ctx.db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt))).orderBy(agents.createdAt);
-  const open = await Promise.all(all.map(async a => mayWrite(me, viewer, a, await agentSpot(ctx.db, a))));
+  const open = await Promise.all(all.map(async a => seesAgent(viewer, { subscriptionId: a.subscriptionId, spot: await agentSpot(ctx.db, a) })));
   return all.filter((_, i) => open[i]);
 }
 
@@ -41,7 +35,7 @@ async function writable(ctx: Ctx, me: Person): Promise<AgentRow[]> {
 async function writableAgent(ctx: Ctx, me: Person, id: string): Promise<AgentRow> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
   if (!agent) throw new ApiError(404, 'not_found', 'This employee does not exist.', 'agent_unknown');
-  if (!mayWrite(me, await viewerOf(ctx.db, me), agent, await agentSpot(ctx.db, agent))) {
+  if (!(await canViewAgent(ctx.db, me, agent))) {
     throw new ApiError(403, 'forbidden', 'The person this assistant belongs to does not write to this agent, so neither does the assistant.', 'assistant_agent_refused');
   }
   return agent;
@@ -75,7 +69,7 @@ async function agentView(ctx: Ctx, agent: AgentRow, depts: Map<string, typeof de
 }
 
 /* What a person's assistant does for them, with its key: reads who it is for and whom it may write to, writes to agents,
-   reads what happened since, and answers what waits for its owner. Nothing here administers the company. */
+   reads what happened since, and answers what waits for its owner, all with the owner's rights. */
 export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 

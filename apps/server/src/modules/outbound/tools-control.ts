@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorHeaders } from '../../auth/internal.js';
-import { decisionPrincipal, ON_ASSISTANT_WORD, withInputLock } from '../conversation/decision-context.js';
+import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import type { ToolJob } from '../tools/job.js';
 
 /* What the orchestrator does for the person its turn answers, through the route the screen calls and within what that person
@@ -18,9 +18,7 @@ const Name = z.string().trim().min(1).max(200);
 export function registerOutboundControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
   const asPerson = (url: string, payload: object) =>
     withInputLock(ctx, job.agentId, async () => {
-      const principal = await decisionPrincipal(ctx.db, job.id);
-      if (principal?.byAssistant) return say(ON_ASSISTANT_WORD, true);
-      const personId = principal?.personId;
+      const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
       if (!personId) return say(NO_PERSON, true);
       const res = await app.inject({ method: 'POST', url, headers: orchestratorHeaders(personId, job.agentId), payload });
       if (res.statusCode < 400) return say(res.body);
