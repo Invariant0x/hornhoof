@@ -37,10 +37,12 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 /* New defaults and the operation id of an open wait, while retaining every preexisting field. */
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
-  /* Every head and member gets the speed skill its role lists. */
-  if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
+  /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty. */
+  if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
   /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. */
   if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0 } }));
+  /* The same for a job and a part of a test run: none ran on a machine's built-in node before there were any. */
+  if (table === 'jobs' || table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
   /* Migration 0098 gives every person an empty Telegram. */
   if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null } }));
   if (table !== 'tasks') return rows;
