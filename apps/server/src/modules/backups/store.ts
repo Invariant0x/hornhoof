@@ -145,6 +145,7 @@ export class BundleStore {
       }, idleMs);
     };
     watch();
+    const file = createWriteStream(part, { flags: 'wx', mode: 0o600, highWaterMark: OVER });
     try {
       await pipeline(
         rest,
@@ -157,9 +158,11 @@ export class BundleStore {
             yield chunk;
           }
         },
-        createWriteStream(part, { flags: 'wx', mode: 0o600, highWaterMark: OVER }),
+        file,
       );
     } catch (err) {
+      /* A file cut before it was open is still made a moment later: only once it is closed can it be removed. */
+      if (!file.closed) await new Promise<void>(resolve => file.once('close', resolve).destroy());
       throw cut ?? (err instanceof BundleRefused ? err : new BundleRefused('size', 'The bundle broke off before its end.'));
     } finally {
       clearTimeout(idle);

@@ -68,6 +68,18 @@ describe('a store of bundles', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('leaves no file behind of a bundle it cuts at its first piece', async () => {
+    const s = await sealer();
+    const store = new BundleStore(folder());
+    const dir = (store as unknown as { dir: string }).dir;
+    /* Longer than signed, and all there at once: it is cut before its file is even open. */
+    for (let n = 0; n < 5; n += 1) {
+      const long = await s.seal(new Date(), 2000);
+      expect(await reasonOf(store.take(Readable.from([Buffer.concat([long.whole, randomBytes(64)])]), s.check))).toBe('size');
+      expect(readdirSync(dir)).toEqual([]);
+    }
+  });
+
   it('takes each bundle once, whole', async () => {
     const s = await sealer();
     const store = new BundleStore(folder());
