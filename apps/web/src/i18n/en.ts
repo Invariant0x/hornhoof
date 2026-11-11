@@ -214,6 +214,7 @@ export const en = {
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',
     ownerKeyMake: 'Hornhoof makes your own key now, once. The command carries it to your machine, so that only you can open that machine to the orchestrator. Enter your password.',
+    ownerKeyUnlock: 'Enter your password once on this device to sign with your key.',
     ownerKeyWrong: 'Wrong password.',
     ownerKeyMaking: 'Making your key',
     ownerKeyNeeded: 'This command carries your key, so it shows once you enter your password.',

@@ -1,7 +1,7 @@
-import { createPublicKey, webcrypto } from 'node:crypto';
+import { createPublicKey, verify, webcrypto } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { api } from '../src/api';
-import { deviceKey, forgetOwnerKey, keyDefaults, makeKey, serverKey, withOwnerKey } from '../src/owner-key';
+import { deviceKey, forgetOwnerKey, keyDefaults, makeKey, serverKey, signGrant, unlockKey, withOwnerKey, type StoredKey } from '../src/owner-key';
 import { mockApi, TEST_KEY } from './api-mock';
 
 const { subtle } = webcrypto;
@@ -101,3 +101,43 @@ async function makeKeyAgain(): Promise<void> {
   mockApi({});
   await makeKey('correct horse battery');
 }
+
+describe('the key on another device, and what it signs', () => {
+  /* The key as the server keeps it after the browser made it, and nothing of it on this device: another device. */
+  async function elsewhere(password: string): Promise<StoredKey> {
+    const calls = mockApi({});
+    await makeKey(password);
+    const sent = calls.find(call => call.method === 'PUT')!.body as Sent;
+    await keyDefaults.store.clear();
+    return { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations };
+  }
+
+  it('unlocks with the password only', async () => {
+    const stored = await elsewhere('correct horse battery');
+    expect(await unlockKey(stored, 'another password')).toBeNull();
+    expect(await keyDefaults.store.get()).toBeNull();
+    const key = await unlockKey(stored, 'correct horse battery');
+    expect(key).not.toBeNull();
+    /* It stays on this device as a key that signs and cannot be read out, and is the server's own. */
+    const kept = await keyDefaults.store.get();
+    expect(kept).toMatchObject({ publicKey: stored.publicKey });
+    expect([kept!.privateKey.extractable, kept!.privateKey.usages]).toEqual([false, ['sign']]);
+    expect(await deviceKey(stored)).toBe(kept!.privateKey);
+  });
+
+  it('signs a grant a machine reads', async () => {
+    const stored = await elsewhere('correct horse battery');
+    const key = (await unlockKey(stored, 'correct horse battery'))!;
+    const grant = await signGrant(key, 'a'.repeat(64), 1_800_086_400, 1_800_000_000);
+    /* Exactly the five fields, in this order, as the machine's keeper checks them. */
+    expect(Object.keys(JSON.parse(grant.payload) as object)).toEqual(['v', 'machine', 'until', 'at', 'nonce']);
+    expect(JSON.parse(grant.payload)).toMatchObject({ v: 1, machine: 'a'.repeat(64), until: 1_800_086_400, at: 1_800_000_000 });
+    expect((JSON.parse(grant.payload) as { nonce: string }).nonce).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    /* The signature in its 64 bytes, which Node checks as the keeper does. */
+    expect(bytes(grant.signature)).toHaveLength(64);
+    const read = createPublicKey({ key: bytes(stored.publicKey), format: 'der', type: 'spki' });
+    expect(verify('sha256', Buffer.from(grant.payload, 'utf8'), { key: read, dsaEncoding: 'ieee-p1363' }, bytes(grant.signature))).toBe(true);
+    const again = await signGrant(key, 'a'.repeat(64), 1_800_086_400, 1_800_000_000);
+    expect((JSON.parse(again.payload) as { nonce: string }).nonce).not.toBe((JSON.parse(grant.payload) as { nonce: string }).nonce);
+  });
+});

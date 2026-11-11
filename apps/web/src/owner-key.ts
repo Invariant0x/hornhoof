@@ -47,6 +47,34 @@ export async function makeKey(password: string, deps: Partial<KeyDeps> = {}): Pr
   return key;
 }
 
+const fromBase64url = (text: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(text.replaceAll('-', '+').replaceAll('_', '/')), char => char.charCodeAt(0));
+
+/* On a device that does not keep the person's key yet: what the server holds is opened with the password, once, and the
+   private half stays here as a key that signs and cannot be read out. Null for a password that does not open it. */
+export async function unlockKey(server: StoredKey, password: string, deps: Partial<KeyDeps> = {}): Promise<CryptoKey | null> {
+  const { store, subtle } = { ...keyDefaults, ...deps };
+  const typed = await subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  const wrapping = await subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: fromBase64url(server.salt), iterations: server.iterations }, typed, { name: 'AES-GCM', length: 256 }, false, ['unwrapKey']);
+  let privateKey: CryptoKey;
+  try {
+    privateKey = await subtle.unwrapKey('pkcs8', fromBase64url(server.wrapped), wrapping, { name: 'AES-GCM', iv: fromBase64url(server.iv) }, CURVE, false, ['sign']);
+  } catch {
+    return null;
+  }
+  await store.put({ publicKey: server.publicKey, privateKey });
+  return privateKey;
+}
+
+/* What a machine's owner signs to open it: the machine by its id in the company's network, until when, when it was
+   signed, and a number used once. The machine's keeper checks exactly these words against the key it holds. */
+export type Grant = { payload: string; signature: string };
+
+export async function signGrant(privateKey: CryptoKey, machine: string, untilS: number, nowS: number, deps: Partial<KeyDeps> = {}): Promise<Grant> {
+  const { subtle } = { ...keyDefaults, ...deps };
+  const payload = JSON.stringify({ v: 1, machine, until: untilS, at: nowS, nonce: base64url(crypto.getRandomValues(new Uint8Array(16))) });
+  return { payload, signature: base64url(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(payload))) };
+}
+
 /* A command that joins a machine carries the key of whoever runs it there, so the machine knows its owner from the
    command itself. Any other command stays as it is. */
 export function withOwnerKey(command: string, publicKey: string): string {
