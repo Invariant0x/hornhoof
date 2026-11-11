@@ -11,6 +11,8 @@ import { onTestFinished } from 'vitest';
 const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
 const REV1 = fileURLToPath(new URL('./updater-rev1.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
+/* The statements of a restore, which the updater's image keeps next to it. */
+const SQL = fileURLToPath(new URL('../../updater/', import.meta.url));
 /* The updater reads and writes its files with jq, so these tests take the jq of this machine, wherever it is. */
 export const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
 const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
@@ -58,6 +60,7 @@ const standEnv = (s: Stand, env: Record<string, string>) => ({
   HORNHOOF_SERVER_DIR: s.server,
   HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
   HORNHOOF_HEALTH_WAIT: '1',
+  HORNHOOF_SQL_DIR: SQL,
   ...env,
 });
 

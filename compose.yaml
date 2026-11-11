@@ -53,6 +53,12 @@ services:
       # The system of the computer, as install.sh wrote it down: the keeper tells the company, so a machine's card says
       # what open access reaches there.
       HORNHOOF_HOST_OS: ${HORNHOOF_HOST_OS:-}
+      # The key of the server's nodes, which the keeper of the machine with the data puts into each backup. Under a name
+      # of the keeper's own: a machine without the data has none, and an empty NODE_KEY would stop the keeper.
+      HORNHOOF_NODE_KEY: ${NODE_KEY:-}
+      # How long a server restored after a total loss waits for a machine of the company to answer, in seconds; 600
+      # when empty.
+      HORNHOOF_SURVIVOR_S: ${HORNHOOF_SURVIVOR_S:-}
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.

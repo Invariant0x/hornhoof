@@ -1,0 +1,67 @@
+import { readFileSync } from 'node:fs';
+import { eq, sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
+import { certificates, companies, departments, invites, machines, people, personAccess, recoveryKeys } from '../src/db/schema.js';
+import type { Carry } from '../src/modules/backups/types.js';
+import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+
+/* What the updater runs on the database a restore replaces, read from where its image takes it. */
+const CARRY = readFileSync(new URL('../../updater/carry.sql', import.meta.url), 'utf8');
+
+describe('the carry of a restore', () => {
+  it('takes the carry when the old database closes', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [department] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    /* Dana was disabled, Eli reaches one department, and Finn has not taken the invite yet. */
+    await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { whole: true } });
+    await invitePerson(app, ceo, { name: 'Eli', email: 'eli@acme.com', access: { whole: true } });
+    const open = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { name: 'Finn', email: 'finn@acme.com', title: '', access: { whole: true } }, ...as(ceo) });
+    expect(open.statusCode).toBe(201);
+    const byName = async (name: string) => (await db.select().from(people).where(eq(people.name, name)))[0]!;
+    const [dana, eli, finn] = [await byName('Dana'), await byName('Eli'), await byName('Finn')];
+    await db.update(people).set({ status: 'disabled' }).where(eq(people.id, dana.id));
+    await db.delete(personAccess).where(eq(personAccess.personId, eli.id));
+    await db.insert(personAccess).values({ companyId: acme!.id, personId: eli.id, departmentId: department!.id });
+    /* An invite that ran out is as closed as one that was used. */
+    await db.insert(invites).values({ tokenHash: hashToken('ran out'), companyId: acme!.id, personId: finn.id, createdBy: owner!.id, expiresAt: new Date(Date.now() - 1000) });
+    const [live, gone] = await db.insert(machines).values([
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'live', networkId: hashToken('live'), role: 'worker', lendsTests: false },
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'gone', networkId: hashToken('gone'), role: 'worker', revokedAt: new Date(), keepsBackups: false },
+    ]).returning();
+    const later = new Date(Date.now() + 86_400_000);
+    await db.insert(certificates).values([
+      { serial: 'aa01', machineId: live!.id, until: later },
+      { serial: 'bb02', machineId: gone!.id, until: later, revokedAt: new Date() },
+    ]);
+    const [retired, active] = await db.insert(recoveryKeys).values([
+      { companyId: acme!.id, recipient: 'age1retired', madeBy: owner!.id, retiredAt: new Date() },
+      { companyId: acme!.id, recipient: 'age1active', linkPrint: 'ab'.repeat(32), linkName: 'acme', linkUrl: 'https://acme.hornhoof.org', madeBy: owner!.id },
+    ]).returning();
+
+    const answered = (await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] };
+    expect(answered.rows).toHaveLength(1);
+    const carry = Object.values(answered.rows[0]!)[0] as Carry;
+
+    const person = (id: string) => carry.people.find(one => one.id === id)!;
+    expect(carry.people).toHaveLength(4);
+    expect(person(owner!.id)).toMatchObject({ status: 'active', isOwner: true, passwordHash: owner!.passwordHash, scopeKind: owner!.scopeKind });
+    expect(person(dana.id)).toMatchObject({ status: 'disabled', isOwner: false, passwordHash: dana.passwordHash });
+    expect(person(eli.id).access).toEqual([{ departmentId: department!.id, teamId: null }]);
+    expect(person(finn.id)).toMatchObject({ status: 'invited', passwordHash: null });
+    const [openInvite] = await db.select().from(invites).where(sql`${invites.personId} = ${finn.id} AND ${invites.expiresAt} > now()`);
+    expect(carry.invites).toEqual([openInvite!.tokenHash]);
+    const machine = (id: string) => carry.machines.find(one => one.id === id);
+    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true });
+    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false });
+    expect(carry.serials).toEqual(['bb02']);
+    const key = (id: string) => carry.recoveryKeys.find(one => one.id === id)!;
+    expect(carry.recoveryKeys).toHaveLength(2);
+    expect(key(active!.id)).toMatchObject({ recipient: 'age1active', linkPrint: 'ab'.repeat(32), linkName: 'acme', linkUrl: 'https://acme.hornhoof.org', madeBy: owner!.id, retiredAt: null });
+    expect(new Date(key(active!.id).madeAt).getTime()).toBe(active!.madeAt.getTime());
+    expect(new Date(key(retired!.id).retiredAt!).getTime()).toBe(retired!.retiredAt!.getTime());
+  });
+});

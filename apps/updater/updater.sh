@@ -39,6 +39,15 @@
 # the machine's keeper writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout};
 # this answers computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
 #
+# It also works for the keeper's backups, on the machine that keeps the company's data. The keeper asks for a dump of
+# the database with dump.json {id} and seals what it finds in dumps/. To restore a backup the keeper writes restore.json
+# {attempt, id, dumpedAt, carry} once restore/<attempt>.sql.gz and restore/<attempt>.env.json are whole. This loads the
+# dump into a database of its own, closes the one in use, renames it to hornhoof_before_<stamp> and the loaded one into
+# its place, writes the backup's three settings into .env, and starts the company; each step goes to
+# restore-status.json. It notes every change in restore-journal.json, with the number the database server knows the
+# old database by, so whatever stops it, the next start puts everything back as it was, or goes on when the swap was
+# done. The old database is never removed here.
+#
 # With HORNHOOF_ROLE=worker it runs on a machine that keeps none of the company's data. There the keeper writes
 # request.json for the build the company server runs. This downloads it, says so with the step wait, and installs once
 # the keeper passes on the server's word in go.json {id, commit, until}: the request's id, its tag, and the second the
@@ -96,6 +105,8 @@ ADDRESSES_AT=0
 # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
 COMPUTER_MAX=1800
 COMPUTER_OUTPUT=30000
+# Where the statements of a restore lie in this image: cutover.sql, carry.sql and adopt.sql.
+SQL_DIR="${HORNHOOF_SQL_DIR:-/usr/local/share/hornhoof-updater}"
 
 ID=''
 VERSION=''
@@ -123,6 +134,17 @@ NODES_FREE=''
 NODES_ONLY=''
 NODES_AT=0
 NOTE_REV=''
+# The restore being run: its attempt, the backup's id and time, the stamp its copies go by, the number the database
+# server gives the database that was in use, the db container, why a swap failed, and what was said once already.
+R_ATTEMPT=''
+R_ID=''
+R_DUMPED=''
+R_STAMP=''
+R_OLD=''
+DBC=''
+SWAP_LINE=''
+JOURNAL_SAID=''
+BACK_SAID=''
 
 say() {
   printf '%s\n' "$*"
@@ -169,6 +191,12 @@ plain_digest() {
 }
 
 digest_or_none() { [ -z "$1" ] || plain_digest "$1"; }
+
+# An id another program gave, which goes into the names of files here.
+plain_id() {
+  case "$1" in '' | *[!A-Za-z0-9-]*) return 1 ;; esac
+  [ "${#1}" -le 64 ]
+}
 
 # by_digest <repository> <image>: the image is one of that repository's, by its digest alone.
 by_digest() { case "$2" in "$1"@*) plain_digest "${2#"$1"@}" ;; *) return 1 ;; esac; }
@@ -307,21 +335,89 @@ backup() {
   # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
   ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old" "${old%.sql.gz}.tunnel.json"; done
   say "Saved the database to backups/$(basename "$file")."
+  hand_backup || {
+    drop_dump "$ID"
+    say "Could not hand the database copy to the keeper for a backup."
+  }
+}
+
+# How many migrations the database has now; fails when it does not answer.
+migrations() {
+  local db n
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] && n=$(docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null) && [ -n "$n" ] && printf '%s' "$n" | tr -d ' '
 }
 
 # How many migrations the database has, once it answers; empty when it does not within HEALTH_WAIT seconds, as after
 # the computer started again.
 applied() {
-  local db n i=0
+  local i=0
   while [ "$i" -lt "$HEALTH_WAIT" ]; do
-    db=$(compose ps -q db 2> /dev/null || true)
-    if [ -n "$db" ] && n=$(docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null) && [ -n "$n" ]; then
-      printf '%s' "$n" | tr -d ' '
-      return 0
-    fi
+    if migrations; then return 0; fi
     i=$((i + 1))
     sleep 1
   done
+}
+
+# owned <path> <mode>: what this wrote as root becomes the keeper's alone to read and remove. The keeper runs as the
+# owner of the control folder.
+owned() {
+  local owner
+  # shellcheck disable=SC2012 # the owner and the group as numbers, which BusyBox and macOS print alike
+  owner=$(ls -nd "$CONTROL" | awk '{ print $3 ":" $4 }')
+  chmod "$2" "$1" && chown "$owner" "$1"
+}
+
+# The folder the keeper takes dumps of the database from, and seals each into a backup: <id>.sql.gz, and <id>.json
+# {id, reason, at, migrations}, or <id>.failed with a line.
+dumps_dir() { mkdir -p "$CONTROL/dumps" && owned "$CONTROL/dumps" 700; }
+
+# dump_said <id> <reason> <migrations>: written after the dump, so it says the dump is whole.
+dump_said() {
+  local file="$CONTROL/dumps/$1.json"
+  case "$3" in '' | *[!0-9]*) return 1 ;; esac
+  (umask 077 && jq -n --arg id "$1" --arg reason "$2" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson migrations "$3" \
+    '{id: $id, reason: $reason, at: $at, migrations: $migrations}' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+}
+
+# drop_dump <id>: whatever a dump that was not finished left.
+drop_dump() { rm -f "$CONTROL/dumps/$1.sql.gz.part" "$CONTROL/dumps/$1.sql.gz" "$CONTROL/dumps/$1.json.new" "$CONTROL/dumps/$1.json"; }
+
+# The copy taken before an update goes to the keeper too, under the update's id.
+hand_backup() {
+  local file="$CONTROL/dumps/$ID.sql.gz"
+  dumps_dir && (umask 077 && cp "$BACKUP" "$file.part") && owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$ID" update "$BEFORE"
+}
+
+# make_dump <id> <db container>: the database as it is now, for the keeper.
+make_dump() {
+  local file="$CONTROL/dumps/$1.sql.gz" n
+  dumps_dir && n=$(migrations) || return 1
+  (umask 077 && docker exec "$2" pg_dump -U hornhoof -d hornhoof | gzip > "$file.part") || return 1
+  owned "$file.part" 600 && mv "$file.part" "$file" && dump_said "$1" timer "$n"
+}
+
+# dump_failed <id>: nothing of the dump stays, and the keeper reads why.
+dump_failed() {
+  local file="$CONTROL/dumps/$1.failed"
+  drop_dump "$1"
+  dumps_dir && (umask 077 && printf '%s\n' 'The database could not be dumped.' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+}
+
+# The data keeper asks for a dump with dump.json {id}. The request goes once the dump is there, whole or failed; a
+# dump that is there is not made again, so the keeper asks anew under another id.
+dump_request() {
+  local id db
+  [ -f "$CONTROL/dump.json" ] || return 0
+  if worker || [ -z "$SERVER_DIR" ]; then return 0; fi
+  id=$(jq -r '.id // empty' "$CONTROL/dump.json" 2> /dev/null || true)
+  plain_id "$id" || return 0
+  if [ ! -f "$CONTROL/dumps/$id.json" ] && [ ! -f "$CONTROL/dumps/$id.failed" ]; then
+    db=$(compose ps -q db 2> /dev/null || true)
+    [ -n "$db" ] || return 0
+    make_dump "$id" "$db" || dump_failed "$id" || return 0
+  fi
+  rm -f "$CONTROL/dump.json"
 }
 
 # The public link's settings as they are now, next to the database copy, readable by the owner only. A link the
@@ -347,11 +443,16 @@ restore() {
   db=$(compose ps -q db 2> /dev/null || true)
   [ -n "$db" ] || return 1
   compose stop app > /dev/null 2>&1 || true
-  docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
-    -c 'DROP DATABASE IF EXISTS hornhoof_restore' -c 'CREATE DATABASE hornhoof_restore OWNER hornhoof TEMPLATE template0' > /dev/null || return 1
-  gzip -dc "$BACKUP" | docker exec -i "$db" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q > /dev/null || return 1
+  load_copy "$db" "$BACKUP" || return 1
   docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
     -c 'DROP DATABASE IF EXISTS hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
+}
+
+# load_copy <db container> <file>: a copy of the database goes into one of its own, hornhoof_restore, made anew.
+load_copy() {
+  docker exec "$1" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
+    -c 'DROP DATABASE IF EXISTS hornhoof_restore' -c 'CREATE DATABASE hornhoof_restore OWNER hornhoof TEMPLATE template0' > /dev/null || return 1
+  gzip -dc "$2" | docker exec -i "$1" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q > /dev/null || return 1
 }
 
 # unpack <tag> <image>: the installer and the compose file that come inside that build of the app image, in
@@ -705,8 +806,10 @@ go_on() {
   esac
 }
 
-# An update this updater was stopped in, or was handed by an older one, goes on by the note of it.
+# An update this updater was stopped in, or was handed by an older one, goes on by the note of it. A restore it was
+# stopped in goes first.
 interrupted() {
+  if ! worker && [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ]; then restore_left || true; fi
   update_running || return 0
   read_status
   if ! recall; then
@@ -718,6 +821,362 @@ interrupted() {
   rm -rf "$WORK"
   WORK=''
   NODES_FREE=''
+}
+
+# psql_on <database> <arguments>: psql in the db container, which stops at the first statement that fails.
+psql_on() {
+  local name=$1
+  shift
+  docker exec "$DBC" psql -U hornhoof -d "$name" -v ON_ERROR_STOP=1 -q "$@"
+}
+
+# The databases of Hornhoof there are now, as words; fails when the database server does not say.
+db_names() { psql_on postgres -tAc "SELECT COALESCE(string_agg(datname, ' '), '') FROM pg_database WHERE datname LIKE 'hornhoof%'" 2> /dev/null; }
+
+# The stamp a restore's copies go by, as this wrote it: digits and a line, so the name of a database made of it is
+# the same however the database server folds letters.
+plain_stamp() {
+  case "$1" in '' | *[!0-9_]*) return 1 ;; esac
+  [ "${#1}" -eq 15 ]
+}
+
+plain_number() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; }
+
+# The number of the database named hornhoof now. A database keeps its number under every name, so the one that was in
+# use is told by it for good.
+number_in_use() { psql_on postgres -tAc "SELECT oid FROM pg_database WHERE datname = 'hornhoof'" 2> /dev/null; }
+
+# restore_says <state> <step> <line> [kept]: restore-status.json, written whole and then moved.
+restore_says() {
+  printf '%s\n' "$3"
+  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg state "$1" --arg step "$2" --arg line "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg kept "${4:-}" \
+    '{attempt: $attempt, id: $id, state: $state, step: $step, line: $line, at: $at, kept: (if $kept == "" then null else $kept end)}' > "$CONTROL/restore-status.json.new"
+  mv "$CONTROL/restore-status.json.new" "$CONTROL/restore-status.json"
+}
+
+# restore_ended <state> <step> <line> [kept]: the last word of a restore; its order and its journal go.
+restore_ended() {
+  restore_says "$@"
+  rm -f "$CONTROL/restore-journal.json" "$CONTROL/restore.json"
+}
+
+# journal <change>: the last change a restore made, written whole and then moved, so a start after any stop knows what
+# to put back.
+journal() {
+  jq -n --arg attempt "$R_ATTEMPT" --arg id "$R_ID" --arg dumped "$R_DUMPED" --arg stamp "$R_STAMP" --arg old "$R_OLD" --arg did "$1" \
+    '{attempt: $attempt, id: $id, dumpedAt: $dumped, stamp: $stamp, old: $old, did: $did}' > "$CONTROL/restore-journal.json.new" && mv "$CONTROL/restore-journal.json.new" "$CONTROL/restore-journal.json"
+}
+
+# The dump and the settings a restore was given in the clear go in every outcome.
+restore_wipe() { rm -f "$CONTROL/restore/$R_ATTEMPT.sql.gz" "$CONTROL/restore/$R_ATTEMPT.env.json"; }
+
+# The app and the node stop, so nothing writes while the databases change places.
+restore_stop() {
+  local s list=''
+  for s in app node; do
+    if names_service "$SERVER_DIR/compose.yaml" "$s"; then list="$list $s"; fi
+  done
+  # shellcheck disable=SC2086 # the names of services, a word each
+  [ -z "$list" ] || compose stop $list > /dev/null 2>&1 || true
+}
+
+# Every service of the build that runs starts, but the database and this updater: with .env as it is now, so one whose
+# settings changed starts anew.
+restore_up() {
+  local s list=''
+  for s in $(services_of "$SERVER_DIR/compose.yaml"); do
+    case "$s" in db | updater) ;; *) list="$list $s" ;; esac
+  done
+  [ -n "$list" ] || return 1
+  # shellcheck disable=SC2086 # the names of services, a word each
+  compose up -d --no-build $list > /dev/null 2>&1
+}
+
+# The commit the build that runs here was made from; empty for a build made by hand.
+running_commit() {
+  docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -aq "$(main_service)" 2> /dev/null || true)" 2> /dev/null || true
+}
+
+# setting <name> <file>: one of the three settings a backup carries, as the file has it; nothing when it has none. It
+# fails for a value that cannot stand in .env as it is, so none with a control character, a space, a quote, # or $
+# passes. The value never goes on a command line.
+setting() {
+  local value re
+  value=$(jq -r --arg name "$1" '.[$name] // "" | if type == "string" then . else "?" end' "$2" 2> /dev/null && printf x) || return 1
+  # What jq printed, less the line end it added: a value that ends with one of its own keeps it, and does not pass.
+  value=${value%x}
+  value=${value%$'\n'}
+  [ -n "$value" ] || return 0
+  case "$1" in
+    HORNHOOF_SECRET) re='^[A-Za-z0-9+/]{43}=$' ;;
+    NODE_KEY) re='^[A-Za-z0-9+/=_-]{32,200}$' ;;
+    RELAY_URL) re='^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$' ;;
+    *) return 1 ;;
+  esac
+  [[ "$value" =~ $re ]] || return 1
+  printf '%s' "$value"
+}
+
+# as_env <file>: the file becomes the server's settings, with the owner the settings have and for that owner alone.
+as_env() {
+  local owner
+  # shellcheck disable=SC2012 # the owner and the group as numbers, which BusyBox and macOS print alike
+  owner=$(ls -n "$SERVER_DIR/.env" | awk '{ print $3 ":" $4 }')
+  chown "$owner" "$1" && chmod 600 "$1" && mv "$1" "$SERVER_DIR/.env"
+}
+
+# write_env <secret> <node key> <relay>: .env with those over their lines, or added, and every other line as it was.
+# An empty one leaves its line as it is.
+write_env() {
+  local file="$SERVER_DIR/.env"
+  (umask 077 && NEW_SECRET="$1" NEW_NODE_KEY="$2" NEW_RELAY="$3" awk '
+    BEGIN { new["HORNHOOF_SECRET"] = ENVIRON["NEW_SECRET"]; new["NODE_KEY"] = ENVIRON["NEW_NODE_KEY"]; new["RELAY_URL"] = ENVIRON["NEW_RELAY"] }
+    {
+      name = $0
+      sub(/=.*/, "", name)
+      if (index($0, "=") > 0 && (name in new) && new[name] != "") {
+        if (!(name in put)) print name "=" new[name]
+        put[name] = 1
+        next
+      }
+      print
+    }
+    END {
+      if (new["HORNHOOF_SECRET"] != "" && !("HORNHOOF_SECRET" in put)) print "HORNHOOF_SECRET=" new["HORNHOOF_SECRET"]
+      if (new["NODE_KEY"] != "" && !("NODE_KEY" in put)) print "NODE_KEY=" new["NODE_KEY"]
+      if (new["RELAY_URL"] != "" && !("RELAY_URL" in put)) print "RELAY_URL=" new["RELAY_URL"]
+    }' "$file" > "$file.new") && as_env "$file.new"
+}
+
+# A stamp no copy goes by yet, so two restores never meet in one name.
+restore_stamp() {
+  local names
+  while true; do
+    R_STAMP=$(date -u +%Y%m%d_%H%M%S)
+    names=$(db_names) || return 1
+    case " $names " in
+      *" hornhoof_before_$R_STAMP "*) ;;
+      *) [ -e "$SERVER_DIR/backups/env-before-$R_STAMP" ] || return 0 ;;
+    esac
+    sleep 1
+  done
+}
+
+# cutover <with carry> <out>: the database in use closes. One session stays on it, turns nothing off itself, since
+# Postgres lets no session close the database it is on, and reads what the restored one must keep once every other
+# session is gone (cutover.sql, and carry.sql for who may get in now). The connections go off from another session, as
+# soon as that one is seen on the database. Its answers go to <out>, a line each.
+cutover() {
+  local reader seen looks=0
+  {
+    cat "$SQL_DIR/cutover.sql"
+    if [ -n "$1" ]; then cat "$SQL_DIR/carry.sql"; fi
+  } | docker exec -i -e PGAPPNAME=hornhoof-cutover "$DBC" psql -U hornhoof -d hornhoof -v ON_ERROR_STOP=1 -qAt > "$2" 2> /dev/null &
+  reader=$!
+  while kill -0 "$reader" 2> /dev/null && [ "$looks" -lt 60 ]; do
+    seen=$(psql_on postgres -tAc "SELECT count(*) FROM pg_stat_activity WHERE datname = 'hornhoof' AND application_name = 'hornhoof-cutover'" 2> /dev/null || true)
+    if [ "${seen:-0}" != 0 ]; then
+      psql_on postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS false' > /dev/null 2>&1 || true
+      break
+    fi
+    looks=$((looks + 1))
+    sleep 1
+  done
+  wait "$reader"
+}
+
+# keep_carry <out>: who may get in now, for the keeper to put into the restored database, and for it alone to read.
+keep_carry() {
+  local file="$CONTROL/restore-carry.json"
+  (umask 077 && sed -n 2p "$1" | jq -ce --arg attempt "$R_ATTEMPT" 'select(type == "object") | {attempt: $attempt, carry: .}' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
+}
+
+# adopt <term> <machine> <cluster>: the loaded database goes by what the closed one went by (adopt.sql).
+adopt() {
+  {
+    printf '%s\n' "SELECT set_config('hornhoof.term', :'term', false), set_config('hornhoof.machine', :'machine', false), set_config('hornhoof.cluster', :'cluster', false);"
+    cat "$SQL_DIR/adopt.sql"
+  } | docker exec -i "$DBC" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q -v term="$1" -v machine="$2" -v cluster="$3" > /dev/null 2>&1
+}
+
+# restore_swap <with carry>: the loaded database takes the place of the one in use, which is kept as
+# hornhoof_before_<stamp> with its connections off, and the backup's settings go into .env. SWAP_LINE says why it
+# failed.
+restore_swap() {
+  local env="$CONTROL/restore/$R_ATTEMPT.env.json" out="$WORK/cutover.out" secret node_key relay term machine cluster
+  SWAP_LINE="The backup's settings cannot be written, so nothing changed."
+  secret=$(setting HORNHOOF_SECRET "$env") && node_key=$(setting NODE_KEY "$env") && relay=$(setting RELAY_URL "$env") || return 1
+  SWAP_LINE='The databases could not change places, so nothing changed.'
+  restore_stamp || return 1
+  R_OLD=$(number_in_use) && plain_number "$R_OLD" || return 1
+  mkdir -p "$SERVER_DIR/backups" && (umask 077 && cp "$SERVER_DIR/.env" "$SERVER_DIR/backups/env-before-$R_STAMP") || return 1
+  journal saved || return 1
+  SWAP_LINE='The database in use could not be closed, so nothing changed.'
+  cutover "$1" "$out" || return 1
+  journal closed || return 1
+  SWAP_LINE='The databases could not change places, so nothing changed.'
+  term=$(sed -n 1p "$out" | jq -r '.term | select(type == "number") | floor' 2> /dev/null || true)
+  case "$term" in '' | *[!0-9]*) return 1 ;; esac
+  machine=$(sed -n 1p "$out" | jq -r '.machine // empty')
+  cluster=$(sed -n 1p "$out" | jq -r '.cluster // empty')
+  if [ -n "$1" ]; then keep_carry "$out" || return 1; fi
+  adopt "$term" "$machine" "$cluster" || return 1
+  psql_on postgres -c "ALTER DATABASE hornhoof RENAME TO hornhoof_before_$R_STAMP" > /dev/null 2>&1 || return 1
+  journal old_renamed || return 1
+  psql_on postgres -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null 2>&1 || return 1
+  journal new_renamed || return 1
+  write_env "$secret" "$node_key" "$relay" || return 1
+  rm -f "$env"
+  journal committed
+}
+
+# Everything a restore changed goes back, from wherever it got to: it looks at what is there, so it may run again from
+# its start. The database that was in use is told by its number, never by a name. While it goes by another name, the
+# one named hornhoof is the restored one, which is dropped, and it takes its name back; while it cannot be found,
+# nothing is dropped at all. Then the company starts as it was.
+restore_back() {
+  local names name kept="$SERVER_DIR/backups/env-before-$R_STAMP"
+  if [ -n "$R_OLD" ]; then
+    name=$(psql_on postgres -tAc "SELECT datname FROM pg_database WHERE oid = $R_OLD" 2> /dev/null) || return 1
+    case "$name" in
+      hornhoof) ;;
+      hornhoof_before_*)
+        case "$name" in *[!a-z0-9_]*) return 1 ;; esac
+        names=$(db_names) || return 1
+        case " $names " in
+          *' hornhoof '*)
+            restore_stop
+            psql_on postgres -c 'DROP DATABASE hornhoof WITH (FORCE)' > /dev/null 2>&1 || return 1
+            ;;
+        esac
+        psql_on postgres -c "ALTER DATABASE $name RENAME TO hornhoof" > /dev/null 2>&1 || return 1
+        ;;
+      *) return 1 ;;
+    esac
+  fi
+  psql_on postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS true' -c 'DROP DATABASE IF EXISTS hornhoof_restore WITH (FORCE)' > /dev/null 2>&1 || return 1
+  # Settings that were not written whole go, with the backup's values in them.
+  rm -f "$SERVER_DIR/.env.new"
+  if [ -n "$R_STAMP" ] && [ -f "$kept" ]; then
+    (umask 077 && cp "$kept" "$SERVER_DIR/.env.new") && as_env "$SERVER_DIR/.env.new" && rm -f "$kept" || return 1
+  fi
+  restore_up || true
+}
+
+# restore_undo <line> <step>: the restore ends failed, with everything as it was. A way back that fails itself leaves
+# the journal and the status, and is tried again.
+restore_undo() {
+  if ! restore_back; then
+    [ -n "$BACK_SAID" ] || printf 'Could not put the database back as it was yet. The updater tries again.\n'
+    BACK_SAID=1
+    return 0
+  fi
+  BACK_SAID=''
+  restore_wipe
+  rm -f "$CONTROL/restore-carry.json" "$CONTROL/restore-carry.json.new"
+  restore_ended failed "$2" "$1"
+}
+
+# The swap is done, which the step start says: the company starts on the restored database and has to answer, as after
+# an update; otherwise everything goes back.
+restore_start() {
+  local kept="hornhoof_before_$R_STAMP"
+  restore_says running start 'Starting the company on the restored database.'
+  rm -f "$CONTROL/recovery-link.json"
+  restore_up || true
+  if healthy "$(running_commit)"; then
+    restore_wipe
+    restore_ended 'done' start "Restored the backup of $R_DUMPED. The database from before is kept on this machine as $kept." "$kept"
+    return 0
+  fi
+  restore_undo 'The restored company did not start, so it is back as it was.' start
+}
+
+# A restore this updater was stopped in, or could not put back: by its journal it goes on when the swap was done, and
+# back otherwise; one stopped before its journal began only loaded a copy. Fails when there is none.
+restore_left() {
+  local file="$CONTROL/restore-journal.json" status="$CONTROL/restore-status.json" did step
+  if [ -f "$file" ]; then
+    R_ATTEMPT=$(jq -r '.attempt // empty' "$file" 2> /dev/null || true)
+    R_ID=$(jq -r '.id // empty' "$file" 2> /dev/null || true)
+    R_DUMPED=$(jq -r '.dumpedAt // empty' "$file" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
+    R_STAMP=$(jq -r '.stamp // empty' "$file" 2> /dev/null || true)
+    R_OLD=$(jq -r '.old // empty' "$file" 2> /dev/null || true)
+    did=$(jq -r '.did // empty' "$file" 2> /dev/null || true)
+    if ! plain_id "$R_ATTEMPT" || ! plain_id "$R_ID" || ! plain_stamp "$R_STAMP" || ! plain_number "$R_OLD"; then
+      [ -n "$JOURNAL_SAID" ] || printf 'restore-journal.json cannot be read, so the restore it is of stays as it is.\n'
+      JOURNAL_SAID=1
+      return 0
+    fi
+  else
+    [ "$(jq -r '.state // empty' "$status" 2> /dev/null || true)" = running ] || return 1
+    step=$(jq -r '.step // empty' "$status" 2> /dev/null || true)
+    case "$step" in load | swap) ;; *) return 1 ;; esac
+    R_ATTEMPT=$(jq -r '.attempt // empty' "$status" 2> /dev/null || true)
+    R_ID=$(jq -r '.id // empty' "$status" 2> /dev/null || true)
+    plain_id "$R_ATTEMPT" && plain_id "$R_ID" || return 1
+    R_STAMP=''
+    R_OLD=''
+    did=''
+  fi
+  DBC=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$DBC" ] || return 0
+  if [ "$did" = committed ]; then
+    restore_start
+  else
+    restore_undo 'The updater stopped during the restore, so nothing changed.' "${step:-swap}"
+  fi
+}
+
+# restore_run <with carry>: load, swap, start.
+restore_run() {
+  restore_says running load 'Loading the backup.'
+  restore_stop
+  if ! load_copy "$DBC" "$CONTROL/restore/$R_ATTEMPT.sql.gz"; then
+    restore_undo 'The backup did not load, so nothing changed.' load
+    return 0
+  fi
+  rm -f "$CONTROL/restore/$R_ATTEMPT.sql.gz"
+  restore_says running swap 'Putting the restored database in the place of the one in use.'
+  if ! restore_swap "$1"; then
+    restore_undo "$SWAP_LINE" swap
+    return 0
+  fi
+  restore_start
+}
+
+# The keeper orders a restore with restore.json, once both files of restore/<attempt> are whole. An order runs once:
+# the same backup is tried again under a new attempt. It waits for an update that waits or runs.
+restore_request() {
+  local file="$CONTROL/restore.json" status="$CONTROL/restore-status.json" carry waiting
+  if worker || [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then return 0; fi
+  if restore_left; then return 0; fi
+  [ -f "$file" ] || return 0
+  waiting=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
+  if plain_id "$waiting" && [ "$waiting" != "$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)" ]; then return 0; fi
+  if update_running; then return 0; fi
+  R_ATTEMPT=$(jq -r '.attempt // empty' "$file" 2> /dev/null || true)
+  R_ID=$(jq -r '.id // empty' "$file" 2> /dev/null || true)
+  plain_id "$R_ATTEMPT" && plain_id "$R_ID" || return 0
+  if [ "$(jq -r '.attempt // empty' "$status" 2> /dev/null || true)" = "$R_ATTEMPT" ]; then
+    case "$(jq -r '.state // empty' "$status" 2> /dev/null || true)" in
+      'done' | failed)
+        rm -f "$file"
+        return 0
+        ;;
+    esac
+  fi
+  [ -f "$CONTROL/restore/$R_ATTEMPT.sql.gz" ] && [ -f "$CONTROL/restore/$R_ATTEMPT.env.json" ] || return 0
+  R_DUMPED=$(jq -r '.dumpedAt // empty' "$file" 2> /dev/null | tr -cd '0-9A-Za-z:.+-' | cut -c1-40 || true)
+  carry=$(jq -r 'if .carry == true then "1" else "" end' "$file" 2> /dev/null || true)
+  R_STAMP=''
+  R_OLD=''
+  DBC=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$DBC" ] || return 0
+  WORK=$(mktemp -d)
+  restore_run "$carry"
+  rm -rf "$WORK"
+  WORK=''
 }
 
 # The nodes on this computer that run another image than the one .env names, by the images of this server's own
@@ -1156,6 +1615,8 @@ if [ "${1:-}" = --once ]; then
   ONCE=1
   write_addresses
   handle_request
+  dump_request
+  restore_request
   catch_up_nodes
   computer_runs
   exit 0
@@ -1179,6 +1640,8 @@ ADDRS=$!
 trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
 while true; do
   handle_request
+  dump_request
+  restore_request
   catch_up_nodes || printf 'Could not look at the nodes.\n'
   sleep 2
 done

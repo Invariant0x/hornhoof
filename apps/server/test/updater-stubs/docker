@@ -7,6 +7,10 @@
 # with the plan on their label and the image they run. STUB_BUILD_SERVICES words are "tag=service,service": the services the compose
 # file of that build names; STUB_SERVICES answers for any other file. STUB_PROJECT_CONTAINERS words are "id=service":
 # the containers of the compose project.
+# The databases are files in STUB_STATE that hold how many migrations each has: migrations for hornhoof, restored for
+# hornhoof_restore, db-<name> for any other; closed-<name> is there while a database takes no connections, and
+# oid-<name> holds the number the server knows it by, which it keeps under every name. STUB_FOLDS: the server keeps the
+# name of a database in capitals, as a real one keeps it in small letters, whatever it was asked.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 word() {
   local key=$1 w
@@ -18,6 +22,52 @@ digest_of() { word "$1" ${STUB_DIGESTS:-}; }
 running_image() { word "$1" ${STUB_RUNNING_IMAGES:-}; }
 build_services() { word "$1" ${STUB_BUILD_SERVICES:-}; }
 project_service() { word "$1" ${STUB_PROJECT_CONTAINERS:-}; }
+db_file() {
+  case "$1" in
+    hornhoof) printf '%s/migrations' "$STUB_STATE" ;;
+    hornhoof_restore) printf '%s/restored' "$STUB_STATE" ;;
+    *) printf '%s/db-%s' "$STUB_STATE" "$1" ;;
+  esac
+}
+# The number of a database that is there, given when it is first asked for.
+oid_of() {
+  local next
+  [ -f "$(db_file "$1")" ] || return 1
+  if [ ! -f "$STUB_STATE/oid-$1" ]; then
+    next=$(($(cat "$STUB_STATE/oids" 2> /dev/null || echo 1000) + 1))
+    printf '%s' "$next" > "$STUB_STATE/oids"
+    printf '%s' "$next" > "$STUB_STATE/oid-$1"
+  fi
+  cat "$STUB_STATE/oid-$1"
+}
+# One statement psql was given with -c, as the database server takes it; it fails as that one would.
+statement() {
+  local from to
+  case "$1" in
+    'DROP DATABASE IF EXISTS '* | 'DROP DATABASE '*)
+      from=${1#DROP DATABASE }; from=${from#IF EXISTS }; from=${from%% *}
+      rm -f "$(db_file "$from")" "$STUB_STATE/closed-$from" "$STUB_STATE/oid-$from" ;;
+    'ALTER DATABASE '*' RENAME TO '*)
+      from=${1#ALTER DATABASE }; from=${from%% *}; to=${1##* RENAME TO }
+      # STUB_RENAME=fail: the loaded database cannot take the place of the one in use.
+      [ "${STUB_RENAME:-ok}" = fail ] && [ "$from" = hornhoof_restore ] && return 1
+      [ -z "${STUB_FOLDS:-}" ] || [ "$to" = hornhoof ] || to=$(printf '%s' "$to" | tr 'a-z' 'A-Z')
+      [ -f "$(db_file "$from")" ] && [ ! -f "$(db_file "$to")" ] || return 1
+      oid_of "$from" > /dev/null
+      mv "$(db_file "$from")" "$(db_file "$to")"
+      mv "$STUB_STATE/oid-$from" "$STUB_STATE/oid-$to"
+      [ ! -f "$STUB_STATE/closed-$from" ] || mv "$STUB_STATE/closed-$from" "$STUB_STATE/closed-$to" ;;
+    'ALTER DATABASE '*' WITH ALLOW_CONNECTIONS false')
+      from=${1#ALTER DATABASE }; from=${from%% *}
+      [ -f "$(db_file "$from")" ] || return 1
+      touch "$STUB_STATE/closed-$from" ;;
+    # STUB_BACK=fail: the database server does not let the old database open again.
+    'ALTER DATABASE '*' WITH ALLOW_CONNECTIONS true')
+      from=${1#ALTER DATABASE }; from=${from%% *}
+      [ "${STUB_BACK:-ok}" != fail ] && [ -f "$(db_file "$from")" ] || return 1
+      rm -f "$STUB_STATE/closed-$from" ;;
+  esac
+}
 tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' "${w%%=*}"; return; }; done; }
 # An image by digest or by tag: what tag it is a build of, and the id of the build it is.
 ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
@@ -80,14 +130,62 @@ case "$1 $2" in
       *'FROM drizzle.__drizzle_migrations'*)
         [ -f "$STUB_STATE/status-when-asked" ] || cp "$HORNHOOF_CONTROL_DIR/status.json" "$STUB_STATE/status-when-asked"
         cat "$STUB_STATE/migrations" ;;
-      *'RENAME TO hornhoof'*) mv "$STUB_STATE/restored" "$STUB_STATE/migrations" ;;
+      # Whether the session that reads the old database of a restore is on it.
+      *'FROM pg_stat_activity'*) if [ -f "$STUB_STATE/cutover-open" ]; then echo 1; else echo 0; fi ;;
+      *"SELECT oid FROM pg_database WHERE datname = 'hornhoof'"*) oid_of hornhoof || true ;;
+      # The name the database with that number goes by now; nothing when there is none.
+      *'FROM pg_database WHERE oid = '*)
+        want=${!#}; want=${want##* }
+        for file in "$STUB_STATE"/oid-*; do
+          [ -f "$file" ] && [ "$(cat "$file")" = "$want" ] && printf '%s\n' "${file##*/oid-}"
+        done ;;
+      *'FROM pg_database'*)
+        names=''
+        for file in "$STUB_STATE/migrations" "$STUB_STATE/restored" "$STUB_STATE"/db-*; do
+          [ -f "$file" ] || continue
+          case "${file##*/}" in migrations) names="$names hornhoof" ;; restored) names="$names hornhoof_restore" ;; *) names="$names ${file##*/db-}" ;; esac
+        done
+        printf '%s\n' "${names# }" ;;
+      # Each statement in its turn, and none after one that failed.
+      *)
+        while [ $# -gt 0 ]; do
+          if [ "$1" = -c ]; then statement "$2" || { echo 'psql: error' >&2; exit 3; }; fi
+          shift
+        done ;;
     esac ;;
-  # A dump going into the copy of the database that takes the place of the one there.
   'exec -i')
-    [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
-    dump=$(cat)
-    printf '%s\n' "$dump" | sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored"
-    printf '%s\n' "$dump" | sed -n 's/^-- copy //p' | tr -d '\n' > "$STUB_STATE/restored-copy" ;;
+    case " $* " in
+      # The session that stays on the database a restore closes. It answers once the connections are off: the term,
+      # machine and cluster of that database, and STUB_CARRY when it was asked who may get in. STUB_CUTOVER=fail: it
+      # never gets onto the database; left: another session would not end.
+      *' PGAPPNAME=hornhoof-cutover '*)
+        asked=$(cat)
+        [ "${STUB_CUTOVER:-ok}" = fail ] && { echo 'psql: error: connection refused' >&2; exit 2; }
+        touch "$STUB_STATE/cutover-open"
+        looks=0
+        until [ -f "$STUB_STATE/closed-hornhoof" ]; do
+          looks=$((looks + 1))
+          [ "$looks" -lt 400 ] || { rm -f "$STUB_STATE/cutover-open"; exit 3; }
+          /bin/sleep 0.05
+        done
+        rm -f "$STUB_STATE/cutover-open"
+        [ "${STUB_CUTOVER:-ok}" = left ] && { echo 'ERROR:  sessions left' >&2; exit 3; }
+        printf '{"term": %s, "machine": "m-old", "cluster": "c-old"}\n' "${STUB_TERM:-7}"
+        case "$asked" in
+          *recoveryKeys*) printf 'cutover with the carry\n' >> "$STUB_LOG"; printf '%s\n' "${STUB_CARRY:-}" ;;
+          *) printf 'cutover alone\n' >> "$STUB_LOG" ;;
+        esac ;;
+      # The loaded database taking over what the closed one went by. STUB_ADOPT=fail: it cannot.
+      *' term='*)
+        cat > /dev/null
+        [ "${STUB_ADOPT:-ok}" = fail ] && exit 3 ;;
+      # A dump going into the copy of the database that takes the place of the one there.
+      *)
+        [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
+        dump=$(cat)
+        printf '%s\n' "$dump" | sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored"
+        printf '%s\n' "$dump" | sed -n 's/^-- copy //p' | tr -d '\n' > "$STUB_STATE/restored-copy" ;;
+    esac ;;
   'image inspect')
     last=${!#}
     case "${4:-}" in

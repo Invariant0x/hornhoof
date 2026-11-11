@@ -89,7 +89,11 @@ describe('front, keeper and migrate', () => {
     expect(Object.keys(keeper!.environment!)).toEqual([
       'DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT',
       'HORNHOOF_ROLE', 'HORNHOOF_JOIN_SERVER', 'HORNHOOF_JOIN_TICKET', 'HORNHOOF_ADDRESSES', 'HORNHOOF_HOSTNAME', 'HORNHOOF_OWNER_KEY', 'HORNHOOF_HOST_OS',
+      'HORNHOOF_NODE_KEY', 'HORNHOOF_SURVIVOR_S',
     ]);
+    /* The node's key goes into each backup under a name of the keeper's own: a NODE_KEY that is set but empty, as on a
+       machine with no node of the server's, would stop the keeper as it starts. */
+    expect(keeper!.environment).toMatchObject({ HORNHOOF_NODE_KEY: '${NODE_KEY:-}', HORNHOOF_SURVIVOR_S: '${HORNHOOF_SURVIVOR_S:-}' });
     /* Its own volume holds the machine's key, which no other service reads. */
     expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper']);
     expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
