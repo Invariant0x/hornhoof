@@ -922,8 +922,9 @@ export class TerminalHost {
     const screen = await this.screen(job.key);
     /* Its screen says why, which the loader would hide. */
     this.showViews(a);
-    await this.whyNotReady(a, job, screen);
-    return await this.failedTurn(a, job, !this.operator?.failure(a.key) && job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
+    const shown = await this.shownNow(a);
+    await this.whyNotReady(a, job, shown);
+    return await this.failedTurn(a, job, !this.operator?.failure(a.key) && job.signedOut.test(shown) ? 'not_logged_in' : 'agent_failed', screen);
   }
 
   /* A program still there that never showed its prompt fails its turn saying so in short, for the retry to say; its screen
@@ -1125,7 +1126,7 @@ export class TerminalHost {
     let pasted = false;
     while (this.operatorPastePending(a, pasted)) {
       if (!(await this.ready(a, job))) {
-        await this.whyNotReady(a, job, await this.screen(a.key));
+        await this.whyNotReady(a, job, await this.shownNow(a));
         return this.failedTurn(a, job, job.input.signal?.aborted ? 'cancelled' : 'agent_failed');
       }
       await this.keepLeftInput(a, job);
@@ -1431,7 +1432,8 @@ export class TerminalHost {
     this.programEnded(a);
     const screen = await this.screen(job.key);
     await this.toldGone(a, watch, screen);
-    return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
+    /* tmux keeps the last lines of a dead pane on its screen, and what this run printed is in its recording. */
+    return await this.failedTurn(a, job, job.signedOut.test(await this.shownNow(a)) ? 'not_logged_in' : 'agent_failed', screen);
   }
 
   /* Reports the program's own state when its call changes or a report is due, else every lookMs. The screen is diagnostic. */
@@ -1780,7 +1782,7 @@ export class TerminalHost {
     return !job.operatorDelivery && job.signedOut.test(await this.shownNow(a));
   }
 
-  /* What a starting program shows, without the lines above its screen: started again in its pane, it has what its last run
+  /* What the program shows now, without the lines above its screen: started again in its pane, it has what its last run
      printed there, as Claude Code and Codex stay on the main screen for a person to scroll back through. */
   private shownNow(a: Agent): Promise<string> {
     return this.opts.tmux.screen(a.name, 0);

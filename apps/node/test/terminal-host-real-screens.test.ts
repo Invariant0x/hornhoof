@@ -42,7 +42,7 @@ function assignment(program: TermProgram, ready: string, draft?: string, shown =
   stops.push(async () => { abort.abort(); await onClock(host.stop()); await onClock(running); rmSync(home, { recursive: true, force: true }); });
   let ended = false;
   void running.then(() => { ended = true; });
-  return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, ended: () => ended, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
+  return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, running, ended: () => ended, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
 it.each([
@@ -62,17 +62,28 @@ it.each([
 /* A program the node starts again in its pane has what its last run printed above its screen, in the pane's history: Claude
    Code and Codex stay on the main screen, for a person to scroll back through. Only what it shows now tells whether it is
    signed out. */
+const LAST_RUN = '• Ran the check of the plan\n  └ The plan was signed out yesterday.\n';
+
 it.each([
   ['codex', codexProgram, 'codex-0.166.0-first'],
   ['kimi', kimiProgram, 'kimi-2.5.1-first'],
 ] as const)('does not take %s for signed out by what its last run said above its screen', async (_kind, program, ready) => {
   const c = assignment(program, ready, undefined, undefined, false);
   let drawn = false;
-  c.screen.mockImplementation(async (_name, history = 200) => (drawn ? real(ready) : history ? '• Ran the check of the plan\n  └ The plan was signed out yesterday.\n' : ''));
+  c.screen.mockImplementation(async (_name, history = 200) => (drawn ? real(ready) : history ? LAST_RUN : ''));
   await untilOnClock(() => c.screen.mock.calls.length > 1);
   drawn = true;
   await untilOnClock(() => c.paste.mock.calls.length > 0 || c.ended());
   expect(c.paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
+});
+
+it.each([
+  ['codex', codexProgram, 'codex-0.166.0-first'],
+  ['kimi', kimiProgram, 'kimi-2.5.1-first'],
+] as const)('says %s never showed its prompt, not that it is signed out, when only its last run said so above its screen', async (_kind, program, ready) => {
+  const c = assignment(program, ready, undefined, undefined, false);
+  c.screen.mockImplementation(async (_name, history = 200) => (history ? LAST_RUN : ''));
+  expect(await onClock(c.running)).toMatchObject({ ok: false, error: 'agent_failed', failure: { text: expect.stringContaining('did not show its prompt') } });
 });
 
 it.each([
