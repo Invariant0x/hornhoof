@@ -1,8 +1,13 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { asc, eq, isNotNull } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { companies, machines, people, publicLinks } from '../src/db/schema.js';
+import { storeThroughput } from '../src/modules/copies/measured.js';
 import { rank, Ranking, rankOf } from '../src/modules/copies/order.js';
+import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { unfit, type Candidate } from '../src/modules/copies/qualify.js';
 import { setUpCompany, testApp, until } from './helpers.js';
 
@@ -203,6 +208,35 @@ describe('the ranking on the server', () => {
     await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, leaving.id));
     await rank(c.ctx);
     expect(await c.places()).toMatchObject({ m1: [2, null, 'data'] });
+  });
+
+  it('keeps the last throughput', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    onTestFinished(() => rmSync(control, { recursive: true, force: true }));
+    const { app, db } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID, HORNHOOF_CONTROL_DIR: control });
+    await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [a] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'a', role: 'data', networkId: 'a'.repeat(32) }).returning();
+    const [b] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'b', role: 'worker', networkId: 'b'.repeat(32), linkMbps: 7 }).returning();
+    const said = (throughput: Record<string, { mbps: number; at: string }> | undefined) =>
+      writeKeeperState(control, { mode: 'lead', at: new Date().toISOString(), link: null, ...(throughput ? { throughput } : {}) });
+    const rate = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!.linkMbps;
+    const at = new Date().toISOString();
+    said({ [a!.id]: { mbps: 80, at } });
+    expect(await storeThroughput(app.ctx)).toBe(1);
+    expect([await rate(a!.id), await rate(b!.id)]).toEqual([80, 7]);
+    /* Written once: the same word again changes no row. */
+    expect(await storeThroughput(app.ctx)).toBe(0);
+    /* A day with nothing sent to it, or a keeper that says nothing at all, keeps what the row has. */
+    said({});
+    expect(await storeThroughput(app.ctx)).toBe(0);
+    said(undefined);
+    expect(await storeThroughput(app.ctx)).toBe(0);
+    expect(await rate(a!.id)).toBe(80);
+    said({ [a!.id]: { mbps: 20, at }, 'not-a-machine': { mbps: 5, at } });
+    expect(await storeThroughput(app.ctx)).toBe(1);
+    expect(await rate(a!.id)).toBe(20);
   });
 
   it('ranks every minute while it leads', async () => {

@@ -236,7 +236,9 @@ async function within<T>(ms: number, waited: Promise<T>): Promise<T> {
 }
 
 /* Not events.once, which rejects on an error, and a refused client's socket may well have one on its way out. */
+/* One that closed before anyone asked has no event left to give. */
 function closeOf(emitter: NodeJS.EventEmitter): Promise<void> {
+  if ((emitter as { closed?: boolean }).closed === true) return Promise.resolve();
   return new Promise(resolve => emitter.once('close', () => resolve()));
 }
 
@@ -774,6 +776,29 @@ describe('PeerServer', () => {
     second.write('more');
     await once(second, 'data');
     expect(stand.server.dbBytes(DATA_ID)).toBeGreaterThanOrEqual(sent.length + 4);
+  });
+
+  it('counts what it sends each machine', async () => {
+    const stand = await standUp();
+    const door = await stand.open('peer');
+    expect(stand.server.sentBytes().size).toBe(0);
+    /* The database's stream to one machine, as a copy's is, and a hello to another. */
+    const toDb = clientOf(stand, door.port, stand.data).request(CONNECT_DB);
+    expect(await statusOf(toDb)).toBe(200);
+    const sent = randomBytes(5 * 1024 * 1024);
+    let back = 0;
+    toDb.on('data', (chunk: Buffer) => (back += chunk.length));
+    toDb.write(sent);
+    await vi.waitFor(() => expect(back).toBe(sent.length), { timeout: 10_000 });
+    const hello = clientOf(stand, door.port, stand.worker).request(HELLO);
+    hello.end();
+    let said = 0;
+    hello.on('data', (chunk: Buffer) => (said += chunk.length));
+    await once(hello, 'end');
+    const counts = stand.server.sentBytes();
+    expect(counts.get(DATA_ID)).toBeGreaterThanOrEqual(sent.length);
+    expect(counts.get(WORKER_ID)).toBe(said);
+    expect(said).toBeGreaterThan(0);
   });
 
   it('answers 502 when the database does not take the connection', async () => {

@@ -37,20 +37,32 @@ async function timedSyncedWrite(path: string): Promise<number> {
   }
 }
 
+/* What measures a machine's connection to the internet, started and stopped with the machine's other measures. */
+export type Internet = { start(): void; stop(): void; snapshot(): { internetRttMs: number | null; internetMbps: number | null } };
+
 export class Measures {
   private samples: number[] = [];
   private timer: NodeJS.Timeout | undefined;
   private busy = false;
 
-  constructor(private readonly opts: { dir: string; sampleMs?: number }) {}
+  constructor(private readonly opts: { dir: string; sampleMs?: number; internet?: Internet }) {}
 
   start(): void {
     this.timer = setInterval(() => void this.sampleUnlessBusy(), this.opts.sampleMs ?? SAMPLE_MS);
     this.timer.unref();
+    this.opts.internet?.start();
   }
 
   stop(): void {
     clearInterval(this.timer);
+    this.opts.internet?.stop();
+  }
+
+  /* The machine's connection to the internet, where it is measured: a measure it has none of yet is left out, so the
+     server keeps the one it had. */
+  network(): { internetRttMs?: number; internetMbps?: number } {
+    const said = this.opts.internet?.snapshot();
+    return { ...(said?.internetRttMs != null ? { internetRttMs: said.internetRttMs } : {}), ...(said?.internetMbps != null ? { internetMbps: said.internetMbps } : {}) };
   }
 
   async sample(): Promise<void> {

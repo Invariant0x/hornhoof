@@ -250,6 +250,23 @@ describe('the network routes the keeper calls', () => {
     }
   });
 
+  it('stores the network measures', async () => {
+    const c = await company();
+    const worker = await c.joined('worker', newKey());
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(worker.id) });
+    const rowOf = async () => (await c.db.select().from(machines).where(eq(machines.id, worker.id)))[0]!;
+    expect((await report({ linkRttMs: 12, internetRttMs: 48, internetMbps: 84 })).statusCode).toBe(204);
+    expect(await rowOf()).toMatchObject({ linkRttMs: 12, internetRttMs: 48, internetMbps: 84 });
+    /* A report that says none of them keeps what the row has, and one of them leaves the others. */
+    expect((await report({ uptimeS: 3 })).statusCode).toBe(204);
+    expect((await report({ internetRttMs: 50 })).statusCode).toBe(204);
+    expect(await rowOf()).toMatchObject({ linkRttMs: 12, internetRttMs: 50, internetMbps: 84 });
+    /* How fast the leader sends to a machine is the leader's to say, never the machine's own. */
+    expect((await report({ linkMbps: 900 })).statusCode).toBe(204);
+    expect((await rowOf()).linkMbps).toBeNull();
+    for (const bad of [{ linkRttMs: 600_001 }, { internetRttMs: -1 }, { internetMbps: 1.5 }, { linkRttMs: null }]) expect((await report(bad)).statusCode, JSON.stringify(bad)).toBe(400);
+  });
+
   it('names who must upload', async () => {
     const c = await company();
     await c.certificate(newKey());

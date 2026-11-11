@@ -4,7 +4,7 @@ import type { HostOs } from '../network/ids.js';
 import { askApp } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { Hourly, machineKey, reasonOf, type MachineKey } from './machine-keys.js';
-import { Measures } from './measures.js';
+import { Measures, type Internet } from './measures.js';
 
 const KEY_RETRY_MS = 60_000;
 const REPORT_EVERY_MS = 20_000;
@@ -24,6 +24,8 @@ export type IdentityOptions = {
   reportEveryMs?: number;
   keyRetryMs?: number;
   sampleMs?: number;
+  /* What measures the machine's connection to the internet; none where a test gives none. */
+  internet?: Internet;
   /* Where the machine can be dialed on its local networks, and the name of its host, to report with the measures. */
   addresses?: () => string[];
   hostname?: string | null;
@@ -62,7 +64,7 @@ export class MachineIdentity {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: IdentityOptions) {
-    this.measures = new Measures({ dir: opts.dir, sampleMs: opts.sampleMs });
+    this.measures = new Measures({ dir: opts.dir, sampleMs: opts.sampleMs, internet: opts.internet });
   }
 
   start(): void {
@@ -137,7 +139,9 @@ export class MachineIdentity {
       const place = this.opts.reportAs?.() ?? { addresses: this.opts.addresses?.() ?? [], ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
       const told = { ...(this.opts.os ? { os: this.opts.os } : {}), pin: this.opts.ownerKey ? keyPrint(this.opts.ownerKey) : null };
       const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...told, ...place };
-      const backups = this.opts.backups?.() ?? null;
+      /* What only a newer app takes: the machine's key for backups with what it holds, and its way to the internet. */
+      const network = this.measures.network();
+      const backups = this.opts.backups?.() || Object.keys(network).length > 0 ? { ...this.opts.backups?.(), ...network } : null;
       let res = await askApp(this.opts.app, 'POST', '/api/network/report', { ...body, ...backups }, this.stopping.signal);
       /* An app of the build before, which runs for a while during an update, refuses words it does not know: the report
          goes again at once without them, so the machine's measures are not lost meanwhile. */

@@ -26,7 +26,7 @@ import { Following } from './following.js';
 import { HolderKeeper } from './holder.js';
 import { WIPE_FILE, WIPED_FILE } from './uploads.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
-import { Measures } from './measures.js';
+import { Measures, type Internet } from './measures.js';
 import { pinKey, readPin } from './owner-pin.js';
 import { updaterBusy } from './updater-status.js';
 import type { WorkerConfig } from './worker-config.js';
@@ -88,6 +88,8 @@ export type WorkerKeeperOptions = {
   visitKind?: 'app' | 'data';
   ownApp?: { target: Target; afterMs: number };
   extraReport?: () => object;
+  /* What measures this machine's connection to the internet; none where a test gives none. */
+  internet?: Internet;
   onView?: (view: KeeperView) => void;
 };
 
@@ -218,7 +220,7 @@ export class WorkerKeeper {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: WorkerKeeperOptions) {
-    this.measures = new Measures({ dir: opts.config.dir });
+    this.measures = new Measures({ dir: opts.config.dir, internet: opts.internet });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, now: opts.now, log: opts.log });
     /* A machine that joined opens only on what its owner signed with the key this keeper holds: it takes no app's word. */
     this.carrier = new ComputerCarrier({
@@ -710,7 +712,11 @@ export class WorkerKeeper {
          that stopped, and a keeper that keeps a copy says how it does. */
       const setup: CopyReport = { state: 'stopped', progress: null, error: 'setup', at: null, name: null, old: null };
       const wiped = this.wiped();
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}) };
+      /* And what the server order is scored on: the day's round trip of its hellos to the leader, and its way to the
+         internet. */
+      const rtt = this.sessions.linkRttMs();
+      const network = { ...this.measures.network(), ...(rtt === null ? {} : { linkRttMs: rtt }) };
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}), ...network };
       let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
       /* The leader heard that this machine holds nothing any more: the updater's word of it has done its work. */
       if (res?.ok && wiped) rmSync(join(this.opts.config.controlDir, WIPED_FILE), { force: true });

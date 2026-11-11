@@ -9,7 +9,9 @@ type Running = { start(): Promise<unknown>; stop(): Promise<void> };
 async function workerKeeper(): Promise<Running> {
   const { WorkerKeeper } = await import('./modules/keeper/worker.js');
   const { workerConfig } = await import('./modules/keeper/worker-config.js');
-  return new WorkerKeeper({ config: workerConfig(process.env, log), frontHost: 'front', log });
+  const { InternetMeasures } = await import('./modules/keeper/internet.js');
+  const config = workerConfig(process.env, log);
+  return new WorkerKeeper({ config, frontHost: 'front', log, internet: new InternetMeasures({ dir: config.dir, log }) });
 }
 
 async function dataKeeper(): Promise<Running> {
@@ -24,6 +26,7 @@ async function dataKeeper(): Promise<Running> {
   const { Relay } = await import('./modules/link/relay.js');
   const { statfsSync } = await import('node:fs');
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
+  const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -54,6 +57,7 @@ async function dataKeeper(): Promise<Running> {
     /* The role copies read this machine's database with, made on a connection of its own each time. */
     copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
     sync,
+    internet: new InternetMeasures({ dir: KEEPER_DIR, log }),
   });
 }
 
@@ -66,6 +70,7 @@ async function followKeeper(): Promise<Running> {
   const { followConfig } = await import('./modules/keeper/follow-config.js');
   const { keeperSql } = await import('./modules/keeper/lease-store.js');
   const { tunnelSettings } = await import('./modules/link/link.js');
+  const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const config = followConfig(process.env, log);
   const whole = loadConfig(process.env);
   const db = openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 });
@@ -81,6 +86,7 @@ async function followKeeper(): Promise<Running> {
     sql: database => keeperSql(urlOf(database), { timeoutMs: 20_000 }),
     /* While the copy is being made its database has no link to read yet. */
     settings: () => tunnelSettings(db, whole).catch(() => undefined),
+    worker: { internet: new InternetMeasures({ dir: config.dir, log }) },
   });
 }
 

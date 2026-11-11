@@ -25,7 +25,9 @@ import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { DataLinks, type DataLinksOptions } from './data-links.js';
+import { Throughput } from './throughput.js';
 import { UploadTaker } from './uploads.js';
+import type { Internet } from './measures.js';
 import { keepSize, KEEP_SIZE_EVERY_MS, SLOTS_EVERY_MS, sweepSlots } from './slots.js';
 import { SyncController, type SyncControllerOptions } from './sync.js';
 import { KEEPER_DIR, reasonOf } from './machine-keys.js';
@@ -69,6 +71,10 @@ export type KeeperOptions = {
   /* The machine's addresses as the installer wrote them down, and its host's name, to report as well. */
   addresses?: string[];
   hostname?: string | null;
+  /* What measures this machine's connection to the internet; none where a test gives none. */
+  internet?: Internet;
+  /* What measures how fast this machine sends to the others; made here unless a test gives one. */
+  throughput?: Pick<Throughput, 'start' | 'stop' | 'best'>;
   /* What a test's keeper reports as its place in place of its own. */
   reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
   /* This machine's database, for peers that keep data: where the peer link's CONNECT db goes. */
@@ -194,6 +200,8 @@ export class Keeper {
   private stopped = false;
   private peers: PeerLink | null = null;
   private links: DataLinks | null = null;
+  /* Reads what the peer server sent each machine, ten times a second, for as long as the keeper runs. */
+  private readonly throughput: Pick<Throughput, 'start' | 'stop' | 'best'>;
   private readonly sync: SyncController | null;
   /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
   private settingsNow: TunnelSettings | null | undefined = undefined;
@@ -215,6 +223,7 @@ export class Keeper {
   private link: KeeperState['link'] = null;
 
   constructor(private readonly opts: KeeperOptions) {
+    this.throughput = opts.throughput ?? new Throughput({ dir: opts.dir ?? KEEPER_DIR, sent: () => this.peers?.sentBytes() ?? new Map<string, number>() });
     const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
     this.listener = new LinkListener({ server: this.door(visitorFromTls, { link: true }), log });
     this.sync =
@@ -245,6 +254,7 @@ export class Keeper {
           leading: () => this.mode() === 'lead',
           log: opts.log,
           reportEveryMs: opts.reportEveryMs,
+          internet: opts.internet,
           /* The addresses the copies saw this machine come from count too, so a machine that moved is found again. */
           addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: this.links?.seen() ?? [] }),
           hostname: opts.hostname,
@@ -322,6 +332,7 @@ export class Keeper {
     if (db && read) this.carryLink(db, () => this.linkUnlessPaused(read), { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
+    this.throughput.start();
     this.carrier?.start();
     if (this.identity) void this.takeBackups();
     this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
@@ -336,6 +347,7 @@ export class Keeper {
   }
 
   async stop(): Promise<void> {
+    this.throughput.stop();
     if (this.timer) clearInterval(this.timer);
     if (this.certificateTimer) clearInterval(this.certificateTimer);
     if (this.fencesTimer) clearInterval(this.fencesTimer);
@@ -504,7 +516,11 @@ export class Keeper {
   private giveWord(): void {
     const dir = this.opts.config.controlDir;
     try {
-      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [] });
+      writeKeeperState(dir, {
+        mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [],
+        /* How fast this machine sent to each of the others at its best in the last day, for the server order. */
+        throughput: this.throughput.best(Date.now()),
+      });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);

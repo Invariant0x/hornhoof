@@ -28,6 +28,7 @@ const CertificateBody = z.object({ signKey: SignKey });
 const JoinBody = z.object({ ticket: z.string().length(43), networkId: z.string().regex(NETWORK_ID), signKey: SignKey });
 const RenewBody = z.object({ machine: z.uuid(), serial: z.string().regex(/^[0-9a-f]{1,64}$/), at: z.iso.datetime(), signature: z.string().min(1).max(200) });
 const Port = z.number().int().min(1).max(65535);
+const Measure = z.number().int().min(0).max(600_000);
 const ReportBody = z.object({
   uptimeS: z.number().int().min(0).optional(),
   fsyncP99Ms: z.number().min(0).nullable().optional(),
@@ -66,6 +67,11 @@ const ReportBody = z.object({
     .optional(),
   /* A machine that stopped holding the data holds nothing of it any more. */
   wiped: z.literal(true).optional(),
+  /* What the server order is scored on, as the machine itself measures it over a day: the round trip of its hellos to
+     the leader, and its round trip and download rate to the internet. A measure it has none of yet is left out. */
+  linkRttMs: Measure.optional(),
+  internetRttMs: Measure.optional(),
+  internetMbps: Measure.optional(),
 });
 
 /* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */

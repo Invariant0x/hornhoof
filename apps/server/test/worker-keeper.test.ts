@@ -546,6 +546,19 @@ describe("a worker's keeper", () => {
     await until(async () => (await c.serverRow())?.hostname === 'deb');
     expect(await c.serverRow()).toMatchObject({ hostname: 'deb', addresses: ['192.0.2.4'] });
   });
+  it('reports its round trip and the internet', async () => {
+    const c = await company();
+    const w = await worker(c, { internet: { start: () => undefined, stop: () => undefined, snapshot: () => ({ internetRttMs: 48, internetMbps: 84 }) } });
+    await until(async () => (await c.rowOf(w.machine)).internetMbps === 84);
+    const row = await c.rowOf(w.machine);
+    expect(row.internetRttMs).toBe(48);
+    /* The day's median of its hellos to the leader, both on this computer. */
+    await until(async () => (await c.rowOf(w.machine)).linkRttMs !== null);
+    expect((await c.rowOf(w.machine)).linkRttMs).toBeLessThan(2000);
+    /* How fast the leader sends to it is the leader's to measure. */
+    expect(row.linkMbps).toBeNull();
+  });
+
   it('says a machine that holds no database is wiped, and one that was wiped once its updater said so', async () => {
     const c = await company();
     const w = await worker(c);

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { MACHINE_ROLES, type LinkPath } from '../db/schema.js';
 import type { HeldCertificate } from '../modules/keeper/certificate.js';
 import type { MachineKey } from '../modules/keeper/machine-keys.js';
+import { RoundTrips } from '../modules/keeper/round-trips.js';
 import { certFacts } from '../modules/network/authority.js';
 import { sameSubnet } from '../modules/network/ids.js';
 import { APP_AUTHORITY, DB_AUTHORITY, PEER_PATHS } from './peer-server.js';
@@ -55,13 +56,16 @@ const HelloBody = z.object({ machine: z.string(), role: z.enum(MACHINE_ROLES), l
 /* asking: a hello is on its way. pinged: the last ping was answered. */
 type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; asking: boolean; pinged: boolean };
 /* failed: the addresses whose last direct try failed. */
-type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number };
+/* trips: how long this machine's hellos to that one took, over the last day. */
+type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number; trips: RoundTrips };
 
 const ignore = (): void => {};
 
-/* One answer of the peer link's hello on a session, or a rejection when it does not come whole within ms. */
-function askHello(h2: ClientHttp2Session, ms: number): Promise<Hello> {
+/* One answer of the peer link's hello on a session, or a rejection when it does not come whole within ms. timed: told
+   how long the answer's headers took from the request, which is the round trip to that machine. */
+function askHello(h2: ClientHttp2Session, ms: number, timed?: (ms: number) => void): Promise<Hello> {
   return new Promise((resolve, reject) => {
+    const from = performance.now();
     /* A session that ended since throws here, and the promise rejects with it. */
     const stream = h2.request({ ':method': 'GET', ':path': PEER_PATHS.hello });
     const chunks: Buffer[] = [];
@@ -69,7 +73,10 @@ function askHello(h2: ClientHttp2Session, ms: number): Promise<Hello> {
     let size = 0;
     const giveUp = setTimeout(() => stream.close(), ms);
     stream.on('error', ignore);
-    stream.once('response', headers => (status = Number(headers[':status'])));
+    stream.once('response', headers => {
+      status = Number(headers[':status']);
+      if (status === 200) timed?.(performance.now() - from);
+    });
     stream.on('data', (chunk: Buffer) => {
       chunks.push(chunk);
       size += chunk.length;
@@ -108,7 +115,7 @@ export class PeerSessions {
     const before = this.kept;
     this.kept = targets.map(target => {
       const same = before.find(kept => kept.target.machine === target.machine);
-      return same ? Object.assign(same, { target }) : { target, session: null, dialing: false, failed: new Set<string>(), directTriedAt: 0 };
+      return same ? Object.assign(same, { target }) : { target, session: null, dialing: false, failed: new Set<string>(), directTriedAt: 0, trips: new RoundTrips() };
     });
     for (const gone of before.filter(kept => !this.kept.includes(kept))) this.end(gone);
     this.timer ??= setInterval(() => this.look(), this.opts.everyMs ?? EVERY_MS).unref();
@@ -119,6 +126,11 @@ export class PeerSessions {
   leader(): { machine: string; path: LinkPath; hello: Hello } | null {
     const kept = this.leading();
     return kept?.session ? { machine: kept.target.machine, path: kept.session.path, hello: kept.session.hello } : null;
+  }
+
+  /* The median round trip of a day's hellos to the machine that leads; null with no leader, or no hello answered yet. */
+  linkRttMs(now = Date.now()): number | null {
+    return this.leading()?.trips.median(now) ?? null;
   }
 
   /* The addresses the data machines saw this machine come from. */
@@ -358,7 +370,7 @@ export class PeerSessions {
       this.opts.changed?.();
     });
     session.timers.push(
-      setInterval(() => this.hello(session), this.opts.helloMs ?? HELLO_MS).unref(),
+      setInterval(() => this.hello(session, kept), this.opts.helloMs ?? HELLO_MS).unref(),
       setInterval(() => this.ping(session), this.opts.pingMs ?? PING_MS).unref(),
     );
     this.opts.changed?.();
@@ -366,10 +378,10 @@ export class PeerSessions {
 
   /* One hello at a time, each with the patience a connect gets: a busy machine answers late, and that is no reason to
      let go of it. One that does not answer at all ends the session. */
-  private hello(session: Session): void {
+  private hello(session: Session, kept: Kept): void {
     if (session.h2.destroyed || session.asking) return;
     session.asking = true;
-    askHello(session.h2, this.opts.connectMs ?? CONNECT_MS).then(
+    askHello(session.h2, this.opts.connectMs ?? CONNECT_MS, ms => kept.trips.add(ms, Date.now())).then(
       hello => {
         session.asking = false;
         const news = hello.lead !== session.hello.lead;

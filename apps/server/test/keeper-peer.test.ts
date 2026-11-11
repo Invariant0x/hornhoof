@@ -357,6 +357,18 @@ describe('the peer link in the keeper', () => {
     expect(load.file.startsWith(join(controlDir, 'uploads', `${networkId}-`))).toBe(true);
   });
 
+  it('writes what it sent each machine', async () => {
+    const c = await company(false);
+    const best = { 'bbbbbbbb-0000-4000-8000-00000000000b': { mbps: 80, at: '2026-11-11T12:00:00.000Z' } };
+    let running = 0;
+    const { keeper, controlDir } = await keeperBeside(c, await listening(c.app), folder(), { throughput: { start: () => void (running += 1), stop: () => void (running -= 1), best: () => best } });
+    await until(() => readKeeperState(controlDir)?.throughput !== undefined);
+    expect(readKeeperState(controlDir)!.throughput).toEqual(best);
+    expect(running).toBe(1);
+    await keeper.stop();
+    expect(running).toBe(0);
+  });
+
   it('reports the address its copies saw', async () => {
     const c = await company(false);
     const saw = { addresses: ['192.168.1.9'] };

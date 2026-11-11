@@ -81,6 +81,20 @@ describe("the machine's identity in its keeper", () => {
     expect((await serverRow())!.heldBackups).toEqual(held);
   });
 
+  it('reports the internet, and leaves out a measure it has none of', async () => {
+    const { target, serverRow } = await appBeside();
+    const said = { internetRttMs: 48 as number | null, internetMbps: null as number | null };
+    let running = 0;
+    identityOn(folder(), target, { reportEveryMs: 20, internet: { start: () => void (running += 1), stop: () => void (running -= 1), snapshot: () => said } });
+    await until(async () => (await serverRow())?.internetRttMs === 48);
+    expect((await serverRow())!.internetMbps).toBeNull();
+    expect(running).toBe(1);
+    /* The daily download came in; the round trip has no sample for a while, and the row keeps the last. */
+    [said.internetRttMs, said.internetMbps] = [null, 84];
+    await until(async () => (await serverRow())?.internetMbps === 84);
+    expect((await serverRow())!.internetRttMs).toBe(48);
+  });
+
   it('reports again without the new words when its app refuses them', async () => {
     /* An app of the build before, which knows nothing of backups. */
     const bodies: Record<string, unknown>[] = [];

@@ -21,6 +21,7 @@ const PEER_EVERY_MS = 5000;
 const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const LOOPBACK = '127.0.0.1';
+const NOTHING_SENT: ReadonlyMap<string, number> = new Map();
 const READ_FAILED = "The keeper cannot read the network's state from its app: the peer link stays as it is.";
 
 /* What the app says of the network to its keeper. */
@@ -122,6 +123,11 @@ export class PeerLink {
   }
 
   /* The bytes this machine's database sent that machine over the peer link. */
+  /* Every byte its peer server wrote to each machine's streams so far; none before it listens. */
+  sentBytes(): ReadonlyMap<string, number> {
+    return this.server?.sentBytes() ?? NOTHING_SENT;
+  }
+
   dbBytes(machine: string): number {
     return this.server?.dbBytes(machine) ?? 0;
   }

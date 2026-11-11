@@ -160,6 +160,24 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state()).toEqual({ path: 'direct', directFails: false, refused: false });
   });
 
+  it('times its hellos to the leader', async () => {
+    const stand = await standUp();
+    const sessions = stand.sessionsWith();
+    /* With no leader there is no round trip to speak of. */
+    expect(sessions.linkRttMs()).toBeNull();
+    sessions.use([stand.target()]);
+    await until(() => sessions.linkRttMs() !== null);
+    const first = sessions.linkRttMs()!;
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThan(2000);
+    /* The day's median is asked at a time: a day and more on, today's hellos are no part of it. */
+    expect(sessions.linkRttMs(Date.now() + 2 * 86_400_000)).toBeNull();
+    /* A leader that stops leading is no leader to measure against. */
+    stand.state.lead = false;
+    await until(() => sessions.leader() === null);
+    expect(sessions.linkRttMs()).toBeNull();
+  });
+
   it('forgets what a session that ended saw', async () => {
     const stand = await standUp();
     const sessions = stand.sessionsWith();

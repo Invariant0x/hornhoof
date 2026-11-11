@@ -169,6 +169,7 @@ export class PeerServer {
   private readonly lineGate = new OncePerMinute();
   /* What this machine's database sent each peer, by the peer's machine. */
   private readonly toDb = new Map<string, number>();
+  private readonly sent = new Map<string, number>();
   private sweeper: NodeJS.Timeout | undefined;
   /* Node ends a refused certificate's socket before it says so, and the socket no longer knows its address by then. The
      plain socket under it closes just before, in the same turn of the loop, so this is that address. */
@@ -194,6 +195,16 @@ export class PeerServer {
 
   /* The bytes this machine's database sent that machine on its streams since this server started: whether a copy still
      takes what it is sent. */
+  /* Every byte written to each peer's streams so far, by the peer's machine: what its database sent it, an app's
+     answers, bundles and hellos. How fast the leader sends to a machine is read from how this grows. */
+  sentBytes(): ReadonlyMap<string, number> {
+    return this.sent;
+  }
+
+  private count(peer: Peer, bytes: number): void {
+    this.sent.set(peer.machine, (this.sent.get(peer.machine) ?? 0) + bytes);
+  }
+
   dbBytes(machine: string): number {
     return this.toDb.get(machine) ?? 0;
   }
@@ -303,8 +314,13 @@ export class PeerServer {
 
   private answer(route: Route, stream: ServerHttp2Stream, peer: Peer): void {
     if (route.to === 'hello') return this.sayHello(stream, peer);
-    if (route.to === 'app') return void tunnel(stream, this.opts.door.connect(peer));
-    if (route.to === 'db') return void tunnel(stream, openTcp(route.db), bytes => this.toDb.set(peer.machine, (this.toDb.get(peer.machine) ?? 0) + bytes));
+    if (route.to === 'app') return void tunnel(stream, this.opts.door.connect(peer), bytes => this.count(peer, bytes));
+    if (route.to === 'db') {
+      return void tunnel(stream, openTcp(route.db), bytes => {
+        this.toDb.set(peer.machine, (this.toDb.get(peer.machine) ?? 0) + bytes);
+        this.count(peer, bytes);
+      });
+    }
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
     if (route.to === 'upload') return void this.takeUpload(stream, peer, route.id, route.length);
     answerEmpty(stream, route.status);
@@ -318,6 +334,7 @@ export class PeerServer {
     bundle.on('error', () => stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR));
     stream.once('close', () => bundle.destroy());
     stream.respond({ ':status': 200, 'content-type': 'application/octet-stream', 'content-length': found.length });
+    bundle.on('data', (chunk: Buffer) => this.count(peer, chunk.length));
     bundle.pipe(stream);
   }
 
@@ -352,7 +369,9 @@ export class PeerServer {
   }
 
   private sayHello(stream: ServerHttp2Stream, peer: Peer): void {
+    const said = JSON.stringify({ ...this.opts.hello(peer), seen: peer.address });
     stream.respond({ ':status': 200, 'content-type': 'application/json' });
-    stream.end(JSON.stringify({ ...this.opts.hello(peer), seen: peer.address }));
+    this.count(peer, Buffer.byteLength(said));
+    stream.end(said);
   }
 }

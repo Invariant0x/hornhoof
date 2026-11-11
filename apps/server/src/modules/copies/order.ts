@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.js';
 import { machines, people, publicLinks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { queryOf } from '../merge/leader.js';
+import { storeThroughput } from './measured.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 import { findThisMachine } from '../network/store.js';
 import { seesAll, unfit, type Candidate } from './qualify.js';
@@ -152,6 +153,9 @@ export class Ranking {
 
   /* A ranking that fails is one line, and the next minute tries again. */
   private async once(): Promise<void> {
+    /* How fast the leader sends to each machine, as its keeper last said; without it the ranking goes on with what
+       the rows hold. */
+    await storeThroughput(this.ctx).catch((err: unknown) => this.ctx.log.warn({ error: loggable(err) }, "Could not write how fast the server sends to each machine. The rows keep what they had."));
     try {
       await rank(this.ctx);
     } catch (err) {
