@@ -20,6 +20,10 @@ export type FakeTelegram = {
   blocked: Set<number>;
   /* While set, it answers 502 to everything, as a proxy in front of it does when it is away. */
   down: boolean;
+  /* Methods that answer 502 while the rest work. */
+  broken: Set<string>;
+  /* Bots with a webhook: Telegram refuses their getUpdates with 409 until deleteWebhook. */
+  webhooks: Set<string>;
   /* Every call, as the method name: never the token. */
   calls: string[];
   /* A message a person writes to the bot. */
@@ -47,6 +51,8 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     offsets: new Map(),
     blocked: new Set(),
     down: false,
+    broken: new Set(),
+    webhooks: new Set(),
     calls: [],
     write(token, from, text, chat = { id: from.id, type: 'private' }) {
       const update: TelegramUpdate = { update_id: nextUpdate++, message: { message_id: nextMessage++, from, chat, date: Math.floor(Date.now() / 1000), ...(text === undefined ? {} : { text }) } };
@@ -64,8 +70,9 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
   const refuse = (code: number, description: string) => ({ ok: false, error_code: code, description });
 
   app.addHook('onRequest', async (req, reply) => {
-    tg.calls.push(req.url.split('/').pop()!.split('?')[0]!);
-    if (tg.down) return reply.code(502).send('Bad Gateway');
+    const method = req.url.split('/').pop()!.split('?')[0]!;
+    tg.calls.push(method);
+    if (tg.down || tg.broken.has(method)) return reply.code(502).send('Bad Gateway');
   });
   app.post<{ Params: { bot: string; method: string }; Body: Record<string, unknown> | undefined }>('/:bot/:method', async (req, reply) => {
     const token = req.params.bot.replace(/^bot/, '');
@@ -75,7 +82,13 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     switch (req.params.method) {
       case 'getMe':
         return { ok: true, result: { id: bot.id, is_bot: true, first_name: bot.first_name, username: bot.username } };
+      case 'deleteWebhook':
+        tg.webhooks.delete(token);
+        /* Telegram forgets what waited for the webhook only when asked to. */
+        if (body.drop_pending_updates === true) pending.delete(token);
+        return { ok: true, result: true };
       case 'getUpdates': {
+        if (tg.webhooks.has(token)) return reply.code(409).send(refuse(409, "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first"));
         const offset = Number(body.offset ?? 0);
         tg.offsets.set(token, [...(tg.offsets.get(token) ?? []), offset]);
         /* Telegram forgets what an offset confirms. */

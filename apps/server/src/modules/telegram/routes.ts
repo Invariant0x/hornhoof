@@ -9,7 +9,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, telegramBots, telegramReplies } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
-import { getMe, TelegramError, type TelegramUser } from './api.js';
+import { deleteWebhook, getMe, TelegramError, type TelegramUser } from './api.js';
 
 /* What a token from @BotFather looks like: the bot's number, a colon and its secret part. */
 const TokenBody = z.object({ token: z.string().trim().regex(/^\d{1,20}:[A-Za-z0-9_-]{20,200}$/, 'Paste the whole token @BotFather gave, like 123456789:AAH...') }).strict();
@@ -28,7 +28,9 @@ function requireBotKeeper(me: Person): void {
   if (me.via) throw new ApiError(403, 'forbidden', 'Only a person sets a Telegram bot, from their own screen.', 'company_scope_only');
 }
 
-/* The bot the token opens, as Telegram says. */
+const unreachable = () => new ApiError(503, 'unavailable', 'Telegram does not answer now. Try again in a few minutes.', 'telegram_unreachable');
+
+/* The bot the token opens, as Telegram says, ready to be read by polling. */
 async function botOf(ctx: Ctx, token: string): Promise<TelegramUser & { username: string }> {
   let bot: TelegramUser;
   try {
@@ -37,9 +39,12 @@ async function botOf(ctx: Ctx, token: string): Promise<TelegramUser & { username
     if (err instanceof TelegramError && err.code !== null && err.code >= 400 && err.code < 500 && err.code !== 429) {
       throw new ApiError(400, 'validation', 'Telegram does not take this token. Copy it again from @BotFather.', 'telegram_token');
     }
-    throw new ApiError(503, 'unavailable', 'Telegram does not answer now. Try again in a few minutes.', 'telegram_unreachable');
+    throw unreachable();
   }
   if (!bot.is_bot || !bot.username) throw new ApiError(400, 'validation', 'Telegram does not take this token. Copy it again from @BotFather.', 'telegram_token');
+  await deleteWebhook(ctx.config.telegramApiUrl, token).catch(() => {
+    throw unreachable();
+  });
   return { ...bot, username: bot.username };
 }
 

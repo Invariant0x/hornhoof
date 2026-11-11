@@ -89,6 +89,23 @@ describe('a Telegram bot of a head', () => {
     expect(away.body).not.toContain(TOKEN.split(':')[1]);
   });
 
+  it('takes off a webhook the bot had before, keeping what waits for it, or is not kept when that fails', async () => {
+    const { app, db, ceo, owner, tg, builtin } = await company();
+    await setTelegram(app, ceo, owner.id, '@Ivan_K');
+    tg.webhooks.add(TOKEN);
+    tg.write(TOKEN, IVAN, 'Written while the webhook was on.');
+    tg.broken.add('deleteWebhook');
+    const away = await connectBot(app, ceo, 'orchestrator', TOKEN);
+    expect(away.statusCode).toBe(503);
+    expect(away.json().error.reason).toBe('telegram_unreachable');
+    expect(await db.select().from(telegramBots)).toEqual([]);
+    tg.broken.clear();
+    expect((await connectBot(app, ceo, 'orchestrator', TOKEN)).statusCode).toBe(200);
+    expect(tg.webhooks.has(TOKEN)).toBe(false);
+    expect((await nextOf(builtin, 'job.run')).prompt).toContain('Written while the webhook was on.');
+    expect(tg.calls.filter(c => c === 'getUpdates').length).toBeGreaterThan(0);
+  });
+
   it('belongs to one head only, and only heads and the orchestrator have one', async () => {
     const c = await company();
     const { head, worker } = await salesHead(c);

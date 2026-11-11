@@ -38,6 +38,9 @@ export const POLL_SECONDS = 30;
 
 export const getMe = (base: string, token: string) => callTelegram<TelegramUser>(base, token, 'getMe', {});
 
+/* A webhook from the bot's earlier life keeps getUpdates refused; taking it off keeps what waits for the bot. */
+export const deleteWebhook = (base: string, token: string) => callTelegram<boolean>(base, token, 'deleteWebhook', { drop_pending_updates: false });
+
 export const getUpdates = (base: string, token: string, offset: number, signal: AbortSignal) =>
   callTelegram<TelegramUpdate[]>(base, token, 'getUpdates', { offset, timeout: POLL_SECONDS, allowed_updates: ['message'] }, signal);
 
