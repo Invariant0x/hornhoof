@@ -110,6 +110,8 @@ async function signedIn(browser: Browser, server: Server, who: keyof Boot['token
   await context.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
+    /* These are about who sees an agent's terminal, so the windows open with it rather than the chat. */
+    localStorage.setItem('hh-agent-view', 'terminal');
   }, { lang, theme });
   const page = await context.newPage();
   const errors: string[] = [];

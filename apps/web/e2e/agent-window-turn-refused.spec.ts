@@ -3,6 +3,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { TurnRefusal } from '../src/types';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
+import { chooseTerminal } from './api';
 import { checkPage, open, shot, watchErrors, type Settings } from './agent-window-steps';
 
 const fixture = (turnRefused: TurnRefusal | null): AgentFixture => ({ awake: true, hasTask: false, messages: [], connections: 0, sent: [], turnRefused });
@@ -13,6 +14,7 @@ async function atSize(page: import('@playwright/test').Page, { lang, theme, widt
     localStorage.setItem('hh-lang', chosen!);
     localStorage.setItem('hh-theme', look!);
   }, [lang, theme]);
+  await chooseTerminal(page);
 }
 
 for (const lang of ['en', 'ru'] as const) {

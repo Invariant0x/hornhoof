@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { box } from './api';
+import { box, chooseTerminal } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
 type Settings = { lang: 'en' | 'ru'; theme: 'light' | 'dark'; width: number };
@@ -10,6 +10,7 @@ async function prepare(page: Page, info: TestInfo, { lang, theme, width }: Setti
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, { lang, theme });
+  await chooseTerminal(page);
   const words = lang === 'en' ? { subscriptions: 'Subscriptions', machines: 'Machines', card: 'Open the card of', open: 'Open Bruno', close: 'Close', task: 'Task', back: 'Back to terminal', minimize: 'Minimize', restore: 'Restore Bruno, Developer', full: 'Full screen', size: 'Restore size', noTask: 'No task', why: 'This agent has no current task.', write: 'Write to Bruno' } : { subscriptions: 'Подписки', machines: 'Машины', card: 'Открыть карточку', open: 'Открыть: Bruno', close: 'Закрыть', task: 'Задача', back: 'К терминалу', minimize: 'Свернуть', restore: 'Развернуть: Bruno, Разработчик', full: 'На весь экран', size: 'Обычный размер', noTask: 'Нет задачи', why: 'У агента сейчас нет задачи.', write: 'Сообщение для Bruno' };
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -213,6 +214,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
 test('a hidden terminal menu leaves Escape with the account menu', async ({ page }) => {
   const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0 };
   await serveAgentWindow(page, live);
+  await chooseTerminal(page);
   await page.goto('/');
   await page.getByRole('button', { name: /Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();

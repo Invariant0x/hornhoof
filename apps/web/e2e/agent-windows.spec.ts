@@ -54,7 +54,10 @@ for (const settings of SETTINGS) {
       await barButton('Clara', words.log).click();
       await expect(windowOf('Clara').getByRole('log')).toBeVisible();
       await minimize('Clara');
+      /* Dana's window opens with the chat, the last choice made in Clara's; the terminal is one click away. */
       await openEmployee('Dana');
+      await expect(windowOf('Dana').getByRole('log')).toBeVisible();
+      await barButton('Dana', words.terminal).click();
       await expect(windowOf('Dana').locator('.xterm-screen')).toBeVisible();
       const danaConnections = live.connections['dana'];
       await barButton('Dana', words.task).click();
@@ -193,8 +196,9 @@ test('a picture pasted beside a strip goes to the log on the screen only, and wa
   await openEmployee('Bruno');
   await barButton('Bruno', words.log).click();
   await minimize('Bruno');
+  /* Clara's window opens with the chat, the last choice made in Bruno's. */
   await openEmployee('Clara');
-  await barButton('Clara', words.log).click();
+  await expect(windowOf('Clara').getByRole('log')).toBeVisible();
   await pastePicture(page, 'screen.png');
   const pasted = (name: string) => windowOf(name).getByRole('img', { name: 'screen.png', exact: true });
   await expect(pasted('Clara')).toBeVisible();

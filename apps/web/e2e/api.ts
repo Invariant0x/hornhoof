@@ -11,6 +11,9 @@ export const ME: Me = {
   company: { id: 'c1', name: 'Acme' },
 };
 
+/* A person who last chose the terminal in this browser: an agent's window opens with it rather than with the chat. */
+export const chooseTerminal = (page: Page) => page.addInitScript(() => localStorage.setItem('hh-agent-view', 'terminal'));
+
 export const AGENT_HIDDEN = { error: { code: 'forbidden', message: 'This employee is not on a plan of yours in a department you have.', reason: 'agent_hidden' } };
 
 const DEV = { id: 'd2', name: 'Development' };

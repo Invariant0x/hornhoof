@@ -128,10 +128,9 @@ describe('a picture dragged into the window', () => {
     const user = userEvent.setup();
     const { messages } = open({ [`POST ${AGENT}/pictures?name=screen.png`]: uploaded('pic1') });
     await line();
-    expect(screen.queryByRole('button', { name: en.window.sendPictures })).not.toBeInTheDocument();
     fireEvent.drop(windowBox(), dragged(png()));
     await preview();
-    await user.click(screen.getByRole('button', { name: en.window.sendPictures }));
+    await user.click(screen.getByRole('button', { name: en.window.chat.send }));
     await waitFor(() => expect(messages()).toEqual([{ text: '', pictures: ['pic1'] }]));
   });
 
@@ -182,6 +181,7 @@ describe('a picture dragged into the window', () => {
   });
 
   it('leaves a picture dropped on a live terminal to the terminal, with no line of the window', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
     const { uploads } = open({}, TERMINAL);
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     fireEvent.dragEnter(windowBox(), dragged(png()));
@@ -201,7 +201,8 @@ describe('a picture pasted into the window', () => {
     expect(await preview('from-page.png')).toBeInTheDocument();
   });
 
-  it('is for the live terminal when one shows, which takes it itself', async () => {
+  it('is for the live terminal when the person chose it, which takes it itself', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
     const { uploads } = open({}, TERMINAL);
     const terminal = await screen.findByRole('textbox', { name: 'Terminal input' });
     expect(fireEvent.paste(terminal, copied([png('from-terminal.png')]))).toBe(true);
@@ -399,7 +400,7 @@ describe('what the window turns away', () => {
     await line();
     fireEvent.drop(windowBox(), dragged(png()));
     await preview();
-    const send = screen.getByRole('button', { name: en.window.sendPictures });
+    const send = screen.getByRole('button', { name: en.window.chat.send });
     await user.click(send);
     await user.click(send);
     await user.type(await line(), '{Enter}');
@@ -476,7 +477,7 @@ describe('a picture in the conversation', () => {
 
   it('shows nothing extra for a message without pictures', async () => {
     open({}, READY, [{ ...said, data: { text: 'Look at this' } }]);
-    await screen.findByRole('button', { name: /Message from/ });
+    await screen.findByText('Look at this');
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(document.querySelector('.t-pics')).toBeNull();
   });
@@ -485,7 +486,7 @@ describe('a picture in the conversation', () => {
 describe('the words about pictures', () => {
   it('exist in both languages', () => {
     for (const t of [en, ru]) {
-      for (const text of [t.window.dropPictures, t.window.addPicture, t.window.sendPictures, t.window.removePicture('a.png'), t.window.openPicture('a.png'), t.window.pictureGone('a.png'), t.errors.picture_invalid, t.errors.picture_too_big, t.errors.pictures_too_many, t.errors.attachment_invalid, t.errors.attachment_unknown]) {
+      for (const text of [t.window.dropPictures, t.window.addPicture, t.window.chat.send, t.window.removePicture('a.png'), t.window.openPicture('a.png'), t.window.pictureGone('a.png'), t.errors.picture_invalid, t.errors.picture_too_big, t.errors.pictures_too_many, t.errors.attachment_invalid, t.errors.attachment_unknown]) {
         expect(text).toBeTruthy();
         expect(text).not.toMatch(/[—ё]/);
       }

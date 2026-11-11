@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ComputerView } from '../src/types';
-import { AGENT_HIDDEN, box } from './api';
+import { AGENT_HIDDEN, box, chooseTerminal } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
@@ -19,6 +19,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, settings);
+  await chooseTerminal(page);
   const live: AgentFixture = { awake: true, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR, viewer: me };
   await serveAgentWindow(page, live);
   await page.route('**/api/**', route => {
@@ -159,20 +160,19 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
   });
 }
 
-test('the line of the log keeps its draft while the person looks at the terminal, which has no line', async ({ page }) => {
+test('the line of the chat keeps its draft while the person looks at the terminal, which has no line', async ({ page }) => {
   const settings = { lang: 'en', theme: 'light', width: 1440 } as const;
   const errors = watchErrors(page);
   await serve(page, 'delegate', settings);
   const window = await open(page, 'orchestrator', 'en');
   const line = window.getByRole('textbox', { name: en.window.placeholder, exact: true });
-  await expect(line).toHaveCount(0);
-  await window.getByRole('button', { name: en.window.showLog, exact: true }).click();
+  await window.getByRole('button', { name: en.window.showChat, exact: true }).click();
   await expect(window.getByRole('log')).toBeVisible();
   await line.fill('A draft');
   await window.getByRole('button', { name: en.window.showTerminal, exact: true }).click();
   await expect(window.locator('.xterm-screen')).toBeVisible();
   await expect(line).toHaveCount(0);
-  await window.getByRole('button', { name: en.window.showLog, exact: true }).click();
+  await window.getByRole('button', { name: en.window.showChat, exact: true }).click();
   await expect(line).toHaveValue('A draft');
   await checkPage(page, errors);
 });
