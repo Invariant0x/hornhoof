@@ -18,7 +18,7 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
-import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
+import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
