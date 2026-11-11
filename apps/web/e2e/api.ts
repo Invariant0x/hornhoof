@@ -95,6 +95,9 @@ export async function serveApi(page: Page) {
     if (path === '/api/stream') return;
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
+    /* A department works in turns unless a test says otherwise, and the person may change it. */
+    const workMode = /^\/api\/departments\/([^/]+)\/work-mode$/.exec(path);
+    if (workMode) return route.fulfill(json({ departmentId: workMode[1], workMode: 'turns', canChangeWorkMode: true }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
