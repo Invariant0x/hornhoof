@@ -7,16 +7,17 @@ import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
 import { arrangedBounds, arrangeMap, deptKey, GAP, H, HALO, HUB, HUB_KEY, personKey, W, type DeptSpot, type MapArrangement, type TopPerson } from '../map-arrange';
 import { useMapLayout } from '../map-layout';
+import { drawOnce } from '../map-roads';
 import type { PeopleLayout, PersonChip } from '../map-people';
 import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar, type View } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
-import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
+import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
 import type { Rect } from '../ui/ortho';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
@@ -40,6 +41,27 @@ const PING_MS = 950;
 const FLASH_MS = 1400;
 /* A grip is this big to touch on the screen at any zoom. An arrow key moves its block this far, ten times as far with Shift. */
 const GRIP = 44, KEY_STEP = 10;
+
+/* Where the map stood when this person left it, kept in this browser for each company and person, so a reload opens it there. */
+const viewKey = (me: Me) => `hh-map-view:${me.company.id}:${me.person.id}`;
+
+function keptView(key: string): View | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<View> | null;
+    const ok = !!v && [v.x, v.y, v.k].every(n => typeof n === 'number' && Number.isFinite(n)) && v.k! > 0;
+    return ok ? { x: v.x!, y: v.y!, k: v.k!, smooth: false } : null;
+  } catch {
+    return null;
+  }
+}
+
+function keepView(key: string, { x, y, k }: View): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ x, y, k }));
+  } catch {
+    /* A private window may refuse; the map then shows all of itself on the next visit. */
+  }
+}
 
 /* What a plan that is not ready waits for: its owner's machine, the login or the first setup of its program. */
 function planWaits(t: Messages, sub: SubView): string {
@@ -264,6 +286,34 @@ function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: MapArrange
   });
 }
 
+/* The quiet lines of the map in the order they are drawn: the people's row and its bus, the people moved out of it, the
+   traces of departments and the department people's wires, each with what names it on the page. */
+function quietLines(arr: MapArrangement): { key: string; pts: Point[]; data: Record<string, string> }[] {
+  return [
+    ...(arr.bus ? [...arr.bus.lines.map(pts => ({ key: toD(pts), pts, data: {} })), { key: 'people', pts: arr.bus.drop, data: { 'data-wire': 'people' } }] : []),
+    ...arr.top.filter(p => p.apart).map(p => ({ key: p.id, pts: p.path, data: { 'data-wire': p.id } })),
+    ...arr.depts.map(s => ({ key: s.id, pts: s.path, data: { 'data-wire': s.id } })),
+    ...arr.people.wires.map(w => ({ key: w.id, pts: w.pts, data: { 'data-person': w.personId, 'data-wire': w.id } })),
+  ];
+}
+
+/* The roads of the map: a stretch that several lines share is drawn once, as thin as one line; and a dot, one to a place,
+   where the people's row leaves its bus, where a trace turns into its card and where a road forks. */
+function Roads({ arr }: { arr: MapArrangement }) {
+  const lines = quietLines(arr);
+  const drawn = drawOnce(lines.map(l => l.pts));
+  const dots = new Map<string, Point>();
+  for (const p of [...(arr.bus ? [arr.bus.via] : []), ...arr.depts.flatMap(s => (s.via ? [s.via] : [])), ...arr.people.vias, ...arr.forks]) dots.set(`${p[0]}:${p[1]}`, p);
+  return (
+    <>
+      {lines.map((l, i) => drawn[i]!.length > 0 && <path key={l.key} className="tr" {...l.data} d={drawn[i]!.map(toD).join(' ')} />)}
+      {[...dots].map(([key, [x, y]]) => (
+        <circle key={key} className="via" cx={x} cy={y} r="4" />
+      ))}
+    </>
+  );
+}
+
 /* Decisions run amber from the hub or the person's department, with the same bridges as the quiet trace. */
 function DecisionSignals({ ways, still, placed, prefix }: { ways: { key: string; id: string; pts: Point[] }[]; still: boolean; placed: PeopleLayout; prefix: string }) {
   return ways.map(w => (
@@ -335,11 +385,12 @@ function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: Person
 type At = { x: number; y: number };
 const ARROWS: Record<string, Point> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
-/* The handle at a block's top left corner: drag it by mouse, touch or pen, or move the block with the arrow keys. It stays the
-   same size on the screen at any zoom and stands up and to the left of the corner, outside the block, so a press on the block
-   still opens it and a press on the map around still moves the map. While the hand moves, onMove shows the block where it is,
-   and null puts it back; onPut keeps the place where the hand let go. */
-function Grip({ label, corner, from, k, onMove, onPut }: { label: string; corner: Point; from: At; k: number; onMove(at: At | null): void; onPut(at: At): void }) {
+/* The handle at a block's top left corner: drag it by mouse, touch or pen, or move the block with the arrow keys. Nothing is
+   drawn for it: the corner itself takes the hand, and only the pointer shows that it moves the block. It stays the same size on
+   the screen at any zoom with its middle on the corner, and onTap gets a press on it that does not move, where it was on the
+   screen, for the card there. While the hand moves, onMove shows the block where it is, and null puts it back; onPut keeps the
+   place where the hand let go. Only the keyboard's focus shows it, by its ring. */
+function Grip({ label, corner, from, k, onMove, onPut, onTap }: { label: string; corner: Point; from: At; k: number; onMove(at: At | null): void; onPut(at: At): void; onTap(x: number, y: number): void }) {
   const press = useRef<{ id: number; x: number; y: number; from: At; at: At | null } | null>(null);
   return (
     <button
@@ -347,7 +398,7 @@ function Grip({ label, corner, from, k, onMove, onPut }: { label: string; corner
       className="grip"
       aria-label={label}
       title={label}
-      style={{ left: corner[0] - GRIP, top: corner[1] - GRIP, width: GRIP, height: GRIP, transform: `scale(${1 / k})` }}
+      style={{ left: corner[0] - GRIP / 2, top: corner[1] - GRIP / 2, width: GRIP, height: GRIP, transform: `scale(${1 / k})` }}
       onPointerDown={e => {
         e.stopPropagation();
         if (e.button !== 0) return;
@@ -369,6 +420,7 @@ function Grip({ label, corner, from, k, onMove, onPut }: { label: string; corner
         e.stopPropagation();
         press.current = null;
         if (p.at) onPut(p.at);
+        else onTap(e.clientX, e.clientY);
       }}
       onPointerCancel={e => {
         if (press.current?.id !== e.pointerId) return;
@@ -382,11 +434,7 @@ function Grip({ label, corner, from, k, onMove, onPut }: { label: string; corner
         const n = e.shiftKey ? KEY_STEP * 10 : KEY_STEP;
         onPut({ x: from.x + step[0] * n, y: from.y + step[1] * n });
       }}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
-      </svg>
-    </button>
+    />
   );
 }
 
@@ -405,9 +453,17 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const company = me.person.scopeKind === 'company';
   const { org, failure } = useOrg();
   const [shots, setShots] = useState<Shot[]>([]);
-  const [minZoom, setMinZoom] = useState(MIN_K);
+  const key = viewKey(me);
+  const [kept] = useState(() => keptView(key));
+  const [minZoom, setMinZoom] = useState(() => Math.min(MIN_K, kept?.k ?? MIN_K));
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, org, { min: minZoom, max: MAX_K });
+  const { view, setView, zoomAt, handlers, dragged, touched } = usePanZoom(box, org, { min: minZoom, max: MAX_K }, kept ?? undefined);
+  /* Whether the view is the person's own: kept from before, shown with Fit, or dragged or zoomed. Only the person moves it
+     then; until then the map shows all of itself. */
+  const chose = useRef(!!kept);
+  const mine = useCallback(() => chose.current || touched(), [touched]);
+  /* The view the map flew into a department from, to stand at again when the department closes. */
+  const back = useRef<View | null>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
@@ -489,7 +545,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     });
   }, [org, arr, fire]);
 
-  /* Moving a block leaves the view where it is; the arrangement coming from the server or put back shows all of it again. */
+  /* Show everything. */
   const fit = useCallback(() => {
     const el = box.current;
     const shown = arrRef.current;
@@ -502,16 +558,37 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
     setMinZoom(Math.min(MIN_K, k));
     setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, leftPanelOpen, inside, setView, layout.version]);
+  }, [org, windowOpen, leftPanelOpen, inside, setView]);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
 
   useEffect(() => {
-    fit();
+    if (inside || !back.current) return;
+    setView({ ...back.current, smooth: true });
+    back.current = null;
+  }, [inside, setView]);
+
+  /* Until the view is the person's own, the map shows all of itself: as it opens, as the arrangement comes from the server or
+     is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
+     moving a block leave the view alone. */
+  const shown = !!arr;
+  useEffect(() => {
+    if (!shown || inside) return;
+    const auto = () => {
+      if (!mine() && !back.current) fitRef.current();
+    };
+    auto();
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(auto);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fit]);
+  }, [shown, inside, layout.version, mine]);
+
+  /* The person's own view stays for the next visit; the flight into a department is not theirs. */
+  useEffect(() => {
+    if (view.smooth !== 'fly' && !inside && mine()) keepView(key, view);
+  }, [view, inside, key, mine]);
 
   /* The map flies into the department's card until it fills the screen, then the department opens. */
   function openDecisions(personId: string) {
@@ -519,10 +596,15 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   }
 
   function enter(spot: DeptSpot, id: string) {
-    if (dragged() || !onOpenDepartment) return;
+    if (!dragged()) fly(spot, id);
+  }
+
+  function fly(spot: DeptSpot, id: string) {
+    if (!onOpenDepartment) return;
     const el = box.current;
     if (!el || !el.clientWidth || still) return onOpenDepartment(id);
     const k = Math.min(el.clientWidth / spot.w, el.clientHeight / spot.h);
+    back.current ??= view;
     setView({ k, x: el.clientWidth / 2 - (spot.x + spot.w / 2) * k, y: el.clientHeight / 2 - (spot.y + spot.h / 2) * k, smooth: 'fly' });
     const timer = setTimeout(() => {
       timers.current.delete(timer);
@@ -561,6 +643,20 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     return dept ? deptLabel(t, dept) : (allPeople.find(p => personKey(p.id) === key)?.name ?? '');
   };
   const arranged = Object.keys(layout.placed).length > 0;
+  /* A press on a grip that does not move it opens the card under it, as a press on that card does: a department, the
+     orchestrator or a person's decisions. Grips of cards close together cover each other's corners at a small zoom, so the
+     card is the one the press is on, the one drawn on top first. */
+  const tapAt = (cx: number, cy: number) => {
+    const r = box.current!.getBoundingClientRect();
+    const x = (cx - r.left - view.x) / view.k, y = (cy - r.top - view.y) / view.k;
+    const on = (b: Rect) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+    const dept = [...spots].reverse().find(on);
+    const person = allPeople.findLast(p => arr.blocks.some(b => b.key === personKey(p.id) && on(b.rect)));
+    if (dept) fly(dept, dept.id);
+    else if (Math.hypot(x - mx, y - my) <= HUB) {
+      if (company) onOpenOrchestrator();
+    } else if (person) onOpenDecisions?.(person.id);
+  };
   const hubArt = (
     <>
       <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
@@ -604,21 +700,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
           <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
-          {arr.bus && (
-            <>
-              {arr.bus.lines.map(pts => (
-                <path key={toD(pts)} className="tr" d={toD(pts)} />
-              ))}
-              <path className="tr" data-wire="people" d={toD(arr.bus.drop)} />
-              <circle className="via" cx={arr.bus.via[0]} cy={arr.bus.via[1]} r="4" />
-            </>
-          )}
-          {arr.top.map(p => p.apart && <path key={p.id} className="tr" data-wire={p.id} d={toD(p.path)} />)}
-          {spots.map(s => (
-            <path key={s.id} className="tr" data-wire={s.id} d={toD(s.path)} />
-          ))}
-          {spots.map(s => s.via && <circle key={s.id} className="via" cx={s.via[0]} cy={s.via[1]} r="4" />)}
-          <PeopleWires placed={placed} />
+          <Roads arr={arr} />
           <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
 
           <DecisionSignals ways={asked} still={still} placed={placed} prefix={wirePrefix} />
@@ -709,11 +791,19 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
               setMoving(null);
               layout.place(b.key, at);
             }}
+            onTap={tapAt}
           />
         ))}
       </div>
 
-      <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={fit} />
+      <ZoomBar
+        k={view.k}
+        onZoom={f => zoomAt(f)}
+        onFit={() => {
+          chose.current = true;
+          fit();
+        }}
+      />
       {(arranged || layout.failed) && (
         <div className="map-arrange" onPointerDown={e => e.stopPropagation()}>
           {layout.failed && <p className="alert" role="alert">{t.map.layoutNotSaved}</p>}

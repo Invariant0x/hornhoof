@@ -3,11 +3,15 @@ import { api, ApiFailure } from '../api';
 import { useT } from '../i18n';
 import { isHidden } from './visibility';
 
-/* What the server keeps: apps/server/src/modules/tasks/attachments.ts and conversation/pictures.ts. */
+/* What the server keeps: apps/server/src/modules/conversation/pictures.ts. A big picture goes smaller to PICTURE_BYTES
+   first, so the agent's program reads it whole; any other file goes as it is. */
 const PICTURE_BYTES = 3 * 1024 * 1024;
+const FILE_BYTES = 10 * 1024 * 1024;
 const PER_MESSAGE = 10;
-const TAKEN = ['image/png', 'image/jpeg', 'image/webp'];
-export const TAKEN_TYPES = TAKEN.join(',');
+/* What the window shows as a picture before it goes. */
+const SHOWN = ['image/png', 'image/jpeg', 'image/webp'];
+/* A sheet with a folded corner, for a file that shows no picture. */
+const FILE_ICON = 'M7 3h7l5 5v13H7zM14 3v5h5';
 /* How far a big picture is scaled down, in turn, before it is turned away. */
 const SCALES = [1, 0.75, 0.5, 0.35];
 const JPEG_QUALITY = 0.85;
@@ -16,15 +20,16 @@ const PANELS = '.side-panels';
 const FIELDS = 'input, textarea, select, [contenteditable="true"]';
 const OWN_FIELDS = '.t-in textarea, .xterm-helper-textarea';
 
-export type Draft = { key: number; file: Blob; name: string; preview: string };
-type Refusal = 'picture_invalid' | 'picture_too_big' | 'pictures_too_many';
+/* preview: the picture to show, or null for a file that waits by its name. */
+export type Draft = { key: number; file: Blob; name: string; preview: string | null };
+type Refusal = 'file_empty' | 'file_too_big' | 'pictures_too_many';
 const refusal = (reason: Refusal) => new ApiFailure(400, 'validation', '', reason);
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 const inPanel = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(PANELS));
 
-/* Nothing else on the page takes a picture, so one pasted with the window showing is for it, wherever the focus is, unless
-   it goes into a field of its own. */
+/* Nothing else on the page takes a file, so one pasted with the window showing is for it, wherever the focus is, unless it
+   goes into a field of its own. */
 const pasteIsForLine = (target: EventTarget | null, box: HTMLElement) => !isHidden(box) && target instanceof Element && (!target.closest(FIELDS) || target.matches(OWN_FIELDS));
 
 /* The file as JPEG at the first scale that fits, or nothing when none does or it is no picture a browser can read. */
@@ -54,16 +59,20 @@ async function shrunk(file: File): Promise<Blob | null> {
 
 const asJpeg = (name: string) => `${name.replace(/\.[^.]*$/, '')}.jpg`;
 
-/* The bytes to send of a file, or why it does not go. */
+/* The bytes to send of a file, or why it does not go. A big picture goes smaller when it can, and as it is when it cannot. */
 export async function readied(file: File): Promise<{ file: Blob; name: string } | Refusal> {
-  if (!TAKEN.includes(file.type)) return 'picture_invalid';
-  if (file.size <= PICTURE_BYTES) return { file, name: file.name };
-  const smaller = await shrunk(file);
-  return smaller ? { file: smaller, name: asJpeg(file.name) } : 'picture_too_big';
+  if (!file.size) return 'file_empty';
+  if (SHOWN.includes(file.type) && file.size > PICTURE_BYTES) {
+    const smaller = await shrunk(file);
+    if (smaller) return { file: smaller, name: asJpeg(file.name) };
+  }
+  return file.size <= FILE_BYTES ? { file, name: file.name } : 'file_too_big';
 }
 
-/* The pictures waiting at the line to go with the next message. A picture that is up keeps its id, so sending again after
-   a failure does not put it up twice. */
+const letGo = (d: Draft) => d.preview && URL.revokeObjectURL(d.preview);
+
+/* The pictures and other files waiting at the line to go with the next message. One that is up keeps its id, so sending
+   again after a failure does not put it up twice. */
 export function useDraftPictures(path: string) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [sending, setSending] = useState(false);
@@ -83,7 +92,8 @@ export function useDraftPictures(path: string) {
       if (current.current.length >= PER_MESSAGE) return setRefused(refusal('pictures_too_many'));
       const ready = await readied(file);
       if (typeof ready === 'string') return setRefused(refusal(ready));
-      change([...current.current, { ...ready, key: ++nextKey.current, preview: URL.createObjectURL(ready.file) }]);
+      const preview = SHOWN.includes(ready.file.type) ? URL.createObjectURL(ready.file) : null;
+      change([...current.current, { ...ready, key: ++nextKey.current, preview }]);
     },
     [change],
   );
@@ -99,7 +109,7 @@ export function useDraftPictures(path: string) {
 
   const drop = useCallback(
     (gone: Draft[]) => {
-      for (const d of gone) URL.revokeObjectURL(d.preview);
+      gone.forEach(letGo);
       change(current.current.filter(d => !gone.includes(d)));
     },
     [change],
@@ -113,13 +123,13 @@ export function useDraftPictures(path: string) {
     [drop],
   );
 
-  /* The browser could not show it, so whatever its name says it is no picture. */
-  const notPicture = useCallback(
+  /* The browser could not show it, so whatever its name says it is no picture: it waits by its name and goes as it is. */
+  const asFile = useCallback(
     (draft: Draft) => {
-      drop([draft]);
-      setRefused(refusal('picture_invalid'));
+      letGo(draft);
+      change(current.current.map(d => (d.key === draft.key ? { ...d, preview: null } : d)));
     },
-    [drop],
+    [change],
   );
 
   const upload = useCallback(
@@ -143,7 +153,8 @@ export function useDraftPictures(path: string) {
         const up: string[] = [];
         for (const draft of going) up.push(await upload(draft));
         await post(up);
-        drop(going);
+        const sent = new Set(going.map(d => d.key));
+        drop(current.current.filter(d => sent.has(d.key)));
       } finally {
         setSending(false);
       }
@@ -151,9 +162,9 @@ export function useDraftPictures(path: string) {
     [drop, upload],
   );
 
-  useEffect(() => () => current.current.forEach(d => URL.revokeObjectURL(d.preview)), []);
+  useEffect(() => () => current.current.forEach(letGo), []);
 
-  return { drafts, sending, refused, setRefused, add, remove, notPicture, deliver };
+  return { drafts, sending, refused, setRefused, add, remove, asFile, deliver };
 }
 
 type Drags = { accepting: boolean; exclusive: boolean; depth: { current: number }; setDragging(on: boolean): void; add(files: File[]): void };
@@ -200,13 +211,13 @@ function pasted(e: ClipboardEvent, box: HTMLElement, accepting: boolean, add: (f
   const said = e.clipboardData;
   if (!said || said.getData('text/plain')) return;
   const files = Array.from(said.files);
-  if (!files.some(f => f.type.startsWith('image/')) || !pasteIsForLine(e.target, box)) return;
+  if (!files.length || !pasteIsForLine(e.target, box)) return;
   e.preventDefault();
   e.stopPropagation();
   if (accepting) add(files);
 }
 
-/* Dragging files over the window and pasting a picture while it shows. A file that misses the window stays from replacing
+/* Dragging files over the window and pasting a picture or another file while it shows. A file that misses the window stays from replacing
    the page, for as long as it is open. Native listeners, from the commit the window shows in: the program in the terminal
    must not see an image pasted, the box holds panels with their own fields, and a file dropped a moment too early would
    replace the page. An exclusive box takes its own paste before an outer window and keeps its drops from that window. */
@@ -252,15 +263,29 @@ export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, 
   return dragging;
 }
 
-/* The pictures waiting at the line, small, each with its way out. */
+const FileIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d={FILE_ICON} />
+  </svg>
+);
+
+/* The pictures and files waiting at the line, small, each with its way out: a picture as itself, any other file by its
+   name. */
 export function PictureTray({ drafts, sending, onRemove, onBroken }: { drafts: Draft[]; sending: boolean; onRemove(d: Draft): void; onBroken(d: Draft): void }) {
   const t = useT();
   if (!drafts.length) return null;
   return (
     <div className="t-tray" aria-busy={sending}>
       {drafts.map(d => (
-        <div key={d.key} className="t-tray-pic">
-          <img src={d.preview} alt={d.name} title={d.name} onError={() => onBroken(d)} />
+        <div key={d.key} className={d.preview ? 't-tray-pic' : 't-tray-file'}>
+          {d.preview ? (
+            <img src={d.preview} alt={d.name} title={d.name} onError={() => onBroken(d)} />
+          ) : (
+            <>
+              <FileIcon />
+              <span>{d.name}</span>
+            </>
+          )}
           <button type="button" aria-label={t.window.removePicture(d.name)} title={t.window.removePicture(d.name)} disabled={sending} onClick={() => onRemove(d)}>
             ×
           </button>
@@ -270,20 +295,19 @@ export function PictureTray({ drafts, sending, onRemove, onBroken }: { drafts: D
   );
 }
 
-/* Choosing pictures with a button, for a phone or a keyboard, where nothing is dragged. */
+/* Choosing pictures and other files with a button, for a phone or a keyboard, where nothing is dragged. */
 export function AddPicture({ id, disabled, onFiles }: { id: string; disabled: boolean; onFiles(files: File[]): void }) {
   const t = useT();
   return (
     <label className="t-add" htmlFor={id} title={t.window.addPicture}>
       <span className="sr">{t.window.addPicture}</span>
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 6h16v12H4zM4 15l5-4 4 3 3-2 4 3M15 9.5h.01" />
+        <path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />
       </svg>
       <input
         id={id}
         className="sr"
         type="file"
-        accept={TAKEN_TYPES}
         multiple
         disabled={disabled}
         onChange={e => {
@@ -307,15 +331,24 @@ function SentPicture({ id, name }: { id: string; name: string }) {
   );
 }
 
-/* The pictures of a person's message, whether its text is folded or not; each opens large. */
+/* A file that is no picture, by its name, to download. */
+function SentFile({ id, name }: { id: string; name: string }) {
+  const t = useT();
+  return (
+    <a className="t-file" href={`/api/attachments/${id}`} download={name} aria-label={t.window.downloadFile(name)} title={t.window.downloadFile(name)}>
+      <FileIcon />
+      <span>{name}</span>
+    </a>
+  );
+}
+
+/* The pictures and files of a person's message, whether its text is folded or not; a picture opens large, a file downloads. */
 export function SentPictures({ data }: { data: unknown }) {
-  const pictures = (data as { pictures?: { id: string; name: string }[] } | null)?.pictures ?? [];
+  const pictures = (data as { pictures?: { id: string; name: string; file?: boolean }[] } | null)?.pictures ?? [];
   if (!pictures.length) return null;
   return (
     <div className="t-pics">
-      {pictures.map(p => (
-        <SentPicture key={p.id} id={p.id} name={p.name} />
-      ))}
+      {pictures.map(p => (p.file ? <SentFile key={p.id} id={p.id} name={p.name} /> : <SentPicture key={p.id} id={p.id} name={p.name} />))}
     </div>
   );
 }

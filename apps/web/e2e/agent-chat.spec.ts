@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { PROGRAM_NAMES } from '../src/providers';
 import type { EventView } from '../src/types';
 import { box } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
@@ -108,9 +109,58 @@ for (const settings of [{ lang: 'en', theme: 'light', width: 1440 }, { lang: 'ru
   });
 }
 
-test('the chat says that an agent with nothing to do sleeps until its next task', async ({ page }, info) => {
+test('the chat says that an agent with nothing to do sleeps until its next task, and its terminal says so too', async ({ page }, info) => {
   const { t, window } = await prepare(page, info, { lang: 'en', theme: 'light', width: 1440 }, { awake: false });
   await openBruno(page, 'en');
   await expect(window.getByRole('status', { name: t.window.chat.state })).toHaveText(t.window.chat.asleep);
-  await expect(window.getByRole('button', { name: t.window.showTerminal, exact: true })).toHaveCount(0);
+  await window.getByRole('button', { name: t.window.showTerminal, exact: true }).click();
+  await expect(window.getByRole('status', { name: t.window.showTerminal, exact: true })).toHaveText(t.window.noTerminal.asleep(PROGRAM_NAMES.codex));
+  await expect(window.locator('.xterm-screen')).toHaveCount(0);
 });
+
+/* The switch to the terminal says its word beside its icon in every window, awake or asleep, at every width. */
+for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
+  const settings = { lang, theme, width };
+  test(`the terminal switch says its word for an agent awake and asleep, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+    const { t, errors, live, window, capture } = await prepare(page, info, settings);
+    const fits = async () => {
+      const frame = await box(window);
+      for (const button of await window.locator('.t-bar > button').all()) {
+        const b = await box(button);
+        expect(b.x).toBeGreaterThanOrEqual(frame.x - 0.5);
+        expect(b.x + b.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    };
+    const says = async (label: string) => {
+      const button = window.getByRole('button', { name: label, exact: true });
+      await expect(button.locator('span')).toHaveText(label);
+      await expect(button.locator('span')).toBeVisible();
+      await expect(button.locator('svg')).toBeVisible();
+      return button;
+    };
+    await openBruno(page, lang);
+    await expect(window.getByRole('log', { name: t.window.chat.conversation })).toBeVisible();
+    await fits();
+    await capture('agent-awake-chat');
+    await (await says(t.window.showTerminal)).click();
+    await expect(window.locator('.xterm-screen')).toBeVisible();
+    await says(t.window.showChat);
+    await fits();
+    await capture('agent-awake-terminal');
+
+    /* The program sleeps: the window opens on the terminal, as last chosen, and says why it is not there. */
+    live.awake = false;
+    await openBruno(page, lang);
+    await expect(window.getByRole('status', { name: t.window.showTerminal, exact: true })).toHaveText(t.window.noTerminal.asleep(PROGRAM_NAMES.codex));
+    await says(t.window.showChat);
+    await fits();
+    await capture('agent-asleep-terminal');
+    await (await says(t.window.showChat)).click();
+    await expect(window.getByRole('status', { name: t.window.chat.state })).toHaveText(t.window.chat.asleep);
+    await says(t.window.showTerminal);
+    await fits();
+    await capture('agent-asleep-chat');
+    expect(errors).toEqual([]);
+  });
+}

@@ -7,15 +7,14 @@ import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
 const PICTURE_BYTES = 3 * 1024 * 1024;
+const FILE_BYTES = 10 * 1024 * 1024;
 
 type Upload = { agent: string; name: string; bytes: Buffer };
 type Said = { agent: string; text: string; pictures?: string[] };
 /* What reached the server from this person, and the keys that reached the terminal. */
 type Server = { uploads: Upload[]; messages: Said[]; keys: string[] };
 
-const isPicture = (b: Buffer) => b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) || b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
-
-/* The server's side of a picture, as it judges one: by what the bytes hold. */
+/* The server's side of a picture or any other file: it keeps one that holds something, up to its limit. */
 async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Server> {
   const { me, types } = VIEWERS[viewer];
   const server: Server = { uploads: [], messages: [], keys: [] };
@@ -35,8 +34,8 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     const up = /^\/api\/agents\/(orchestrator|b1)\/pictures$/.exec(url.pathname);
     if (up && post) {
       const bytes = route.request().postDataBuffer() ?? Buffer.alloc(0);
-      if (bytes.length > PICTURE_BYTES) return route.fulfill({ status: 413, json: { error: { code: 'validation', message: 'Too big.', reason: 'picture_too_big' } } });
-      if (!isPicture(bytes)) return route.fulfill({ status: 400, json: { error: { code: 'validation', message: 'Not a picture.', reason: 'picture_invalid' } } });
+      if (!bytes.length) return route.fulfill({ status: 400, json: { error: { code: 'validation', message: 'Empty.', reason: 'file_empty' } } });
+      if (bytes.length > FILE_BYTES) return route.fulfill({ status: 413, json: { error: { code: 'validation', message: 'Too big.', reason: 'file_too_big' } } });
       const name = url.searchParams.get('name')!;
       server.uploads.push({ agent: up[1]!, name, bytes });
       return route.fulfill({ status: 201, json: { id: `pic${server.uploads.length}`, name } });
@@ -109,7 +108,7 @@ const picture = (page: Page, name: string, type = 'image/png', noise = false): P
     { name, type, noise },
   );
 
-/* Anything that is no picture, under whatever name and type it comes. */
+/* A file of any kind, under whatever name and type it comes. */
 const file = (page: Page, name: string, type: string, text: string): Promise<JSHandle<DataTransfer>> =>
   page.evaluateHandle(
     ({ name, type, text }) => {
@@ -169,7 +168,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await checkPage(page, errors);
     });
 
-    test('an SVG, a renamed file and what the server refuses are turned away, each saying why', async ({ page }, info) => {
+    test('an SVG, a renamed file and a document go up as files, and an empty one is turned away, saying why', async ({ page }, info) => {
       const errors = watchErrors(page);
       const server = await serve(page, 'delegate', settings);
       const window = await open(page, 'b1', lang);
@@ -178,24 +177,27 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await window.locator('.xterm-screen').click();
       await page.keyboard.type('A draft');
       await expect.poll(() => server.keys.join('')).toBe('A draft');
-      const refusal = window.getByRole('alert').filter({ hasText: t.errors.picture_invalid });
-      await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'logo.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg"/>') });
+      const refusal = window.getByRole('alert').filter({ hasText: t.errors.file_empty });
+      await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'Reports', '', '') });
       await expect(refusal).toBeVisible();
-      await expect(window.locator('.t-tray')).toHaveCount(0);
       await shot(page, info, 'refused', settings);
-      await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'notes.png', 'image/png', 'plain words, not a picture') });
-      await expect(refusal).toBeVisible();
-      await expect(window.getByRole('img', { name: 'notes.png', exact: true })).toHaveCount(0);
       expect(server.uploads).toEqual([]);
-      expect(server.messages).toEqual([]);
-      /* Nothing of the pictures went in, the words before them stay, and this person still writes. */
+      /* Nothing of the empty one went in, the words before it stay, and each file after it goes up as it is. */
       expect(server.keys.join('')).toBe('A draft');
-      await page.keyboard.type(' goes on');
-      await expect.poll(() => server.keys.join('')).toBe('A draft goes on');
-      /* A file named a picture goes up from a terminal, where the server is who looks at its bytes and refuses it. */
-      const refused = (e: string) => e.includes('status of 400');
-      expect(errors.filter(refused)).toHaveLength(1);
-      await checkPage(page, errors.filter(e => !refused(e)));
+      const sent = [
+        ['logo.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+        ['notes.png', 'image/png', 'plain words, not a picture'],
+        ['report.pdf', 'application/pdf', '%PDF-1.7 a report'],
+      ] as const;
+      for (const [n, [name, type, text]] of sent.entries()) {
+        await terminal.dispatchEvent('drop', { dataTransfer: await file(page, name, type, text) });
+        await expect.poll(() => server.keys.at(-1)).toBe(`${name}: hh-fetch message pic${n + 1}`);
+      }
+      await expect(refusal).toHaveCount(0);
+      expect(server.uploads.map(u => [u.name, u.bytes.toString()])).toEqual(sent.map(([name, , text]) => [name, text]));
+      expect(server.messages).toEqual([]);
+      await shot(page, info, 'files', settings);
+      await checkPage(page, errors);
     });
   });
 }

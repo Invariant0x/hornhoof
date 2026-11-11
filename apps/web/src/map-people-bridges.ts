@@ -17,8 +17,10 @@ function segments(pts: Point[]): Segment[] {
   });
 }
 
-const between = (v: number, a: number, b: number) => v >= Math.min(a, b) && v <= Math.max(a, b);
+const between = (v: number, a: number, b: number) => v > Math.min(a, b) && v < Math.max(a, b);
 
+/* Where two lines cross: each runs on through the point. Where one ends or turns on the other, it joins or leaves a road, and
+   nothing is cut. */
 function intersection(a: Segment, b: Segment): Point | null {
   const aVertical = a.a[0] === a.b[0], bVertical = b.a[0] === b.b[0];
   if (aVertical === bVertical) return null;

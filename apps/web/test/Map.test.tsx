@@ -7,6 +7,7 @@ import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
 import { arcEnd } from '../src/hub-turns';
+import { arrangeMap } from '../src/map-arrange';
 import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
@@ -242,6 +243,67 @@ describe('Map', () => {
     expect(container.querySelector('.zoom .zv')).toHaveTextContent('120%');
   });
 
+  it('leaves the view where the person put it as the company changes live, the arrangement comes, panels open and a department closes, and opens it there again', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    onTestFinished(() => {
+      width.mockRestore();
+      height.mockRestore();
+    });
+    const stream = fakeStream();
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: { 'dept:d1': { x: 40, y: 700 } } }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const opened: string[] = [];
+    const { container, rerender, unmount } = render(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const view = () => container.querySelector<HTMLElement>('.world')!.style.transform;
+    /* The map shows all of itself when it first opens; then the person zooms in. */
+    await waitFor(() => expect(view()).not.toBe('translate(0px, 0px) scale(1)'));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    const mine = view();
+    stream.send({ type: 'working', working: 1 });
+    await act(async () => arrive());
+    await waitFor(() => expect(marketing.style.left).toBe('40px'));
+    expect(view()).toBe(mine);
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen />);
+    expect(view()).toBe(mine);
+    /* Into a department and out of it: the map flies into its card, and comes back to where the person left it. */
+    fireEvent.click(marketing);
+    await waitFor(() => expect(opened).toEqual(['d1']));
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen inside />);
+    rerender(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} windowOpen leftPanelOpen />);
+    expect(view()).toBe(mine);
+    /* A reload opens the map where the person left it, at the same scale. */
+    unmount();
+    const again = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    expect(again.container.querySelector<HTMLElement>('.world')!.style.transform).toBe(mine);
+  });
+
+  it('shows all of the map as it first opens, with the blocks where the server keeps them, until the person moves it', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1100);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    onTestFinished(() => {
+      width.mockRestore();
+      height.mockRestore();
+    });
+    /* A view kept in a form the map cannot read counts as none. */
+    localStorage.setItem(`hh-map-view:${ME.company.id}:${ME.person.id}`, '{"k":"far"}');
+    let arrive = () => {};
+    const kept = new Promise<[number, unknown]>(resolve => (arrive = () => resolve([200, { blocks: { 'dept:d1': { x: 40, y: 1400 } } }])));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': () => kept });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
+    await waitFor(() => expect(scale()).not.toBe(1));
+    const first = scale();
+    await act(async () => arrive());
+    await waitFor(() => expect(marketing.style.top).toBe('1400px'));
+    expect(scale()).toBeLessThan(first);
+  });
+
   it.each([375, 1440])('fits the company clear of a left panel at %ipx', async width => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} leftPanelOpen />);
@@ -280,8 +342,10 @@ describe('Map', () => {
     expect([maria.style.left, maria.style.top]).toEqual(['900px', '20px']);
     /* Every line still runs only across and down, now to where the blocks stand. */
     for (const path of container.querySelectorAll('.wires path.tr')) {
-      const pts = path.getAttribute('d')!.slice(2).split(' L ').map(p => p.split(' ').map(Number));
-      expect(pts.slice(1).every((q, i) => q[0] === pts[i]![0] || q[1] === pts[i]![1]), path.getAttribute('d')!).toBe(true);
+      for (const run of path.getAttribute('d')!.split('M ').filter(Boolean)) {
+        const pts = run.trim().split(' L ').map(p => p.split(' ').map(Number));
+        expect(pts.slice(1).every((q, i) => q[0] === pts[i]![0] || q[1] === pts[i]![1]), path.getAttribute('d')!).toBe(true);
+      }
     }
     fireEvent.click(screen.getByRole('button', { name: 'Put back as it was' }));
     const home = deptLayout(2)[0]!;
@@ -329,6 +393,63 @@ describe('Map', () => {
     expect(screen.getAllByRole('button', { name: /^Передвинуть: / }).map(b => b.getAttribute('aria-label'))).toEqual(
       expect.arrayContaining(['Передвинуть: Оркестратор', 'Передвинуть: Marketing', 'Передвинуть: Development', 'Передвинуть: Ivan', 'Передвинуть: Maria']),
     );
+  });
+
+  it('draws nothing at a block\'s corner but the grip over it, and a press on it that does not move opens the card under it', async () => {
+    const opened: string[] = [], decisions: string[] = [];
+    const calls = mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': [200, { blocks: { 'person:p2': { x: 20, y: 60 } } }] });
+    const { container } = render(<MapScreen {...PROPS} onOpenDepartment={id => opened.push(id)} onOpenDecisions={id => decisions.push(id)} />);
+    const marketing = (await screen.findByText('Marketing')).closest<HTMLElement>('.dept')!;
+    const maria = screen.getByText('Maria').closest('li')!;
+    await waitFor(() => expect([maria.style.left, maria.style.top]).toEqual(['20px', '60px']));
+    const grip = screen.getByRole('button', { name: 'Move Marketing' });
+    expect(grip.childElementCount).toBe(0);
+    expect(container.querySelectorAll('.grip svg')).toHaveLength(0);
+    /* Its middle is the card's corner, so the corner itself takes the hand. */
+    const [x, y] = [parseFloat(marketing.style.left), parseFloat(marketing.style.top)];
+    expect([parseFloat(grip.style.left) + parseFloat(grip.style.width) / 2, parseFloat(grip.style.top) + parseFloat(grip.style.height) / 2]).toEqual([x, y]);
+    const tap = (target: HTMLElement, at: [number, number]) => {
+      fireEvent.pointerDown(target, { clientX: at[0], clientY: at[1], pointerId: 1, button: 0 });
+      fireEvent.pointerUp(target, { clientX: at[0] + 1, clientY: at[1], pointerId: 1 });
+    };
+    /* On the card it opens the card; on the map beside it, nothing. */
+    tap(grip, [x + 6, y + 6]);
+    expect(opened).toEqual(['d1']);
+    tap(grip, [x - 15, y + 10]);
+    expect(opened).toEqual(['d1']);
+    /* Maria's card stands just above the corner of Marketing: where her card is, it opens hers. */
+    tap(grip, [x - 10, y - 15]);
+    expect([opened, decisions]).toEqual([['d1'], ['p2']]);
+    expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
+  });
+
+  it('runs the lines that go side by side as one road, drawn once, with a dot where it forks', async () => {
+    const deputy = (id: string, name: string, of: string[]) => ({ ...PEOPLE[2]!, id, name, title: '', status: 'active' as const, deputy: true, departments: of, access: { whole: false, departments: of.map(d => ({ id: d, name: d })), teams: [] } });
+    const ids = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'];
+    const org = { ...ORG, people: [...ORG.people, deputy('n1', 'Oleg', ['d1', 'd5']), deputy('n2', 'Nina', ['d2', 'd3', 'd6']), deputy('n3', 'Petr', ['d2', 'd4']), deputy('n4', 'Lena', ['d1', 'd2'])], departments: ids.map(id => dept({ id, name: id })) };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Lena');
+    const runs = [...container.querySelectorAll('.wires path.tr:not(.live)')].flatMap((path, el) =>
+      path.getAttribute('d')!.split('M ').filter(Boolean).flatMap(run => {
+        const pts = run.trim().split(' L ').map(p => p.split(' ').map(Number));
+        return pts.slice(1).map((q, i) => {
+          const p = pts[i]!, across = p[1] === q[1];
+          expect(across || p[0] === q[0], path.getAttribute('d')!).toBe(true);
+          const [a, b] = across ? [p[0]!, q[0]!] : [p[1]!, q[1]!];
+          return { el, across, at: across ? p[1]! : p[0]!, lo: Math.min(a, b), hi: Math.max(a, b) };
+        });
+      }),
+    );
+    /* No stretch is drawn twice, and no lines run side by side along a road's length. */
+    const pairs = runs.flatMap((r, i) => runs.slice(i + 1).filter(o => o.across === r.across && Math.abs(o.at - r.at) < 28 && Math.min(o.hi, r.hi) - Math.max(o.lo, r.lo) >= (o.at === r.at ? 0.5 : 28)).map(o => [r, o]));
+    expect(pairs).toEqual([]);
+    /* Each fork of the roads has its dot, and there is one dot to a place. */
+    const dots = [...container.querySelectorAll('.wires .via')].map(c => `${c.getAttribute('cx')}:${c.getAttribute('cy')}`);
+    expect(new Set(dots).size).toBe(dots.length);
+    const forks = arrangeMap(org).forks;
+    expect(forks.length).toBeGreaterThan(0);
+    expect(dots).toEqual(expect.arrayContaining(forks.map(([x, y]) => `${x}:${y}`)));
   });
 
   it('says so when a move could not be kept, and a press on a grip that does not move keeps nothing', async () => {

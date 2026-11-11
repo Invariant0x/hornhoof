@@ -34,10 +34,20 @@ describe('pictures uploaded from a terminal', () => {
     ]);
   });
 
-  it('rejects an invalid picture before any upload', async () => {
+  it('uploads a file of any kind and puts in the command that gets it', async () => {
+    const calls = mockApi({
+      'POST /api/agents/orchestrator/pictures?name=report.pdf': [201, { id: 'f1', name: 'report.pdf' }],
+    });
+    await expect(uploadTerminalPictures('/api/agents/orchestrator/terminal', [new File(['%PDF-1.7'], 'report.pdf', { type: 'application/pdf' })])).resolves.toBe('report.pdf: hh-fetch message f1');
+    expect(calls.map(c => c.path)).toEqual(['/api/agents/orchestrator/pictures?name=report.pdf']);
+  });
+
+  it('turns away an empty file and one over 10 MB before any upload', async () => {
     const calls = mockApi({});
-    const failure = uploadTerminalPictures('/api/agents/orchestrator/terminal', [new File(['words'], 'words.txt', { type: 'text/plain' })]);
-    await expect(failure).rejects.toMatchObject({ status: 400, reason: 'picture_invalid' });
+    const empty = uploadTerminalPictures('/api/agents/orchestrator/terminal', [new File([], 'Reports', { type: '' })]);
+    await expect(empty).rejects.toMatchObject({ status: 400, reason: 'file_empty' });
+    const big = uploadTerminalPictures('/api/agents/orchestrator/terminal', [new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'film.mov', { type: 'video/quicktime' })]);
+    await expect(big).rejects.toMatchObject({ status: 400, reason: 'file_too_big' });
     expect(calls).toEqual([]);
   });
 
@@ -54,7 +64,8 @@ describe('pictures uploaded from a terminal', () => {
 
 
 const BIG = 3 * 1024 * 1024;
-const bigPicture = () => new File([new Uint8Array(BIG + 1)], 'big.png', { type: 'image/png' });
+const FILE_BYTES = 10 * 1024 * 1024;
+const bigPicture = (size = BIG + 1) => new File([new Uint8Array(size)], 'big.png', { type: 'image/png' });
 
 function imageBitmap() {
   const image = { width: 100, height: 50, close: vi.fn() };
@@ -91,22 +102,31 @@ describe('making a large terminal picture fit the upload limit', () => {
     expect(image.close).toHaveBeenCalledOnce();
   });
 
-  it('refuses the picture when no smaller JPEG fits and still closes the image', async () => {
+  it('sends the picture as it is when no smaller JPEG fits, and still closes the image', async () => {
     const image = imageBitmap();
     canvasBlobs(Array.from({ length: 4 }, () => new Blob([new Uint8Array(BIG + 1)])));
-    await expect(readied(bigPicture())).resolves.toBe('picture_too_big');
+    const big = bigPicture();
+    await expect(readied(big)).resolves.toEqual({ file: big, name: 'big.png' });
     expect(image.close).toHaveBeenCalledOnce();
   });
 
-  it('refuses a file the browser cannot decode', async () => {
+  it('sends a file the browser cannot decode as it is', async () => {
     vi.stubGlobal('createImageBitmap', vi.fn(() => Promise.reject(new Error('not an image'))));
-    await expect(readied(bigPicture())).resolves.toBe('picture_too_big');
+    const big = bigPicture();
+    await expect(readied(big)).resolves.toEqual({ file: big, name: 'big.png' });
   });
 
-  it('refuses a picture when the browser cannot draw it', async () => {
+  it('sends a picture the browser cannot draw as it is, and still closes the image', async () => {
     const image = imageBitmap();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
-    await expect(readied(bigPicture())).resolves.toBe('picture_too_big');
+    const big = bigPicture();
+    await expect(readied(big)).resolves.toEqual({ file: big, name: 'big.png' });
     expect(image.close).toHaveBeenCalledOnce();
+  });
+
+  it('turns away a picture over 10 MB that it cannot make smaller', async () => {
+    vi.stubGlobal('createImageBitmap', undefined);
+    await expect(readied(bigPicture(FILE_BYTES))).resolves.toEqual({ file: expect.any(File), name: 'big.png' });
+    await expect(readied(bigPicture(FILE_BYTES + 1))).resolves.toBe('file_too_big');
   });
 });
