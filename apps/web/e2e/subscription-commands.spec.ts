@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ShownCommand, SubView } from '../src/types';
@@ -61,6 +61,9 @@ async function prepare(page: Page, language: 'en' | 'ru', theme: string) {
 }
 
 const messages: Record<'en' | 'ru', Messages> = { en, ru };
+/* The command as the server gave it, for a Mac or Linux; the one for Windows stands under it. */
+const unix = (scope: Locator, t: Messages) => scope.getByRole('group', { name: t.subs.onMacLinux, exact: true });
+const windows = (scope: Locator, t: Messages) => scope.getByRole('group', { name: t.subs.onWindows, exact: true });
 const tab = (page: Page, t: Messages, name: 'subscriptions' | 'machines') => page.getByRole('navigation').getByRole('button', { name: t.shell.tabs[name], exact: true }).click();
 const open = (page: Page, t: Messages, name: string) => page.getByRole('button', { name: t.tables.openCard(name), exact: true }).click();
 async function connect(page: Page, t: Messages, name: string) {
@@ -85,9 +88,11 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     const top = page.getByRole('region', { name: t.subs.commandHeading('Claude'), exact: true });
     const row = page.getByRole('row', { name: 'Claude', exact: true });
     await expect(row).toContainText(t.subs.states.waiting_machine);
-    await expect(top.getByRole('button', { name: t.common.copy, exact: true })).toBeVisible();
+    await expect(unix(top, t).getByRole('button', { name: t.common.copy, exact: true })).toBeVisible();
+    await expect(windows(top, t).getByRole('button', { name: t.common.copy, exact: true })).toBeVisible();
     await expect(top.getByText(t.subs.runThis, { exact: true })).toBeVisible();
-    const command = await top.locator('code').textContent();
+    const command = await unix(top, t).locator('code').textContent();
+    await expect(windows(top, t).locator('code')).toHaveText(`powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://demo.example.test/install.ps1))) ${command!.slice(command!.indexOf('--join'))}"`);
     const screenshot = async (state: string) => {
       await page.setViewportSize({ width, height: 2200 });
       await page.locator('main').evaluate(el => { el.scrollTop = 0; });
@@ -98,17 +103,17 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await tab(page, t, 'machines');
     await expect(page.getByRole('heading', { name: t.machines.heading, exact: true })).toBeVisible();
     await tab(page, t, 'subscriptions');
-    await expect(top.locator('code')).toHaveText(command!);
+    await expect(unix(top, t).locator('code')).toHaveText(command!);
     await expect(top.getByRole('button', { name: t.common.done, exact: true })).toBeVisible();
     await page.reload();
     await tab(page, t, 'subscriptions');
-    await expect(top.locator('code')).toHaveText(command!);
+    await expect(unix(top, t).locator('code')).toHaveText(command!);
     await top.getByRole('button', { name: t.common.done, exact: true }).click();
     await expect(top).toHaveCount(0);
     await expect(row).toContainText(t.subs.states.waiting_machine);
     await open(page, t, 'Claude');
     const card = page.getByRole('article', { name: 'Claude, Ivan', exact: true });
-    await expect(card.locator('code')).toHaveText(command!);
+    await expect(unix(card, t).locator('code')).toHaveText(command!);
     await expect(card.getByText(t.subs.commandHours(21), { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: t.subs.newCommandLabel('Claude'), exact: true })).toHaveCount(0);
     await expect(card.getByRole('button', { name: t.common.cancel, exact: true })).toHaveCount(0);
@@ -117,7 +122,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await tab(page, t, 'subscriptions');
     await open(page, t, 'Claude');
     await expect(top).toHaveCount(0);
-    await expect(card.locator('code')).toHaveText(command!);
+    await expect(unix(card, t).locator('code')).toHaveText(command!);
     data.expire();
     await page.clock.fastForward(6000);
     await expect(card.locator('code')).toHaveCount(0);
@@ -125,10 +130,10 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(fresh).toHaveText(t.subs.newCommand);
     await screenshot('new');
     await fresh.click();
-    await expect(card.locator('code')).not.toHaveText(command!);
+    await expect(unix(card, t).locator('code')).not.toHaveText(command!);
     await expect(top).toBeVisible();
     await page.context().grantPermissions(['clipboard-write']);
-    const copy = top.getByRole('button', { name: t.common.copy, exact: true });
+    const copy = unix(top, t).getByRole('button', { name: t.common.copy, exact: true });
     await copy.click();
     await expect(copy).toHaveText(t.common.copied);
     await page.clock.runFor(1000);
@@ -163,7 +168,7 @@ test('three plans keep their own row commands when two top blocks are closed', a
   await expect(page.getByRole('region', { name: /^Install / })).toHaveCount(1);
   for (const name of ['Claude', 'Codex', 'Kimi']) {
     await open(page, en, name);
-    await expect(page.getByRole('article', { name: `${name}, Ivan`, exact: true }).locator('code')).toHaveCount(1);
+    await expect(unix(page.getByRole('article', { name: `${name}, Ivan`, exact: true }), en).locator('code')).toHaveCount(1);
   }
   await page.reload();
   await tab(page, en, 'subscriptions');
