@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, ask, at, DIGESTS, JQ, NODE_DIGESTS, refs, runOnce, stand, startLoop, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 import { until } from './helpers-basic.js';
 
@@ -131,7 +131,6 @@ describe('the updater of a worker', () => {
     const release = join(s.dir, 'release');
     writeFileSync(installer, `printf 'own installer start\\n' >> "$STUB_LOG"\nuntil [ -e ${release} ] || [ ! -d ${s.dir} ]; do /bin/sleep 0.05; done\nprintf 'own installer end\\n' >> "$STUB_LOG"\n`);
     const loop = startLoop(s, { ...WORKER, HORNHOOF_INSTALLER: installer });
-    onTestFinished(loop.stop);
     await until(() => loop.calls().includes('own installer start'));
     writeFileSync(join(s.control, 'request.json'), JSON.stringify(ask('w1')));
     await until(() => loop.status()?.step === 'wait');

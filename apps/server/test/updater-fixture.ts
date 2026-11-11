@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { onTestFinished } from 'vitest';
 
 /* What the tests of the updater share: a server folder of its own, and one pass of updater.sh over it with stub docker and curl. */
 
@@ -74,18 +75,25 @@ const statusOf = (s: Stand) => {
    A wait of the updater takes a moment here, so its loops do not spin. */
 export function startLoop(s: Stand, env: Record<string, string> = {}) {
   const child = spawn('bash', [SCRIPT], { stdio: 'ignore', detached: true, env: standEnv(s, { STUB_DURING_SLEEP: '/bin/sleep 0.05', ...env }) });
-  const stop = () => {
+  onTestFinished(endWith(child));
+  return { calls: () => callsOf(s), status: () => statusOf(s) };
+}
+
+/* Ends a run with everything it started. A run whose test gave up on it would otherwise go on by itself: its stubs wait
+   for what the test never did, for as long as the computer is up. */
+function endWith(child: { pid?: number }): () => void {
+  return () => {
     try {
       process.kill(-child.pid!, 'SIGKILL');
     } catch {
       /* Gone already. */
     }
   };
-  return { stop, calls: () => callsOf(s), status: () => statusOf(s) };
 }
 
 async function run(script: string, flag: string, s: Stand, env: Record<string, string>) {
-  const child = spawn('bash', [script, flag], { stdio: ['ignore', 'pipe', 'pipe'], env: standEnv(s, env) });
+  const child = spawn('bash', [script, flag], { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: standEnv(s, env) });
+  onTestFinished(endWith(child));
   let stdout = '';
   let stderr = '';
   child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
