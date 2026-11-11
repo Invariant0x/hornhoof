@@ -16,9 +16,12 @@ import { MachineIdentity, type Published } from './identity.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
+import type { BundleSecrets } from '../backups/bundle.js';
+import { ageKey } from './age-key.js';
 import { answerOf, askApp } from './app-call.js';
+import { BackupKeeper, type PeerBackups } from './backups.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
-import { KEEPER_DIR } from './machine-keys.js';
+import { KEEPER_DIR, reasonOf } from './machine-keys.js';
 import type { LeaseStore } from './lease-store.js';
 import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
@@ -71,6 +74,9 @@ export type KeeperOptions = {
   computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
   /* What offers the machine to its peers through the relay; frpc unless a test says otherwise. */
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
+  /* How often the keeper looks after the backups, and tries again for the keys it makes them with. */
+  backupsEveryMs?: number;
+  backupKeysRetryMs?: number;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -79,6 +85,9 @@ type ToServe = Awaited<ReturnType<typeof servedCertificate>>;
 const EVERY_MS = 1000;
 const LINK_EVERY_MS = 3000;
 const GUARD_EVERY_MS = 10_000;
+const BACKUP_KEYS_RETRY_MS = 60_000;
+/* How many of the bundles a machine holds its report names. */
+const REPORTED_BUNDLES = 16;
 const FRPC_RESTART_MS = 2000;
 const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
 const SETTINGS_KEPT = "The keeper cannot read the link's settings from the database: frpc stays as it is.";
@@ -137,6 +146,13 @@ function keepingOnFailure<T>(work: () => Promise<T>, say: () => void): () => Pro
   };
 }
 
+/* What a backup carries besides the database: the three settings without which the database cannot be read or the
+   company reached. The node key comes under a name of the keeper's own, since compose passes NODE_KEY empty to a
+   machine that has none. */
+export function bundleSecrets(config: Config, env: NodeJS.ProcessEnv = process.env): BundleSecrets {
+  return { HORNHOOF_SECRET: config.secret.toString('base64'), NODE_KEY: env.HORNHOOF_NODE_KEY ?? '', RELAY_URL: config.relayUrl };
+}
+
 /* A read may outlast the pause between reads, and an older answer must not land after a newer one. The work never throws. */
 function oneAtATime(work: () => Promise<unknown>): () => Promise<void> {
   let running = false;
@@ -155,6 +171,11 @@ export class Keeper {
   private readonly identity: MachineIdentity | null;
   /* Carries this machine's computer access from its app to its updater. */
   private readonly carrier: ComputerCarrier | null;
+  /* Makes the company's backups, once the machine has its key and its key for backups. */
+  private backups: BackupKeeper | null = null;
+  private backupsTimer: NodeJS.Timeout | null = null;
+  private backupKeysSaid = false;
+  private stopped = false;
   private peers: PeerLink | null = null;
   private guardTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -187,6 +208,7 @@ export class Keeper {
           reportAs: opts.reportAs,
           os: opts.config.hostOs,
           ownerKey: opts.config.ownerKey,
+          backups: () => (this.backups ? { ageKey: this.backups.ageRecipient(), heldBackups: this.backups.held().slice(0, REPORTED_BUNDLES) } : null),
         })
       : null;
     /* The server's own keeper takes its app's word while it holds no key of its owner: the database is its own. */
@@ -243,6 +265,7 @@ export class Keeper {
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
     this.carrier?.start();
+    if (this.identity) void this.takeBackups();
     this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
     this.guardTimer.unref();
     if (settings) await this.servePeers(settings, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
@@ -255,7 +278,9 @@ export class Keeper {
     if (this.fencesTimer) clearInterval(this.fencesTimer);
     if (this.guardTimer) clearInterval(this.guardTimer);
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = null;
-    await Promise.all([this.carrier?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    this.stopped = true;
+    if (this.backupsTimer) clearTimeout(this.backupsTimer);
+    await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
   }
 
@@ -277,9 +302,50 @@ export class Keeper {
       everyMs: this.opts.peerEveryMs,
       holdMs: this.opts.holdMs,
       peerClientFor: this.opts.peerClientFor,
+      backups: this.peerBackups(),
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
+  }
+
+  /* The backups wait for the machine's key and for its key for backups, both kept in the keeper's folder. A folder
+     that cannot keep them is said once and tried again each minute, with everything else running on. */
+  private async takeBackups(): Promise<void> {
+    if (this.stopped || this.backups) return;
+    const { config, log, app } = this.opts;
+    const dir = this.opts.dir ?? KEEPER_DIR;
+    try {
+      const key = this.identity?.machineKey();
+      if (!key) throw new Error("the machine's key is not there yet");
+      const age = await ageKey(dir);
+      if (this.stopped) return;
+      this.backups = new BackupKeeper({
+        dir,
+        controlDir: config.controlDir,
+        key,
+        held: () => this.certificate(),
+        age,
+        secrets: () => bundleSecrets(config),
+        ask: (method, path, body) => askApp(app, method, path, body).then(answerOf),
+        leads: () => this.mode() === 'lead',
+        log,
+        everyMs: this.opts.backupsEveryMs,
+      });
+      this.backups.start();
+    } catch (err) {
+      if (!this.backupKeysSaid) log(`The keeper cannot make backups yet: ${reasonOf(err)}. It tries again each minute.`);
+      this.backupKeysSaid = true;
+      this.backupsTimer = setTimeout(() => void this.takeBackups(), this.opts.backupKeysRetryMs ?? BACKUP_KEYS_RETRY_MS);
+      this.backupsTimer.unref();
+    }
+  }
+
+  /* What the peer link serves of backups, also before the keeper of backups is there: nothing yet. */
+  private peerBackups(): PeerBackups {
+    return {
+      get: (peer, id) => this.backups?.peer().get(peer, id) ?? { status: 404 },
+      put: async (peer, id, body) => (this.backups ? this.backups.peer().put(peer, id, body) : 403),
+    };
   }
 
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */

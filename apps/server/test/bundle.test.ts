@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:c
 import { createReadStream, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import * as age from 'age-encryption';
 import { describe, expect, it, vi } from 'vitest';
@@ -154,6 +154,22 @@ describe('a backup bundle', () => {
     const forged: Manifest = { ...sealed.manifest, size: inside.manifest.size, sha256: inside.manifest.sha256 };
     expect(await reasonOf(() => openBundle(createReadStream(inside.out), forged, [c.own.identity]))).toBe('content');
     expect(await reasonOf(() => openBundle(createReadStream(inside.out), { ...inside.manifest, company: randomUUID() }, [c.own.identity]))).toBe('content');
+  });
+
+  it('leaves what it read a bundle from open once the bundle is read to its end', async () => {
+    const c = await company();
+    const sealed = await c.seal();
+    /* A stream that is answered on afterwards, as a peer's request is: only a bundle that is cut cuts it. */
+    const whole = new PassThrough({ autoDestroy: false });
+    whole.end(Buffer.concat([Buffer.from(headLine(sealed.head)), readFileSync(sealed.out)]));
+    const read = await readHead(whole);
+    expect((await buffer(read.rest)).equals(readFileSync(sealed.out))).toBe(true);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(whole.destroyed).toBe(false);
+    const cut = new PassThrough({ autoDestroy: false });
+    cut.write(Buffer.concat([Buffer.from(headLine(sealed.head)), readFileSync(sealed.out).subarray(0, 100)]));
+    (await readHead(cut)).rest.destroy();
+    expect(cut.destroyed).toBe(true);
   });
 
   it('answers only its own challenge', async () => {

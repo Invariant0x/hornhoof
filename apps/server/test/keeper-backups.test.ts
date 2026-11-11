@@ -1,0 +1,263 @@
+import { randomUUID } from 'node:crypto';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buffer } from 'node:stream/consumers';
+import { gzipSync } from 'node:zlib';
+import { describe, expect, it } from 'vitest';
+import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js';
+import { bundleRows } from '../src/modules/backups/records.js';
+import { BackupKeeper, BUNDLE_EVERY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
+import { bundleSecrets } from '../src/modules/keeper/keeper.js';
+import { saveLink } from '../src/modules/link/link.js';
+import { backupCompany, OWN } from './helpers-backups.js';
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const SECRETS: BundleSecrets = { HORNHOOF_SECRET: `${'A'.repeat(43)}=`, NODE_KEY: 'k'.repeat(40), RELAY_URL: 'https://relay.hornhoof.test' };
+const DUMP = gzipSync('-- a dump of the hornhoof database\n');
+
+/* The server's keeper of backups with its app, a clock the test moves, and the test in the place of the updater. */
+async function stand(over: { secrets?: () => BundleSecrets } = {}) {
+  const c = await backupCompany();
+  const controlDir = mkdtempSync(join(tmpdir(), 'hh-control-'));
+  const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-'));
+  const start = Date.now();
+  let now = start;
+  const lines: string[] = [];
+  /* record: what the app answers to a bundle's record in place of its own answer. down: it answers nothing. holders:
+     which machines it says hold which bundles, in place of what it says itself. */
+  const said = { record: null as number | null, down: false, leads: true, holders: null as Record<string, string[]> | null };
+  const asked: string[] = [];
+  const ask: Ask = async (method, path, body) => {
+    asked.push(`${method} ${path}`);
+    if (said.down) throw new Error('the app did not answer');
+    if (method === 'POST' && said.record) return { status: said.record, body: null };
+    const res = await c.app.inject({ method, url: path, ...(body === undefined ? {} : { payload: body as object }), ...OWN });
+    try {
+      const answer = res.json() as Record<string, unknown>;
+      return { status: res.statusCode, body: method === 'GET' && said.holders ? { ...answer, holders: said.holders } : answer };
+    } catch {
+      return { status: res.statusCode, body: null };
+    }
+  };
+  const keeper = new BackupKeeper({
+    dir, controlDir, key: c.key, held: () => c.held, age: { identity: c.ownIdentity, recipient: c.ownAge }, secrets: over.secrets ?? (() => SECRETS), ask,
+    leads: () => said.leads, log: line => lines.push(line), now: () => new Date(now),
+  });
+  const dumps = join(controlDir, 'dumps');
+  const request = join(controlDir, 'dump.json');
+  const wanted = (): string | null => (existsSync(request) ? (JSON.parse(readFileSync(request, 'utf8')) as { id: string }).id : null);
+  /* A dump as the updater leaves it: the dump first, then the file that says it is whole. */
+  const dumped = (id: string, more: object = {}) => {
+    mkdirSync(dumps, { recursive: true });
+    writeFileSync(join(dumps, `${id}.sql.gz`), DUMP);
+    writeFileSync(join(dumps, `${id}.json`), JSON.stringify({ id, reason: 'timer', at: new Date(now).toISOString(), migrations: 106, ...more }));
+    /* Written at the time the test's clock says. */
+    for (const end of ['.sql.gz', '.json']) utimesSync(join(dumps, `${id}${end}`), new Date(now), new Date(now));
+  };
+  /* The updater answers the request there is, and removes it unless it was stopped before that. */
+  const updater = (opts: { stopped?: boolean } = {}): string | null => {
+    const id = wanted();
+    if (!id || existsSync(join(dumps, `${id}.json`))) return null;
+    dumped(id);
+    if (!opts.stopped) rmSync(request);
+    return id;
+  };
+  const waiting = () => (existsSync(dumps) ? readdirSync(dumps).sort() : []);
+  /* One bundle from the asking to the record. */
+  const bundle = async (): Promise<string> => {
+    await keeper.round();
+    const id = updater();
+    if (!id) throw new Error('no dump was asked for');
+    await keeper.round();
+    return id;
+  };
+  const opened = async (id: string) => {
+    const held = keeper.store().list().find(one => one.id === id)!;
+    const { secrets, dump } = await openBundle(createReadStream(keeper.store().ageFile(id)), held.manifest, [c.ownIdentity]);
+    return { manifest: held.manifest, secrets, dump: await buffer(dump) };
+  };
+  return { ...c, keeper, controlDir, dir, lines, said, asked, dumps, request, wanted, dumped, updater, waiting, bundle, opened, advance: (ms: number) => void (now += ms), now: () => now };
+}
+
+describe('the keeper of backups', () => {
+  it('makes a bundle at once, then every 6 hours', async () => {
+    const s = await stand();
+    await s.keeper.round();
+    const first = s.wanted();
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(s.updater()).toBe(first);
+    await s.keeper.round();
+    /* Sealed, signed and recorded, and nothing of the dump is left in the clear. */
+    expect(s.keeper.held()).toEqual([first]);
+    const rows = await bundleRows(s.db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: first, company: s.acme.id, reason: 'timer', migrations: 106, signer: s.held.machine, recovery: null, recipients: [s.ownAge] });
+    expect([s.waiting(), s.wanted()]).toEqual([[], null]);
+    const bundle = await s.opened(first!);
+    expect(bundle.secrets).toEqual(SECRETS);
+    expect(bundle.dump.equals(DUMP)).toBe(true);
+    expect(s.keeper.view()).toMatchObject({ company: s.acme.id });
+
+    s.advance(5 * HOUR);
+    await s.keeper.round();
+    expect(s.wanted()).toBeNull();
+    s.advance(HOUR);
+    await s.keeper.round();
+    expect(s.wanted()).not.toBeNull();
+    expect(s.wanted()).not.toBe(first);
+    expect(BUNDLE_EVERY_MS).toBe(6 * HOUR);
+  });
+
+  it('asks for one dump at a time', async () => {
+    const s = await stand();
+    const dumpedIds: string[] = [];
+    const requests: (string | null)[] = [];
+    for (let round = 0; round < 10; round += 1) {
+      await s.keeper.round();
+      requests.push(s.wanted());
+      /* An updater stopped before it removed the request. */
+      const id = s.updater({ stopped: true });
+      if (id) dumpedIds.push(id);
+      /* The gap between two dumps passes, and with it the six hours, every third round. */
+      if (round % 3 === 2) s.advance(BUNDLE_EVERY_MS);
+    }
+    /* Four requests in ten rounds, each dumped once; the three that had a round after them became one bundle each,
+       recorded once. */
+    expect(dumpedIds).toHaveLength(4);
+    expect(new Set(dumpedIds).size).toBe(4);
+    expect((await bundleRows(s.db)).map(row => row.id).sort()).toEqual(dumpedIds.slice(0, 3).sort());
+    expect(s.asked.filter(call => call === 'POST /api/network/backups')).toHaveLength(3);
+    /* A request stood until its dump was sealed, and none took its place meanwhile. */
+    expect(requests.map(id => (id ? dumpedIds.indexOf(id) : null))).toEqual([0, null, null, 1, null, null, 2, null, null, 3]);
+  });
+
+  it('makes one soon after a new recovery file', async () => {
+    const s = await stand();
+    await saveLink(s.db, s.config, s.acme.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test' } });
+    const worker = await s.worker('mac');
+    const first = await s.bundle();
+    s.advance(MINUTE);
+    const file = JSON.parse(((await s.recoveryFile()).json() as { text: string }).text.split('\n')[1]!) as { recipient: string };
+    /* The ten minutes are not over, and a dump is asked for all the same. */
+    const second = await s.bundle();
+    expect(second).not.toBe(first);
+    const [row] = await bundleRows(s.db, { limit: 1 });
+    expect(row).toMatchObject({ id: second, recovery: file.recipient, recoveryLink: { name: 'acme', url: 'https://acme.hornhoof.test' }, holders: [worker] });
+    expect(row!.recipients).toEqual([s.ownAge, file.recipient].sort());
+    /* A second file at once waits for the ten minutes, however often it is made anew. */
+    const again = JSON.parse(((await s.recoveryFile()).json() as { text: string }).text.split('\n')[1]!) as { recipient: string };
+    await s.keeper.round();
+    expect(s.wanted()).toBeNull();
+    s.advance(DUMP_GAP_MS - MINUTE);
+    await s.keeper.round();
+    expect(s.wanted()).toBeNull();
+    s.advance(MINUTE);
+    const third = await s.bundle();
+    expect((await bundleRows(s.db, { limit: 1 }))[0]).toMatchObject({ id: third, recovery: again.recipient });
+  });
+
+  it('leaves no plaintext dump', async () => {
+    const s = await stand();
+    /* The app does not take the record: the dump waits, sealed once, and goes with the record. */
+    await s.keeper.round();
+    const id = s.updater()!;
+    s.said.record = 503;
+    await s.keeper.round();
+    expect(s.waiting()).toEqual([`${id}.json`, `${id}.sql.gz`]);
+    expect(await bundleRows(s.db)).toEqual([]);
+    s.said.record = null;
+    await s.keeper.round();
+    expect(s.waiting()).toEqual([]);
+    expect((await bundleRows(s.db)).map(row => row.id)).toEqual([id]);
+    expect(s.keeper.store().list()).toHaveLength(1);
+
+    /* A dump whose bundle the store holds is not sealed again. */
+    s.dumped(id);
+    const sealedAt = s.keeper.store().list()[0]!.manifest.madeAt;
+    await s.keeper.round();
+    expect(s.waiting()).toEqual([]);
+    expect(s.keeper.store().list().map(one => one.manifest.madeAt)).toEqual([sealedAt]);
+
+    /* A dump nobody sealed within a day goes, whatever the app does and whether this machine leads. */
+    for (const how of ['refuses', 'down', 'not leading'] as const) {
+      const old = randomUUID();
+      s.dumped(old);
+      s.said.record = how === 'refuses' ? 503 : null;
+      s.said.down = how === 'down';
+      s.said.leads = how !== 'not leading';
+      await s.keeper.round();
+      expect(s.waiting(), how).toEqual([`${old}.json`, `${old}.sql.gz`]);
+      s.lines.length = 0;
+      s.advance(DUMP_LIFE_MS + MINUTE);
+      await s.keeper.round();
+      expect(s.waiting(), how).toEqual([]);
+      expect(s.lines.filter(line => line.includes('not sealed within a day')), how).toHaveLength(1);
+      expect(DUMP_LIFE_MS).toBe(24 * HOUR);
+    }
+  });
+
+  it('says so of a dump that failed or cannot be read, and keeps none of it', async () => {
+    const s = await stand();
+    await s.keeper.round();
+    const id = s.wanted()!;
+    mkdirSync(s.dumps, { recursive: true });
+    writeFileSync(join(s.dumps, `${id}.failed`), 'The database could not be dumped.\n');
+    /* What says a dump is whole without the dump, or with words that are none of the updater's. */
+    const [alone, odd] = [randomUUID(), randomUUID()];
+    writeFileSync(join(s.dumps, `${alone}.json`), JSON.stringify({ id: alone, reason: 'timer', at: new Date().toISOString(), migrations: 106 }));
+    s.dumped(odd, { reason: 'whim' });
+    s.dumped('not-a-uuid');
+    await s.keeper.round();
+    expect([s.waiting(), s.wanted()]).toEqual([[], null]);
+    expect(s.lines.some(line => line.includes('The database could not be dumped.'))).toBe(true);
+    expect(s.keeper.held()).toEqual([]);
+    /* It does not ask again before the ten minutes are over. */
+    await s.keeper.round();
+    expect(s.wanted()).toBeNull();
+    s.advance(DUMP_GAP_MS);
+    await s.keeper.round();
+    expect(s.wanted()).not.toBeNull();
+  });
+
+  it('puts the node key in the bundle', async () => {
+    const c = await backupCompany();
+    const base = { HORNHOOF_SECRET: c.config.secret.toString('base64'), RELAY_URL: c.config.relayUrl };
+    expect(bundleSecrets(c.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) })).toEqual({ ...base, NODE_KEY: 'n'.repeat(40) });
+    expect(bundleSecrets(c.config, { HORNHOOF_NODE_KEY: '' })).toEqual({ ...base, NODE_KEY: '' });
+    expect(bundleSecrets(c.config, {})).toEqual({ ...base, NODE_KEY: '' });
+    const s = await stand({ secrets: () => bundleSecrets(c.config, { HORNHOOF_NODE_KEY: 'n'.repeat(40) }) });
+    expect((await s.opened(await s.bundle())).secrets.NODE_KEY).toBe('n'.repeat(40));
+  });
+
+  it('keeps its latest two and what holders still fetch', async () => {
+    const s = await stand();
+    const ids: string[] = [];
+    for (let made = 0; made < 4; made += 1) {
+      ids.push(await s.bundle());
+      /* The app names the first one for a machine that has not fetched it yet. */
+      s.said.holders = { [ids[0]!]: [randomUUID()] };
+      s.advance(BUNDLE_EVERY_MS);
+    }
+    expect(s.keeper.held()).toEqual([ids[3], ids[2], ids[0]]);
+    s.said.holders = null;
+    await s.keeper.round();
+    expect(s.keeper.held()).toEqual([ids[3], ids[2]]);
+  });
+
+  it('makes nothing while it does not lead', async () => {
+    const s = await stand();
+    s.said.leads = false;
+    await s.keeper.round();
+    expect([s.wanted(), s.asked]).toEqual([null, []]);
+    /* Nor without a certificate that says this machine holds the data, or before the company is set up. */
+    const worker = new BackupKeeper({
+      dir: s.dir, controlDir: s.controlDir, key: s.key, held: () => ({ ...s.held, role: 'worker' }), age: { identity: s.ownIdentity, recipient: s.ownAge }, secrets: () => SECRETS,
+      ask: async (method, path) => ({ status: 200, body: (await s.app.inject({ method, url: path, ...OWN })).json() }), leads: () => true, log: () => undefined,
+    });
+    await worker.round();
+    expect(s.wanted()).toBeNull();
+    expect(worker.view()).toMatchObject({ company: s.acme.id });
+  });
+});

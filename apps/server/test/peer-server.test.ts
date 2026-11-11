@@ -1,15 +1,23 @@
-import { createPrivateKey, generateKeyPairSync, webcrypto } from 'node:crypto';
+import { createHash, createPrivateKey, generateKeyPairSync, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buffer } from 'node:stream/consumers';
+import * as age from 'age-encryption';
 import http from 'node:http';
 import http2 from 'node:http2';
 import type { ClientHttp2Session, ClientHttp2Stream, Http2SecureServer } from 'node:http2';
 import net, { type AddressInfo } from 'node:net';
-import { PassThrough, type Duplex, type Readable } from 'node:stream';
+import { PassThrough, Readable, type Duplex } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import tls from 'node:tls';
 import * as peculiar from '@peculiar/x509';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
+import { headLine, sealBundle } from '../src/modules/backups/bundle.js';
+import type { MakerView } from '../src/modules/backups/types.js';
+import { BackupKeeper, type PeerBackups } from '../src/modules/keeper/backups.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -318,6 +326,12 @@ describe('routeOf', () => {
     ['hello with a query', asked('GET', '/peer/hello?x=1'), 'peer', 'data', db, refused(404)],
     ['another path', asked('GET', '/'), 'peer', 'data', db, refused(404)],
     ['a request naming the app without CONNECT', asked('GET', '/', APP_AUTHORITY), 'peer', 'data', db, refused(404)],
+    ['a bundle asked for', asked('GET', `/peer/backups/${INVOCATION}`), 'peer', 'worker', db, { to: 'bundle', id: INVOCATION, put: false }],
+    ['a bundle sent, through the app door', asked('PUT', `/peer/backups/${INVOCATION}`), 'app', 'worker', null, { to: 'bundle', id: INVOCATION, put: true }],
+    ['a bundle by no id', asked('GET', '/peer/backups/latest'), 'peer', 'worker', db, refused(404)],
+    ['a bundle with more after its id', asked('GET', `/peer/backups/${INVOCATION}/head`), 'peer', 'worker', db, refused(404)],
+    ['a bundle with a query', asked('GET', `/peer/backups/${INVOCATION}?x=1`), 'peer', 'worker', db, refused(404)],
+    ['another method at a bundle', asked('DELETE', `/peer/backups/${INVOCATION}`), 'peer', 'data', db, refused(404)],
   ] as const)('%s', (_, headers, kind, role, here, route) => {
     expect(routeOf(headers, kind, role, here)).toEqual(route);
   });
@@ -484,6 +498,118 @@ describe('PeerServer', () => {
     expect(await statusOf(onAppDoor.request(CONNECT_DB))).toBe(403);
     expect(stand.db.connections()).toBe(1);
     expect(await statusOf(onAppDoor.request(CONNECT_APP))).toBe(200);
+  });
+
+  /* A stand whose machine keeps backups: the keeper of them is made once the stand has its certificate. */
+  async function standWithBackups() {
+    const late: { peer?: PeerBackups } = {};
+    const stand = await standUp({ backups: { get: (peer, id) => late.peer!.get(peer, id), put: (peer, id, body) => late.peer!.put(peer, id, body) } });
+    const backups = await backupsOf(stand);
+    late.peer = backups.keeper.peer();
+    return { stand, backups };
+  }
+
+  /* The keeper of backups of the stand's own machine, with what its app says of the bundles, and bundles it made. */
+  async function backupsOf(stand: Stand) {
+    const identity = await age.generateX25519Identity();
+    const own = { identity, recipient: await age.identityToRecipient(identity) };
+    const held = stand.state.held!;
+    const view: MakerView = { company: COMPANY, recipients: [], recovery: null, last: { id: randomUUID(), madeAt: new Date().toISOString(), recovery: null }, holders: {}, wanted: [], order: null };
+    const keeper = new BackupKeeper({
+      dir: mkdtempSync(join(tmpdir(), 'hh-keeper-')), controlDir: mkdtempSync(join(tmpdir(), 'hh-control-')), key: stand.own.key, held: () => held, age: own,
+      secrets: () => ({ HORNHOOF_SECRET: 's', NODE_KEY: 'n', RELAY_URL: 'r' }), ask: () => Promise.resolve({ status: 200, body: view }), leads: () => true, log: ignore,
+    });
+    const elsewhere = mkdtempSync(join(tmpdir(), 'hh-bundles-'));
+    /* A bundle this machine sealed, left outside its store. */
+    const sealed = async (bytes = 256 * 1024) => {
+      const id = randomUUID();
+      const out = join(elsewhere, `${id}.age`);
+      const made = await sealBundle({
+        dump: Readable.from([randomBytes(bytes)]), id, company: COMPANY, dumpedAt: new Date(), reason: 'timer', migrations: 106, secrets: { HORNHOOF_SECRET: 's', NODE_KEY: 'n', RELAY_URL: 'r' },
+        recipients: [own.recipient], recovery: null, recoveryLink: null, key: stand.own.key, held, out,
+      });
+      /* As it travels: its two lines, then the sealed part. */
+      const whole = Buffer.concat([Buffer.from(headLine(made.head)), readFileSync(out)]);
+      return { id, out, ...made, travels: () => whole };
+    };
+    return { keeper, view, sealed };
+  }
+  const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+  it('serves a bundle only to its holders', async () => {
+    const { stand, backups } = await standWithBackups();
+    const x = await backups.sealed();
+    backups.keeper.store().put(x.head, x.manifest, x.out);
+    backups.view.holders = { [x.id]: [WORKER_ID] };
+    await backups.keeper.round();
+    for (const kind of ['peer', 'app'] as const) {
+      const door = await stand.open(kind);
+      const holder = clientOf(stand, door.port, stand.worker);
+      const got = holder.request({ ':path': `${PEER_PATHS.backups}${x.id}` });
+      const headers = await new Promise<http2.IncomingHttpHeaders>(resolve => got.once('response', resolve));
+      const bytes = await buffer(got);
+      expect([headers[':status'], Number(headers['content-length']), sha256(bytes)], kind).toEqual([200, bytes.length, sha256(await buffer(backups.keeper.store().open(x.id)!.stream()))]);
+      expect(bytes.length, kind).toBe(backups.keeper.store().open(x.id)!.length);
+      /* Another machine of the company is none of its holders; a bundle this machine does not hold is nobody's. */
+      const other = clientOf(stand, door.port, stand.data);
+      expect(await statusOf(other.request({ ':path': `${PEER_PATHS.backups}${x.id}` })), kind).toBe(403);
+      expect(await statusOf(holder.request({ ':path': `${PEER_PATHS.backups}${randomUUID()}` })), kind).toBe(404);
+      /* Nobody sends one that was not asked for. */
+      const sent = holder.request({ ':method': 'PUT', ':path': `${PEER_PATHS.backups}${x.id}` });
+      sent.end(x.travels());
+      expect(await statusOf(sent), kind).toBe(403);
+    }
+    /* A machine that keeps no backups serves none. */
+    const plain = await standUp();
+    const without = await plain.open('peer');
+    const asking = clientOf(plain, without.port, plain.worker);
+    expect(await statusOf(asking.request({ ':path': `${PEER_PATHS.backups}${x.id}` }))).toBe(404);
+    const sending = asking.request({ ':method': 'PUT', ':path': `${PEER_PATHS.backups}${x.id}` });
+    sending.end('x');
+    expect(await statusOf(sending)).toBe(404);
+  });
+
+  it('takes back a bundle it asked a holder for, and cuts one that is not what its head says', async () => {
+    const { stand, backups } = await standWithBackups();
+    const [wanted, long] = [await backups.sealed(), await backups.sealed()];
+    backups.view.wanted = [{ id: wanted.id, from: WORKER_ID }, { id: long.id, from: WORKER_ID }];
+    await backups.keeper.round();
+    const door = await stand.open('peer');
+    const holder = clientOf(stand, door.port, stand.worker);
+    const put = (id: string) => holder.request({ ':method': 'PUT', ':path': `${PEER_PATHS.backups}${id}` });
+    /* From another machine than the one asked: refused. */
+    const stranger = clientOf(stand, door.port, stand.data).request({ ':method': 'PUT', ':path': `${PEER_PATHS.backups}${wanted.id}` });
+    stranger.end(wanted.travels());
+    expect(await within(3000, statusOf(stranger))).toBe(403);
+    const sent = put(wanted.id);
+    sent.end(wanted.travels());
+    expect(await within(3000, statusOf(sent))).toBe(201);
+    expect(backups.keeper.held()).toEqual([wanted.id]);
+    /* Held already: taken as done, without reading it again. */
+    const again = put(wanted.id);
+    again.end(Buffer.alloc(16));
+    expect(await within(3000, statusOf(again))).toBe(201);
+
+    /* Longer than its head says: refused once it passes the signed size, long before its end. */
+    const MIB = 1024 * 1024;
+    const tooLong = put(long.id);
+    const answered = statusOf(tooLong);
+    const gone = closeOf(tooLong);
+    tooLong.resume();
+    let accepted = 0;
+    tooLong.write(long.travels());
+    const chunk = Buffer.alloc(64 * 1024);
+    for (let sentBytes = 0; sentBytes < 32 * MIB && !tooLong.destroyed && !tooLong.closed; sentBytes += chunk.length) {
+      if (!tooLong.write(chunk, err => (accepted += err ? 0 : chunk.length))) await Promise.race([new Promise(resolve => tooLong.once('drain', resolve)), gone]);
+    }
+    expect(await within(5000, answered)).toBe(400);
+    await within(5000, gone);
+    expect(accepted).toBeLessThan(3 * MIB);
+    expect(backups.keeper.held()).toEqual([wanted.id]);
+    /* Under another bundle's name: refused as well. */
+    const misnamed = put(long.id);
+    misnamed.end(wanted.travels());
+    expect(await within(3000, statusOf(misnamed))).toBe(400);
   });
 
   it('answers anything else with 404, and a door that cannot connect with 502', async () => {

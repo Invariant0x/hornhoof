@@ -3,8 +3,9 @@ import http2 from 'node:http2';
 import type { Http2SecureServer, Http2Session, IncomingHttpHeaders, ServerHttp2Session, ServerHttp2Stream } from 'node:http2';
 import type net from 'node:net';
 import type { AddressInfo } from 'node:net';
-import type { Duplex } from 'node:stream';
+import { PassThrough, type Duplex } from 'node:stream';
 import tls from 'node:tls';
+import type { PeerBackups } from '../modules/keeper/backups.js';
 import type { HeldCertificate } from '../modules/keeper/certificate.js';
 import type { MachineKey } from '../modules/keeper/machine-keys.js';
 import { certFacts } from '../modules/network/authority.js';
@@ -12,7 +13,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import type { Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -30,12 +31,14 @@ export type PeerServerOptions = {
   db: Target | null;
   /* Answered with seen: peer.address added. */
   hello: (peer: Peer) => Record<string, unknown>;
+  /* The bundles this machine gives to the machines that hold them, and takes back from one; without it, neither. */
+  backups?: PeerBackups;
   log: (line: string) => void;
   now?: () => Date;
   sweepMs?: number;
 };
 type Kind = 'peer' | 'app';
-type Route = { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'refused'; status: 403 | 404 };
+type Route = { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'refused'; status: 403 | 404 };
 type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number) => void; reject: (err: Error) => void };
 
 const SWEEP_MS = 5000;
@@ -47,6 +50,8 @@ const NAMES_NO_MACHINE = 'NAMES_NO_MACHINE';
 const CONTEXT_FAILURE = 'context';
 const CLOSED = 'The peer link closed before it could listen.';
 
+const BUNDLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 const ignore = (): void => {};
 
 function routeOfConnect(authority: unknown, kind: Kind, role: MachineRole, db: Target | null): Route {
@@ -57,8 +62,12 @@ function routeOfConnect(authority: unknown, kind: Kind, role: MachineRole, db: T
 
 export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineRole, db: Target | null): Route {
   const method = headers[':method'];
+  const path = String(headers[':path']);
   if (method === 'CONNECT') return routeOfConnect(headers[':authority'], kind, role, db);
-  return method === 'GET' && headers[':path'] === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
+  if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.backups) && BUNDLE_ID.test(path.slice(PEER_PATHS.backups.length))) {
+    return { to: 'bundle', id: path.slice(PEER_PATHS.backups.length), put: method === 'PUT' };
+  }
+  return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
 }
 
 /* The reason this peer may not go on, in OpenSSL's words for the same two cases, or null when it may. */
@@ -282,7 +291,34 @@ export class PeerServer {
     if (route.to === 'hello') return this.sayHello(stream, peer);
     if (route.to === 'app') return void tunnel(stream, this.opts.door.connect(peer));
     if (route.to === 'db') return void tunnel(stream, openTcp(route.db));
+    if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
     answerEmpty(stream, route.status);
+  }
+
+  /* A bundle goes to a machine picked to hold it, with its length said first. A peer that leaves ends the reading. */
+  private giveBundle(stream: ServerHttp2Stream, peer: Peer, id: string): void {
+    const found = this.opts.backups?.get(peer, id) ?? { status: 404 as const };
+    if (found.status !== 200) return answerEmpty(stream, found.status);
+    const bundle = found.stream();
+    bundle.on('error', () => stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR));
+    stream.once('close', () => bundle.destroy());
+    stream.respond({ ':status': 200, 'content-type': 'application/octet-stream', 'content-length': found.length });
+    bundle.pipe(stream);
+  }
+
+  /* A bundle comes back from a machine that holds it. What takes it reads a copy of the stream and may cut that at any
+     moment, while the stream itself stays for the answer; then it is closed with whatever the peer still sends, so one
+     that is refused is cut at once. */
+  private async takeBundle(stream: ServerHttp2Stream, peer: Peer, id: string): Promise<void> {
+    const body = new PassThrough();
+    body.on('error', ignore);
+    stream.pipe(body);
+    stream.once('close', () => body.destroy());
+    const status = this.opts.backups ? await this.opts.backups.put(peer, id, body).catch(() => 400 as const) : 404;
+    stream.unpipe(body);
+    body.destroy();
+    answerEmpty(stream, status);
+    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
   }
 
   private sayHello(stream: ServerHttp2Stream, peer: Peer): void {

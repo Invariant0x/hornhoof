@@ -32,6 +32,8 @@ export type IdentityOptions = {
   ownerKey?: string | null;
   /* What a test's keeper reports as its place in place of its own. */
   reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
+  /* The machine's key for backups and the bundles it holds, once it has the key. */
+  backups?: () => { ageKey: string; heldBackups: string[] } | null;
 };
 
 /* A port as compose gives it in the environment; null for anything that is no port. */
@@ -135,7 +137,11 @@ export class MachineIdentity {
       const place = this.opts.reportAs?.() ?? { addresses: this.opts.addresses?.() ?? [], ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
       const told = { ...(this.opts.os ? { os: this.opts.os } : {}), pin: this.opts.ownerKey ? keyPrint(this.opts.ownerKey) : null };
       const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...told, ...place };
-      const res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
+      const backups = this.opts.backups?.() ?? null;
+      let res = await askApp(this.opts.app, 'POST', '/api/network/report', { ...body, ...backups }, this.stopping.signal);
+      /* An app of the build before, which runs for a while during an update, refuses words it does not know: the report
+         goes again at once without them, so the machine's measures are not lost meanwhile. */
+      if (res.status === 400 && backups) res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {
       if (this.stopped) return;

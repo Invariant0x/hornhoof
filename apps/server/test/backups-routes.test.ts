@@ -1,66 +1,15 @@
-import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Readable } from 'node:stream';
-import * as age from 'age-encryption';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, companies, departments, machines, people } from '../src/db/schema.js';
-import { sealBundle } from '../src/modules/backups/bundle.js';
+import { agents, departments, machines } from '../src/db/schema.js';
 import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
 import type { HolderView, MakerView } from '../src/modules/backups/types.js';
-import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
-import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { issueCertificate, makeAuthority } from '../src/modules/network/authority.js';
-import { hostIdOf } from '../src/modules/network/join.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
-
-const MACHINE_ID = hostIdOf('server-0001-abcd');
-const VIA = 'x-hornhoof-via';
-const OWN = { remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } };
-const from = (machine: string) => ({ remoteAddress: '127.0.0.1', headers: { [VIA]: machine, 'x-hornhoof-keeper': '1' } });
-const GIB = 1024 ** 3;
-
-function machineKey(): MachineKey {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  return { privatePem: privateKey.export({ type: 'pkcs8', format: 'pem' }) as string, publicPem: publicKey.export({ type: 'spki', format: 'pem' }) as string };
-}
-const ageRecipient = async () => age.identityToRecipient(await age.generateX25519Identity());
-
-/* A company whose server's keeper took its certificate, and what it seals bundles with. */
-async function company() {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
-  const ceo = await setUpCompany(app);
-  const [acme] = await db.select().from(companies);
-  const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
-  const key = machineKey();
-  const taken = (await app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: key.publicPem }, ...OWN })).json() as HeldCertificate;
-  const held: HeldCertificate = { machine: taken.machine, role: 'data', certPem: taken.certPem, authorityPem: taken.authorityPem, until: taken.until };
-  const ownAge = await ageRecipient();
-  const report = (payload: object, who: object = OWN) => app.inject({ method: 'POST', url: '/api/network/report', payload, ...who });
-  expect((await report({ ageKey: ownAge, addresses: ['127.0.0.1'] })).statusCode).toBe(204);
-  const dir = mkdtempSync(join(tmpdir(), 'hh-backups-'));
-  /* A bundle's head as the server's keeper makes it; the sealed part stays in the test's folder. */
-  const head = async (over: Partial<Parameters<typeof sealBundle>[0]> = {}) => {
-    const id = over.id ?? randomUUID();
-    const sealed = await sealBundle({
-      dump: Readable.from([randomBytes(2048)]), id, company: acme!.id, dumpedAt: new Date(), reason: 'timer', migrations: 106, secrets: { HORNHOOF_SECRET: 's', NODE_KEY: 'n', RELAY_URL: 'r' },
-      recipients: [ownAge], recovery: null, recoveryLink: null, key, held, out: join(dir, `${id}-${randomUUID()}.age`), ...over,
-    });
-    return { id, ...sealed };
-  };
-  const record = (said: string, who: object = OWN) => app.inject({ method: 'POST', url: '/api/network/backups', payload: { head: said }, ...who });
-  const view = async <T>(who: object = OWN) => (await app.inject({ url: '/api/network/backups', ...who })).json() as T;
-  let made = 0;
-  const worker = async (name: string, over: Partial<typeof machines.$inferInsert> = {}) =>
-    (await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: `${name}-${++made}`, hostname: name, role: 'worker', networkId: hostIdOf(`${name}-${made}`), addresses: ['127.0.0.1'], reportAt: new Date(), diskFree: 100 * GIB, ...over }).returning())[0]!.id;
-  const recoveryFile = () => app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(ceo) });
-  return { app, db, config, ceo, acme: acme!, owner: owner!, key, held, ownAge, report, head, record, view, worker, recoveryFile };
-}
+import { ageRecipient, backupCompany as company, from, machineKey, MACHINE_ID, VIA } from './helpers-backups.js';
 
 describe('the backups routes', () => {
   it('seals only to the machines that hold the data, and to the recovery key', async () => {

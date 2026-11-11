@@ -1,16 +1,20 @@
 import { generateKeyPairSync, X509Certificate } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import http2, { type ClientHttp2Session, type ClientHttp2Stream } from 'node:http2';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TLSSocket } from 'node:tls';
+import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
+import { bundleRows } from '../src/modules/backups/records.js';
+import { AGE_KEY_FILE } from '../src/modules/keeper/age-key.js';
+import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, type MachineKey } from '../src/modules/keeper/machine-keys.js';
@@ -63,8 +67,9 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     offered.push({ config: peerConfigFor(services, { machineId: MACHINE_ID, local }), clientId });
     return { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
   };
+  const controlDir = folder();
   const keeper = new Keeper({
-    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: MACHINE_ID, ACME_DIRECTORY: 'off' }),
+    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: controlDir, HORNHOOF_MACHINE_ID: MACHINE_ID, ACME_DIRECTORY: 'off' }),
     db: c.db,
     lease: fakeLease(),
     app,
@@ -83,7 +88,7 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
   });
   const ports = await keeper.start();
   onTestFinished(() => keeper.stop());
-  return { keeper, dir, lines, ports, offered };
+  return { keeper, dir, controlDir, lines, ports, offered };
 }
 
 /* A worker of the company's network: a row with its key, and a certificate of the database's authority for it. */
@@ -276,6 +281,44 @@ describe('the peer link in the keeper', () => {
     /* The app has been asked many times over by now, and no answer of it names a link to offer through. */
     expect(offered).toEqual([]);
     expect(lines.filter(line => line.startsWith('Offering this machine'))).toEqual([]);
+  });
+
+  it("makes the company's backups, reports its key for them, and serves bundles only to their holders", async () => {
+    const c = await company(false);
+    const { keeper, controlDir, dir } = await keeperBeside(c, await listening(c.app), folder(), { backupsEveryMs: 20, reportEveryMs: 20, backupKeysRetryMs: 20 });
+    const serverRow = async () => (await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0];
+    /* Its key for backups is kept for the keeper alone, and its public half reaches the company. */
+    await until(async () => Boolean((await serverRow())?.ageKey));
+    expect((await serverRow())!.ageKey).toMatch(/^age1[0-9a-z]{58}$/);
+    expect(statSync(join(dir, AGE_KEY_FILE)).mode & 0o777).toBe(0o600);
+    /* It asks the updater for a dump at once; the test dumps in the updater's place. */
+    const request = join(controlDir, 'dump.json');
+    await until(() => existsSync(request));
+    const { id } = JSON.parse(readFileSync(request, 'utf8')) as { id: string };
+    mkdirSync(join(controlDir, 'dumps'));
+    writeFileSync(join(controlDir, 'dumps', `${id}.sql.gz`), gzipSync('-- a dump of the hornhoof database\n'));
+    writeFileSync(join(controlDir, 'dumps', `${id}.json`), JSON.stringify({ id, reason: 'timer', at: new Date().toISOString(), migrations: 106 }));
+    await until(async () => (await bundleRows(c.db)).length === 1);
+    const [row] = await bundleRows(c.db);
+    expect(row).toMatchObject({ id, signer: (await serverRow())!.id, recipients: [(await serverRow())!.ageKey], reason: 'timer' });
+    await until(() => !existsSync(request) && readdirSync(join(controlDir, 'dumps')).length === 0);
+    await until(async () => (await serverRow())!.heldBackups.includes(id));
+    /* The sealed bundle holds none of the dump in the clear. */
+    expect(readFileSync(join(dir, BUNDLES_DIR, `${id}.age`)).includes('a dump of the hornhoof database')).toBe(false);
+
+    /* A machine of the company that was not picked to hold it gets none of it through the peer link. */
+    const w = await worker(c);
+    const session = sessionOf((await keeper.peerPorts()).peer, w);
+    const statusOf = (path: string, method = 'GET') => new Promise<number | null>(resolve => {
+      const stream = session.request({ ':method': method, ':path': path }, { endStream: true });
+      stream.on('error', ignore);
+      stream.once('response', headers => resolve(Number(headers[':status'])));
+      stream.once('close', () => resolve(null));
+      stream.resume();
+    });
+    expect(await statusOf(`/peer/backups/${id}`)).toBe(403);
+    expect(await statusOf(`/peer/backups/${id.replace(/^./, id.startsWith('0') ? '1' : '0')}`)).toBe(404);
+    expect(await statusOf(`/peer/backups/${id}`, 'PUT')).toBe(403);
   });
 
   it('keeps the list of revoked certificates where only the keeper reads it', async () => {

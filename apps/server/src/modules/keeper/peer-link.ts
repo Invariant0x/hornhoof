@@ -8,6 +8,7 @@ import { PeerDoor } from '../../net/peer-door.js';
 import { PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
+import type { PeerBackups } from './backups.js';
 import type { HeldCertificate } from './certificate.js';
 import type { MachineIdentity } from './identity.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
@@ -52,6 +53,8 @@ export type PeerLinkOptions = {
   everyMs?: number;
   holdMs?: number;
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
+  /* What this machine serves of backups to its peers; nothing when left out. */
+  backups?: PeerBackups;
   log: (line: string) => void;
 };
 
@@ -182,6 +185,7 @@ export class PeerLink {
       door: this.door,
       db: this.opts.db,
       hello: () => this.hello(),
+      backups: this.opts.backups,
       log: this.opts.log,
     });
     this.server = server;

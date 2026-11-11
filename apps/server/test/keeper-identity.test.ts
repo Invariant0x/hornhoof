@@ -72,6 +72,36 @@ describe("the machine's identity in its keeper", () => {
     expect(await db.select().from(machines).where(eq(machines.networkId, MACHINE_ID))).toHaveLength(1);
   });
 
+  it('reports its key for backups and the bundles it holds', async () => {
+    const { target, serverRow } = await appBeside();
+    const [ageKey, held] = [`age1${'q'.repeat(58)}`, ['0f0f0f0f-0000-4000-8000-00000000000a']];
+    identityOn(folder(), target, { backups: () => ({ ageKey, heldBackups: held }) });
+    await until(async () => (await serverRow())?.ageKey === ageKey);
+    expect((await serverRow())!.heldBackups).toEqual(held);
+  });
+
+  it('reports again without the new words when its app refuses them', async () => {
+    /* An app of the build before, which knows nothing of backups. */
+    const bodies: Record<string, unknown>[] = [];
+    const old = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        const body = (chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString()) : {}) as Record<string, unknown>;
+        if (req.url !== '/api/network/report') return void res.writeHead(503).end();
+        bodies.push(body);
+        res.writeHead('ageKey' in body ? 400 : 204).end();
+      });
+    });
+    await new Promise<void>(resolve => old.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => void old.close());
+    const { lines } = identityOn(folder(), { host: '127.0.0.1', port: (old.address() as AddressInfo).port }, { backups: () => ({ ageKey: `age1${'q'.repeat(58)}`, heldBackups: [] }) });
+    await until(() => bodies.length >= 2);
+    expect(['ageKey' in bodies[0]!, 'heldBackups' in bodies[0]!, 'ageKey' in bodies[1]!, 'heldBackups' in bodies[1]!]).toEqual([true, true, false, false]);
+    expect(bodies[1]).toMatchObject({ commit: 'c0ffee'.padEnd(40, '0') });
+    expect(lines.filter(line => line.includes('Could not report'))).toEqual([]);
+  });
+
   it('reports nothing where the app does not lead', async () => {
     const { target, serverRow } = await appBeside();
     const { identity } = identityOn(folder(), target, { leading: () => false });

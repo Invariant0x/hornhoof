@@ -94,9 +94,11 @@ async function takeLines(from: Chunks, bounds: number[]): Promise<{ lines: strin
 }
 
 /* What was left of a stream after its first lines, and all that still comes. It can be cut at any moment, also while
-   it waits for bytes that never come: cutting it cuts what it reads from. */
+   it waits for bytes that never come: cutting it cuts what it reads from. Read to its end, it leaves that open, since
+   a peer's request is still to be answered on. */
 function restOf(left: Buffer, from: Chunks, input: Readable, failed: () => Error): Readable {
   let first: Buffer | null = left.length > 0 ? left : null;
+  let ended = false;
   return new Readable({
     read() {
       if (first) {
@@ -106,12 +108,16 @@ function restOf(left: Buffer, from: Chunks, input: Readable, failed: () => Error
         return;
       }
       from.next().then(
-        next => void (this.destroyed || this.push(next.done ? null : next.value)),
+        next => {
+          if (this.destroyed) return;
+          ended = next.done === true;
+          this.push(next.done ? null : next.value);
+        },
         () => void (this.destroyed || this.destroy(failed())),
       );
     },
     destroy(err, done) {
-      input.destroy();
+      if (err || !ended) input.destroy();
       done(err);
     },
   });
