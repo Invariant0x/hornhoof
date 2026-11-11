@@ -649,3 +649,46 @@ describe('migration 0104, computer access per machine', () => {
     expect(await codeOf(db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason) values (gen_random_uuid(), gen_random_uuid(), 'look')`))).toBe('23514');
   });
 });
+
+describe('migrations 0105 and 0106, the backups', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds each machine's age key and holdings, and the recovery keys, journaled and closed", async () => {
+    const db = await fullyMigrated();
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key) values (gen_random_uuid(), gen_random_uuid(), 'a')`);
+    expect((await db.execute(sql`select age_key, keeps_backups, held_backups from machines`)).rows).toEqual([{ age_key: null, keeps_backups: true, held_backups: [] }]);
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname = 'recovery_keys'`);
+    expect(tables.rows).toEqual([{ relname: 'recovery_keys', closed: true, journaled: true }]);
+    const key = (recipient: string) => db.execute(sql`insert into recovery_keys (company_id, recipient, link_name, link_url, made_by) values (gen_random_uuid(), ${recipient}, 'acme', 'https://acme.hornhoof.org', gen_random_uuid())`);
+    await key('age1first');
+    expect(await codeOf(key('age1first'))).toBe('23505');
+  });
+
+  it('adds net.backups, fenced, with only the reasons, sizes and hashes there are', async () => {
+    const db = await fullyMigrated();
+    const fence = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred from pg_trigger t
+      where t.tgrelid = 'net.backups'::regclass and t.tgname = 'net_fence'`);
+    expect(fence.rows).toEqual([{ deferrable: true, deferred: true }]);
+    const backup = (over: { reason?: string; size?: number; sha256?: string } = {}) =>
+      db.execute(sql`insert into net.backups (id, company_id, dumped_at, made_at, reason, size, sha256, signer, serial, recipients, migrations, head)
+        values (gen_random_uuid(), gen_random_uuid(), now(), now(), ${over.reason ?? 'timer'}, ${over.size ?? 10}, ${over.sha256 ?? 'a'.repeat(64)}, gen_random_uuid(), 'ab', '{}', 106, '{}')`);
+    await backup();
+    await backup({ reason: 'update' });
+    expect(await codeOf(backup({ reason: 'fork' }))).toBe('23514');
+    expect(await codeOf(backup({ size: 0 }))).toBe('23514');
+    expect(await codeOf(backup({ sha256: 'XYZ' }))).toBe('23514');
+    expect((await db.execute(sql`select holders from net.backups limit 1`)).rows).toEqual([{ holders: [] }]);
+  });
+});

@@ -276,6 +276,11 @@ export const machines = pgTable(
     failedAt: timestamp('failed_at', { withTimezone: true }),
     /* The print of its owner's key as its keeper pinned it from the command the owner ran there. */
     ownerPin: text('owner_pin'),
+    /* Backups: the public half of the age key its keeper made, whether its owner lets it keep the company's bundles,
+       and the bundles its keeper last said it holds. */
+    ageKey: text('age_key'),
+    keepsBackups: boolean('keeps_backups').notNull().default(true),
+    heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
   },
   t => [
     unique('machines_person_key').on(t.personId, t.machineKey),
@@ -2200,6 +2205,23 @@ export const machineAccess = pgTable(
   },
   () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
 ).enableRLS();
+
+/* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO
+   keeps. linkPrint, linkName, linkUrl: the public link it was saved with, which a bundle names so a machine that
+   survived a total loss finds the new server by it; none when saved without a link. */
+export const recoveryKeys = pgTable('recovery_keys', {
+  id: id(),
+  companyId: companyId(),
+  recipient: text('recipient').notNull().unique(),
+  linkPrint: text('link_print'),
+  linkName: text('link_name'),
+  linkUrl: text('link_url'),
+  madeBy: uuid('made_by')
+    .notNull()
+    .references(() => people.id),
+  madeAt: createdAt(),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
+}).enableRLS();
 
 /* waiting: its machine's keeper has not taken it; sent: the keeper took it; lost: the keeper no longer holds it and gave
    no answer, so what it did is not known. */

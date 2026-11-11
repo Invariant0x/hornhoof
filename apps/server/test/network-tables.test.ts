@@ -78,6 +78,26 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM computer_runs`))).toEqual([{ n: 1 }]);
   });
 
+  it('keeps the orchestrator out of the backups and the recovery keys, even when it is granted them', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const rows = async (text: string) => (await agentSql.run(text, 'write'))[0]!;
+    await rows('SELECT 1');
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'mac-0001-abcd' });
+    await db.execute(sql`INSERT INTO recovery_keys (company_id, recipient, made_by) VALUES (${company!.id}, 'age1recovery', ${owner!.id})`);
+    await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON recovery_keys TO "${agentRole('postgres')}"`));
+    expect((await rows('SELECT * FROM recovery_keys')).rows).toEqual([]);
+    expect((await rows('DELETE FROM recovery_keys')).changed).toBe(0);
+    await expect(rows(`INSERT INTO recovery_keys (company_id, recipient, made_by) VALUES ('${company!.id}', 'age1other', '${owner!.id}')`)).rejects.toMatchObject({ code: '42501' });
+    await expect(rows('SELECT * FROM net.backups')).rejects.toMatchObject({ code: '42501' });
+    /* Whether a machine keeps the company's backups is its owner's tick, and what it holds its keeper's word. */
+    await expect(rows('UPDATE machines SET keeps_backups = false')).rejects.toMatchObject({ code: '42501' });
+    await expect(rows(`UPDATE machines SET age_key = 'age1mine'`)).rejects.toMatchObject({ code: '42501' });
+  });
+
   it('lets the orchestrator read what a machine is in the network, and change none of it', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);

@@ -68,6 +68,12 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.problems()).toEqual([]);
   });
 
+  it('names the backups among what is fenced', async () => {
+    const s = await store();
+    await s.run.query('DROP TRIGGER net_fence ON net.backups');
+    expect(await s.lease.problems()).toEqual(['net.backups has no fence trigger']);
+  });
+
   it('names each fence that does not hold', async () => {
     const s = await store();
     const role = agentRole('postgres');
