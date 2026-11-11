@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { statfsSync } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { uptime } from 'node:os';
+import { availableParallelism, totalmem, uptime } from 'node:os';
 import { join } from 'node:path';
 
 export const SAMPLE_MS = 20_000;
@@ -10,7 +10,8 @@ const PROBE_FILE = 'fsync-probe';
 const PROBE_BYTES = 4096;
 const FEWEST_SAMPLES = 10;
 
-export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number };
+/* memory and cores: what the keeper's container sees, which on a Mac is what Docker's VM was given. */
+export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number };
 
 /* The rank in whole numbers first, so no error of floating point moves it. */
 export function fsyncP99(samples: readonly number[]): number | null {
@@ -59,7 +60,7 @@ export class Measures {
   /* Throws when the folder is gone: there is no honest number for free space then. */
   snapshot(): MachineMeasures {
     const { bavail, bsize } = statfsSync(this.opts.dir);
-    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize };
+    return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize, memory: totalmem(), cores: availableParallelism() };
   }
 
   /* A disk that hangs never collects a pile of open writes. A sample it refuses costs only that sample: a measure changes

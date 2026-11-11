@@ -214,6 +214,19 @@ describe('the network routes the keeper calls', () => {
     expect((await report({ uptimeS: 7 }, from('00000000-0000-4000-8000-000000000000'))).statusCode).toBe(404);
   });
 
+  it('stores memory and cores', async () => {
+    const c = await company();
+    const worker = await c.joined('worker', newKey());
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(worker.id) });
+    const rowOf = async () => (await c.db.select().from(machines).where(eq(machines.id, worker.id)))[0]!;
+    expect((await report({ memory: 8 * 2 ** 30, cores: 10 })).statusCode).toBe(204);
+    expect(await rowOf()).toMatchObject({ memory: 8 * 2 ** 30, cores: 10 });
+    /* A report of a keeper from before says neither, and the row keeps both. */
+    expect((await report({ uptimeS: 3 })).statusCode).toBe(204);
+    expect(await rowOf()).toMatchObject({ memory: 8 * 2 ** 30, cores: 10 });
+    for (const bad of [{ cores: 0 }, { cores: 4097 }, { cores: 1.5 }, { memory: -1 }, { memory: 1.5 }]) expect((await report(bad)).statusCode, JSON.stringify(bad)).toBe(400);
+  });
+
   it("keeps the print of the owner's key a machine pinned", async () => {
     const c = await company();
     const worker = await c.joined('worker', newKey());

@@ -42,6 +42,7 @@ import { refreshHolders } from './modules/backups/holders.js';
 import { Restores } from './modules/backups/restore.js';
 import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
 import { keptDatabases } from './modules/merge/kept.js';
+import { Ranking } from './modules/copies/order.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
@@ -102,6 +103,8 @@ export type Ctx = Deps & {
   totalLoss: TotalLoss;
   /* The merges of the databases that came back. */
   merger: Merger;
+  /* The numbering of the machines that may hold the company's data. */
+  ranking: Ranking;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -193,6 +196,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.restores = new Restores(ctx);
   ctx.totalLoss = new TotalLoss(ctx);
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
+  ctx.ranking = new Ranking(ctx);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
@@ -221,6 +225,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* What the databases that came back hold is brought back while this app leads, a look a minute. */
   ctx.mode.whenLead(() => ctx.merger.start(), () => ctx.merger.stop());
   app.addHook('onClose', async () => ctx.merger.stop());
+  /* The machines that may hold the data are numbered while this app leads, at once and then each minute. */
+  ctx.mode.whenLead(() => ctx.ranking.start(), () => ctx.ranking.stop());
+  app.addHook('onClose', async () => ctx.ranking.stop());
   app.addHook('onClose', async () => clearTimeout(carryTimer));
   /* Its own build, for the machines that follow it, asked for off the path of any request. A server told to ask the
      registry only when asked waits for the first machine that wants to know. */

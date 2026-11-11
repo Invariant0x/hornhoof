@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { certificates, companies, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people } from '../src/db/schema.js';
+import { rank } from '../src/modules/copies/order.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { companyFolder, issueTicket, onlineShare, renewedMessage, renewMessage, visitorKeyOf, type WorkerView } from '../src/modules/network/join.js';
@@ -165,7 +166,7 @@ describe('joining the company as a machine', () => {
     expect(issuedBy(said.authorityPem, said.certPem)).toBe(true);
     expect(new Date(said.until).getTime()).toBe(new X509Certificate(said.certPem).validToDate.getTime());
     expect(said.view).toMatchObject({ machine, role: 'worker', authorityPem: said.authorityPem, revoked: [] });
-    expect(said.view.data).toEqual([{ machine: server!.id, networkId: HOST_ID, hostname: null, addresses: [], peerPort: null, webPort: null }]);
+    expect(said.view.data).toEqual([{ machine: server!.id, networkId: HOST_ID, hostname: null, addresses: [], peerPort: null, webPort: null, number: null, copyName: null }]);
     expect(await c.rowOf(machine)).toMatchObject({ networkId: hostIdOf(MAC.machineId), role: 'worker', signKey: keys.pem });
     const first = certFacts(said.certPem).serial;
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toMatchObject([{ serial: first, revokedAt: null }]);
@@ -341,7 +342,7 @@ describe('joining the company as a machine', () => {
     const said = res.json() as { machine: string; link: Record<string, unknown>; data: unknown[]; authorityPem: string; crlPem: string; revoked: string[] };
     expect(said).toMatchObject({ machine: w.machine, authorityPem: w.authorityPem, revoked: [] });
     expect(said.crlPem).toContain('BEGIN X509 CRL');
-    expect(said.data).toEqual([{ machine: own.machine, networkId: HOST_ID, hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080 }]);
+    expect(said.data).toEqual([{ machine: own.machine, networkId: HOST_ID, hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080, number: null, copyName: null }]);
     expect(said.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: own.link.appSecret, visitorKey: c.relay.visitorKeys.get('acme') });
     /* The data machine's own view keeps what it had, and lists the data machines too. */
     expect(Object.keys(own.link).sort()).toEqual(['appSecret', 'dataSecret', 'name']);
@@ -364,6 +365,20 @@ describe('joining the company as a machine', () => {
     const waiting = await c.redeem(ticket, MAC.machineId, w.keys.pem);
     expect(waiting.statusCode).toBe(503);
     expect((await c.renew(w, { serial: 'ab12' })).statusCode).toBe(503);
+  });
+
+  it("names each data machine's number and copy", async () => {
+    const c = await company({ HORNHOOF_KEEPER: 'on' });
+    await c.link('acme');
+    await c.serverCertificate();
+    const w = await c.worker();
+    await rank(c.app.ctx);
+    const view = (await c.peers(keeperOf(w.machine))).json() as { data: { networkId: string; number: number | null; copyName: string | null }[] };
+    expect(view.data).toMatchObject([{ networkId: HOST_ID, number: 1, copyName: null }]);
+    /* A copy is listed with its place and the name its subscription goes by. */
+    await c.db.update(machines).set({ role: 'data', serverOrder: 2, copyName: 'copy_0f0f0f0f0f0f0f0f_1' }).where(eq(machines.id, w.machine));
+    const own = (await c.peers()).json() as typeof view;
+    expect(own.data.map(row => [row.number, row.copyName])).toEqual([[1, null], [2, 'copy_0f0f0f0f0f0f0f0f_1']]);
   });
 
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {

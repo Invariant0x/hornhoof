@@ -103,7 +103,8 @@ export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date)
   return cored.length > 0;
 }
 
-export type DataMachine = { machine: string; networkId: string; hostname: string | null; addresses: string[]; peerPort: number | null; webPort: number | null };
+/* number: its place in taking the server, 1 for the one that leads. copyName: the name its copy's subscription goes by. */
+export type DataMachine = { machine: string; networkId: string; hostname: string | null; addresses: string[]; peerPort: number | null; webPort: number | null; number: number | null; copyName: string | null };
 export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string };
 /* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
    keeps the link it has. */
@@ -116,7 +117,7 @@ export async function dataMachines(db: Db): Promise<DataMachine[]> {
     .from(machines)
     .where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.networkId)))
     .orderBy(asc(machines.createdAt), asc(machines.id));
-  return rows.map(row => ({ machine: row.id, networkId: row.networkId!, hostname: row.hostname || null, addresses: row.addresses, peerPort: row.peerPort, webPort: row.webPort }));
+  return rows.map(row => ({ machine: row.id, networkId: row.networkId!, hostname: row.hostname || null, addresses: row.addresses, peerPort: row.peerPort, webPort: row.webPort, number: row.serverOrder, copyName: row.copyName }));
 }
 
 const VisitSecret = z.object({ name: z.string(), key: z.string() });

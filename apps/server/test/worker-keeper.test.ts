@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
@@ -240,6 +240,7 @@ describe("a worker's keeper", () => {
     const w = await worker(c);
     await until(async () => (await c.rowOf(w.machine)).reportAt !== null);
     expect(await c.rowOf(w.machine)).toMatchObject({ path: 'direct', directFails: false, addresses: ['192.168.1.20'], webPort: 18081, commit: 'w0rker' });
+    expect(await c.rowOf(w.machine)).toMatchObject({ memory: totalmem(), cores: availableParallelism() });
     const said = await ask(w.front, { path: '/api/keeper' });
     expect(said.status).toBe(200);
     expect(said.json()).toEqual(w.status());

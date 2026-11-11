@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -55,6 +55,7 @@ describe("the machine's identity in its keeper", () => {
     await until(async () => (await serverRow())!.reportAt !== null);
     expect(await serverRow()).toMatchObject({ webPort: 8123, peerPort: 8223, commit: 'c0ffee'.padEnd(40, '0') });
     expect((await serverRow())!.diskFree).toBeGreaterThan(0);
+    expect(await serverRow()).toMatchObject({ memory: totalmem(), cores: availableParallelism() });
   });
 
   it('keeps the same key and certificate when the keeper starts again', async () => {

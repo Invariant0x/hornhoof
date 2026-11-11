@@ -28,6 +28,9 @@ const ReportBody = z.object({
   uptimeS: z.number().int().min(0).optional(),
   fsyncP99Ms: z.number().min(0).nullable().optional(),
   diskFree: z.number().int().min(0).optional(),
+  /* The memory and the processors Docker gives the machine. */
+  memory: z.number().int().min(0).optional(),
+  cores: z.number().int().min(1).max(4096).optional(),
   commit: z.string().max(64).optional(),
   webPort: Port.optional(),
   peerPort: Port.optional(),

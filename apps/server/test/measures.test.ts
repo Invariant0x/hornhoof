@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir, uptime } from 'node:os';
+import { availableParallelism, tmpdir, totalmem, uptime } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KEEP_SAMPLES, Measures, SAMPLE_MS, fsyncP99, keepLatest } from '../src/modules/keeper/measures.js';
@@ -64,7 +64,9 @@ describe('Measures', () => {
     for (let taken = 0; taken < 9; taken++) await measures.sample();
     expect(measures.snapshot().fsyncP99Ms).toBeNull();
     await measures.sample();
-    const { uptimeS, fsyncP99Ms, diskFree } = measures.snapshot();
+    const { uptimeS, fsyncP99Ms, diskFree, memory, cores } = measures.snapshot();
+    expect(memory).toBe(totalmem());
+    expect(cores).toBe(availableParallelism());
     expect(fsyncP99Ms).toBeGreaterThanOrEqual(0);
     expect(diskFree).toBeGreaterThan(0);
     expect(Number.isInteger(diskFree)).toBe(true);

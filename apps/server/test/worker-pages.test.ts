@@ -5,7 +5,7 @@ import { disconnectedAnswer, noLeaderAnswer } from '../src/modules/keeper/worker
 import { workerConfig } from '../src/modules/keeper/worker-config.js';
 
 const asked = (url: string) => ({ url, headers: {} }) as http.IncomingMessage;
-const SERVER = { machine: 'a', networkId: 'b', hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080 };
+const SERVER = { machine: 'a', networkId: 'b', hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080, number: 1, copyName: null };
 const MACHINE_ID = 'ab12cd34'.repeat(8);
 
 describe('the pages a worker serves by itself', () => {
