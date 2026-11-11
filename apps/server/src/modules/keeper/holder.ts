@@ -4,14 +4,14 @@ import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import { checkHead } from '../backups/bundle.js';
 import { BundleStore } from '../backups/store.js';
-import type { HolderView } from '../backups/types.js';
+import { ROOM, type HolderView } from '../backups/types.js';
 import { BUNDLES_DIR } from './backups.js';
 import type { HeldCertificate } from './certificate.js';
 import { Hourly, reasonOf } from './machine-keys.js';
 
 export const HOLD_EVERY_MS = 60_000;
 /* A bundle is fetched only with this many times its size free. */
-export const ROOM = 3;
+export { ROOM } from '../backups/types.js';
 
 const BACKUPS_PATH = '/api/network/backups';
 const BUNDLE_PATH = '/peer/backups/';
@@ -105,6 +105,8 @@ export class HolderKeeper {
   }
 
   private async look(): Promise<void> {
+    /* First, whatever else is there or not: what a fetch that died left would else stay for good. */
+    this.bundles.tidy();
     const held = this.opts.held();
     if (!held || !this.opts.link.leader()) return;
     const view = await this.view();

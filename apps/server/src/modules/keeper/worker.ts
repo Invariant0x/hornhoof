@@ -13,6 +13,7 @@ import { keyPrint } from '../computer/owner-key.js';
 import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
+import { REPORTED_BUNDLES } from '../backups/types.js';
 import { ownAddresses } from './addresses.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp, type AppAnswer } from './app-call.js';
@@ -91,8 +92,6 @@ const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const STOP_GRACE_MS = 5000;
 const BACKUP_KEY_RETRY_MS = 60_000;
-/* How many of the bundles a machine holds its report names. */
-const REPORTED_BUNDLES = 16;
 const LOOPBACK = '127.0.0.1';
 const KEEPER_PATH = '/api/keeper';
 const JSON_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
@@ -172,6 +171,7 @@ export class WorkerKeeper {
   private readonly hourly = new Hourly();
   /* Carries this machine's computer access from the leader to its updater. */
   private readonly carrier: ComputerCarrier;
+  private reporting: Promise<void> | null = null;
   /* Keeps the company's backups this machine was picked to hold. */
   private readonly holder: HolderKeeper;
   /* The public half of this machine's key for backups, once its folder keeps one. */
@@ -248,7 +248,7 @@ export class WorkerKeeper {
     void this.takeAgeKey();
     this.every(this.opts.lookEveryMs ?? LOOK_EVERY_MS, () => this.look());
     this.every(this.opts.viewEveryMs ?? VIEW_EVERY_MS, () => void this.readView());
-    this.every(this.opts.reportEveryMs ?? REPORT_EVERY_MS, () => void this.report());
+    this.every(this.opts.reportEveryMs ?? REPORT_EVERY_MS, () => this.reportUnlessBusy());
     return { front };
   }
 
@@ -273,7 +273,7 @@ export class WorkerKeeper {
     if (this.ageTimer) clearTimeout(this.ageTimer);
     this.certificates?.stop();
     this.measures.stop();
-    await Promise.all([this.holder.stop(), this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
+    await Promise.all([this.reporting, this.holder.stop(), this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
   }
 
   /* The machine's own key for backups, which the company seals to once this machine holds its data. A folder that
@@ -583,6 +583,12 @@ export class WorkerKeeper {
     this.mergeView(answer);
     const follow = Follow.safeParse(answer);
     if (follow.success) this.following.heard(follow.data.build, follow.data.go);
+  }
+
+  /* One report at a time: a leader that is slow to answer never collects a pile of them, and none overtakes another. */
+  private reportUnlessBusy(): void {
+    if (this.reporting) return;
+    this.reporting = this.report().finally(() => { this.reporting = null; });
   }
 
   private async report(): Promise<void> {

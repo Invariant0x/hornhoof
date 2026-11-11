@@ -17,6 +17,7 @@ import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
+import { REPORTED_BUNDLES } from '../backups/types.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
@@ -86,8 +87,6 @@ const EVERY_MS = 1000;
 const LINK_EVERY_MS = 3000;
 const GUARD_EVERY_MS = 10_000;
 const BACKUP_KEYS_RETRY_MS = 60_000;
-/* How many of the bundles a machine holds its report names. */
-const REPORTED_BUNDLES = 16;
 const FRPC_RESTART_MS = 2000;
 const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
 const SETTINGS_KEPT = "The keeper cannot read the link's settings from the database: frpc stays as it is.";

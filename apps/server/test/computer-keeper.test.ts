@@ -296,18 +296,61 @@ describe("a machine's keeper and its computer access", () => {
     carrier.prepare();
     const gets = () => s.asked.filter(call => call.method === 'GET').map(call => call.path);
     await carrier.tick();
-    s.said.get = open(s.nowS() + 3600, await (await owner()).grant());
+    const notMine = await (await owner()).grant();
+    s.said.get = open(s.nowS() + 3600, notMine);
     await carrier.tick();
-    /* The round after: the app hears that this machine stayed closed, once. */
+    /* The round after: the app hears that this machine stayed closed, once, and which grant it was that opened
+       nothing, so a grant the owner signed since is not closed for it. */
     s.said.get = closed();
     await carrier.tick();
     await carrier.tick();
-    expect(gets().map(path => path.includes('refused=1'))).toEqual([false, false, true, false]);
+    const nonce = (JSON.parse(notMine.payload) as { nonce: string }).nonce;
+    expect(gets().map(path => path.includes(`refused=${nonce}`))).toEqual([false, false, true, false]);
+    expect(gets().filter(path => path.includes('refused='))).toHaveLength(1);
     /* A grant it took, and an answer that was closed, are nothing to say. */
     s.said.get = open(s.nowS() + 3600, await mine.grant());
     await carrier.tick();
     await carrier.tick();
-    expect(gets().slice(-1)[0]).not.toContain('refused=1');
+    expect(gets().slice(-1)[0]).not.toContain('refused=');
+    /* An open answer with no grant at all is refused too, with nothing to name. */
+    s.said.get = open(s.nowS() + 3600, null);
+    await carrier.tick();
+    await carrier.tick();
+    expect(gets().slice(-1)[0]).toContain('refused=1');
+  });
+
+  it('starts its record of grants anew when it cannot be read, and takes no grant signed before that', async () => {
+    const mine = await owner();
+    const s = stand({ pin: mine.publicKey });
+    /* What a power cut or a build with another shape left. */
+    writeFileSync(join(s.dir, GRANTS_FILE), '{"held": nul');
+    const carrier = s.make();
+    carrier.prepare();
+    /* A grant signed a while ago, which this keeper may have taken and seen end before: it can no longer tell, so it
+       does not take it. */
+    const until_ = s.nowS() + 3600;
+    s.said.get = open(until_, await mine.grant({ at: s.nowS() - 60 }));
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    expect(s.lines.filter(line => line.includes('starts a new one'))).toHaveLength(1);
+    /* One its owner signs now opens the machine, once. */
+    const fresh = await mine.grant();
+    s.said.get = open(until_, fresh);
+    await carrier.tick();
+    expect(s.settings().untilSec).toBe(until_);
+    s.said.get = closed();
+    await carrier.tick();
+    s.said.get = open(until_, fresh);
+    await carrier.tick();
+    expect(s.settings()).toEqual(CLOSED);
+    /* The new record is kept, and a keeper that starts again goes by it. */
+    const kept = JSON.parse(readFileSync(join(s.dir, GRANTS_FILE), 'utf8')) as { since: number; spent: unknown[] };
+    expect([kept.since, kept.spent.length]).toEqual([s.nowS(), 1]);
+    const again = s.make();
+    again.prepare();
+    s.said.get = open(until_, await mine.grant({ at: s.nowS() - 60 }));
+    await again.tick();
+    expect(s.settings()).toEqual(CLOSED);
   });
 
   it('closes when it cannot write down what it spent, and still opens nothing twice', async () => {

@@ -285,6 +285,37 @@ describe('computer access to a machine of the company', () => {
     expect(await computer.wait(next, '0f0f0f0f-0000-4000-8000-00000000000a')).toBe('gone');
   });
 
+  it('does not give up a command that waits behind one that still runs', async () => {
+    const c = await company();
+    let now = Date.now();
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    computer.moveLegacy(c.control);
+    computer.seen(c.mac, true);
+    c.app.ctx.computer = computer;
+    await c.openMac();
+    const stillOpen = () => c.db.update(machineAccess).set({ until: new Date(now + 3_600_000) }).where(eq(machineAccess.machineId, c.mac));
+    /* A long command goes out, and a second waits its turn: the machine's updater runs one at a time. */
+    const [long, queued] = [await c.start(c.mac, 'make everything'), await c.start(c.mac, 'id')];
+    for (const id of [long, queued]) await c.db.update(computerRuns).set({ createdAt: new Date(now + (id === queued ? 1 : 0)), timeoutS: 1800 }).where(eq(computerRuns.id, id));
+    expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([long]);
+    /* Longer than a command may wait for a keeper, with the keeper there all along and the first still running. */
+    now += WAITING_MS + 60_000;
+    await stillOpen();
+    expect((await computer.take(c.mac, [long])).runs).toEqual([]);
+    expect(await computer.wait(queued, c.acme.id)).toBe('running');
+    expect((await c.runsOf(c.mac)).map(run => run.state)).toEqual(['sent', 'waiting']);
+    /* The first ends, and the second goes out at the keeper's next ask, however long it waited behind it. */
+    expect(await computer.answer(c.mac, long, { exit: 0, output: 'made' })).toBe(true);
+    expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([queued]);
+    /* One that waits with nothing before it, and no keeper to take it, is given up as before. */
+    expect(await computer.answer(c.mac, queued, { exit: 0, output: '' })).toBe(true);
+    const lonely = await c.start(c.mac, 'uptime');
+    await c.db.update(computerRuns).set({ createdAt: new Date(now) }).where(eq(computerRuns.id, lonely));
+    now += WAITING_MS + 1000;
+    await stillOpen();
+    expect(await computer.wait(lonely, c.acme.id)).toEqual({ exit: 126, output: 'marat-mac did not take this command in time, so it was not run.' });
+  });
+
   it('gives up a command that waited or was out too long, and tells the keeper what to let go of', async () => {
     const c = await company();
     let now = Date.now();
@@ -336,6 +367,18 @@ describe('computer access to a machine of the company', () => {
     /* Said of a machine that is closed, it changes nothing and says nothing more. */
     await c.app.inject({ url: '/api/network/computer?updater=1&refused=1', ...keeperOf(c.mac) });
     expect((await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer'))))).toHaveLength(lines.length);
+
+    /* The keeper names the grant it did not take. Its owner signed another since: that one stays open. */
+    const signed = await c.key.grant(c.NETWORK_ID);
+    expect((await c.open(c.tokens.marat, c.mac, { grant: signed })).statusCode).toBe(200);
+    const earlier = (JSON.parse((await c.key.grant(c.NETWORK_ID)).payload) as { nonce: string }).nonce;
+    expect((await c.app.inject({ url: `/api/network/computer?updater=1&refused=${earlier}`, ...keeperOf(c.mac) })).json()).toMatchObject({ access: { grant: signed } });
+    expect((await c.accessOf(c.mac))!.until).not.toBeNull();
+    /* The one that is open, named: closed. */
+    const nonce = (JSON.parse(signed.payload) as { nonce: string }).nonce;
+    expect((await c.app.inject({ url: `/api/network/computer?updater=1&refused=${nonce}`, ...keeperOf(c.mac) })).json()).toMatchObject({ access: null });
+    expect(await c.accessOf(c.mac)).toMatchObject({ until: null, grant: null });
+    expect((await c.app.inject({ url: '/api/network/computer?updater=1&refused=not%20a%20nonce', ...keeperOf(c.mac) })).statusCode).toBe(400);
   });
 
   it('ends the commands nobody took when access closes, and gives none on a closed machine', async () => {
@@ -584,6 +627,12 @@ describe('what an app from before access was per machine left', () => {
     expect(await app.ctx.computer.importLegacy(control)).toBe(false);
     expect(app.ctx.computer.ready()).toBe(false);
     expect((await app.inject({ url: '/api/network/computer?updater=1', ...OWN_KEEPER })).statusCode).toBe(503);
+    /* Only the server's own machine waits for the file: any other machine of the company is served meanwhile. */
+    const [acme] = await db.select().from(companies);
+    const [boss] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [other] = await db.insert(machines).values({ companyId: acme!.id, personId: boss!.id, machineKey: 'other-0001', hostname: 'other', role: 'worker', networkId: 'd'.repeat(64) }).returning();
+    expect((await app.inject({ url: '/api/network/computer?updater=1', ...keeperOf(other!.id) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${other!.id}/access/close`, ...as(ceo) })).statusCode).toBe(200);
     const server = await serverMachine(app);
     expect((await app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(ceo) })).statusCode).toBe(503);
     expect(await app.ctx.computer.importLegacy(control)).toBe(true);

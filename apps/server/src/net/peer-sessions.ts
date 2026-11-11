@@ -7,6 +7,7 @@ import { MACHINE_ROLES, type LinkPath } from '../db/schema.js';
 import type { HeldCertificate } from '../modules/keeper/certificate.js';
 import type { MachineKey } from '../modules/keeper/machine-keys.js';
 import { certFacts } from '../modules/network/authority.js';
+import { sameSubnet } from '../modules/network/ids.js';
 import { APP_AUTHORITY, PEER_PATHS } from './peer-server.js';
 
 /* A data machine to keep a session to. machine: its row's id, which its certificate names. networkId: its keeper's id,
@@ -56,8 +57,6 @@ type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: N
 type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number };
 
 const ignore = (): void => {};
-/* Two IPv4 addresses on one /24, as two machines behind one home router are. */
-const sameNetwork = (a: string, b: string): boolean => a.split('.').slice(0, 3).join('.') === b.split('.').slice(0, 3).join('.');
 
 /* One answer of the peer link's hello on a session, or a rejection when it does not come whole within ms. */
 function askHello(h2: ClientHttp2Session, ms: number): Promise<Hello> {
@@ -133,7 +132,7 @@ export class PeerSessions {
     const kept = this.leading() ?? this.kept.find(one => one.session);
     const session = kept?.session;
     const own = this.opts.own();
-    const directFails = session?.path === 'relay' && [...kept!.failed].some(address => own.some(mine => sameNetwork(address, mine)));
+    const directFails = session?.path === 'relay' && [...kept!.failed].some(address => own.some(mine => sameSubnet(address, mine)));
     return { path: session?.path ?? null, directFails, refused: this.refused };
   }
 

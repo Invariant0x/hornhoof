@@ -415,9 +415,21 @@ dump_request() {
   if [ ! -f "$CONTROL/dumps/$id.json" ] && [ ! -f "$CONTROL/dumps/$id.failed" ]; then
     db=$(compose ps -q db 2> /dev/null || true)
     [ -n "$db" ] || return 0
-    make_dump "$id" "$db" || dump_failed "$id" || return 0
+    # The request goes also when not even the failure could be written, as on a full disk: the keeper asks anew in its
+    # own time, and no pass dumps the database again by itself.
+    make_dump "$id" "$db" || dump_failed "$id" || drop_dump "$id"
   fi
   rm -f "$CONTROL/dump.json"
+}
+
+# A dump in the clear is never left for long. The keeper seals and removes each, and removes what it did not seal
+# within a day; this does the same for a machine whose keeper makes no backups, or does not run.
+sweep_dumps() {
+  [ -d "$CONTROL/dumps" ] || return 0
+  if [ -n "$(find "$CONTROL/dumps" -type f -mmin +1440 2> /dev/null | head -n 1)" ]; then
+    find "$CONTROL/dumps" -type f -mmin +1440 -exec rm -f {} + 2> /dev/null || true
+    printf 'Deleted a database dump that was not sealed within a day.\n'
+  fi
 }
 
 # The public link's settings as they are now, next to the database copy, readable by the owner only. A link the
@@ -1617,6 +1629,7 @@ if [ "${1:-}" = --once ]; then
   ONCE=1
   write_addresses
   handle_request
+  sweep_dumps
   dump_request
   restore_request
   catch_up_nodes
@@ -1642,6 +1655,7 @@ ADDRS=$!
 trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
 while true; do
   handle_request
+  sweep_dumps
   dump_request
   restore_request
   catch_up_nodes || printf 'Could not look at the nodes.\n'

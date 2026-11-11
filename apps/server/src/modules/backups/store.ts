@@ -3,14 +3,13 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { UUID } from '../../net/proxy.js';
 import { BundleRefused, headLine, readHead, type Manifest } from './bundle.js';
+import { ROOM } from './types.js';
 
 export type StoredBundle = { id: string; manifest: Manifest; head: string; size: number };
 /* A transfer that moves no byte for this long is cut. */
 export const IDLE_MS = 30_000;
-/* A bundle is taken only into a folder with this many times its size free. */
-const ROOM = 3;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /* How far past its signed size a transfer is read before it is seen to be too long. */
 const OVER = 1024 * 1024;
 
@@ -194,15 +193,24 @@ export class BundleStore {
     rmSync(this.ageFile(id), { force: true });
   }
 
-  /* Removes every complete bundle that is not named, what a take that died left, and a sealed part with no head. */
+  /* Removes every complete bundle that is not named, and what tidy removes. */
   keepOnly(ids: string[]): void {
+    for (const name of readdirSync(this.dir)) {
+      const id = name.split('.')[0]!;
+      if (name.endsWith('.head') && !ids.includes(id)) this.remove(id);
+    }
+    this.tidy();
+  }
+
+  /* Removes what a take that died left, and a sealed part with no head: a keeper stopped in the middle of a transfer
+     leaves them, and nothing else ever would take them away. A take that still runs keeps its file. */
+  tidy(): void {
     for (const name of readdirSync(this.dir)) {
       const path = join(this.dir, name);
       const id = name.split('.')[0]!;
       if (name.endsWith('.part')) {
         if (!this.parts.has(path)) rmSync(path, { force: true });
-      } else if (name.endsWith('.head') && !ids.includes(id)) this.remove(id);
-      else if (name.endsWith('.age') && !existsSync(this.head(id)) && !this.writing.has(id)) rmSync(path, { force: true });
+      } else if (name.endsWith('.age') && !existsSync(this.head(id)) && !this.writing.has(id)) rmSync(path, { force: true });
     }
   }
 }

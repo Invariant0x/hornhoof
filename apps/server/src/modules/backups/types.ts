@@ -2,6 +2,12 @@ import type { Manifest, RecoveryLink } from './bundle.js';
 
 /* The messages between keepers and the app about backups, which both sides read. */
 
+/* The free disk a machine needs to take a bundle, in bundles: the app picks holders by it, and each machine checks it
+   again before it takes one. */
+export const ROOM = 3;
+/* How many of the bundles a machine holds its report names, newest first. */
+export const REPORTED_BUNDLES = 16;
+
 /* What the leading app tells its own keeper to restore. attempt: new for each start, so the same bundle can be tried
    again. source: the keeper's own store, or what a holder or a browser sent it. identity: the recovery file's, held in
    memory only, when the keeper's own key does not open the bundle. expect: what the database recorded of the bundle,

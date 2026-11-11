@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { UUID } from '../../net/proxy.js';
 import { readGrant, type Grant } from '../computer/grant.js';
 import { Hourly, readJson, reasonOf, writePrivately } from './machine-keys.js';
 
@@ -16,7 +17,6 @@ const ALIVE_MS = 30_000;
 /* The grant the keeper holds, and the ones that ended, each until its own end, so none opens the machine twice. */
 export const GRANTS_FILE = 'grants.json';
 const LEGACY_FILE = 'computer.legacy.json';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /* As many held commands as one ask names. */
 const HELD_MOST = 8;
 
@@ -49,7 +49,20 @@ const Answer = z.object({
   /* The commands this keeper named that are no longer out with it. An app from before it said so names none. */
   forget: z.array(z.string().regex(UUID)).max(HELD_MOST).default([]),
 });
-const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object({ nonce: z.string(), until: z.number() })) });
+const GRANT_NONCE = /^[A-Za-z0-9_-]{22}$/;
+/* The nonce a grant carries, when it carries one as grants do. */
+function nonceOf(grant: { payload: string } | null): string | null {
+  try {
+    const nonce = grant ? (JSON.parse(grant.payload) as { nonce?: unknown }).nonce : null;
+    return typeof nonce === 'string' && GRANT_NONCE.test(nonce) ? nonce : null;
+  } catch {
+    return null;
+  }
+}
+
+/* since: the second this record was started anew after one that could not be read. What was spent before is not known
+   then, so no grant signed before that second is taken. */
+const Grants = z.object({ held: SignedGrant.nullable(), spent: z.array(z.object({ nonce: z.string(), until: z.number() })), since: z.number().optional() });
 type Grants = z.infer<typeof Grants>;
 const Out = z.object({ exit: z.number().int().min(0).max(255), output: z.string() });
 
@@ -70,7 +83,8 @@ export class ComputerCarrier {
   private wasOpen = false;
   private prepared = false;
   /* The app said open with a grant this keeper did not take: said back to it at the next ask, once. */
-  private refusedGrant = false;
+  /* The grant the app gave last that opened nothing here, by its nonce; '1' for an open answer with no grant to name. */
+  private refusedGrant: string | null = null;
   /* The numbers of grants that ended while the keeper's folder took no write: kept here until it does. */
   private readonly spentUnwritten = new Map<string, number>();
   /* What the keeper last decided of its grants, for a round in which the file cannot be read. */
@@ -212,6 +226,13 @@ export class ComputerCarrier {
     }
   }
 
+  /* A record that cannot be read is no reason to keep the machine closed for good, nor to forget that grants were
+     spent: the new one says from when it counts. */
+  private startAnew(nowS: number): Grants {
+    this.opts.log("The keeper's record of grants cannot be read. It starts a new one, and takes only what the machine's owner signs from now on.");
+    return { held: null, spent: [], since: nowS };
+  }
+
   private unkept(why: string): void {
     this.sayHourly('grants', `The keeper could not keep its record of grants, so this machine's computer stays closed: ${why}`);
   }
@@ -221,7 +242,7 @@ export class ComputerCarrier {
     const facts = grant ? (JSON.parse(grant.payload) as { nonce?: unknown; until?: unknown }) : null;
     const more = facts && typeof facts.nonce === 'string' && typeof facts.until === 'number' ? [{ nonce: facts.nonce, until: facts.until }] : [];
     const spent = [...grants.spent.filter(one => !more.some(m => m.nonce === one.nonce)), ...more].filter(one => one.until > nowS);
-    return { held: null, spent };
+    return { ...grants, held: null, spent };
   }
 
   /* Until when the app's answer opens this machine, in seconds, or null. With a key held, only its owner's grant for
@@ -231,21 +252,19 @@ export class ComputerCarrier {
   private openUntil(access: z.infer<typeof Answer>['access']): number | null {
     const nowS = Math.floor(this.now().getTime() / 1000);
     const pin = this.opts.pin();
-    this.refusedGrant = false;
+    this.refusedGrant = null;
     if (!pin) return this.opts.trustApp && access && access.untilSec > nowS ? access.untilSec : null;
     const read = this.grants();
-    /* What it holds and spent: as written, or as it last decided when the file cannot be read. With neither there is
-       nothing to go by, and nothing opens. */
-    const known = read ?? this.decided;
-    if (!known) {
-      this.unkept('the file cannot be read');
-      return null;
-    }
-    const before: Grants = { held: known.held, spent: [...known.spent, ...[...this.spentUnwritten].filter(([nonce]) => !known.spent.some(one => one.nonce === nonce)).map(([nonce, until]) => ({ nonce, until }))] };
+    /* What it holds and spent: as written, or as it last decided when the file cannot be read. With neither, what was
+       spent is not known any more: a new record starts, which takes no grant signed before this moment, so a grant
+       that ended before cannot open the machine again, and one its owner signs now can. */
+    const known = read ?? this.decided ?? this.startAnew(nowS);
+    const before: Grants = { ...known, spent: [...known.spent, ...[...this.spentUnwritten].filter(([nonce]) => !known.spent.some(one => one.nonce === nonce)).map(([nonce, until]) => ({ nonce, until }))] };
     const sent = access?.grant ?? null;
     const same = before.held !== null && sent !== null && before.held.payload === sent.payload && before.held.signature === sent.signature;
-    let after: Grants = same ? { held: before.held, spent: before.spent.filter(one => one.until > nowS) } : this.spend(before, before.held, nowS);
-    const facts = sent ? readGrant(sent, pin, this.opts.machine, nowS) : null;
+    let after: Grants = same ? { ...before, spent: before.spent.filter(one => one.until > nowS) } : this.spend(before, before.held, nowS);
+    const read_ = sent ? readGrant(sent, pin, this.opts.machine, nowS) : null;
+    const facts = read_ && read_.at >= (before.since ?? 0) ? read_ : null;
     let until: number | null = null;
     if (access && sent && facts && !after.spent.some(one => one.nonce === facts.nonce)) {
       after = { ...after, held: sent };
@@ -254,13 +273,13 @@ export class ComputerCarrier {
       /* What it held ended with this answer, though the app sent it again. */
       if (same) after = this.spend(after, before.held, nowS);
       if (access) {
-        this.refusedGrant = true;
+        this.refusedGrant = nonceOf(sent) ?? '1';
         this.sayHourly('grant', "The company server says this machine's computer access is open, with no grant of its owner that this machine's keeper takes. It stays closed.");
       }
     }
     const kept = JSON.stringify(after) === JSON.stringify(read) || this.keep(after);
     /* A grant that could not be written down as held is not held, and is not spent either: it opens once it can be. */
-    this.decided = kept ? after : { held: null, spent: after.spent };
+    this.decided = kept ? after : { ...after, held: null };
     if (!kept) return null;
     return until !== null && until > nowS ? until : null;
   }
@@ -268,8 +287,8 @@ export class ComputerCarrier {
   private async takeAccess(): Promise<void> {
     const held = this.commandFiles().slice(0, HELD_MOST);
     /* The app hears once that the grant it gave opened nothing here, so nobody is shown an open machine that is closed. */
-    const refused = this.refusedGrant ? '&refused=1' : '';
-    this.refusedGrant = false;
+    const refused = this.refusedGrant ? `&refused=${this.refusedGrant}` : '';
+    this.refusedGrant = null;
     const path = `/api/network/computer?updater=${this.updaterAlive() ? 1 : 0}&held=${held.join(',')}${refused}`;
     const res = await this.opts.ask('GET', path, undefined, this.bounded()).catch((err: unknown) => ({ status: 0, body: reasonOf(err) }));
     if (this.stopped) return;
@@ -306,8 +325,9 @@ export class ComputerCarrier {
     renameSync(`${base}.json.new`, `${base}.json`);
   }
 
-  /* A command the app no longer has out with this keeper, or whose answer nobody can read: its files go. The updater
-     stops what it began once the command's file is gone, and clears its own mark. */
+  /* A command the app no longer has out with this keeper, or whose answer nobody can read: its files go. At its next
+     look the updater clears its own mark of it and removes what is left of its container; one it still watches runs
+     until its time is over or access closes, and its answer then goes nowhere. */
   private letGo(id: string): void {
     if (this.stopped) return;
     const base = join(this.file('computer'), id);

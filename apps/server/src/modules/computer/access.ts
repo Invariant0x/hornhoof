@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, max, ne } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -96,6 +96,16 @@ async function endRuns(tx: Db, machineIds: string[], names: Map<string, string>,
     const waiting = and(eq(computerRuns.machineId, id), eq(computerRuns.state, 'waiting'));
     await tx.update(computerRuns).set({ state: 'done', exit: CLOSED_EXIT, output: closedLine(names.get(id) ?? 'this machine'), doneAt: now }).where(waiting);
     if (alsoSent) await tx.update(computerRuns).set({ state: 'lost', doneAt: now }).where(and(eq(computerRuns.machineId, id), eq(computerRuns.state, 'sent')));
+  }
+}
+
+/* The nonce of a grant as it was signed; none for one that is no grant. */
+function grantNonce(payload: string): string | null {
+  try {
+    const { nonce } = JSON.parse(payload) as { nonce?: unknown };
+    return typeof nonce === 'string' ? nonce : null;
+  } catch {
+    return null;
   }
 }
 
@@ -310,11 +320,16 @@ export class Computers {
   async wait(runId: string, companyId: string, ms = this.waitMs): Promise<Waited> {
     const end = Date.now() + ms;
     const mine = and(eq(computerRuns.id, runId), eq(computerRuns.companyId, companyId));
+    const read = () => this.ctx.db.select({ state: computerRuns.state, machineId: computerRuns.machineId, createdAt: computerRuns.createdAt }).from(computerRuns).where(mine);
     for (;;) {
-      const [run] = await this.ctx.db.select({ state: computerRuns.state, machineId: computerRuns.machineId, createdAt: computerRuns.createdAt }).from(computerRuns).where(mine);
+      let [run] = await read();
+      /* One that waited long is given up when it was its keeper that did not come for it, and read again. */
+      if (run?.state === 'waiting' && this.now().getTime() - run.createdAt.getTime() >= WAITING_MS) {
+        await this.endStale(run.machineId);
+        [run] = await read();
+      }
       if (!run) return 'gone';
-      if (run.state === 'waiting' && this.now().getTime() - run.createdAt.getTime() >= WAITING_MS) await this.endStale(run.machineId);
-      else if (run.state === 'done') {
+      if (run.state === 'done') {
         const [done] = await this.ctx.db.select({ exit: computerRuns.exit, output: computerRuns.output }).from(computerRuns).where(mine);
         return { exit: done?.exit ?? -1, output: done?.output ?? '' };
       } else if (run.state === 'lost') return 'lost';
@@ -323,10 +338,17 @@ export class Computers {
     }
   }
 
-  /* Ends the commands of a machine that waited too long for its keeper: they were never run, and are not run later. */
+  /* Ends the commands of a machine that waited too long for its keeper: they were never run, and are not run later. A
+     command also waits its turn behind one that is out, since a machine runs one at a time, and that wait is no keeper's
+     fault: nothing is given up while a command of the machine is out, nor until that long after its last one ended. */
   private async endStale(machineId: string, tx: Db = this.ctx.db): Promise<void> {
-    const [row] = await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
     const now = this.now();
+    const ofMachine = eq(computerRuns.machineId, machineId);
+    const [out] = await tx.select({ id: computerRuns.id }).from(computerRuns).where(and(ofMachine, eq(computerRuns.state, 'sent'))).limit(1);
+    if (out) return;
+    const [ended] = await tx.select({ at: max(computerRuns.doneAt) }).from(computerRuns).where(and(ofMachine, isNotNull(computerRuns.doneAt)));
+    if (ended?.at && now.getTime() - ended.at.getTime() < WAITING_MS) return;
+    const [row] = await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
     await tx
       .update(computerRuns)
       .set({ state: 'done', exit: CLOSED_EXIT, output: staleLine(row ? this.nameOf(row) : 'The machine'), doneAt: now })
@@ -380,12 +402,17 @@ export class Computers {
 
   /* The machine's keeper did not take the grant the app gave it: its clock is off, or it does not hold the key the app
      thinks it holds. The machine is closed there whatever the row says, so the row says so too, and nobody is shown an
-     open machine that runs nothing. The machine, when that changed anything. */
-  async refused(machineId: string): Promise<AccessMachine | null> {
+     open machine that runs nothing. nonce: the grant the keeper means; one its owner signed since is another grant,
+     and stays. The machine, when that changed anything. */
+  async refused(machineId: string, nonce: string | null = null): Promise<AccessMachine | null> {
     return this.ctx.db.transaction(async tx => {
       const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
       if (!row || row.revokedAt || !row.networkId) return null;
       const now = this.now();
+      if (nonce !== null) {
+        const [open] = await tx.select({ grant: machineAccess.grant }).from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
+        if (!open?.grant || grantNonce(open.grant.payload) !== nonce) return null;
+      }
       const closed = await tx.update(machineAccess).set({ until: null, grant: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.grant), gt(machineAccess.until, now))).returning({ id: machineAccess.machineId });
       if (closed.length === 0) return null;
       const machine = this.machineOf(row);
@@ -436,8 +463,9 @@ export class Computers {
 
   /* While this app leads: what the file set aside said becomes the row of the server's own machine, once that machine
      has a row, and the file goes. It never writes over a row that is there: whatever was decided since the file was
-     written stands, so a file of before that turns up later opens nothing. Until it is done nothing of computer access
-     is served. Whether it is done: false while the server's own machine has no row yet, to be tried again. */
+     written stands, so a file of before that turns up later opens nothing. Until it is done the access of the server's
+     own machine is not served. Whether it is done: false while the server's own machine has no row yet, to be tried
+     again. */
   async importLegacy(controlDir: string): Promise<boolean> {
     if (this.legacyDone) return true;
     const aside = join(controlDir, LEGACY_FILE);
@@ -462,6 +490,14 @@ export class Computers {
 
   ready(): boolean {
     return this.legacyDone;
+  }
+
+  /* Whether this machine's access is served yet. Only the server's own machine waits for what an app from before left
+     of it: every other machine of the company has nothing to take over, and is served whatever becomes of that. */
+  async served(machineId: string): Promise<boolean> {
+    if (this.legacyDone) return true;
+    const [row] = await this.ctx.db.select({ networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
+    return !row || !this.own(row);
   }
 
   /* The machine a person sits at: a request to localhost that did not come over the link came through the front door

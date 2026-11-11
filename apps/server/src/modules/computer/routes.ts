@@ -44,16 +44,17 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return orchestrator;
   }
 
-  /* Nothing is changed before this app has taken over what an app from before left of the server's own access. */
-  function served(): void {
-    if (!ctx.computer.ready()) throw new ApiError(503, 'unavailable', 'This server does not serve computer access yet. Try again in a moment.');
+  /* Nothing of the server's own machine is changed before this app has taken over what an app from before left of its
+     access. Every other machine is served meanwhile. */
+  async function served(machineId: string): Promise<void> {
+    if (!(await ctx.computer.served(machineId))) throw new ApiError(503, 'unavailable', 'This server does not serve computer access yet. Try again in a moment.');
   }
 
   /* Every person's screens fetch their own views again. */
   const changed = (companyId: string) => ctx.bus.publish(companyId, { type: 'computer' });
 
   async function open(me: Person, machineId: string, body: unknown): Promise<AccessView> {
-    served();
+    await served(machineId);
     const { machine, until, asked } = await ctx.computer.open(me, machineId, OpenBody.parse(body ?? {}).grant);
     changed(me.companyId);
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(logName(machine)) }, me.id);
@@ -68,7 +69,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   async function close(me: Person, machineId: string): Promise<AccessView> {
-    served();
+    await served(machineId);
     const machine = await ctx.computer.close(me, machineId);
     changed(me.companyId);
     await line(me.companyId, { state: 'closed', ...onMachine(logName(machine)) }, me.id);
@@ -76,7 +77,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   async function decline(me: Person, machineId: string): Promise<AccessView> {
-    served();
+    await served(machineId);
     const machine = await ctx.computer.decline(me, machineId);
     if (machine) {
       changed(me.companyId);

@@ -88,11 +88,28 @@ describe('the machines that keep a bundle', () => {
     void _v;
     void _head;
     await recordBundle(c.db, { ...row, head: JSON.stringify({ manifest: JSON.stringify({ v: 1, ...manifest }), signature: 'x', certPem: 'x' }), holders });
+    /* It holds the bundle, so it keeps its place with no room for another and an hour of silence. */
+    await c.db.update(machines).set({ heldBackups: [row.id] }).where(eq(machines.id, old));
     await refreshHolders(c.db, NOW);
     expect((await bundleRow(c.db, row.id))!.holders).toEqual([old, a, b]);
     await c.db.update(machines).set({ reportAt: new Date(NOW.getTime() - DAY_MS - 60_000) }).where(eq(machines.id, old));
     await refreshHolders(c.db, NOW);
     expect((await bundleRow(c.db, row.id))!.holders).toEqual([a, b, d]);
+  });
+
+  it('gives the place of a holder that never fetched the bundle and no longer can to the next', async () => {
+    const c = await company();
+    const [a, b, d, e] = [await c.worker('a', { online: 0.8 }), await c.worker('b', { online: 0.7 }), await c.worker('d', { online: 0.6 }), await c.worker('e', { online: 0.5 })];
+    const id = randomUUID();
+    const pick = (keep: string[]) => pickHolders(c.db, { size: SIZE, keep, now: NOW, id });
+    /* All three were picked a moment ago and are still fetching: nothing changes. */
+    expect(await pick([a, b, d])).toEqual([a, b, d]);
+    /* One ran out of room before it had the bundle, and one fell silent before it had it: both give their places up.
+       The third has it, and keeps its place through the same. */
+    await c.db.update(machines).set({ diskFree: Math.floor(2.9 * SIZE) }).where(eq(machines.id, a));
+    await c.db.update(machines).set({ reportAt: new Date(NOW.getTime() - 3 * 60_000) }).where(eq(machines.id, b));
+    await c.db.update(machines).set({ heldBackups: [id], diskFree: 0, reportAt: new Date(NOW.getTime() - 3_600_000) }).where(eq(machines.id, d));
+    expect(await pick([a, b, d])).toEqual([d, e]);
   });
 
   it('keeps one place off site', async () => {
@@ -108,5 +125,22 @@ describe('the machines that keep a bundle', () => {
     const newcomer = await c.worker('newcomer', { addresses: ['203.0.113.9'], online: 0.8 });
     expect(await c.pick([h1, h2, away])).toEqual([h1, h2, away]);
     expect(await c.pick()).toEqual([h1, h2, newcomer]);
+  });
+
+  it('tells a machine elsewhere by how it reaches the server, not by its numbers alone', async () => {
+    const c = await company();
+    const [h1, h2, h3] = [await c.worker('h1', { online: 0.8, path: 'direct' }), await c.worker('h2', { online: 0.7, path: 'direct' }), await c.worker('h3', { online: 0.6, path: 'direct' })];
+    /* A machine in another town whose router gives out the same numbers as the server's: it comes through the relay,
+       so it is off site, and takes the place kept for one. */
+    const twin = await c.worker('twin', { addresses: ['192.0.2.77'], online: 0.3, path: 'relay' });
+    expect(await c.pick()).toEqual([h1, h2, twin]);
+    /* A machine that says no address at all is not known to be elsewhere: it takes no place kept for one off site. */
+    await c.db.update(machines).set({ revokedAt: NOW }).where(eq(machines.id, twin));
+    const mute = await c.worker('mute', { addresses: [], online: 0.9 });
+    expect(await c.pick()).toEqual([h1, h2, h3]);
+    void mute;
+    /* With fewer at home than places, it holds one like any other. */
+    await c.db.update(machines).set({ revokedAt: NOW }).where(eq(machines.id, h3));
+    expect(await c.pick()).toEqual([h1, h2, mute]);
   });
 });

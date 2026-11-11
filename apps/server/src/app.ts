@@ -137,6 +137,9 @@ function closeOpenSockets(app: FastifyInstance): void {
 
 /* How often the holders of the newest bundles are looked at again. */
 const HOLDERS_EVERY_MS = 3_600_000;
+/* The look for the server's own machine's row grows slower up to this, and says so once after this many looks. */
+const TAKE_OVER_SLOWEST_MS = 30_000;
+const TAKE_OVER_SAID = 5;
 /* How soon the carry of a restore is tried again after it could not be applied. */
 const RESTORE_RETRY_MS = 10_000;
 
@@ -218,18 +221,23 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   );
   app.addHook('onClose', async () => clearInterval(holdersTimer));
   /* While this app leads it takes over the server's own computer access as an app from before left it, and looks
-     again every second until that is done: its own machine gets its row only once its keeper has asked. */
+     again until that is done, at first every second and then less often: its own machine gets its row only once its
+     keeper has asked. The other machines are served meanwhile. */
+  let accessTries = 0;
   const takeOverAccess = (): void =>
     void ctx.computer
       .importLegacy(config.controlDir)
       .catch((err: unknown) => {
-        ctx.log.warn({ error: loggable(err) }, 'Could not take over the computer access an older build left. Computer access is not served until it is.');
+        ctx.log.warn({ error: loggable(err) }, "Could not take over the computer access an older build left. The server's own computer access is not served until it is.");
         return false;
       })
       .then(done => {
-        if (!done && ctx.mode.current() === 'lead') setTimeout(takeOverAccess, 1000).unref();
+        if (done || ctx.mode.current() !== 'lead') return;
+        accessTries += 1;
+        if (accessTries === TAKE_OVER_SAID) ctx.log.warn("The server's own machine has no row yet, so its computer access waits. The other machines are served.");
+        setTimeout(takeOverAccess, Math.min(TAKE_OVER_SLOWEST_MS, 1000 * 2 ** Math.min(accessTries - 1, 10))).unref();
       });
-  ctx.mode.whenLead(takeOverAccess, () => undefined);
+  ctx.mode.whenLead(() => void ((accessTries = 0), takeOverAccess()), () => undefined);
   ctx.mode.whenLeaving(() => closeOpenSockets(app));
   app.addHook('onReady', async () => {
     ctx.mode.start();

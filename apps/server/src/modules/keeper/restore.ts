@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { BundleRefused, checkHead, openBundle } from '../backups/bundle.js';
 import type { BundleStore, StoredBundle } from '../backups/store.js';
-import type { RestoreOrder, RestoreStatus, RestoreStep } from '../backups/types.js';
+import { ROOM, type RestoreOrder, type RestoreStatus, type RestoreStep } from '../backups/types.js';
 import { reasonOf } from './machine-keys.js';
 
 /* For how long the keeper waits for a holder to send the bundle. */
@@ -14,8 +14,6 @@ export const INCOMING_DIR = 'incoming';
 
 const STATUS_FILE = 'restore-status.json';
 const ORDER_FILE = 'restore.json';
-/* The dump and the settings in the clear need this many times the bundle free. */
-const ROOM = 3;
 const POLL_MS = 1000;
 /* The steps that are the keeper's own; the updater's follow them. */
 const OWN_STEPS: readonly RestoreStep[] = ['fetch', 'check', 'open'];
@@ -190,6 +188,7 @@ export class RestoreRunner {
   }
 
   private async opened(order: RestoreOrder, store: BundleStore, held: StoredBundle): Promise<void> {
+    /* The dump and the settings in the clear need as much room as a bundle does where it is kept. */
     if (this.free() < ROOM * held.manifest.size) throw new Stopped(NO_ROOM);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const { dump, env } = this.filesOf(order);

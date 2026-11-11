@@ -11,7 +11,7 @@ import type { MachineKey } from '../modules/keeper/machine-keys.js';
 import { certFacts } from '../modules/network/authority.js';
 import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
-import type { Target } from './proxy.js';
+import { UUID, type Target } from './proxy.js';
 
 export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/' } as const;
 export const APP_AUTHORITY = 'app:8080';
@@ -50,8 +50,6 @@ const NAMES_NO_MACHINE = 'NAMES_NO_MACHINE';
 const CONTEXT_FAILURE = 'context';
 const CLOSED = 'The peer link closed before it could listen.';
 
-const BUNDLE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 const ignore = (): void => {};
 
 function routeOfConnect(authority: unknown, kind: Kind, role: MachineRole, db: Target | null): Route {
@@ -64,7 +62,7 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   const method = headers[':method'];
   const path = String(headers[':path']);
   if (method === 'CONNECT') return routeOfConnect(headers[':authority'], kind, role, db);
-  if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.backups) && BUNDLE_ID.test(path.slice(PEER_PATHS.backups.length))) {
+  if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.backups) && UUID.test(path.slice(PEER_PATHS.backups.length))) {
     return { to: 'bundle', id: path.slice(PEER_PATHS.backups.length), put: method === 'PUT' };
   }
   return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };

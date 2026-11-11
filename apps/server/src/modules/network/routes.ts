@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
 import { agents, companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { REPORTED_BUNDLES } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
@@ -42,7 +43,7 @@ const ReportBody = z.object({
   os: z.enum(['linux', 'darwin']).optional(),
   /* The public half of the age key its keeper made, and the bundles it holds: its newest sixteen at most. */
   ageKey: z.string().regex(/^age1[02-9ac-hj-np-z]{58}$/).optional(),
-  heldBackups: z.array(z.uuid()).max(16).optional(),
+  heldBackups: z.array(z.uuid()).max(REPORTED_BUNDLES).optional(),
   /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });
@@ -58,7 +59,9 @@ async function machineRefused(ctx: Ctx, companyId: string, machine: AccessMachin
 const ComputerQuery = z.object({
   updater: z.enum(['0', '1']).default('0'),
   /* The keeper did not take the grant it was last given: its machine stayed closed. */
-  refused: z.enum(['0', '1']).default('0'),
+  /* 0: nothing was refused. 1: the grant the app gave, as a keeper from before grants were named says it. Else the
+     nonce of the grant that opened nothing. */
+  refused: z.string().regex(/^(0|1|[A-Za-z0-9_-]{22})$/).default('0'),
   held: z
     .string()
     .max(8 * 37)
@@ -182,10 +185,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  /* Computer access of the asker's own machine is served only by an app that leads and has taken over what an older app
-     left: anything else is no answer, and the keeper keeps what it holds for a while and then closes. */
+  /* Computer access of the asker's own machine is served only by an app that leads, and that of the server's own
+     machine only once the app has taken over what an older app left of it: anything else is no answer, and the keeper
+     keeps what it holds for a while and then closes. */
   async function computerOf(who: Asker): Promise<Holder> {
-    if (!leading() || !ctx.computer.ready()) throw new ApiError(503, 'unavailable', 'This server does not serve computer access now.');
+    if (!leading() || (who.own && !ctx.computer.ready())) throw new ApiError(503, 'unavailable', 'This server does not serve computer access now.');
     const machine = await machineOf(who);
     if (!machine) throw notAMachine();
     return machine;
@@ -197,7 +201,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const machine = await computerOf(await requireKeeper(req));
     const { updater, held, refused } = ComputerQuery.parse(req.query);
     ctx.computer.seen(machine.id, updater === '1');
-    const closed = refused === '1' ? await ctx.computer.refused(machine.id) : null;
+    const closed = refused === '0' ? null : await ctx.computer.refused(machine.id, refused === '1' ? null : refused);
     if (closed) await machineRefused(ctx, await companyId(), closed);
     return ctx.computer.take(machine.id, held);
   });

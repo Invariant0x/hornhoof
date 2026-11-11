@@ -3,6 +3,7 @@ import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, ren
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { Peer } from '../../net/peer-server.js';
+import { UUID } from '../../net/proxy.js';
 import { checkHead, sealBundle, type BundleReason, type BundleSecrets } from '../backups/bundle.js';
 import { BundleStore } from '../backups/store.js';
 import type { MakerView } from '../backups/types.js';
@@ -21,7 +22,6 @@ export const KEEP_OWN = 2;
 export const BUNDLES_DIR = 'bundles';
 
 const EVERY_MS = 10_000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REASONS: readonly string[] = ['timer', 'update'] satisfies BundleReason[];
 
 export type Ask = (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; body: unknown }>;

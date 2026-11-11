@@ -10,7 +10,7 @@ import { authorityOf, findThisMachine, networkMachine } from '../network/store.j
 import { keeperAsker } from '../network/via.js';
 import { BundleRefused, checkHead, MAX_HEAD } from './bundle.js';
 import { pickHolders } from './holders.js';
-import { activeRecovery, linkChanged, makeRecoveryFile } from './recovery.js';
+import { activeRecovery, makeRecoveryFile } from './recovery.js';
 import { bundleRow, bundleRows, recordBundle } from './records.js';
 import { warningOf } from './restore.js';
 import type { HolderView, MakerView } from './types.js';
@@ -159,7 +159,8 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
       last: rows[0]?.madeAt ?? null,
       recovery: active ? { madeAt: active.madeAt.toISOString(), madeBy: maker?.name ?? '' } : null,
       recoveryNeeded: !active,
-      linkChanged: Boolean(newest) && (await linkChanged(db, config)),
+      /* A key that is not retired and is not the company's now was saved with another link. */
+      linkChanged: Boolean(newest) && !active,
       restore: ctx.restores.status(),
       kept: await keptDatabases(),
       bundles: bundles.map(({ row, why }) => ({

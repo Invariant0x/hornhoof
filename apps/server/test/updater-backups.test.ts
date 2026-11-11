@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -53,6 +53,36 @@ describe('updater, backups', () => {
     const again = await runOnce(s, null);
     expect(again.calls.filter(call => call.includes('pg_dump'))).toHaveLength(1);
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
+  });
+
+  it('asks for no dump twice when it cannot even say that one failed', async () => {
+    const s = stand();
+    wants(s, ID);
+    /* The dump fails, and so does the file that would say so: the folder is full, or not this user's. */
+    mkdirSync(join(dumps(s), `${ID}.failed.new`), { recursive: true });
+    const r = await runOnce(s, null, { STUB_DUMP: 'fail' });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.includes('pg_dump'))).toHaveLength(1);
+    /* The request goes all the same, so the next pass does not dump again: the keeper asks anew in its own time. */
+    expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
+    const again = await runOnce(s, null, { STUB_DUMP: 'fail' });
+    expect(again.calls.filter(call => call.includes('pg_dump'))).toHaveLength(1);
+  });
+
+  it('deletes a dump nobody sealed within a day, also with no keeper to do it', async () => {
+    const s = stand();
+    mkdirSync(dumps(s));
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    for (const name of ['old.sql.gz', 'old.json', 'old.sql.gz.part', 'fresh.sql.gz', 'fresh.json']) {
+      writeFileSync(join(dumps(s), name), 'x');
+      if (name.startsWith('old')) utimesSync(join(dumps(s), name), old, old);
+    }
+    const r = await runOnce(s, null);
+    expect(r.code).toBe(0);
+    expect(readdirSync(dumps(s)).sort()).toEqual(['fresh.json', 'fresh.sql.gz']);
+    expect(r.out).toContain('Deleted a database dump that was not sealed within a day.');
+    /* A machine with no such folder is left alone. */
+    expect((await runOnce(stand(), null)).out).not.toContain('Deleted a database dump');
   });
 
   it('takes no name for a dump but a plain one, and dumps nothing on a machine with no database', async () => {

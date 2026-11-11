@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -198,6 +198,22 @@ describe('a machine that keeps the company\'s backups', () => {
     s.names(named);
     await s.keeper.round();
     expect(s.keeper.held()).toEqual([named.id]);
+  });
+
+  it('clears what a fetch that died left, with or without a leader', async () => {
+    const s = await stand();
+    const a = await s.seal(0);
+    s.names(a);
+    await s.keeper.round();
+    /* A keeper killed in the middle of a fetch leaves its part, and one killed between the two files a sealed part with
+       no head. */
+    const bundles = join(s.dir, 'bundles');
+    const [part, headless] = [`${randomUUID()}.0a1b2c3d4e5f.part`, `${randomUUID()}.age`];
+    for (const name of [part, headless]) writeFileSync(join(bundles, name), 'left');
+    s.said.leader = false;
+    await s.keeper.round();
+    expect(s.files()).toEqual([`${a.id}.age`, `${a.id}.head`]);
+    expect(s.keeper.held()).toEqual([a.id]);
   });
 
   it('sends what its leader wants', async () => {
