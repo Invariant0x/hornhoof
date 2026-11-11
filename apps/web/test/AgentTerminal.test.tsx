@@ -522,11 +522,14 @@ describe("an agent's live terminal in its window", () => {
     await waitFor(() => expect(FakeSocket.all).toHaveLength(2));
   });
 
-  it('shows the log when the node cannot show a terminal', async () => {
+  it('says why when the node cannot show a terminal, with the chat one click away', async () => {
+    const user = userEvent.setup();
     open();
     (await socket()).ended(4404, 'no_terminal');
+    expect(await screen.findByRole('status', { name: 'Terminal' })).toHaveTextContent(/is asleep now\. It wakes up when someone writes to the agent/);
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument();
+    expect(FakeSocket.all).toHaveLength(1);
   });
 
   it('connects again when the machine went away for a moment, and starts the screen over', async () => {
@@ -583,6 +586,7 @@ describe("an agent's live terminal in its window", () => {
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
+    localStorage.setItem('hh-agent-view', 'chat');
     view();
     expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
   });
@@ -597,6 +601,7 @@ describe("an agent's live terminal in its window", () => {
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
+    localStorage.setItem('hh-agent-view', 'chat');
     view();
     expect(await screen.findByText(/were left unsent in the program's input/)).toBeInTheDocument();
     expect(screen.getByText(says)).toBeInTheDocument();
@@ -809,11 +814,12 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([]);
   });
 
-  it('keeps the log for agents whose node shows no terminal', async () => {
+  it('opens no terminal for an agent whose node shows none, and says why, with the chat one click away', async () => {
     open(false);
-    expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
+    expect(await screen.findByText(/is asleep now/)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent(/is asleep now/);
     expect(FakeSocket.all).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: 'Chat' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
   });
 
   it('copies selected text on selection, Cmd+C, Ctrl+Shift+C and Ctrl+C without sending ^C or Escape to the program, and keeps Ctrl+C without selection', async () => {

@@ -747,6 +747,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-copy:disabled { color: var(--muted); cursor: default; }
 .t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
 .t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+/* Why the terminal cannot show now, in place of it. */
+.t-load p { max-width: 60ch; margin: 0; padding: 0 24px; text-align: center; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 /* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
@@ -1821,6 +1823,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .t-bar button.agent-task-toggle { flex-direction: column; gap: 0; }
 .agent-task-toggle::after { content: attr(data-other); height: 0; overflow: hidden; visibility: hidden; }
 .bar-word svg { display: none; }
+.bar-word.both svg { display: block; flex: none; }
 .window-controls { display: flex; flex: none; gap: 4px; }
 .window-controls button { width: 26px; height: 26px; border-radius: 50%; background: var(--surface2); }
 .window-controls .window-close { color: var(--pink); }
@@ -1868,6 +1871,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
   .orch > .t-bar button.bar-word { padding: 0; width: 28px; justify-content: center; align-items: center; }
   .bar-word svg { display: block; }
   .bar-word span { display: none; }
+  .orch > .t-bar button.bar-word.both { width: auto; padding: 0 8px; gap: 6px; }
+  .bar-word.both span { display: inline; }
   /* A panel takes the whole window here: what lies under it is out of reach for the keyboard too. */
   .orch.with-panels .agent-conversation { display: none; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }

@@ -51,9 +51,10 @@ function WindowControls({ full, onFull, onMinimize, onClose }: { full: boolean; 
   </div>;
 }
 
-/* A button of the bar that says what it does, or shows only its icon where the bar has no room for the words. */
-export function WordButton({ label, icon, onClick }: { label: string; icon: string; onClick(): void }) {
-  return <button className="btn small ghost bar-word" type="button" aria-label={label} title={label} onClick={onClick}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={icon} /></svg><span>{label}</span></button>;
+/* A button of the bar that says what it does, or shows only its icon where the bar has no room for the words. both: the word
+   and the icon side by side at any width. */
+export function WordButton({ label, icon, onClick, both = false }: { label: string; icon: string; onClick(): void; both?: boolean }) {
+  return <button className={`btn small ghost bar-word${both ? ' both' : ''}`} type="button" aria-label={label} title={label} onClick={onClick}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={icon} /></svg><span>{label}</span></button>;
 }
 
 /* The agent's task as a panel of its window. Links in it open others in its place. Escape is the panels' own here. */

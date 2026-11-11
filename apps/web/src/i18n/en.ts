@@ -556,6 +556,11 @@ export const en = {
     pictureUploaded: 'The picture path is in the terminal. Press Enter to send it.',
     opening: (program: string) => `Opening the ${program} terminal…`,
     asleep: (program: string) => `The ${program} program sleeps until this agent's next task. Scroll up to see what it did.`,
+    /* The terminal view of an agent with no live terminal to show. */
+    noTerminal: {
+      asleep: (program: string) => `The ${program} program of this agent is asleep now. It wakes up when someone writes to the agent, and its terminal shows here then.`,
+      away: "This agent's terminal cannot be shown here now. What it says is in the chat.",
+    },
     stop: 'Stop',
     stopped: 'Stopped',
     created: (name: string, products: number) =>
