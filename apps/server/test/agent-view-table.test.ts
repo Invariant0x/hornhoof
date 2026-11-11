@@ -61,8 +61,8 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
   { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
   /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
-  { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true },
-  { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true },
+  { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true, ownerToo: true },
+  { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
   { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits') },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
