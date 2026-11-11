@@ -2,7 +2,7 @@ import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
 import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
@@ -761,13 +761,12 @@ function alongWith(ctx: Ctx, agentId: string, jobId: string, only?: SQL) {
 }
 
 /* What goes out inside a task's turn. A head reads everything that moved on its tasks while it was busy in one turn, instead
-   of one turn per task. Anyone else takes in one turn what waited on the same task until the node it goes to came back:
-   what a machine that was away kept would otherwise go out turn after turn, each out of date. */
+   of one turn per task. Anyone else takes in one turn what waits on the same task when this turn waited until the node it
+   goes to came back: what a machine that was away kept would otherwise go out turn after turn, each out of date. */
 async function goingAlong(ctx: Ctx, agent: { id: string; kind: string }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId' | 'createdAt'>, nodeId: string | null): Promise<Along[]> {
   if (!job.taskId) return [];
   if (agent.kind === 'head') return alongWith(ctx, agent.id, job.id);
-  const back = await cameBack(ctx.db, nodeId, job.createdAt);
-  return back ? alongWith(ctx, agent.id, job.id, and(eq(jobs.taskId, job.taskId), lt(jobs.createdAt, back))) : [];
+  return (await cameBack(ctx.db, nodeId, job.createdAt)) ? alongWith(ctx, agent.id, job.id, eq(jobs.taskId, job.taskId)) : [];
 }
 
 /* A waiting turn that went out inside another: over, with its task taken up as its own turn would have. */
