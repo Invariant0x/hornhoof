@@ -50,6 +50,9 @@ services:
       # The key of the machine's owner, as the join command they ran there carried it. The keeper of a machine that
       # joined pins it, and only what that key signs opens the machine later.
       HORNHOOF_OWNER_KEY: ${HORNHOOF_OWNER_KEY:-}
+      # The system of the computer, as install.sh wrote it down: the keeper tells the company, so a machine's card says
+      # what open access reaches there.
+      HORNHOOF_HOST_OS: ${HORNHOOF_HOST_OS:-}
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.

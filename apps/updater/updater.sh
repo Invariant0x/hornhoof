@@ -35,9 +35,9 @@
 # replace them with the app at once. The same goes for an update an updater from before this ran, and for install.sh
 # server by hand.
 #
-# It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
-# the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
-# computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
+# It also runs the orchestrator's commands on this computer, as root, while the machine's owner keeps access to it open:
+# the machine's keeper writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout};
+# this answers computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
 #
 # With HORNHOOF_ROLE=worker it runs on a machine that keeps none of the company's data. There the keeper writes
 # request.json for the build the company server runs. This downloads it, says so with the step wait, and installs once
@@ -880,7 +880,8 @@ take_over() {
     stop_with failed "No updater could start. Hornhoof still runs the build from before; run install.sh server in $SERVER_DIR." finished
 }
 
-# Whether the CEO keeps access to the computer open now, by the time the app wrote, which ends it by itself.
+# Whether the machine's owner keeps access to the computer open now, by the time its keeper wrote, which ends it by
+# itself.
 computer_open() {
   local until
   until=$(jq -r '.untilSec // 0' "$CONTROL/computer.json" 2> /dev/null || true)
@@ -897,7 +898,7 @@ computer_answer() {
 
 # Each waiting command, one at a time, in a container of the updater's image: root with every privilege, in the
 # computer's processes, network and names, with its whole file system at /host and its Docker. chroot /host runs a
-# command on the computer itself. A command past its time, or still running when the CEO closes access, is stopped;
+# command on the computer itself. A command past its time, or still running when access is closed, is stopped;
 # nothing runs while access is closed. A command this updater started is marked, so after a restart it never runs a
 # second time, and what still runs of it is stopped.
 computer_runs() {

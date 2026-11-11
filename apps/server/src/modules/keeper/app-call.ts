@@ -33,3 +33,12 @@ export function askApp(app: Target, method: 'GET' | 'POST', path: string, body?:
     out.end(text);
   });
 }
+
+/* The answer as its status and whatever JSON it carried; none for a body that is no JSON. */
+export function answerOf(res: AppAnswer): { status: number; body: unknown } {
+  try {
+    return { status: res.status, body: res.json() };
+  } catch {
+    return { status: res.status, body: null };
+  }
+}

@@ -1,4 +1,5 @@
-import { NETWORK_ID } from './modules/network/ids.js';
+import { isP256 } from './modules/computer/owner-key.js';
+import { hostOsOf, NETWORK_ID, type HostOs } from './modules/network/ids.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NodeBuild } from '@hornhoof/protocol';
@@ -54,6 +55,11 @@ export type Config = {
   hostId: string | null;
   /* This install's id, which install.sh writes once and never changes; null for one installed before. */
   machineId: string | null;
+  /* The key of the owner of the machine the server runs on, when a command they ran there brought one: its keeper then
+     opens the machine only on what that key signed. */
+  ownerKey: string | null;
+  /* The system of the computer the server runs on, as install.sh wrote it down. */
+  hostOs: HostOs | null;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -110,6 +116,9 @@ const Env = z.object({
     unset,
     z.string().regex(NETWORK_ID, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
   ),
+  /* Neither stops a start: a key that is none pins nothing, and a system that is not known is left out. */
+  HORNHOOF_OWNER_KEY: z.preprocess(unset, z.string().optional()),
+  HORNHOOF_HOST_OS: z.preprocess(unset, z.string().optional()),
 });
 
 /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
@@ -203,5 +212,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...harnessSettings(set),
     hostId: set.HORNHOOF_HOST_ID ?? null,
     machineId: set.HORNHOOF_MACHINE_ID ?? null,
+    ownerKey: set.HORNHOOF_OWNER_KEY && isP256(set.HORNHOOF_OWNER_KEY) ? set.HORNHOOF_OWNER_KEY : null,
+    hostOs: hostOsOf(set.HORNHOOF_HOST_OS),
   };
 }

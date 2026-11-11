@@ -35,6 +35,9 @@ const ReportBody = z.object({
   directFails: z.boolean().optional(),
   /* How far the machine is with the server's build: downloaded, installing, or failed at it. Null: with none. */
   update: z.object({ commit: z.string().min(1).max(64), state: z.enum(UPDATE_STATES) }).nullable().optional(),
+  /* The system of the computer, as its installer wrote it down; left out when not known, and the row keeps what its
+     node's join said. */
+  os: z.enum(['linux', 'darwin']).optional(),
   /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });

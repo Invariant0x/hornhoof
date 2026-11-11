@@ -230,6 +230,19 @@ describe('the network routes the keeper calls', () => {
     for (const bad of ['P'.repeat(42), 'P'.repeat(44), `${'P'.repeat(42)}$`]) expect((await report({ pin: bad })).statusCode, bad).toBe(400);
   });
 
+  it("takes the system a machine's keeper names, and keeps what the row said when it names none", async () => {
+    const c = await company();
+    const worker = await c.joined('worker', newKey());
+    await c.db.update(machines).set({ os: 'darwin' }).where(eq(machines.id, worker.id));
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(worker.id) });
+    const osOf = async () => (await c.db.select().from(machines).where(eq(machines.id, worker.id)))[0]!.os;
+    expect((await report({ uptimeS: 3 })).statusCode).toBe(204);
+    expect(await osOf()).toBe('darwin');
+    expect((await report({ os: 'linux' })).statusCode).toBe(204);
+    expect(await osOf()).toBe('linux');
+    for (const bad of ['windows', '', null]) expect((await report({ os: bad })).statusCode, String(bad)).toBe(400);
+  });
+
   it('answers that the server has no machine id when it has none', async () => {
     const c = await company({ HORNHOOF_MACHINE_ID: '' });
     const res = await c.certificate(newKey());

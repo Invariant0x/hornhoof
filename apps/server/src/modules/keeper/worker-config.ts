@@ -1,5 +1,5 @@
 import { isP256 } from '../computer/owner-key.js';
-import { NETWORK_ID } from '../network/ids.js';
+import { hostOsOf, NETWORK_ID, type HostOs } from '../network/ids.js';
 import { addressesIn } from './addresses.js';
 import { publishedFrom, type Published } from './identity.js';
 import { KEEPER_DIR } from './machine-keys.js';
@@ -20,6 +20,8 @@ export type WorkerConfig = {
   addresses: string[];
   /* The key of the machine's owner, as the command they ran here carried it: the keeper pins it once it joined. */
   ownerKey: string | null;
+  /* The system of the computer, as the installer wrote it down. */
+  hostOs: HostOs | null;
 };
 
 const RUN_AGAIN = 'Run the join command from Hornhoof on this machine again.';
@@ -51,5 +53,6 @@ export function workerConfig(env: NodeJS.ProcessEnv, log: (line: string) => void
     ports: publishedFrom(env),
     addresses: addressesIn(env),
     ownerKey: ownerKey && isP256(ownerKey) ? ownerKey : null,
+    hostOs: hostOsOf(env.HORNHOOF_HOST_OS),
   };
 }

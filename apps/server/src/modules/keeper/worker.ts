@@ -14,7 +14,8 @@ import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
 import { ownAddresses } from './addresses.js';
-import { askApp, type AppAnswer } from './app-call.js';
+import { answerOf, askApp, type AppAnswer } from './app-call.js';
+import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { Following } from './following.js';
@@ -67,6 +68,8 @@ export type WorkerKeeperOptions = {
   holdEveryMs?: number;
   certificate?: { retryMs?: number };
   sessions?: Partial<PeerSessionsOptions>;
+  /* How often the keeper asks for its machine's computer access; the carrier's own paces unless a test says otherwise. */
+  computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
 };
 
 type View = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link: WorkerLink | null };
@@ -159,6 +162,8 @@ export class WorkerKeeper {
   private renewing = false;
   private lastMoment = 0;
   private readonly hourly = new Hourly();
+  /* Carries this machine's computer access from the leader to its updater. */
+  private readonly carrier: ComputerCarrier;
   /* The ticket that let this machine in and whose owner's key is not kept yet. */
   private owed: string | null = null;
   /* Ends what the keeper has asked the server for when it stops. */
@@ -167,6 +172,18 @@ export class WorkerKeeper {
   constructor(private readonly opts: WorkerKeeperOptions) {
     this.measures = new Measures({ dir: opts.config.dir });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, now: opts.now, log: opts.log });
+    /* A machine that joined opens only on what its owner signed with the key this keeper holds: it takes no app's word. */
+    this.carrier = new ComputerCarrier({
+      controlDir: opts.config.controlDir,
+      dir: opts.config.dir,
+      machine: opts.config.machineId,
+      ask: (method, path, body, signal) => this.askComputer(method, path, body, signal),
+      pin: () => readPin(opts.config.dir),
+      trustApp: false,
+      log: opts.log,
+      now: opts.now,
+      ...opts.computer,
+    });
     this.door = new LeaderDoor({ connect: () => this.sessions.connectApp() });
   }
 
@@ -197,6 +214,7 @@ export class WorkerKeeper {
     if (this.unredeemed() && this.certificates.current()) this.certificates.renewNow();
     else this.certificates.start();
     this.sessions.use(this.targets());
+    this.carrier.start();
     this.every(this.opts.lookEveryMs ?? LOOK_EVERY_MS, () => this.look());
     this.every(this.opts.viewEveryMs ?? VIEW_EVERY_MS, () => void this.readView());
     this.every(this.opts.reportEveryMs ?? REPORT_EVERY_MS, () => void this.report());
@@ -223,7 +241,7 @@ export class WorkerKeeper {
     for (const timer of this.timers.splice(0)) clearInterval(timer);
     this.certificates?.stop();
     this.measures.stop();
-    await Promise.all([this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
+    await Promise.all([this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
   }
 
   private every(ms: number, work: () => void): void {
@@ -482,9 +500,18 @@ export class WorkerKeeper {
     if (this.disconnected) return;
     this.disconnected = true;
     this.opts.log(CUT_OFF);
+    /* Nobody can close this machine through a company it is no part of, so it closes now and asks no more. */
+    void this.carrier.stop();
     this.certificates.stop();
     this.sessions.use([]);
     this.look();
+  }
+
+  /* The carrier's asks go to the leader as the keeper's own, through the door that is open only while there is one. With
+     none there is no answer, and a minute of that closes the machine. */
+  private async askComputer(method: 'GET' | 'POST', path: string, body: unknown, signal?: AbortSignal): Promise<{ status: number; body: unknown }> {
+    if (!this.leader()) throw new Error('no machine of the company answers now');
+    return answerOf(await askApp(this.doorTarget, method, path, body, signal));
   }
 
   /* Through the peer link, from the leader, while there is one. */
@@ -526,6 +553,7 @@ export class WorkerKeeper {
         directFails: state.directFails,
         update: this.following.update(),
         pin: this.pinPrint(),
+        ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
       };
       const res = await this.askLeader('POST', '/api/network/report', body);
       if (res && !res.ok && !this.disconnected) throw new Error(`the company server answered ${res.status}`);

@@ -1,4 +1,6 @@
 import type { Target } from '../../net/proxy.js';
+import { keyPrint } from '../computer/owner-key.js';
+import type { HostOs } from '../network/ids.js';
 import { askApp } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { Hourly, machineKey, reasonOf, type MachineKey } from './machine-keys.js';
@@ -25,6 +27,9 @@ export type IdentityOptions = {
   /* Where the machine can be dialed on its local networks, and the name of its host, to report with the measures. */
   addresses?: () => string[];
   hostname?: string | null;
+  /* The computer's system, when known, and the key of its owner that this keeper holds, when it holds one. */
+  os?: HostOs | null;
+  ownerKey?: string | null;
   /* What a test's keeper reports as its place in place of its own. */
   reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
 };
@@ -128,7 +133,8 @@ export class MachineIdentity {
     try {
       const { web, peer } = this.opts.published;
       const place = this.opts.reportAs?.() ?? { addresses: this.opts.addresses?.() ?? [], ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
-      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...place };
+      const told = { ...(this.opts.os ? { os: this.opts.os } : {}), pin: this.opts.ownerKey ? keyPrint(this.opts.ownerKey) : null };
+      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...told, ...place };
       const res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {

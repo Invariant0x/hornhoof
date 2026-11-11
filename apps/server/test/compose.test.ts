@@ -88,7 +88,7 @@ describe('front, keeper and migrate', () => {
     expect(keeper!.ports).toEqual(['${HORNHOOF_PEER_PORT:-8180}:7070']);
     expect(Object.keys(keeper!.environment!)).toEqual([
       'DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT',
-      'HORNHOOF_ROLE', 'HORNHOOF_JOIN_SERVER', 'HORNHOOF_JOIN_TICKET', 'HORNHOOF_ADDRESSES', 'HORNHOOF_HOSTNAME', 'HORNHOOF_OWNER_KEY',
+      'HORNHOOF_ROLE', 'HORNHOOF_JOIN_SERVER', 'HORNHOOF_JOIN_TICKET', 'HORNHOOF_ADDRESSES', 'HORNHOOF_HOSTNAME', 'HORNHOOF_OWNER_KEY', 'HORNHOOF_HOST_OS',
     ]);
     /* Its own volume holds the machine's key, which no other service reads. */
     expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper']);

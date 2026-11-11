@@ -16,6 +16,8 @@ import { MachineIdentity, type Published } from './identity.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
+import { answerOf, askApp } from './app-call.js';
+import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { KEEPER_DIR } from './machine-keys.js';
 import type { LeaseStore } from './lease-store.js';
 import type { Clocks } from './lease.js';
@@ -65,6 +67,8 @@ export type KeeperOptions = {
   peerEveryMs?: number;
   /* How often the keeper asks whether another machine holds the company's data. */
   guardEveryMs?: number;
+  /* How often the keeper asks for its machine's computer access; the carrier's own paces unless a test says otherwise. */
+  computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
   /* What offers the machine to its peers through the relay; frpc unless a test says otherwise. */
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
@@ -149,6 +153,8 @@ function oneAtATime(work: () => Promise<unknown>): () => Promise<void> {
 export class Keeper {
   private readonly holder: LeaseHolder;
   private readonly identity: MachineIdentity | null;
+  /* Carries this machine's computer access from its app to its updater. */
+  private readonly carrier: ComputerCarrier | null;
   private peers: PeerLink | null = null;
   private guardTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -179,6 +185,21 @@ export class Keeper {
           addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: [] }),
           hostname: opts.hostname,
           reportAs: opts.reportAs,
+          os: opts.config.hostOs,
+          ownerKey: opts.config.ownerKey,
+        })
+      : null;
+    /* The server's own keeper takes its app's word while it holds no key of its owner: the database is its own. */
+    this.carrier = opts.config.machineId
+      ? new ComputerCarrier({
+          controlDir: opts.config.controlDir,
+          dir: opts.dir ?? KEEPER_DIR,
+          machine: opts.config.machineId,
+          ask: (method, path, body, signal) => askApp(opts.app, method, path, body, signal).then(answerOf),
+          pin: () => opts.config.ownerKey,
+          trustApp: true,
+          log: opts.log,
+          ...opts.computer,
         })
       : null;
   }
@@ -221,6 +242,7 @@ export class Keeper {
     if (db && settings) this.carryLink(db, settings, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
+    this.carrier?.start();
     this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
     this.guardTimer.unref();
     if (settings) await this.servePeers(settings, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
@@ -233,7 +255,7 @@ export class Keeper {
     if (this.fencesTimer) clearInterval(this.fencesTimer);
     if (this.guardTimer) clearInterval(this.guardTimer);
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = null;
-    await Promise.all([this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    await Promise.all([this.carrier?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
   }
 
