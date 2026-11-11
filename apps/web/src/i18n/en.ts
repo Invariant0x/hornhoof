@@ -550,6 +550,7 @@ export const en = {
     pictureUploaded: 'The picture path is in the terminal. Press Enter to send it.',
     working: 'Working…',
     opening: (program: string) => `Opening the ${program} terminal…`,
+    asleep: (program: string) => `The ${program} program sleeps until this agent's next task. Scroll up to see what it did.`,
     escToStop: 'esc to stop',
     stop: 'Stop',
     waiting: (n: number) => `${n} waiting`,

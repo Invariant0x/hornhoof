@@ -269,8 +269,8 @@ class FakeSocket {
   testError(reason: 'denied' | 'expired' | 'unavailable' | 'unknown') {
     this.onmessage?.({ data: JSON.stringify({ type: 'error', reason }) });
   }
-  program(running: boolean) {
-    this.onmessage?.({ data: JSON.stringify({ type: 'program', running }) });
+  program(running: boolean, asleep = false) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'program', running, ...(asleep ? { asleep } : {}) }) });
   }
   ended(code: number, reason: string) {
     this.readyState = 3;
@@ -358,6 +358,22 @@ describe("an agent's live terminal in its window", () => {
     ws.opened();
     ws.program(false);
     expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    ws.program(true);
+    await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('shows what a program that sleeps printed, and says it sleeps until the next task, with no loader over it', async () => {
+    const { container } = open();
+    const ws = await socket();
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    ws.opened();
+    ws.program(false, true);
+    await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent("The Claude program sleeps until this agent's next task. Scroll up to see what it did."));
+    expect(terminal.queryByText('Opening the Claude terminal…')).not.toBeInTheDocument();
+    /* A turn starts it: the loader shows until it is up. */
+    ws.program(false);
+    await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…'));
+    expect(terminal.queryByText(/sleeps until/)).not.toBeInTheDocument();
     ws.program(true);
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
