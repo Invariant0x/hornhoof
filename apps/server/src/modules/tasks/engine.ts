@@ -1225,19 +1225,35 @@ export async function lastMove(db: Db | Tx, taskId: string) {
   return last;
 }
 
+/* How many turns the agent went on through on the task since it last moved, as the stuck counter counts them: a turn that
+   waited in line until its node came back is not one. */
+async function turnsGoneOn(db: Db, agentId: string, task: Task): Promise<number> {
+  const last = await lastMove(db, task.id);
+  const [before] = await db
+    .select({ n: count() })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), sql`${taskEvents.data}->>'afterReturn' is distinct from 'true'`, last ? gt(taskEvents.createdAt, last.createdAt) : undefined));
+  return Number(before?.n ?? 0);
+}
+
+async function goOn(ctx: Live, agentId: string, task: Task, set: Partial<Task>, data: Record<string, unknown>): Promise<Moved> {
+  const wakes: Wake[] = [{ agentId, taskId: task.id, why: 'go_on' }];
+  const row = await move(ctx, task, set, { kind: 'continued', actor: { agentId }, data }, undefined, wakes);
+  return { task: row, wakes };
+}
+
 /* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
    worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row its head is asked. */
 export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
-  const last = await lastMove(ctx.db, task.id);
-  const [before] = await ctx.db
-    .select({ n: count() })
-    .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), last ? gt(taskEvents.createdAt, last.createdAt) : undefined));
-  const turns = Number(before?.n ?? 0) + 1;
+  const turns = (await turnsGoneOn(ctx.db, agentId, task)) + 1;
   if (turns >= GOING_ON_TURNS) return askAboutStill(ctx, agentId, task, 0, `Went on for ${turns} turns in a row on #${task.number} without handing anything in. Tell it how to go on, or cancel the task.`);
-  const wakes: Wake[] = [{ agentId, taskId: task.id, why: 'go_on' }];
-  const row = await move(ctx, task, { silent: 0 }, { kind: 'continued', actor: { agentId }, data: { turns } }, undefined, wakes);
-  return { task: row, wakes };
+  return goOn(ctx, agentId, task, { silent: 0 }, { turns });
+}
+
+/* A turn that waited in line until the agent's node came back worked and goes on too, but a machine coming back says nothing
+   of the agent standing still: it counts for neither stuck counter. */
+export async function wentOnAfterReturn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
+  return goOn(ctx, agentId, task, {}, { turns: await turnsGoneOn(ctx.db, agentId, task), afterReturn: true });
 }
 
 /* pick: the way a person took, from 0, in a choice. */

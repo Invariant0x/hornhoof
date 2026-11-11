@@ -1,8 +1,8 @@
 import { NodeReconnect, type NodeMessage } from '@hornhoof/protocol';
-import { desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, lte, max, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { machines, nodeConnections, nodes } from '../../db/schema.js';
+import { machines, nodeConnections, nodes, type jobs } from '../../db/schema.js';
 import { type LinkEnd, type NodeIdentity } from './hub.js';
 import { hasCurrentKey } from './nodes.js';
 
@@ -57,6 +57,23 @@ export async function nodeDisconnected(ctx: Writes, id: NodeIdentity, end: LinkE
   /* A server stopping has ended it already. */
   await ctx.db.update(nodeConnections).set({ disconnectedAt: end.at, cause: end.cause, closeCode: end.code, closeReason: reason, error }).where(sql`${nodeConnections.id} = ${end.link} and ${nodeConnections.disconnectedAt} is null`);
   ctx.log.info({ machine: node.hostname, node: id.nodeId, ...line }, DISCONNECTED);
+}
+
+/* When the node last connected again while a turn waited in line for it, between the time the turn was queued and the time it
+   went out: the node had been away, or went away and came back, meanwhile. None while it stayed connected, as the built-in
+   node, which keeps no history, always is. */
+export async function cameBack(db: Db, nodeId: string | null, queuedAt: Date, sentAt = new Date()): Promise<Date | null> {
+  if (!nodeId) return null;
+  const [back] = await db
+    .select({ at: max(nodeConnections.connectedAt) })
+    .from(nodeConnections)
+    .where(and(eq(nodeConnections.nodeId, nodeId), gt(nodeConnections.connectedAt, queuedAt), lte(nodeConnections.connectedAt, sentAt)));
+  return back?.at ?? null;
+}
+
+/* Whether a turn that went out had waited in line until its node came back. */
+export async function waitedForReturn(db: Db, turn: Pick<typeof jobs.$inferSelect, 'nodeId' | 'createdAt' | 'startedAt'>): Promise<boolean> {
+  return Boolean(turn.startedAt && (await cameBack(db, turn.nodeId, turn.createdAt, turn.startedAt)));
 }
 
 /* What a node says of a drop goes with the connection before its new one, whichever way the server saw that end. */
