@@ -15,7 +15,8 @@ export function nameOf(table: string, row: Record<string, unknown> | null, key: 
   if (row) {
     if (table === 'tasks') return `task #${text(row.number)} ${quoted(row.title)}`;
     if (table === 'turns') return `turn ${text(row.number)} ${quoted(row.title)}`;
-    if (table === 'people') return `${text(row.name)} (${text(row.email)})`;
+    /* A person's assistant has no email. */
+    if (table === 'people') return row.email == null ? text(row.name) : `${text(row.name)} (${text(row.email)})`;
     if (table === 'agents' || table === 'departments' || table === 'teams') return text(row.name);
     if (table === 'machines') return text(row.hostname) || 'a machine';
     if (table === 'subscriptions') return text(row.label);

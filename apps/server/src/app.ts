@@ -33,6 +33,9 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
+import { assistantSetupRoutes } from './modules/assistants/setup.js';
+import { assistantRoutes } from './modules/assistants/routes.js';
+import { Assistants } from './modules/assistants/service.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
 import { signinRoutes } from './modules/subscriptions/signin.js';
@@ -126,6 +129,7 @@ export type Ctx = Deps & {
   tls: LinkTls;
   mode: AppMode;
   telegram: TelegramBots;
+  assistants: Assistants;
 };
 
 declare module 'fastify' {
@@ -222,6 +226,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.tls = new LinkTls(ctx);
   app.addHook('onClose', async () => ctx.tls.stop());
   ctx.telegram = new TelegramBots(ctx);
+  ctx.assistants = new Assistants(ctx);
   /* First of what a leader does: the work its one built-in node ran before each machine had its own is named as this
      machine's, before anything else looks at it. A failure is one line, and the next time it leads tries again. */
   ctx.mode.whenLead(() => nameBuiltinWork(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not name the built-in node's earlier work as this machine's.")), () => undefined);
@@ -231,6 +236,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
      nodes go, so a message it is taking reaches its agent first. */
   ctx.mode.whenLead(() => ctx.telegram.start(), () => ctx.telegram.stop());
   app.addHook('preClose', async () => ctx.telegram.stop());
+  /* What Hornhoof does for assistants writes what it collects, so it starts when this app first leads. It runs on
+     from then until the app closes: a pass that finds the app no longer leading writes nothing, since the fence
+     refuses it. */
+  let assistantsRun = false;
+  ctx.mode.whenLead(() => (assistantsRun ? undefined : ((assistantsRun = true), ctx.assistants.start())), () => undefined);
+  app.addHook('preClose', async () => ctx.assistants.stop());
   /* A database that was restored takes over who may get in now before this app serves anybody on it: the first thing
      it does when it first leads. Until that has gone through, every request but for its health is turned away as
      while it starts, in whatever mode, since the sessions the backup brought back would else still read; a failure is
@@ -317,6 +328,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   setupRoutes(app, ctx);
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
+  assistantSetupRoutes(app, ctx);
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
@@ -355,5 +367,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
   telegramRoutes(app, ctx);
+  assistantRoutes(app, ctx);
   return app;
 }

@@ -1,3 +1,4 @@
+import { workingTurns } from './hub-turns';
 import { peopleLayout, rowCenters, wirePeople, type PeopleLayout, type PersonChip, type PersonRoute } from './map-people';
 import { departmentPeople, wholeCompanyPeople } from './org';
 import type { Org } from './types';
@@ -7,49 +8,53 @@ import type { Point } from './ui/wires';
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
 export const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
 export const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
-export const DEPT_W = 280, DEPT_H = 160;
-/* Up to two rows sit at the prototype's corners; more rows stack evenly around the hub, this far apart. */
-const CORNER = 220, ROW = 220;
+/* A card grows by its turn strip while any department works in the turn, so every card of the map stays the same size. */
+export const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
+/* Up to two rows sit at the prototype's corners; more rows stack evenly around the hub, this far apart, and never closer than
+   ROW_GAP between the cards. */
+const CORNER = 220, ROW = 220, ROW_GAP = 32;
 /* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */
 export const GAP = 28;
 /* Where a department trace turns: 84 out from the hub's middle, under the hub, and the inner side of each column. */
 const BEND = 84, INNER = 210;
-/* The company's turn sits right under the hub, between the traces that leave it downwards, in two lines at most. */
-export const TURN_GAP = 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
 /* The glow around the hub, and the hint of an empty map under it. */
 export const HALO = 260, START_H = 120;
 
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
 /* How far above or below the hub each row's middle sits. */
-function rowOffsets(rows: number): number[] {
+function rowOffsets(rows: number, h: number): number[] {
   if (rows <= 2) return [-CORNER, CORNER].slice(0, rows);
-  return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * ROW);
+  const step = Math.max(ROW, h + ROW_GAP);
+  return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * step);
 }
+
+/* How tall the cards of the map are: taller for the turn strip while any department works in the turn. */
+export const cardHeight = (org: Org): number => (workingTurns(org.departments).length ? DEPT_H_TURN : DEPT_H);
 
 /* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others
    run out under the hub, turn up or down beside it and come into the near side of their card, all at right angles. */
-export function deptLayout(n: number): DeptSpot[] {
-  const offsets = rowOffsets(Math.ceil(n / 2));
+export function deptLayout(n: number, h = DEPT_H): DeptSpot[] {
+  const offsets = rowOffsets(Math.ceil(n / 2), h);
   return Array.from({ length: n }, (_, i) => {
     const side = i % 2 ? 1 : -1;
     const midY = CY + offsets[Math.floor(i / 2)]!;
     const edgeX = CX + side * INNER;
     return {
       x: side < 0 ? edgeX - DEPT_W : edgeX,
-      y: midY - DEPT_H / 2,
+      y: midY - h / 2,
       w: DEPT_W,
-      h: DEPT_H,
+      h,
       path: midY !== CY ? [[CX, CY], [CX + side * BEND, CY], [CX + side * BEND, midY], [edgeX, midY]] : [[CX, CY], [edgeX, CY]],
     };
   });
 }
 
 /* The people sit just above the top row, and their bus runs 14 below them. */
-export function chipsTop(n: number): number {
-  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2))[0] ?? -CORNER) - DEPT_H / 2 - GAP - CHIP_H;
+export function chipsTop(n: number, h = DEPT_H): number {
+  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2), h)[0] ?? -CORNER) - h / 2 - GAP - CHIP_H;
 }
-export const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
+export const busY = (n: number, h = DEPT_H) => chipsTop(n, h) + CHIP_H + 14;
 export const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
 export const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
 
@@ -72,7 +77,6 @@ export type Bus = { lines: Point[][]; drop: Point[]; via: Point };
 
 export type MapArrangement = {
   hub: Rect;
-  turn: Rect;
   depts: ArrangedDept[];
   top: TopPerson[];
   bus: Bus | null;
@@ -113,21 +117,21 @@ type Placing = { key: string; home: Rect; rect: Rect };
    block now stands across it; any other is routed again, around the blocks in its way. A person docked beside a department
    goes with it. */
 export function arrangeMap(org: Org, placed: Placed = {}): MapArrangement {
-  const n = org.departments.length;
-  const spots = deptLayout(n);
+  const n = org.departments.length, h = cardHeight(org);
+  const spots = deptLayout(n, h);
   const hubHome = { x: CX - HUB, y: CY - HUB, w: 2 * HUB, h: 2 * HUB };
   const hub = placedAt(placed, HUB_KEY, hubHome);
   const hubMoved = !samePlace(hub, hubHome);
   const middle: Point = [hub.x + HUB, hub.y + HUB];
 
   const depts: Placing[] = org.departments.map((d, i) => {
-    const home = { x: spots[i]!.x, y: spots[i]!.y, w: DEPT_W, h: DEPT_H };
+    const home = { x: spots[i]!.x, y: spots[i]!.y, w: DEPT_W, h };
     return { key: deptKey(d.id), home, rect: placedAt(placed, deptKey(d.id), home) };
   });
   const deptById = new Map(org.departments.map((d, i) => [d.id, depts[i]!]));
 
   const topPeople = wholeCompanyPeople(org);
-  const top = chipsTop(n), bus = busY(n), centers = chipCenters(topPeople.length);
+  const top = chipsTop(n, h), bus = busY(n, h), centers = chipCenters(topPeople.length);
   const tops: (Placing & { id: string })[] = topPeople.map((p, i) => {
     const home = { x: centers[i]! - CHIP_W / 2, y: top, w: CHIP_W, h: CHIP_H };
     return { id: p.id, key: personKey(p.id), home, rect: placedAt(placed, personKey(p.id), home) };
@@ -180,7 +184,6 @@ export function arrangeMap(org: Org, placed: Placed = {}): MapArrangement {
   const people = Object.keys(placed).length ? movedPeople(base, chips, chipById, deptById, others, movedOthers) : base;
   return {
     hub,
-    turn: { x: middle[0] - TURN_W / 2, y: hub.y + 2 * HUB + TURN_GAP, w: TURN_W, h: TURN_H },
     depts: arrangedDepts,
     top: arrangedTop,
     bus: arrangedBus,
@@ -212,11 +215,11 @@ function movedPeople(
   return { chips: placedChips, routes, ...wirePeople(routes, placedChips) };
 }
 
-/* The part of the world that has something on it, so Fit fills the screen with it: the hub with its glow and what sits under
-   it, every block and every line. */
+/* The part of the world that has something on it, so Fit fills the screen with it: the hub with its glow, the hint under it
+   on an empty map, every block and every line. */
 export function arrangedBounds(arr: MapArrangement, org: Org): { x0: number; y0: number; x1: number; y1: number } {
   const mx = arr.hub.x + HUB;
-  const below = arr.hub.y + 2 * HUB + GAP + (org.turn ? TURN_H : 0) + (org.departments.length ? 0 : START_H);
+  const below = arr.hub.y + 2 * HUB + GAP + (org.departments.length ? 0 : START_H);
   const b = { x0: mx - HALO, x1: mx + HALO, y0: arr.hub.y, y1: below };
   const grow = (x0: number, y0: number, x1: number, y1: number) => {
     b.x0 = Math.min(b.x0, x0);

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
-import { arrangedBounds, arrangeMap, deptKey, GAP, H, HALO, HUB, HUB_KEY, personKey, TURN_H, W, type DeptSpot, type MapArrangement, type TopPerson } from '../map-arrange';
+import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
+import { arrangedBounds, arrangeMap, deptKey, GAP, H, HALO, HUB, HUB_KEY, personKey, W, type DeptSpot, type MapArrangement, type TopPerson } from '../map-arrange';
 import { useMapLayout } from '../map-layout';
 import type { PeopleLayout, PersonChip } from '../map-people';
 import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
@@ -20,13 +21,12 @@ import type { Rect } from '../ui/ortho';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
-import { TurnProgress } from '../ui/TurnProgress';
-import { useTurns } from '../tasks';
 import { clock } from './Subscriptions';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
-const GAUGE_SEGMENTS = 24;
+/* The gauge of working agents runs over the top of the hub, 6 degrees clear of each end of its middle line. */
+const GAUGE_SEGMENTS = 24, GAUGE_FROM = 186, GAUGE_TO = 354;
 const { min: MIN_K, max: MAX_K } = CANVAS_ZOOM_LIMITS;
 /* The orchestrator's window covers the right of a wide screen; Fit keeps the company clear of it. */
 const WINDOW_W = 672;
@@ -58,39 +58,70 @@ export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: st
   return sub.kind === 'api_key' ? t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '') : t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
-/* Only a running turn needs the tracker's numbers; the rest of the map stays independent of their request. */
-function HubTurn({ current, at }: { current: Org['turn']; at: Rect }) {
-  const t = useT();
-  const { turns, failure } = useTurns(!!current);
-  const style = { left: at.x, top: at.y, width: at.w };
-  if (!current) return null;
-  if (failure !== null) {
-    const message = errorText(t, failure);
-    return <div className="hub-turn" style={style} title={current.goal}>
-      <b>{t.tasks.turn(current.number)}</b>
-      <small className="hub-turn-error" role="alert" title={message}>{message}</small>
-    </div>;
-  }
-  const turn = turns?.find(row => row.status === 'open');
-  if (!turn) return null;
-  return <div className="hub-turn" style={style} title={`${turn.title}\n${turn.goal}`}>
-    <b>{t.tasks.turn(turn.number)}</b>
-    <TurnProgress tasks={turn.tasks} />
-  </div>;
-}
-
 /* One gauge segment lights per 1/24 of the agents at work, and at least one while any agent works. */
-function gaugeArc(working: number, total: number): { d: string; n: number } {
+function gaugeArc(working: number, total: number): { d: string; length: number } {
   const n = working && total ? Math.max(1, Math.round((GAUGE_SEGMENTS * working) / total)) : 0;
-  if (!n) return { d: 'M 17 120 A 103 103 0 0 1 17 120', n };
-  const a = Math.PI + (Math.PI * n) / GAUGE_SEGMENTS;
-  return { d: `M 17 120 A 103 103 0 0 1 ${(120 + 103 * Math.cos(a)).toFixed(2)} ${(120 + 103 * Math.sin(a)).toFixed(2)}`, n };
+  if (!n) return { d: arcD(GAUGE_FROM, GAUGE_FROM), length: 1 };
+  const length = dashLength(n);
+  return { d: arcD(GAUGE_FROM, GAUGE_FROM + ((GAUGE_TO - GAUGE_FROM) * length) / dashLength(GAUGE_SEGMENTS)), length };
 }
 
 const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
-  const a = Math.PI + (Math.PI * i) / 36;
+  const a = ((GAUGE_FROM + ((GAUGE_TO - GAUGE_FROM) * i) / 36) * Math.PI) / 180;
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
+
+/* The turn inside a department's card: its number, the tasks done out of all, and twenty squares lit from the left. It is part
+   of the card's one button, which opens the department. */
+function DeptTurn({ turn }: { turn: WorkingTurn }) {
+  const t = useT();
+  const label = t.tasks.turnProgress(turn.done, turn.total);
+  const lit = litSquares(turn.done, turn.total);
+  return (
+    <span className="dept-turn">
+      <span className="dt-head">
+        <b className="dt-turn">{t.tasks.turn(turn.turnNumber)}</b>
+        <span className="dt-cnt">{label}</span>
+      </span>
+      <span className="sq-bar dept-sq" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sharePercent(turn.done, turn.total)}>
+        {Array.from({ length: TURN_CELLS }, (_, k) => (
+          <i key={k} className={k < lit ? 'on' : undefined} />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+/* The lower half of the hub, one sector per department working in the turn, in the order of their cards. With several, the one
+   whose card is pointed at or focused stands out and the others fade. */
+function TurnArcs({ turns, pointed }: { turns: WorkingTurn[]; pointed: string | null }) {
+  if (!turns.length) return null;
+  const sectors = hubSectors(turns.length);
+  const lit = turns.length > 1 && turns.some(w => w.id === pointed);
+  return (
+    <>
+      <path className="hub-eq" d="M 11 120 H 23 M 217 120 H 229" />
+      {turns.map((w, i) => {
+        const s = sectors[i]!, fill = sectorFill(s, w.done, w.total), sep = s.separator;
+        return (
+          <g key={w.id} className={`turn-sec${lit ? (w.id === pointed ? ' active' : ' dim') : ''}`} data-dept={w.id}>
+            <path className="turn-sec-bg" d={arcD(s.from, s.to)} pathLength={dashLength(s.segments)} />
+            {fill && <path className="turn-sec-fill" d={fill.d} pathLength={fill.length} />}
+            {sep && <line className="turn-sec-sep" x1={sep[0][0]} y1={sep[0][1]} x2={sep[1][0]} y2={sep[1][1]} />}
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+/* What the hub names under its count: the turn while one department works in it, and with several, the department whose card
+   is pointed at. */
+function hubTag(t: Messages, turns: WorkingTurn[], pointed: string | null): string | null {
+  if (turns.length === 1) return t.tasks.turn(turns[0]!.turnNumber);
+  const w = turns.find(x => x.id === pointed);
+  return w ? `${w.roleCode} · ${t.tasks.turn(w.turnNumber)}` : null;
+}
 
 function topDeptId(org: Org, deptId: string): string | undefined {
   return org.departments.find(d => d.id === deptId || d.products.some(pr => pr.id === deptId))?.id;
@@ -207,6 +238,10 @@ function deptClass(d: Department, flashing: boolean): string {
   const waits = !busy && d.employees.some(e => e.status === 'waiting');
   return `dept${busy ? ' busy' : ''}${waits ? ' waits' : ''}${flashing ? ' flash' : ''}`;
 }
+
+/* Every card grows for the turn strip while any department works in the turn, and its lines keep their place under the name;
+   with-turn: this department works in it. */
+const turnClass = (tall: boolean, works: boolean) => (works ? ' tall with-turn' : tall ? ' tall' : '');
 
 const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
 
@@ -381,6 +416,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   /* Where this person put blocks, and the block their hand moves now. */
   const layout = useMapLayout();
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
+  /* The department whose card the pointer or the keyboard is on, so the hub shows its turn. */
+  const [pointed, setPointed] = useState<string | null>(null);
   const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed) : null), [org, layout.placed, moving]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
@@ -512,6 +549,10 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const asked = decisionWays(org, arr);
   const hubAsked = topPeople.some(p => (p.pendingDecisions ?? 0) > 0);
   const gauge = gaugeArc(org.agents.working, org.agents.total);
+  const turns = workingTurns(depts);
+  const turnOf = new Map(turns.map(w => [w.id, w]));
+  const tag = hubTag(t, turns, pointed);
+  const hubClass = `hub${hubAsked ? ' attn' : ''}${tag ? ' has-tag' : ''}`;
   const hubPlace = { left: hub.x, top: hub.y, width: hub.w, height: hub.h };
   /* What each grip names: the orchestrator, a department or a person. */
   const blockName = (key: string): string => {
@@ -527,20 +568,25 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         <g className="spin">
           <circle className="hub-ring" cx="120" cy="120" r="119" />
         </g>
-        <path className="gauge-bg" d="M 17 120 A 103 103 0 0 1 223 120" pathLength={GAUGE_SEGMENTS} />
-        <path className="gauge" d={gauge.d} pathLength={gauge.n || 1} />
+        <path className="gauge-bg" d={arcD(GAUGE_FROM, GAUGE_TO)} pathLength={dashLength(GAUGE_SEGMENTS)} />
+        <path className="gauge" d={gauge.d} pathLength={gauge.length} />
+        <TurnArcs turns={turns} pointed={pointed} />
         <circle className="hub-in" cx="120" cy="120" r="88" />
-        <path className="hub-hz" d="M 40 132 L 200 132" />
+        <path className="hub-hz" d="M 64 120 L 176 120" />
         {/* Motion means real work: the dot runs only while an agent works. */}
         {org.agents.working > 0 && <Pulse pts={GAUGE_TRACK} speed={motionSpeed(55, still)} bounce tone="k" />}
       </svg>
       <LogoMark className="hub-mark" />
-      <span className="hub-num">
+      <span className="hub-num" title={t.map.agentsWorking}>
         <b>{org.agents.working}</b>
         <span>/</span>
         <span>{org.agents.total}</span>
       </span>
-      <span className="hub-lbl">{t.map.agentsWorking}</span>
+      {tag && (
+        <span className="hub-focus-tag" aria-hidden="true">
+          {tag}
+        </span>
+      )}
     </>
   );
 
@@ -587,19 +633,17 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
 
         {company ? (
-          <button className={`hub${windowOpen ? ' on' : ''}${hubAsked ? ' attn' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+          <button className={`${hubClass}${windowOpen ? ' on' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
             {hubArt}
           </button>
         ) : (
-          <div className={`hub${hubAsked ? ' attn' : ''}`} style={hubPlace}>
+          <div className={hubClass} style={hubPlace}>
             {hubArt}
           </div>
         )}
 
-        <HubTurn current={org.turn} at={arr.turn} />
-
         {depts.length === 0 && (
-          <div className="start" style={{ left: mx - 260, top: hub.y + hub.h + GAP + (org.turn ? TURN_H : 0) }}>
+          <div className="start" style={{ left: mx - 260, top: hub.y + hub.h + GAP }}>
             <p>{t.map.emptyHint}</p>
             {company && (
               <button className="btn" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
@@ -610,7 +654,17 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         )}
 
         {depts.map((d: Department, i) => (
-          <button key={d.id} type="button" className={deptClass(d, flashing.has(d.id))} style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }} onClick={() => enter(spots[i]!, d.id)}>
+          <button
+            key={d.id}
+            type="button"
+            className={`${deptClass(d, flashing.has(d.id))}${turnClass(turns.length > 0, turnOf.has(d.id))}`}
+            style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }}
+            onClick={() => enter(spots[i]!, d.id)}
+            onMouseEnter={() => setPointed(d.id)}
+            onMouseLeave={() => setPointed(p => (p === d.id ? null : p))}
+            onFocus={() => setPointed(d.id)}
+            onBlur={() => setPointed(p => (p === d.id ? null : p))}
+          >
             <Edge cut={12} corner>
               <span className="row1">
                 <b className="dname">{deptLabel(t, d)}</b>
@@ -638,6 +692,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
                   </span>
                 )
               )}
+              {turnOf.has(d.id) && <DeptTurn turn={turnOf.get(d.id)!} />}
             </Edge>
           </button>
         ))}

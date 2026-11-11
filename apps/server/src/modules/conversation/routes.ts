@@ -13,7 +13,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt, type Standing, type WrittenFrom } from './prompt.js';
+import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt, type Standing, type WrittenFrom } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -28,21 +28,33 @@ const MessageBody = z
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
 export type TelegramOrigin = { bot: string; chat: number; update: number };
+/* The message of the person's assistant this is, by the id the assistant was given for it. */
+export type AssistantOrigin = { message: string };
 
-function writtenBy(me: Person, text: string, pictures: MessagePicture[], telegram?: TelegramOrigin & { standing: Standing }, from?: WrittenFrom) {
+/* The words of the person's assistant, which the agent takes as the person's own and answers in its window for the
+   assistant to read. */
+function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, origin: AssistantOrigin, standing: Standing) {
+  const assistant = { id: me.assistant.id, name: me.assistant.name, message: origin.message };
+  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
+}
+
+/* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */
+type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing; from?: WrittenFrom };
+
+function writtenBy(me: Person, text: string, pictures: MessagePicture[], { telegram, assistant, standing, from }: Origins = {}) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
-  if (telegram) {
-    const { standing, ...origin } = telegram;
-    return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin } } };
+  if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, assistant, standing);
+  if (telegram && standing) {
+    return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
   }
   return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures), from), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram. */
-type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; from?: WrittenFrom };
+type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
 
 /* What the person is to this agent, said with words that came through Telegram, where no window shows who wrote. */
 async function standingOf(ctx: Ctx, me: Person, agent: AgentRow): Promise<Standing> {
@@ -50,8 +62,8 @@ async function standingOf(ctx: Ctx, me: Person, agent: AgentRow): Promise<Standi
   return { owner: me.isOwner, delegate: me.isCeoDelegate, department: department ? department.owner === me.id : null };
 }
 
-/* A person's words to an agent, from its window or through its Telegram bot, under that person's own rights: whoever calls
-   this has checked that they see the agent. Returns the turn the words went into. */
+/* A person's words to an agent, from its window, through its Telegram bot or by the person's assistant, under that person's
+   own rights: whoever calls this has checked that they may write to the agent. Returns the turn the words went into. */
 export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input: Written): Promise<string> {
   if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
   const pictures = await ownPictures(ctx, me, agent.id, input.pictures);
@@ -62,7 +74,8 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   }
   /* Pictures alone read as their names wherever the words of a message show. */
   const words = input.text || pictures.map(p => p.name).join(', ');
-  const { actor, turn } = writtenBy(me, words, pictures, input.telegram && { ...input.telegram, standing: await standingOf(ctx, me, agent) }, input.from);
+  const standing = input.telegram || input.assistant ? await standingOf(ctx, me, agent) : undefined;
+  const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing, from: input.from });
   const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
   ctx.bus.publish(me.companyId, {
     type: 'pulse',
@@ -71,7 +84,7 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   });
   /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
      answers requests with its own tool. */
-  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text));
+  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text, { assistant: me.assistant?.id }));
   return jobId;
 }
 

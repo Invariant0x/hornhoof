@@ -624,6 +624,41 @@ describe('Department view', () => {
     expect(screen.queryByRole('button', { name: '+ Hire' })).not.toBeInTheDocument();
   });
 
+  it('says in its About how the department works, and lets whoever the server allows switch it between turns and all the time', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      {
+        'GET /api/departments/d2/work-mode': [200, { departmentId: 'd2', workMode: 'turns', canChangeWorkMode: true }],
+        'PUT /api/departments/d2/work-mode': [200, { departmentId: 'd2', workMode: 'continuous', canChangeWorkMode: true }],
+      },
+      { ...DEV_ORG, departments: [{ ...dev!, workMode: 'turns', turnProgress: null }] },
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const how = screen.getByRole('region', { name: 'How it works' });
+    expect(await within(how).findByRole('radio', { name: 'Works in turns' })).toBeChecked();
+    await user.click(within(how).getByRole('radio', { name: 'Works all the time' }));
+    await waitFor(() => expect(within(how).getByRole('radio', { name: 'Works all the time' })).toBeChecked());
+    expect(calls.filter(c => c.method === 'PUT' && c.path === '/api/departments/d2/work-mode').map(c => c.body)).toEqual([{ workMode: 'continuous' }]);
+  });
+
+  it('only tells a person who reaches the department how it works', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/work-mode': [200, { departmentId: 'd2', workMode: 'continuous', canChangeWorkMode: false }] },
+      { ...DEV_ORG, departments: [{ ...dev!, people: [...dev!.people, LENA], workMode: 'continuous', turnProgress: null }] },
+      listed('p6', 'Lena'),
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const how = screen.getByRole('region', { name: 'How it works' });
+    expect(await within(how).findByText('Works all the time, without turns.')).toBeInTheDocument();
+    expect(within(how).queryByRole('radio')).toBeNull();
+    expect(calls.some(c => c.method === 'PUT')).toBe(false);
+  });
+
   it('lets the owner of the department hire into it, and change its repository and sub-units, without the orchestrator', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;

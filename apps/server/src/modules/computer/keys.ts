@@ -52,6 +52,8 @@ export function keyRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/me/key', async (req: FastifyRequest, reply: FastifyReply) => {
     const me = await ownSession(req);
     const { password, ...key } = KeyBody.parse(req.body);
+    /* A person's assistant has no email and no password, so none to check. */
+    if (me.email === null) throw wrongPassword();
     const attempt = await signInTry(db, me.email, await clientAddress(req, config));
     if (!attempt.allowed) refuse(reply, attempt.retryAfterS, attempt.windowMs);
     const [row] = await db.select({ passwordHash: people.passwordHash }).from(people).where(eq(people.id, me.id));

@@ -57,6 +57,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'signedRenewal', path: /^\/api\/network\/renew$/, rule: "a request signed with the machine's own key, of this moment and taken once" },
   { name: 'ownSession', path: /^\/api\/me\/key$/, rule: "the person's own session, never one the orchestrator acts in" },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },
+  { name: 'requireAssistant', path: /^\/api\/assistant\//, rule: "assistant key, acting with its owner's rights as they are now" },
 ];
 
 function callName(node: ts.Expression): string | undefined {

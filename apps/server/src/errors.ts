@@ -189,7 +189,15 @@ export type ErrorReason =
   | 'telegram_taken'
   | 'telegram_heads_only'
   | 'telegram_invalid'
-  | 'telegram_person_taken';
+  | 'telegram_person_taken'
+  | 'assistant_owner_invalid'
+  | 'not_an_assistant'
+  | 'assistant_no_sign_in'
+  | 'assistant_has_owner_rights'
+  | 'assistant_key_invalid'
+  | 'assistant_owner_inactive'
+  | 'assistant_not_allowed'
+  | 'assistant_agent_refused';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
 /* A change counts as sent once any commit of it is listed. One that failed between two commits is listed too, so the

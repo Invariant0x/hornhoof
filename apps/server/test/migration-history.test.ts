@@ -43,8 +43,10 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0 } }));
   /* The same for a job and a part of a test run: none ran on a machine's built-in node before there were any. */
   if (table === 'jobs' || table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
-  /* Migration 0098 gives every person an empty Telegram. */
-  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null } }));
+  /* Migration 0098 gives every person an empty Telegram, and 0100 makes every one a person and no assistant. */
+  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null } }));
+  /* Migration 0100: nobody's assistant answered a request before. */
+  if (table === 'requests') return rows.map(row => ({ row: { ...row.row, answered_by_assistant_id: null } }));
   if (table !== 'tasks') return rows;
   /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty. */
   const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];

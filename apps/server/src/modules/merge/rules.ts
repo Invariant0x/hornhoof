@@ -58,6 +58,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals'], skip('work')),
   /* An answer a bot still owed when its database was set aside is not sent later, out of its time. */
   telegram_replies: skip('work'),
+  /* What an assistant was told, and what is still being collected for it, is the feed of the database that leads: its
+     numbers are that database's own, and an answer collected in one that was set aside is not told later. */
+  ...each(['assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'], skip('work')),
 
   /* Records that are written once: one the leader lacks is added, and none is compared. */
   applied: add('work'),
@@ -88,6 +91,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(['recovery_keys', 'certificates', 'authority', 'peer_secrets', 'public_links'], rows('access')),
   /* A bot's token is a way from outside to an agent of the company. */
   telegram_bots: rows('access'),
+  /* An assistant's key is a way in from outside, under its owner's rights. */
+  assistants: rows('access'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
 

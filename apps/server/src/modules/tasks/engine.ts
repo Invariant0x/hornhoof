@@ -1335,7 +1335,10 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+/* How an answer came: inline in words the window already delivered, or from the person's assistant, which is recorded with it. */
+type AnswerWay = { inlineText?: true; assistant?: string };
+
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, { inlineText, assistant }: AnswerWay = {}): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1365,14 +1368,14 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, answeredByAssistantId: assistant ?? null, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await endRequest(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}) }, inlineText }, ctx.config);
     const back = await statusAfterWait(tx, task, current?.status);
     if (back) {
       await tx
@@ -1403,7 +1406,7 @@ function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Param
 /* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
    and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
    their own answer. The task's own turn still follows, which watches that the task moves. */
-export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string): Promise<Wake[]> {
+export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string, { assistant }: { assistant?: string } = {}): Promise<Wake[]> {
   const said = text.trim();
   if (!said) return [];
   const [person] = await ctx.db
@@ -1424,7 +1427,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     if (!takes(person, access, r)) continue;
     try {
       /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
-      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, true)).wakes);
+      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, { inlineText: true, assistant })).wakes);
     } catch (err) {
       /* Someone answered it in the task meanwhile, or the person's right went meanwhile. */
       if (!(err instanceof ApiError && PASSED_OVER.has(err.reason))) throw err;

@@ -144,6 +144,12 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/requests/:id/explained': 'the orchestrator alone',
   'GET /api/outbound': 'outbound-views.test.ts: channels and messages of the departments the person may see',
   'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
+  'GET /api/assistant/me': "assistants-rights.test.ts: an assistant key, read with its owner's rights as they are now",
+  'GET /api/assistant/agents': "assistants-rights.test.ts: exactly the agents its owner may write to in the agent's window",
+  'POST /api/assistant/messages': "assistants-rights.test.ts, assistants-messages.test.ts: an agent its owner may write to, 403 otherwise",
+  'GET /api/assistant/events': 'assistants-events.test.ts: the events of this assistant alone',
+  'GET /api/assistant/requests': 'assistants-events.test.ts: the requests that wait for its owner',
+  'POST /api/assistant/requests/:id/answer': 'assistants-events.test.ts: what its owner may answer, 403 otherwise',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
@@ -171,6 +177,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/parts/:id/files/:name', 'PUT /api/parts/:id/files/:name',
   'POST /api/harness/claim', 'POST /api/harness/:key/done', 'POST /api/harness/:key/failed', 'GET /api/harness/:key/bundle', 'PUT /api/harness/:key/parts/:index',
   'PATCH /api/people/:id', 'PUT /api/people/:id/ceo-delegate', 'POST /api/people/:id/invite', 'POST /api/people/invite',
+  'POST /api/people/assistants', 'PATCH /api/people/:id/assistant', 'POST /api/people/:id/key', 'DELETE /api/people/:id/key',
   'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
   'POST /api/recovery', 'GET /api/recovery', 'POST /api/recovery/restore', 'POST /api/recovery/challenge', 'PUT /api/recovery/bundles/:id',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
