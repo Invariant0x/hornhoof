@@ -9,8 +9,9 @@ const SRC = join(SERVER, 'src');
 /* The merge's source reads a database that came back, on a connection of its own that only reads. */
 const POOL_OWNERS = ['src/db/client.ts', 'src/db/agent-sql.ts', 'src/modules/keeper/lease-store.ts', 'src/modules/merge/source.ts'];
 /* The keeper's own session writes what is this machine's alone. A copy's subscription applies what the leader has
-   confirmed already, on a machine that has no copy of its own to wait for. */
-const LOOSE_COMMIT_ALLOWED = ['src/modules/keeper/lease-store.ts', 'src/modules/keeper/copy.ts'];
+   confirmed already, on a machine that has no copy of its own to wait for; so does the one an old leader joins the new
+   one with. */
+const LOOSE_COMMIT_ALLOWED = ['src/modules/keeper/lease-store.ts', 'src/modules/keeper/copy.ts', 'src/modules/keeper/promote.ts'];
 
 type Rule = { name: string; matches: (line: string) => boolean; allowedIn?: string[]; sample: string };
 
@@ -76,6 +77,7 @@ describe('the lint of the fences', () => {
     expect(brokenBy('src/modules/keeper/lease-store.ts', 'new pg.Client({ connectionString: url })')).toBeUndefined();
     expect(brokenBy('src/modules/keeper/lease-store.ts', 'SET synchronous_commit = off')).toBeUndefined();
     expect(brokenBy('src/modules/keeper/copy.ts', "CREATE SUBSCRIPTION copy_1 WITH (synchronous_commit = 'local')")).toBeUndefined();
+    expect(brokenBy('src/modules/keeper/promote.ts', "CREATE SUBSCRIPTION copy_1 WITH (create_slot = false, synchronous_commit = 'local')")).toBeUndefined();
     expect(brokenBy('src/modules/keeper/sync.ts', "SET synchronous_commit = 'local'")?.name).toBe('a loose synchronous_commit lets a commit go without its copy');
   });
 
