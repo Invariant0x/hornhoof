@@ -7,6 +7,7 @@ import { queryOf } from '../merge/leader.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 import { findThisMachine } from '../network/store.js';
 import { seesAll, unfit, type Candidate } from './qualify.js';
+import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js';
 
 /* The machines after the leader that hold a copy: numbers 2 and 3. */
 export const COPIES = 2;
@@ -64,10 +65,31 @@ export async function candidates(db: Db): Promise<Candidate[]> {
 export async function rank(ctx: Ctx, now = new Date()): Promise<{ changed: number }> {
   const { db, config } = ctx;
   if (!(await findThisMachine(db, config))) return { changed: 0 };
+  const { changed, leave } = await place(ctx, now);
+  /* A machine that holds the data and whose person no longer sees the whole company, as a restore of an older backup
+     can bring one back, gives the data up as it does when the scope is taken. */
+  if (leave.length > 0) {
+    await cutReplication(ctx.replication, leave);
+    await db.transaction(tx => leaveData(ctx, tx, leave.map(machine => machine.id), now));
+    await afterLeave(ctx);
+  } else {
+    /* A change of the link's key that the relay did not take yet is tried again with each ranking. */
+    await ctx.links.finishKey().catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not change the key of the company's link yet. The next minute tries again."));
+  }
+  return { changed };
+}
+
+async function place(ctx: Ctx, now: Date): Promise<{ changed: number; leave: Leaving[] }> {
+  const { db, config } = ctx;
   return db.transaction(async tx => {
-    const before = await tx.select({ id: machines.id, serverOrder: machines.serverOrder, serverWhy: machines.serverWhy, role: machines.role }).from(machines).where(isNull(machines.revokedAt)).orderBy(asc(machines.id)).for('update');
+    const before = await tx
+      .select({ id: machines.id, networkId: machines.networkId, serverOrder: machines.serverOrder, serverWhy: machines.serverWhy, role: machines.role })
+      .from(machines)
+      .where(isNull(machines.revokedAt))
+      .orderBy(asc(machines.id))
+      .for('update');
     const leader = await findThisMachine(tx, config);
-    if (!leader) return { changed: 0 };
+    if (!leader) return { changed: 0, leave: [] };
     const [sized] = await queryOf(tx)<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
     const [link] = await tx.select({ name: publicLinks.name }).from(publicLinks).limit(1);
     const places = new Map(rankOf(await candidates(tx), { leader: leader.id, dbSize: Number(sized?.size ?? 0), link: Boolean(link), now }).map(place => [place.id, place]));
@@ -77,11 +99,12 @@ export async function rank(ctx: Ctx, now = new Date()): Promise<{ changed: numbe
       const role = place.data && row.role !== 'data' ? { role: 'data' as const } : {};
       return place.number !== row.serverOrder || place.why !== row.serverWhy || 'role' in role ? [{ id: row.id, set: { serverOrder: place.number, serverWhy: place.why, ...role } }] : [];
     });
-    if (changes.length === 0) return { changed: 0 };
+    const leave = before.filter(row => places.get(row.id)?.leave).map(({ id, networkId }) => ({ id, networkId }));
+    if (changes.length === 0) return { changed: 0, leave };
     /* Every changed row gives its number up first, so two numbers that swap never meet. */
     await tx.update(machines).set({ serverOrder: null }).where(inArray(machines.id, changes.map(change => change.id)));
     for (const change of changes) await tx.update(machines).set(change.set).where(eq(machines.id, change.id));
-    return { changed: changes.length };
+    return { changed: changes.length, leave };
   });
 }
 

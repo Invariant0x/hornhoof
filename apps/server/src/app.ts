@@ -43,6 +43,7 @@ import { Restores } from './modules/backups/restore.js';
 import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
 import { keptDatabases } from './modules/merge/kept.js';
 import { Ranking } from './modules/copies/order.js';
+import { replicationOf, type Replication } from './modules/copies/slots.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
 import { backupRoutes } from './modules/backups/routes.js';
@@ -105,6 +106,8 @@ export type Ctx = Deps & {
   merger: Merger;
   /* The numbering of the machines that may hold the company's data. */
   ranking: Ranking;
+  /* The slots of the copies in this server's Postgres. */
+  replication: Replication;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -197,6 +200,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.totalLoss = new TotalLoss(ctx);
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
   ctx.ranking = new Ranking(ctx);
+  ctx.replication = replicationOf(deps.db);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);

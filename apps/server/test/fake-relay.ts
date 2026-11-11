@@ -33,6 +33,8 @@ export type FakeRelay = {
   evictionBound: number;
   /* How the route answer is spoiled: not JSON, one extra field, the state "gone", no answer at all. */
   routeAnswer: 'contract' | 'garbage' | 'extra' | 'badstate' | 'hang';
+  /* True: the next change of a key goes through, and its answer is a dropped connection. It then turns false again. */
+  loseAnswer: boolean;
   /* A registration of a name by a client, as the plugin lets it through or refuses it. */
   register: (name: string, client: string) => Registered;
   /* The holder of a name was evicted or stopped. */
@@ -42,6 +44,7 @@ export type FakeRelay = {
 };
 
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const CHOSEN_KEY = /^[A-Za-z0-9_-]{43}$/;
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const newKey = () => randomBytes(24).toString('base64url');
@@ -126,6 +129,7 @@ function newRelay(): FakeRelay {
     passthrough: true,
     evictionBound: 30,
     routeAnswer: 'contract',
+    loseAnswer: false,
     register: (name, client) => register(relay.routes, name, client),
     drop: name => drop(relay.routes, name),
     restartFrps: () => {
@@ -196,10 +200,18 @@ export async function fakeRelay(): Promise<FakeRelay> {
     const stored = acceptSync(relay, req.params.name, record.data);
     return typeof stored === 'string' ? reply.code(409).send({ error: stored }) : { sync: stored };
   });
-  app.post<{ Params: { name: string } }>('/api/v1/links/:name/key', { preHandler: authorize }, async req => {
-    const key = newKey();
+  /* The key Hornhoof chose, when it sends one (the addendum to R6.1): 43 base64url characters, and not the key the link
+     has. */
+  app.post<{ Params: { name: string }; Body: { key?: unknown } | undefined }>('/api/v1/links/:name/key', { preHandler: authorize }, async (req, reply) => {
+    const chosen = req.body?.key;
+    if (chosen !== undefined && !(typeof chosen === 'string' && CHOSEN_KEY.test(chosen))) return reply.code(400).send({ error: 'invalid' });
+    if (chosen === relay.bindings.get(req.params.name)!.key) return reply.code(400).send({ error: 'same_key' });
+    const key = chosen ?? newKey();
     relay.bindings.set(req.params.name, { key });
-    return { key };
+    if (!relay.loseAnswer) return { key };
+    relay.loseAnswer = false;
+    req.raw.socket.destroy();
+    return reply.hijack();
   });
   app.post<{ Params: { name: string } }>('/api/v1/links/:name/visitor-key', { preHandler: authorize }, async req => {
     const visitorKey = newKey();

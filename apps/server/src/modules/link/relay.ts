@@ -127,9 +127,10 @@ export class Relay {
     return body.success ? { up: true, relayStarted: body.data.relayStarted, passthrough: body.data.passthrough } : DOWN;
   }
 
-  /* A new link key; the old one stops working at once. */
-  async changeKey(name: string, key: string): Promise<string> {
-    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/key`, key, KeyAnswer)).key;
+  /* A new link key; the old one stops working at once. next: the key to set, 43 base64url characters, so a caller that
+     kept it first still knows the key when the answer is lost on the way; without it the relay picks one. */
+  async changeKey(name: string, key: string, next?: string): Promise<string> {
+    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/key`, key, KeyAnswer, next === undefined ? undefined : { key: next })).key;
   }
 
   /* A new visitor key for the link, replacing the one before. */
@@ -137,8 +138,8 @@ export class Relay {
     return (await this.secretFrom(`/links/${encodeURIComponent(name)}/visitor-key`, key, VisitorKeyAnswer)).visitorKey;
   }
 
-  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>): Promise<T> {
-    const res = await this.call('POST', path, { key });
+  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>, body?: object): Promise<T> {
+    const res = await this.call('POST', path, { key, body });
     if (res.status === 429) throw busy();
     const parsed = res.ok ? answer.safeParse(await res.json().catch(() => null)) : null;
     if (!parsed?.success) throw unreachable();

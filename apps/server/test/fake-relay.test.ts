@@ -233,6 +233,26 @@ describe('the fake relay keeps the contract', () => {
     expect((await call(relay, 'DELETE', '/bindings/acme', { key: fresh })).status).toBe(204);
   });
 
+  it('R6.1 sets the key it is given', async () => {
+    const relay = await relayWithBinding();
+    const next = 'n'.repeat(43);
+    expect(await call(relay, 'POST', '/links/acme/key', { key: 'k', body: { key: next } })).toEqual({ status: 200, body: { key: next } });
+    expect((await route(relay, 'acme', 'k')).status).toBe(401);
+    expect((await route(relay, 'acme', next)).status).toBe(200);
+    /* A key of another form, and the key the link has, are refused, and the key stays. */
+    for (const bad of ['n'.repeat(42), 'n'.repeat(44), `${'n'.repeat(42)}+`, 5]) {
+      expect(await call(relay, 'POST', '/links/acme/key', { key: next, body: { key: bad } }), String(bad)).toMatchObject({ status: 400, body: { error: 'invalid' } });
+    }
+    expect(await call(relay, 'POST', '/links/acme/key', { key: next, body: { key: next } })).toMatchObject({ status: 400, body: { error: 'same_key' } });
+    expect((await route(relay, 'acme', next)).status).toBe(200);
+    /* An answer lost on the way: the key changed all the same. */
+    relay.loseAnswer = true;
+    const other = 'o'.repeat(43);
+    await expect(call(relay, 'POST', '/links/acme/key', { key: next, body: { key: other } })).rejects.toThrow();
+    expect(relay.loseAnswer).toBe(false);
+    expect((await route(relay, 'acme', other)).status).toBe(200);
+  });
+
   it('R6.2 hands out a visitor key and replaces it', async () => {
     const relay = await relayWithBinding();
     expect(await call(relay, 'POST', '/links/acme/visitor-key', { key: 'wrong' })).toEqual({ status: 401, body: UNAUTHORIZED });

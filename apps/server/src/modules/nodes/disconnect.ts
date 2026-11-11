@@ -1,7 +1,8 @@
-import { and, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { clearNodeWords, pump } from '../conversation/queue.js';
+import { afterLeave, cutReplication } from '../copies/scope.js';
 import { revokeMachineRows, visitorKeyOf } from '../network/join.js';
 import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
@@ -11,12 +12,20 @@ import { liveNode, settlePlans } from './nodes.js';
 /* Stops these machines' nodes: open jobs fail, the parts of test runs they ran wait for another machine, sockets close,
    the agents on them pick another machine of their plan at their next turn, and a plan left with no machine waits for
    one again. A turn that waited for one of these machines goes out on another one now. A machine of the network is cut
-   off for good: its certificates, tickets and commands end in the same transaction that marks its row. */
+   off for good: its certificates, tickets and commands end in the same transaction that marks its row. One that held the
+   company's data is cut from the server's changes first, and leaves holding nothing that opens the company's link: the
+   link's key changes too. */
 export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
   if (machineIds.length === 0) return;
+  const copies = await ctx.db.select({ id: machines.id, networkId: machines.networkId }).from(machines).where(and(inArray(machines.id, machineIds), eq(machines.role, 'data'), isNull(machines.revokedAt)));
+  await cutReplication(ctx.replication, copies);
   const { ids, moved, cored } = await ctx.db.transaction(async tx => {
     const now = new Date();
     await tx.update(machines).set({ revokedAt: now }).where(inArray(machines.id, machineIds));
+    if (copies.length > 0) {
+      await tx.update(machines).set({ dataLeftAt: now, serverOrder: null, serverWhy: null }).where(inArray(machines.id, copies.map(copy => copy.id)));
+      await ctx.links.startKey(tx);
+    }
     const cored = await revokeMachineRows(tx, machineIds, now);
     const gone = await tx
       .update(nodes)
@@ -29,7 +38,8 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
   });
   /* A machine that had the core holds the link's visitor key. The relay ends it when it gives a new one, so that is
      asked for now and not waited for; a relay that does not answer is asked again with the next view a keeper reads. */
-  if (cored) void visitorKeyOf(ctx, { force: true });
+  if (copies.length > 0) void afterLeave(ctx);
+  else if (cored) void visitorKeyOf(ctx, { force: true });
   /* The nodes lose their keys first, so the turns that end here send no next turn to the leaving ones. */
   for (const id of ids) { clearNodeWords(ctx, nodeIdentity(id)); ctx.hub.close(id, 4001); }
   if (ids.length) await failOpenJobs(ctx, inArray(jobs.nodeId, ids), 'machine_disconnected');

@@ -13,6 +13,7 @@ import { agentChanges, agents, companies, invites, machines, people, personChang
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { onAgent } from '../conversation/queue.js';
+import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { personView, personViews } from './views.js';
@@ -288,15 +289,23 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* Disabling has steps of its own, taken after whatever else this request changes. */
     if (status === 'disabled') delete changes.status;
 
+    /* A person who no longer sees the whole company holds none of its data: their machines that hold a copy are cut from
+       the server's changes first, before anything new is written, and give the data up in the same transaction. */
+    const losesAll = target.scopeKind === 'company' && body.access !== undefined && !('whole' in body.access);
+    const leaving = losesAll ? await leavingData(db, config, id) : [];
+    await cutReplication(ctx.replication, leaving);
+
     const changed = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
       if (body.name !== undefined && body.name !== target.name) {
         await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
       }
       if (body.access) await saveAccess(tx, target, body.access);
+      await leaveData(ctx, tx, leaving.map(machine => machine.id), new Date());
       const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
       return row!;
     });
+    if (leaving.length > 0) void afterLeave(ctx);
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
     if (status === 'disabled') await disablePerson(ctx, id, me);
     else if (body.access) await releasePlansOf(ctx, changed, me);

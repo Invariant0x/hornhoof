@@ -1,12 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { publicLinks } from '../../db/schema.js';
-import { loggable } from '../../errors.js';
+import { machines, publicLinks } from '../../db/schema.js';
+import { ApiError, loggable } from '../../errors.js';
 import { linkMode, readLinkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
 import { Settings, type TunnelSettings } from './tunnel.js';
@@ -32,7 +33,8 @@ export async function publicUrl(db: Db, config: Config): Promise<string> {
 /* Keeps a link the relay just gave, in place of the one before. */
 export async function saveLink(tx: Db | Tx, config: Config, companyId: string, bound: Bound): Promise<void> {
   const row = { name: bound.name, url: bound.url, keyEnc: encryptSecret(bound.key, config.secret), tunnelEnc: encryptSecret(JSON.stringify(bound.tunnel), config.secret) };
-  await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, createdAt: new Date() } });
+  /* A new link has a key no machine that left ever knew, so a change of key that was under way has nothing left to do. */
+  await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, nextKeyEnc: null, createdAt: new Date() } });
 }
 
 async function settingsWith(db: Db, config: Config, modeOf: typeof linkMode): Promise<TunnelSettings | null> {
@@ -102,15 +104,50 @@ export class PublicLinks {
     });
   }
 
-  /* The relay lets the link go first, so a link it still holds is never forgotten here. */
+  /* The relay lets the link go first, so a link it still holds is never forgotten here. While another machine keeps a
+     copy the link stays: the copies and the server tell each other through it who holds the latest changes. */
   remove(companyId: string): Promise<void> {
     return this.inTurn(async () => {
       const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
       if (!old) return;
+      const { db, config } = this.ctx;
+      const others = sql`${machines.networkId} IS DISTINCT FROM ${config.machineId}`;
+      const [copy] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
+      if (copy) throw new ApiError(409, 'conflict', 'Machines keep copies of the company through its link, so it stays.', 'link_needed');
       await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
       await this.ctx.db.delete(publicLinks).where(eq(publicLinks.companyId, companyId));
       await this.writeSettings();
       this.ctx.tls?.kick();
+    });
+  }
+
+  /* Starts a change of the link's key, in the transaction that makes it needed: the new key is kept beside the old one,
+     sealed the same way, before the relay is asked, so an answer lost on the way never leaves the company with no key
+     that works. One that is under way already is the one that goes on. */
+  async startKey(tx: Db | Tx): Promise<void> {
+    const [row] = await tx.select({ companyId: publicLinks.companyId, nextKeyEnc: publicLinks.nextKeyEnc }).from(publicLinks).limit(1).for('update');
+    if (!row || row.nextKeyEnc) return;
+    await tx.update(publicLinks).set({ nextKeyEnc: encryptSecret(randomBytes(32).toString('base64url'), this.ctx.config.secret) }).where(eq(publicLinks.companyId, row.companyId));
+  }
+
+  /* One try to finish a change of key. The relay is asked with the new key first: when it takes it, an earlier ask went
+     through and only its answer was lost. When it refuses it, the change is asked for with the key the link has.
+     none: no change is under way. later: the relay did not answer, and the next try does the same. */
+  finishKey(): Promise<'done' | 'none' | 'later'> {
+    return this.inTurn(async () => {
+      const { db, config } = this.ctx;
+      const [row] = await db.select().from(publicLinks).limit(1);
+      if (!row?.nextKeyEnc) return 'none';
+      const next = decryptSecret(row.nextKeyEnc, config.secret);
+      const taken = await this.relay.route(row.name, next);
+      if (!taken.known) {
+        if (taken.why !== 'refused') return 'later';
+        const changed = await this.relay.changeKey(row.name, decryptSecret(row.keyEnc, config.secret), next).then(() => true, () => false);
+        if (!changed) return 'later';
+      }
+      await db.update(publicLinks).set({ keyEnc: row.nextKeyEnc, nextKeyEnc: null }).where(and(eq(publicLinks.companyId, row.companyId), eq(publicLinks.nextKeyEnc, row.nextKeyEnc)));
+      await this.writeSettings();
+      return 'done';
     });
   }
 

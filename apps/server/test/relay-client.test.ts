@@ -179,6 +179,25 @@ describe('changing keys', () => {
     }
   });
 
+  it('sets the key it is given', async () => {
+    const { fake, relay, key } = await acme();
+    const next = 'n'.repeat(43);
+    expect(await relay.changeKey('acme', key, next)).toBe(next);
+    expect(fake.bindings.get('acme')?.key).toBe(next);
+    expect(await relay.route('acme', key)).toEqual({ known: false, why: 'refused' });
+    expect((await relay.route('acme', next)).known).toBe(true);
+    /* A key the relay does not take leaves the one it has. */
+    for (const bad of ['n'.repeat(42), next]) {
+      expect((await failure(relay.changeKey('acme', next, bad)) as ApiError).reason, bad).toBe('relay_unreachable');
+      expect(fake.bindings.get('acme')?.key).toBe(next);
+    }
+    /* An answer lost on the way reads as no answer, and the relay holds the new key. */
+    fake.loseAnswer = true;
+    const other = 'o'.repeat(43);
+    expect((await failure(relay.changeKey('acme', next, other)) as ApiError).reason).toBe('relay_unreachable');
+    expect((await relay.route('acme', other)).known).toBe(true);
+  });
+
   it('refuses a key answer that is not a key', async () => {
     const error = await failure(new Relay(await oneAnswer({ key: 5 })).changeKey('acme', 'k'.repeat(20)));
     expect((error as ApiError).reason).toBe('relay_unreachable');
