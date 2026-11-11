@@ -517,6 +517,63 @@ describe('AgentCard', () => {
   });
 });
 
+describe('the Telegram bot on a head\'s card', () => {
+  const HEAD: AgentCardView = { ...CARD, kind: 'head', name: 'Sasha', telegram: null };
+  const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
+
+  it('connects a bot by its token from @BotFather, and shows only the bot\'s name after', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'GET /api/agents/b1': [200, HEAD], 'PUT /api/agents/b1/telegram': [200, { telegram: { username: 'acme_sales_bot' } }] });
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    expect(within(bot).getByText(/@BotFather/, { selector: 'p' })).toBeInTheDocument();
+    const field = within(bot).getByLabelText('Token from @BotFather');
+    expect(within(bot).getByRole('button', { name: 'Connect bot' })).toBeDisabled();
+    await user.type(field, ` ${TOKEN} `);
+    await user.click(within(bot).getByRole('button', { name: 'Connect bot' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/agents/b1/telegram', body: { token: TOKEN } }));
+    const link = await within(bot).findByRole('link', { name: '@acme_sales_bot' });
+    expect(link).toHaveAttribute('href', 'https://t.me/acme_sales_bot');
+    expect(within(bot).queryByLabelText('Token from @BotFather')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(TOKEN);
+  });
+
+  it('says why Telegram did not take the token, in Russian too', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const user = userEvent.setup();
+    open({ 'GET /api/agents/b1': [200, HEAD], 'PUT /api/agents/b1/telegram': [400, { error: { code: 'validation', message: 'Telegram does not take this token.', reason: 'telegram_token' } }] });
+    const bot = await screen.findByRole('region', { name: 'Бот в Telegram' });
+    await user.type(within(bot).getByLabelText('Токен от @BotFather'), TOKEN);
+    await user.click(within(bot).getByRole('button', { name: 'Подключить бота' }));
+    expect(await within(bot).findByRole('alert')).toHaveTextContent('Telegram не принимает этот токен');
+  });
+
+  it('takes the bot off after asking', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'GET /api/agents/b1': [200, { ...HEAD, telegram: { username: 'acme_sales_bot' } }], 'DELETE /api/agents/b1/telegram': [204, undefined] });
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    await user.click(within(bot).getByRole('button', { name: 'Remove bot' }));
+    await user.click(within(bot).getByRole('button', { name: 'Yes, remove' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'DELETE')?.path).toBe('/api/agents/b1/telegram'));
+    expect(await within(bot).findByLabelText('Token from @BotFather')).toBeInTheDocument();
+  });
+
+  it('shows the orchestrator\'s bot to someone who cannot change it, with nothing to change', async () => {
+    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
+    open({ 'GET /api/agents/b1': [200, { ...HEAD, kind: 'orchestrator', telegram: { username: 'acme_ceo_bot' } }] }, listed);
+    const bot = await screen.findByRole('region', { name: 'Telegram bot' });
+    expect(within(bot).getByRole('link', { name: '@acme_ceo_bot' })).toBeInTheDocument();
+    expect(within(bot).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(bot).queryByLabelText('Token from @BotFather')).not.toBeInTheDocument();
+  });
+
+  it('has no bot on a worker\'s card', async () => {
+    open();
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByRole('region', { name: 'Telegram bot' })).not.toBeInTheDocument();
+  });
+});
+
 describe('AgentCard assignment', () => {
   it.each([
     ['en', 'Assignment', 'Skills', 'Prompt', 'Backend engineer'],

@@ -106,14 +106,25 @@ function DeputySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) =
   );
 }
 
-/* rename: the server lets this person change the name here. titleOnly: access is not theirs to change here. */
-type EditRights = { rename: boolean; titleOnly: boolean };
-type EditDraft = { name: string; title: string; access: AccessInput };
+/* rename: the server lets this person change the name here. titleOnly: access is not theirs to change here. telegram: nor
+   is the person's Telegram, which is their own and, but for the CEO's and the deputy's, theirs who manage them. */
+type EditRights = { rename: boolean; titleOnly: boolean; telegram: boolean };
+type EditDraft = { name: string; title: string; access: AccessInput; telegram: string };
 
-/* What Save sends: the name only when the window shows it and it changed, so an old window takes back nobody's new name. */
-function changesOf(person: PersonView, { rename, titleOnly }: EditRights, draft: EditDraft) {
+/* The person's Telegram as the field shows it: the username, or the account's number when that is all there is. */
+const telegramOf = (person: PersonView): string => (person.telegram?.username ? `@${person.telegram.username}` : person.telegram?.id != null ? String(person.telegram.id) : '');
+
+/* What Save sends: the name and the Telegram only when the window shows them and they changed, so an old window takes back
+   nobody's new name, and a number a bot learned stays. */
+function changesOf(person: PersonView, { rename, titleOnly, telegram: tg }: EditRights, draft: EditDraft) {
   const name = draft.name.trim();
-  return { ...(rename && name !== person.name ? { name } : {}), title: draft.title.trim(), ...(titleOnly ? {} : { access: draft.access }) };
+  const telegram = draft.telegram.trim();
+  return {
+    ...(rename && name !== person.name ? { name } : {}),
+    title: draft.title.trim(),
+    ...(titleOnly ? {} : { access: draft.access }),
+    ...(tg && telegram !== telegramOf(person) ? { telegram } : {}),
+  };
 }
 
 const fillable = ({ rename, titleOnly }: EditRights, draft: EditDraft): boolean => (!rename || draft.name.trim() !== '') && (titleOnly || !accessEmpty(draft.access));
@@ -132,14 +143,15 @@ function NameAndTitle({ rename, name, title, onName, onTitle }: { rename: boolea
 
 /* Your own row and the owner's take no access. deputy: the CEO may make this person the deputy, or take it off, here.
    onUpdated: what is saved, before the deputy's own call. */
-function EditForm({ person, org, titleOnly, rename, deputy, onUpdated, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; rename: boolean; deputy: boolean; onUpdated: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
+function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, deputy, onUpdated, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; rename: boolean; telegram: boolean; deputy: boolean; onUpdated: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
   const t = useT();
   const [name, setName] = useState(person.name);
   const [title, setTitle] = useState(person.title);
+  const [telegram, setTelegram] = useState(() => telegramOf(person));
   const [choice, setChoice] = useState<Choice>(() => ({ access: accessInput(person.access), deputy: Boolean(person.isCeoDelegate), before: null }));
   const { access, deputy: isDeputy } = choice;
-  const rights = { rename, titleOnly };
-  const draft = { name, title, access };
+  const rights = { rename, titleOnly, telegram: telegramShown };
+  const draft = { name, title, access, telegram };
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -166,6 +178,13 @@ function EditForm({ person, org, titleOnly, rename, deputy, onUpdated, onSaved, 
       <h2>{t.people.editHeading(person.name)}</h2>
       <form onSubmit={e => void submit(e)} className="panel-form">
         <NameAndTitle rename={rename} name={name} title={title} onName={setName} onTitle={setTitle} />
+        {telegramShown && (
+          <div style={{ gridColumn: 1 }}>
+            <Field label={t.people.telegram} hint={t.people.telegramHint}>
+              {p => <input {...p} value={telegram} onChange={e => setTelegram(e.target.value)} maxLength={64} placeholder={t.people.telegramPlaceholder} autoComplete="off" spellCheck={false} />}
+            </Field>
+          </div>
+        )}
         {!titleOnly && <AccessPicker org={org} value={access} onChange={a => setChoice(c => deputyRule.accessed(c, a))} />}
         {deputy && <DeputySwitch on={isDeputy} onChange={on => setChoice(c => deputyRule.switched(c, on))} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
@@ -184,6 +203,7 @@ function PersonDetails({ person, org, onClose }: { person: PersonView; org: Org 
     <h2>{person.name}</h2>
     <p>{person.title}</p>
     <p>{accessText(t, person.access, org)}</p>
+    {telegramOf(person) && <p>{t.people.telegram}: {telegramOf(person)}</p>}
     <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
   </Edge>;
 }
@@ -196,6 +216,9 @@ const deputyOn = (me: Me, p: PersonView): boolean => me.person.isOwner && !p.isO
 /* Whose name this person may change, as the server's guard has it: their own, and anyone's for the CEO and for the deputy
    who sees the whole company. Having the whole company alone is not enough. */
 const renames = (me: Me, p: PersonView): boolean => p.id === me.person.id || me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company');
+
+/* Whose Telegram this person may set, as the server's guard has it: their own, and anyone's they manage. */
+const setsTelegram = (me: Me, p: PersonView): boolean => p.id === me.person.id || rightsOn(me, p).manageable;
 
 /* What this person may do on another's row. */
 function rightsOn(me: Me, p: PersonView): { manageable: boolean; titleOnly: boolean; deputy: boolean } {
@@ -240,7 +263,7 @@ function PersonEditPanel({ edit, me, org, onUpdated, onSaved, onClose }: { edit:
   if (!edit) return null;
   const canEdit = rightsOn(me, edit.person).manageable || edit.titleOnly;
   if (!canEdit) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
-  return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} rename={renames(me, edit.person)} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
+  return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} rename={renames(me, edit.person)} telegram={setsTelegram(me, edit.person)} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
 }
 
 function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: PersonView; me: Me; org: Org | null; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> }) {

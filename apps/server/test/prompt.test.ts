@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { orchestratorSteady } from '../src/modules/agents/instructions.js';
-import { ORCHESTRATOR_INSTRUCTIONS, preface } from '../src/modules/conversation/prompt.js';
+import { answerInTelegram, ORCHESTRATOR_INSTRUCTIONS, preface } from '../src/modules/conversation/prompt.js';
 import { loadTemplates } from '../src/modules/templates/load.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import type { Task } from '../src/modules/tasks/engine.js';
@@ -213,5 +213,14 @@ describe("what employees wrote, in another agent's turn", () => {
 
   it("leaves a person's answer and comment as theirs", () => {
     expect(wakePrompt({ kind: 'worker' }, task, { agentId: 'a', taskId: 't', why: 'answered', text: 'EUR.' })).toContain(':\n\nEUR.\n\n');
+  });
+});
+
+describe('a person who wrote through Telegram', () => {
+  it('is named with what they are in the company, so the agent weighs their words by it', () => {
+    expect(answerInTelegram({ name: 'Ivan' }, { owner: true, delegate: false, department: null })).toMatch(/^Ivan wrote this in Telegram\. Ivan is the company's owner \(the CEO\)\. .*plain text/);
+    expect(answerInTelegram({ name: 'Rita' }, { owner: false, delegate: false, department: true })).toContain('Rita is responsible for your department.');
+    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: false })).toContain("Bob is neither the company's owner nor the CEO's delegate, nor responsible for your department.");
+    expect(answerInTelegram({ name: 'Bob' }, { owner: false, delegate: false, department: null })).toContain("Bob is neither the company's owner nor the CEO's delegate.");
   });
 });

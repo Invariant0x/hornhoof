@@ -37,6 +37,32 @@ export const PersonPatch = z.object({
 
 const DelegateBody = z.object({ isCeoDelegate: z.boolean() }).strict();
 
+/* Who the person is in Telegram, apart from PersonPatch, which the orchestrator's tool takes whole: a username with or
+   without @, a t.me link, or the account's number; empty takes it off. */
+const TelegramPatch = z.object({ telegram: z.string().trim().max(64).nullable().optional() });
+type TelegramColumns = { telegramUsername: string | null; telegramUserId: number | null };
+
+const badTelegram = () => new ApiError(400, 'validation', 'Write the Telegram username, like @name, or the number of the account.', 'telegram_invalid');
+
+/* What the field says, or nothing to change when it says what is kept already: a bot keeps the number it learned. */
+function telegramChange(input: string | null | undefined, now: TelegramColumns): TelegramColumns | undefined {
+  if (input === undefined) return undefined;
+  const plain = (input ?? '').replace(/^(?:https?:\/\/)?t\.me\//i, '').replace(/^@/, '');
+  if (!plain) return now.telegramUsername || now.telegramUserId ? { telegramUsername: null, telegramUserId: null } : undefined;
+  if (/^\d{1,15}$/.test(plain)) return Number(plain) === now.telegramUserId ? undefined : { telegramUsername: null, telegramUserId: Number(plain) };
+  if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(plain)) throw badTelegram();
+  return plain.toLowerCase() === now.telegramUsername ? undefined : { telegramUsername: plain.toLowerCase(), telegramUserId: null };
+}
+
+/* A Telegram account speaks to the bots as the person it is set for, so it is set from a person's own screen: for
+   themselves, or by whoever changes that person, and for the CEO or the CEO delegate only by the CEO. */
+function guardTelegram(me: Person, target: Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>): void {
+  if (me.via) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen.');
+  if (target.id !== me.id && (target.isOwner || target.isCeoDelegate) && !me.isOwner) {
+    throw new ApiError(403, 'forbidden', 'Only the CEO sets who the CEO or the CEO delegate is in Telegram.', 'owner_locked');
+  }
+}
+
 const IdParams = z.object({ id: z.uuid() });
 const TokenParams = z.object({ token: z.string().min(1).max(100) });
 
@@ -247,11 +273,16 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = PersonPatch.parse(req.body);
-    /* Anyone may change their own name and title; everything else needs the whole company. */
+    const { telegram } = TelegramPatch.parse(req.body);
+    /* Anyone may change their own name, title and Telegram; everything else needs the whole company. */
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
-    const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+    const [target] = await db
+      .select({ ...personColumns, passwordHash: people.passwordHash, telegramUsername: people.telegramUsername, telegramUserId: people.telegramUserId })
+      .from(people)
+      .where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (telegram !== undefined) guardTelegram(me, target);
     guardRename(me, id, body);
     guardDisable(me, target, body);
     if (body.access && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
@@ -263,7 +294,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (body.title !== undefined) changes.title = body.title;
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
-    Object.assign(changes, markAfter(changes.status, body));
+    Object.assign(changes, markAfter(changes.status, body), telegramChange(telegram, target));
 
     const person = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
@@ -274,6 +305,9 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
       const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
       return row!;
+    }).catch((err: unknown) => {
+      if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'Another person of the company has this Telegram already.', 'telegram_person_taken');
+      throw err;
     });
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
     if (changes.status === 'disabled') {

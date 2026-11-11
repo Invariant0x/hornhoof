@@ -680,6 +680,13 @@
       "when": 1794313434406,
       "tag": "0097_route_abilities",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794404648165,
+      "tag": "0098_telegram",
+      "breakpoints": true
     }
   ]
 }

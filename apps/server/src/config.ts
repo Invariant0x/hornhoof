@@ -37,6 +37,8 @@ export type Config = {
   templatesDir: string;
   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
   relayUrl: string;
+  /* Where the Telegram Bot API answers; tests put a stand-in here. */
+  telegramApiUrl: string;
   /* The tunnel container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
   /* How much all the files on the company's tasks may take together. */
@@ -84,6 +86,7 @@ const Env = z.object({
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+  TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
@@ -138,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+    telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     ...harnessSettings(set),

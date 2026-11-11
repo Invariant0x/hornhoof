@@ -25,7 +25,7 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 type Crew = keyof AclCompany['crew'];
 type Viewer = keyof AclCompany['tokens'];
-type Call = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: object };
+type Call = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; payload?: object };
 
 /* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything. */
 type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; closedStatus?: 403 | 404 };
@@ -59,6 +59,9 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/agents/:id/start', of: anAgent('POST', '/start', {}) },
   { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
   { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
+  /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
+  { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true },
+  { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true },
   { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits') },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
