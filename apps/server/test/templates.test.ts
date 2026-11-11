@@ -110,6 +110,23 @@ describe('templates', () => {
     expect(paragraph).not.toMatch(/exception|never change|never hire/);
   });
 
+  it("keeps every department's work as files in a repository of its own, which the orchestrator creates itself with a saved key, or offers", () => {
+    const resources = body('orch-resources');
+    expect(resources).toMatch(/Every department keeps at least one repository of its own/);
+    expect(resources).toMatch(/letters, texts, layouts and tables/);
+    expect(resources).toMatch(/any earlier version/);
+    expect(resources).toMatch(/keeps none and a key is saved for it, create its first repository yourself with create_repository[\s\S]*then tell the CEO or the department's owner[\s\S]*its address/);
+    expect(resources).toMatch(/no key[\s\S]*offer one to the CEO or the department's owner[\s\S]*why[\s\S]*what it takes/);
+    expect(resources).toMatch(/A second repository[\s\S]*only with their word/);
+    expect(resources).not.toMatch(/never create one without their word/i);
+    expect(body('orch-company')).toMatch(/hands in a document in place of a commit only until it has one/);
+    for (const id of ['hh-lead-tasks', 'hh-task-flow']) expect(body(id), id).toMatch(/letters, texts, layouts and tables/);
+    expect(body('hh-lead-tasks')).toMatch(/a document only while the department keeps none/);
+    expect(body('hh-task-flow')).toMatch(/only while your department keeps no repository/);
+    expect(body('hh-head')).toMatch(/keeps no repository[\s\S]*"tell_orchestrator"/);
+    for (const id of ['orch-resources', 'orch-company', 'hh-lead-tasks', 'hh-task-flow', 'hh-head']) expect(body(id), id).not.toMatch(/[—ё]/);
+  });
+
   it('keeps task tools, waits, evidence and communication available without a role workflow', () => {
     const flow = `${body('hh-tasks')}\n${body('hh-task-flow')}`;
     for (const tool of ['task', 'tasks', 'submit', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);

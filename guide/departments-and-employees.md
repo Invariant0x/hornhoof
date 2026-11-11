@@ -133,7 +133,7 @@ Every department has a route of its own: the stages its work goes through in a t
 
 The one who checks carries the skill "Checking a result" and runs a model at least as strong as the author's. It corrects what it finds itself and passes the result on, or sends work that answers the wrong question to the head.
 
-A department that keeps its work in a repository hands in a commit, as Development does. A department with no repository hands in a document: what the employee wrote in the hand-in and the files attached to the task. The task shows its stages as "Work" and "Check", and once the check passed it waits for the head to accept it.
+A department that keeps its work in a repository hands in a commit, as Development does. A department with no repository hands in a document until it gets one: what the employee wrote in the hand-in and the files attached to the task. [Repositories](repositories.md#why-does-every-department-need-one) says why it should get one. The task shows its stages as "Work" and "Check", and once the check passed it waits for the head to accept it.
 
 A department where nobody carries the checking skill works as before: the employee does the task and reports it done. To have work checked there, hire the role from the table or switch the skill on for an employee. Outside a turn, and in a turn that runs turnkey, there are no stages in any department.
 

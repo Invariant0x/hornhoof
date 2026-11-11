@@ -76,7 +76,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await page.keyboard.press('Escape');
     await expect(logout).toHaveCount(0);
     expect(stops).toEqual([]);
-    for (const name of en ? ['About', 'Share access', 'Versions'] : ['О программе', 'Общий доступ', 'Версии']) {
+    for (const name of en ? ['About', 'Company settings', 'Versions'] : ['О программе', 'Настройки компании', 'Версии']) {
       await activate(account);
       await page.getByRole('button', { name, exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();

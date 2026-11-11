@@ -275,6 +275,30 @@ export const departments = pgTable('departments', {
   createdAt: createdAt(),
 }, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
+/* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
+   shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
+   department may keep one of its own, which goes first for it and its products. */
+export const repoHosts = pgTable(
+  'repo_hosts',
+  {
+    id: id(),
+    companyId: companyId(),
+    /* None: the whole company's. */
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['github'] }).notNull().default('github'),
+    owner: text('owner').notNull(),
+    tokenEnc: text('token_enc').notNull(),
+    tokenLast4: text('token_last4').notNull(),
+    updatedBy: uuid('updated_by').references(() => people.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [
+    uniqueIndex('repo_hosts_company').on(t.companyId).where(sql`${t.departmentId} IS NULL`),
+    uniqueIndex('repo_hosts_department').on(t.departmentId),
+    check('repo_hosts_provider', sql`${t.provider} IN ('github')`),
+  ],
+);
+
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
 export const approvalPolicies = pgTable(

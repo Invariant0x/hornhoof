@@ -6,13 +6,14 @@ import { errorText, useT } from '../i18n';
 import type { Me } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { CompanyRepoHost } from '../ui/RepoHost';
 import { useDialogClose } from '../ui/use-dialog-close';
 
 type Link = { name: string; url: string };
 type Loaded = { link: Link | null; domain: string };
 
-/* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
-   copy, move to another name or remove. */
+/* The company's settings, for people who see the whole company: its public link at hornhoof.org, which they copy, move
+   to another name or remove, and the GitHub key Hornhoof creates repositories with. */
 export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -117,6 +118,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
           </section>
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+        <CompanyRepoHost />
       </div>
     </div>
   );
