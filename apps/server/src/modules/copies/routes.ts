@@ -1,11 +1,11 @@
 import { Encrypter } from 'age-encryption';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import type { BundleSecrets } from '../backups/bundle.js';
 import { notAMachine } from '../network/join.js';
 import { networkMachine } from '../network/store.js';
-import { keeperAsker } from '../network/via.js';
+import { keeperAsker, type Asker } from '../network/via.js';
 import { holdsData } from './holds.js';
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
@@ -15,14 +15,19 @@ const notLeading = () => new ApiError(503, 'unavailable', 'This server does not 
 
 export function copiesRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
+  /* Who is not a keeper gets no further. */
+  const requireKeeper = async (req: FastifyRequest): Promise<Asker> => {
+    const who = await keeperAsker(req, config);
+    if (!who) throw notKeeper();
+    return who;
+  };
 
   /* A machine that the ranking gave the data asks for what it needs to keep it: the company's secret, the key its node
      signs in with, and the relay's address. They go out only sealed to the key that machine's keeper made, so nothing
      on the way and no other machine reads them, and only to the keeper of a live machine whose row says data and
      whose person sees the whole company. */
   app.post('/api/network/secrets', async (req, reply) => {
-    const who = await keeperAsker(req, config);
-    if (!who) throw notKeeper();
+    const who = await requireKeeper(req);
     if (who.own) throw notData();
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
