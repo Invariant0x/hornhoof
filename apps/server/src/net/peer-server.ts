@@ -14,7 +14,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -36,15 +36,23 @@ export type PeerServerOptions = {
   backups?: PeerBackups;
   /* What takes the upload of a machine that stopped holding the company's data; without it, none is taken. */
   uploads?: PeerUploads;
+  /* What answers the keeper of another data machine about a planned switch of the server; without it, nothing does. */
+  switches?: PeerSwitches;
   log: (line: string) => void;
   now?: () => Date;
   sweepMs?: number;
 };
+/* The paths of a planned switch, as one data machine's keeper asks them of another's: the method, the path with its
+   query, and the body as JSON, none for a GET. after: done once the answer has gone out. */
+export type PeerSwitches = { handle(peer: Peer, method: 'GET' | 'POST', path: string, body: unknown): Promise<{ status: number; body: object; after?: () => void }> };
 type Kind = 'peer' | 'app';
-type Route = { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'upload'; id: string; length: number | null } | { to: 'refused'; status: 403 | 404 };
+type Route =
+  | { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'upload'; id: string; length: number | null }
+  | { to: 'switch'; method: 'GET' | 'POST'; path: string } | { to: 'refused'; status: 403 | 404 };
 type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number) => void; reject: (err: Error) => void };
 
 const SWEEP_MS = 5000;
+const SWITCH_BODY_BYTES = 64 * 1024;
 const MINUTE_MS = 60_000;
 const ANY_ADDRESS = '0.0.0.0';
 const CERT_REVOKED = 'CERT_REVOKED';
@@ -71,6 +79,10 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if (method === 'PUT' && path.startsWith(PEER_PATHS.upload) && UUID.test(path.slice(PEER_PATHS.upload.length))) {
     const length = /^\d{1,15}$/.test(String(headers['content-length'])) ? Number(headers['content-length']) : null;
     return { to: 'upload', id: path.slice(PEER_PATHS.upload.length), length };
+  }
+  /* A planned switch is between the keepers of machines that hold the data, on the peer door alone. */
+  if ((method === 'GET' || method === 'POST') && path.startsWith(PEER_PATHS.switch)) {
+    return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
   }
   return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
 }
@@ -142,6 +154,23 @@ function joinBothWays(stream: ServerHttp2Stream, far: Duplex, sent?: (bytes: num
     if (!far.readableEnded) stream.close(http2.constants.NGHTTP2_CONNECT_ERROR);
     /* Nothing reads what the peer still sends, and a stream with unread bytes never closes. */
     stream.resume();
+  });
+}
+
+/* What a peer sent on a stream, whole, when it is no longer than this; null for more, or for a stream that was cut. */
+function bodyWithin(stream: ServerHttp2Stream, max: number): Promise<Buffer | null> {
+  return new Promise(resolve => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const take = (chunk: Buffer): void => {
+      size += chunk.length;
+      if (size <= max) return void chunks.push(chunk);
+      stream.off('data', take);
+      resolve(null);
+    };
+    stream.on('data', take);
+    stream.once('end', () => resolve(Buffer.concat(chunks)));
+    stream.once('close', () => resolve(null));
   });
 }
 
@@ -323,7 +352,36 @@ export class PeerServer {
     }
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
     if (route.to === 'upload') return void this.takeUpload(stream, peer, route.id, route.length);
+    if (route.to === 'switch') return void this.answerSwitch(stream, peer, route.method, route.path);
     answerEmpty(stream, route.status);
+  }
+
+  /* A path of a planned switch: its body is read whole, as JSON and no longer than a hello, and what handles it gives
+     the answer. What it wants done after the answer is done once the stream that carried it has ended. */
+  private async answerSwitch(stream: ServerHttp2Stream, peer: Peer, method: 'GET' | 'POST', path: string): Promise<void> {
+    const { switches } = this.opts;
+    if (!switches) return answerEmpty(stream, 404);
+    let body: unknown;
+    if (method === 'POST') {
+      const sent = await bodyWithin(stream, SWITCH_BODY_BYTES);
+      try {
+        if (!sent) throw new Error('too long, or cut');
+        body = JSON.parse(sent.toString());
+      } catch {
+        answerEmpty(stream, 400);
+        /* Whatever the peer still sends is not read. */
+        if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+        return;
+      }
+    }
+    const answer = await switches.handle(peer, method, path, body).catch(() => null);
+    if (isGone(stream)) return;
+    if (!answer) return answerEmpty(stream, 500);
+    const said = JSON.stringify(answer.body);
+    if (answer.after) stream.once('close', answer.after);
+    stream.respond({ ':status': answer.status, 'content-type': 'application/json' });
+    this.count(peer, Buffer.byteLength(said));
+    stream.end(said);
   }
 
   /* A bundle goes to a machine picked to hold it, with its length said first. A peer that leaves ends the reading. */

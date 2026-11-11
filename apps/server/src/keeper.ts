@@ -6,6 +6,11 @@ const log = (line: string): void => console.log(line);
 
 type Running = { start(): Promise<unknown>; stop(): Promise<void> };
 
+/* A keeper whose kind must change ends itself: its listeners close, the process ends with 0, and compose starts it
+   again, as the kind its folders say then. */
+let running: Running | null = null;
+const exit = (): void => void (running?.stop() ?? Promise.resolve()).catch(() => undefined).then(() => process.exit(0));
+
 async function workerKeeper(): Promise<Running> {
   const { WorkerKeeper } = await import('./modules/keeper/worker.js');
   const { workerConfig } = await import('./modules/keeper/worker-config.js');
@@ -27,6 +32,7 @@ async function dataKeeper(): Promise<Running> {
   const { statfsSync } = await import('node:fs');
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
+  const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -58,6 +64,32 @@ async function dataKeeper(): Promise<Running> {
     copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
     sync,
     internet: new InternetMeasures({ dir: KEEPER_DIR, log }),
+    /* Its part of a planned switch of the server to this machine: with nothing written down of one it leads at once,
+       and tells an old leader that comes back late which machine leads now. */
+    taking:
+      config.databaseUrl && config.machineId
+        ? parts => {
+            const sql = keeperSql(config.databaseUrl!, { timeoutMs: 20_000 });
+            const relay = new Relay(config.relayUrl);
+            /* The one subscription this database follows the old leader with. */
+            const subscribed = async (): Promise<string | null> =>
+              (await sql.query<{ name: string }>('SELECT s.subname::text AS name FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() ORDER BY 1 LIMIT 1')).rows[0]?.name ?? null;
+            return new Promoter({
+              dir: KEEPER_DIR, controlDir: config.controlDir, sql, machine: { networkId: config.machineId! },
+              registered: async () => {
+                const link = parts.link();
+                if (!link) return false;
+                const route = await relay.route(link.name, link.key);
+                return route.known && route.state === 'held' && route.client === link.client;
+              },
+              probe: async nonce => {
+                const base = process.env.HORNHOOF_LINK_PROBE || parts.link()?.url;
+                return base ? probeLink(base, nonce) : null;
+              },
+              tunnel: parts.tunnel, subscription: pgSubscription(sql, subscribed), appLeads: parts.appLeads, exit, log,
+            });
+          }
+        : undefined,
   });
 }
 
@@ -87,6 +119,7 @@ async function followKeeper(): Promise<Running> {
     /* While the copy is being made its database has no link to read yet. */
     settings: () => tunnelSettings(db, whole).catch(() => undefined),
     worker: { internet: new InternetMeasures({ dir: config.dir, log }) },
+    exit,
   });
 }
 
@@ -105,11 +138,14 @@ async function followsAnother(): Promise<boolean> {
 
 async function dataOrFollowKeeper(): Promise<Running> {
   const { keeperRole } = await import('./modules/keeper/role.js');
-  const role = await keeperRole(process.env, process.env.HORNHOOF_CONTROL_DIR || '/control', followsAnother);
+  const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
+  const role = await keeperRole(process.env, process.env.HORNHOOF_CONTROL_DIR || '/control', KEEPER_DIR, followsAnother);
+  /* One that takes the server over, or hands it over, is a leading keeper that goes on from what it wrote down. */
   return role === 'follow' ? followKeeper() : dataKeeper();
 }
 
 const keeper = await (process.env.HORNHOOF_ROLE === 'worker' ? workerKeeper() : dataOrFollowKeeper());
+running = keeper;
 
 await keeper.start();
 

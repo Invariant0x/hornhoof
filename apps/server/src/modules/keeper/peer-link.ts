@@ -10,6 +10,7 @@ import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import type { PeerBackups } from './backups.js';
 import { NETWORK_ID } from '../network/ids.js';
+import type { PeerSwitches } from '../../net/peer-server.js';
 import type { PeerUploads } from './uploads.js';
 import type { HeldCertificate } from './certificate.js';
 import type { MachineIdentity } from './identity.js';
@@ -65,6 +66,8 @@ export type PeerLinkOptions = {
   backups?: PeerBackups;
   /* What takes the uploads of machines that stopped holding the data; none are taken when left out. */
   uploads?: PeerUploads;
+  /* What answers another data machine's keeper about a planned switch of the server. */
+  switches?: PeerSwitches;
   log: (line: string) => void;
 };
 
@@ -217,6 +220,7 @@ export class PeerLink {
       hello: () => this.hello(),
       backups: this.opts.backups,
       uploads: this.opts.uploads,
+      switches: this.opts.switches,
       log: this.opts.log,
     });
     this.server = server;

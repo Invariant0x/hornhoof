@@ -326,6 +326,34 @@ describe('the keeper', () => {
     expect(await row()).toMatchObject({ webPort: 8123, peerPort: 8223 });
   });
 
+  it('takes no lease before it promoted', async () => {
+    const lease = fakeLease();
+    const said = { leads: false, tunnel: [] as string[] };
+    const front = await appIsDown();
+    const taking: KeeperOptions['taking'] = parts => ({
+      start: async () => void parts.tunnel.start(),
+      stop: async () => undefined,
+      leads: () => said.leads,
+      handle: async () => ({ status: 404, body: {} }),
+    });
+    const k = await keeperOn(await echoHeaders(), { lease, taking, takingEveryMs: 10, everyMs: 20, ports: { front: front.port, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 } });
+    expect(k.ports.front).toBe(front.port);
+    /* Until it promoted: no lease, the app off, and nobody let in at the front door. */
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(lease.calls.filter(call => call.method === 'take')).toEqual([]);
+    expect([wordIn(k.dir), k.keeper.mode()]).toEqual(['off', 'read']);
+    await expect(send(front, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+    /* The link's door answers who this machine is, which its own nonce is checked by. */
+    const proof = await send(k.link, { path: `/api/network/lease?nonce=${'n'.repeat(22)}` });
+    expect([proof.status, JSON.parse(proof.body)]).toEqual([200, { machine: null, term: null, nonce: 'n'.repeat(22) }]);
+
+    said.leads = true;
+    await until(() => wordIn(k.dir) === 'lead');
+    expect(lease.calls.filter(call => call.method === 'take')).toHaveLength(1);
+    await until(async () => (await send(front, { path: '/' }).catch(() => null))?.status === 200);
+    expect(k.keeper.mode()).toBe('lead');
+  });
+
   it('keeps leading and serving when its own folder cannot be written', async () => {
     const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: 'a1b2c3d4'.repeat(4) });
     const notAFolder = join(folder(), 'keeper');

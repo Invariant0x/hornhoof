@@ -12,6 +12,7 @@ import { Leaving, type LeavingOptions } from './leave.js';
 import type { Sql } from './lease-store.js';
 import { machineKey, reasonOf } from './machine-keys.js';
 import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
+import { pgSubscription, Taker, type TakerOptions } from './taking.js';
 import { writeKeeperState } from './state.js';
 import { WorkerKeeper, type KeeperView, type WorkerKeeperOptions, type WorkerStatus } from './worker.js';
 
@@ -54,6 +55,10 @@ export type FollowKeeperOptions = {
   maker?: Partial<CopyMakerOptions>;
   /* What a test changes in how the machine gives up the data once its owner lost the scope. */
   leaving?: Partial<LeavingOptions>;
+  /* What a test changes in how this machine answers a planned switch of the server to it. */
+  taker?: Partial<TakerOptions>;
+  /* Ends this keeper, so that it starts again as another kind; the process ends unless a test says otherwise. */
+  exit?: () => void;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
@@ -63,13 +68,18 @@ export type FollowKeeperOptions = {
    makes this machine's copy and keeps it, opens a door through which its database reaches the leader's, and serves a
    peer link of its own, so the leader can read what this machine holds. It takes no lease and runs no frpc of the
    company's link, so nothing it does can make this machine write the company's tables. Once the leader says its owner
-   sees the whole company no more, it stops the copy, gives the leader what it holds, and has the machine wiped. */
+   sees the whole company no more, it stops the copy, gives the leader what it holds, and has the machine wiped. When
+   the CEO moves the server here, it answers the keeper that hands the server over, and once that one said go it ends,
+   to start again as the keeper that takes the server. */
 export class FollowKeeper {
   private readonly maker: CopyMaker;
   private readonly leaving: Leaving;
   private readonly worker: WorkerKeeper;
   private readonly peerDoor: PeerDoor;
   private readonly door: DbDoor;
+  private readonly taker: Taker;
+  private readonly copySql: Closable;
+  private ports: Promise<{ data: number; app: number }> = new Promise(() => {});
   private server: PeerServer | null = null;
   private tunnel: TunnelKeeper<PeerServices> | null = null;
   private view: KeeperView | null = null;
@@ -118,6 +128,17 @@ export class FollowKeeper {
       log,
       ...opts.leaving,
     });
+    this.copySql = opts.sql(COPY_DB);
+    this.taker = new Taker({
+      dir: config.dir,
+      sql: this.copySql,
+      leader: () => this.leader(),
+      copyReady: () => this.maker.report()?.state === 'ready',
+      subscription: pgSubscription(this.copySql, async () => this.maker.report()?.name ?? null),
+      exit: opts.exit ?? (() => process.exit(0)),
+      log,
+      ...opts.taker,
+    });
     this.peerDoor = new PeerDoor({ app: opts.app });
     this.door = new DbDoor({
       connect: () => this.worker.parts().link.connectDb(),
@@ -139,6 +160,18 @@ export class FollowKeeper {
     return { front, door };
   }
 
+  /* The ports this machine's peer link listens on, once it does. */
+  peerPorts(): Promise<{ data: number; app: number }> {
+    return this.ports;
+  }
+
+  /* The machine this keeper's link names as the leader now, as its view lists it. */
+  private leader(): { networkId: string; hostname: string } | null {
+    const leads = this.worker.parts().link.leader();
+    const row = leads && this.view?.data.find(machine => machine.machine === leads.machine);
+    return row ? { networkId: row.networkId, hostname: row.hostname ?? '' } : null;
+  }
+
   status(): WorkerStatus & { copy: CopyReport | null } {
     return { ...this.worker.status(), copy: this.maker.report() };
   }
@@ -149,6 +182,7 @@ export class FollowKeeper {
     this.timer = null;
     await this.working;
     await Promise.all([this.tunnel?.stop(), this.server?.close().catch(() => undefined), this.door.close(), this.peerDoor.stop(), this.worker.stop(), this.maker.stop()]);
+    await this.copySql.close().catch(() => undefined);
   }
 
   private diskFree(): number | null {
@@ -179,13 +213,17 @@ export class FollowKeeper {
       door: this.peerDoor,
       db: this.opts.db,
       hello: () => ({ machine: certificates.current()?.machine ?? '', role: 'data', lead: false, commit: config.commit }),
+      /* A switch is answered to a data machine of the company by the id its keeper runs under; one this machine's view
+         does not list is nobody it would answer. */
+      switches: { handle: (peer, method, path, body) => this.taker.handle(this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '', method, path, body) },
       log,
     });
     this.server = server;
     certificates.onChange(() => server.refresh());
     const { ports, host } = this.opts;
-    void Promise.all([server.listen(ports?.peer ?? KEEPER_PORTS.peer, 'peer', host), server.listen(ports?.peerApp ?? KEEPER_PORTS.peerApp, 'app', LOOPBACK)])
-      .then(([data, app]) => this.offer({ data, app }))
+    this.ports = Promise.all([server.listen(ports?.peer ?? KEEPER_PORTS.peer, 'peer', host), server.listen(ports?.peerApp ?? KEEPER_PORTS.peerApp, 'app', LOOPBACK)]).then(([data, app]) => ({ data, app }));
+    void this.ports
+      .then(local => this.offer(local))
       .catch((err: Error) => void (this.stopped || log(`The peer link could not listen: ${err.message}`)));
   }
 
@@ -230,6 +268,10 @@ export class FollowKeeper {
       await this.leaving.step(owed);
       return;
     }
+    await this.taker.tick();
+    /* Once it took the go of a switch, its subscription stays stopped and this keeper ends: the copy's maker, which
+       starts a stopped subscription again, takes no step. */
+    if (this.taker.going()) return;
     await this.maker.tick(this.view?.copy ?? null);
     this.giveWord(this.maker.mode());
     await this.keepReplica();

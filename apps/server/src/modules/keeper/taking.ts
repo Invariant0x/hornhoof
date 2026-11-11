@@ -1,0 +1,458 @@
+import { randomBytes } from 'node:crypto';
+import { readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { REPLICA_FILE } from './become.js';
+import { COPY_STATE, copyName } from './copy.js';
+import type { Sql } from './lease-store.js';
+import { reasonOf, writePrivately } from './machine-keys.js';
+import { dropSubscriptions, handoverOf, makeSlots, raiseSequences, recordHandover, termOf, writeTerm } from './promote.js';
+import { ensurePublication } from './replica.js';
+import { nextTakeStep, SWITCH_MS, takeState, type Taking, type TakeState } from './switch-step.js';
+
+/* How the machine a planned switch moves the server to takes it over: its follow keeper answers the keeper that hands
+   over, and once that one said go, the machine's keeper starts again as a leading keeper that takes no lease until it
+   holds the company's name at hornhoof.org, proved it by a nonce of its own, and promoted its database. */
+
+export const TAKING_FILE = 'taking.json';
+export const SWITCH_PATH = '/peer/switch/';
+const EVERY_MS = 250;
+const PROBE_EVERY_MS = 1000;
+
+const TermShape = z.object({ number: z.number().int(), machine: z.string(), split: z.boolean() });
+const TakingShape = z.object({
+  switch: z.uuid(),
+  from: z.object({ networkId: z.string(), hostname: z.string().optional() }),
+  term: TermShape,
+  at: z.number(),
+  deadline: z.number(),
+  phase: z.enum(['offered', 'go', 'promoted', 'aborted']),
+  w: z.string().nullable(),
+  copies: z.array(z.string()).nullable(),
+  slots: z.record(z.string(), z.string()).nullable(),
+  why: z.literal('no_link').nullable(),
+});
+
+const LSN = /^[0-9A-F]{1,8}\/[0-9A-F]{1,8}$/;
+const NETWORK_ID = /^[0-9a-f]{32}([0-9a-f]{32})?$/;
+const Offer = z.object({ switch: z.uuid(), term: TermShape, deadline: z.number() });
+const Go = z.object({ switch: z.uuid(), w: z.string().regex(LSN), copies: z.array(z.string().regex(NETWORK_ID)).max(64) });
+const Abort = z.object({ switch: z.uuid() });
+
+/* What this keeper wrote down of a switch it takes part in as the target; null when there is none. A file that cannot
+   be read counts as none, and is said. */
+export function readTaking(dir: string, log?: (line: string) => void): Taking | null {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, TAKING_FILE), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log?.(`The keeper could not read what it wrote down of taking the server over: ${reasonOf(err)}`);
+    return null;
+  }
+  try {
+    return TakingShape.parse(JSON.parse(text));
+  } catch (err) {
+    log?.(`The keeper could not read what it wrote down of taking the server over: ${reasonOf(err)}`);
+    return null;
+  }
+}
+
+/* Written whole and then moved, so a keeper that starts again never reads half of it. */
+export function writeTaking(dir: string, taking: Taking): void {
+  writePrivately(join(dir, TAKING_FILE), JSON.stringify(taking));
+}
+
+export function forgetTaking(dir: string): void {
+  rmSync(join(dir, TAKING_FILE), { force: true });
+}
+
+/* This machine's subscription to the machine that leads, as far as a switch asks of it. applying: it is enabled and
+   its apply worker runs. */
+export type OwnSubscription = { enabled(): Promise<boolean>; applying(): Promise<boolean>; disable(): Promise<void>; enable(): Promise<void> };
+
+/* The subscription of a real Postgres, by the name the copy's maker gave it; with no name there is none. */
+export function pgSubscription(sql: Sql, name: () => Promise<string | null>): OwnSubscription {
+  const ident = (text: string): string => `"${text.replaceAll('"', '""')}"`;
+  const enabled = async (): Promise<boolean> => {
+    const { rows } = await sql.query<{ enabled: boolean }>(
+      'SELECT s.subenabled AS enabled FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() AND s.subname = $1', [await name()]);
+    return rows[0]?.enabled === true;
+  };
+  const set = async (word: 'ENABLE' | 'DISABLE'): Promise<void> => {
+    const subscription = await name();
+    if (subscription && (await enabled()) !== (word === 'ENABLE')) await sql.query(`ALTER SUBSCRIPTION ${ident(subscription)} ${word}`);
+  };
+  return {
+    enabled,
+    applying: async () => {
+      const { rows } = await sql.query<{ running: boolean }>(
+        `SELECT s.subenabled AND EXISTS (SELECT 1 FROM pg_stat_subscription st WHERE st.subid = s.oid AND st.relid IS NULL AND st.pid IS NOT NULL) AS running
+           FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() AND s.subname = $1`, [await name()]);
+      return rows[0]?.running === true;
+    },
+    disable: () => set('DISABLE'),
+    enable: () => set('ENABLE'),
+  };
+}
+
+const PROBE_MS = 5000;
+const Proof = z.object({ machine: z.string(), nonce: z.string() });
+
+/* Asks through the company's public name who holds the lease there, with this nonce: what the keeper that answers
+   says, or nothing when none does in five seconds. base: the link's address, https://<host>. */
+export async function probeLink(base: string, nonce: string): Promise<{ machine: string; nonce: string } | null> {
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/api/network/lease?nonce=${encodeURIComponent(nonce)}`, { signal: AbortSignal.timeout(PROBE_MS), redirect: 'error', headers: { 'cache-control': 'no-store' } });
+    if (res.status !== 200) return null;
+    const proof = Proof.safeParse(await res.json());
+    return proof.success ? proof.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/* after: what is done once the answer has gone out. */
+export type SwitchAnswer = { status: number; body: object; after?: () => void };
+
+const refused = (status: 403 | 404 | 409, why?: string): SwitchAnswer => ({ status, body: { ok: false, ...(why ? { why } : {}) } });
+const OK: SwitchAnswer = { status: 200, body: { ok: true } };
+
+type Asked = { name: 'offer' | 'go' | 'abort'; body: unknown } | { name: 'state'; switch: string };
+
+/* Which of the switch's paths a request names; null for none of them. */
+function asked(method: string, path: string, body: unknown): Asked | null {
+  if (!path.startsWith(SWITCH_PATH)) return null;
+  const [name, query = ''] = path.slice(SWITCH_PATH.length).split('?', 2);
+  if (method === 'POST' && (name === 'offer' || name === 'go' || name === 'abort')) return { name, body };
+  const id = new URLSearchParams(query).get('switch') ?? '';
+  return method === 'GET' && name === 'state' && z.uuid().safeParse(id).success ? { name: 'state', switch: id } : null;
+}
+
+type Paths = {
+  dir: string;
+  sql: Sql;
+  subscription: OwnSubscription;
+  now: () => number;
+  log: (line: string) => void;
+};
+
+/* What the target answers of a switch: from what it wrote down while that is of this switch, else from the handover
+   it recorded. Only the machine that offered is answered; with nothing written down, the machine the handover names
+   as the leader before, so a new leader of any kind tells an old one that comes back late that it leads. */
+async function stateOf(p: Paths, from: string, id: string): Promise<SwitchAnswer> {
+  const mine = readTaking(p.dir, p.log);
+  const taking = mine?.switch === id ? mine : null;
+  const handover = await handoverOf(p.sql, id);
+  if (taking ? taking.from.networkId !== from : handover !== null && handover.term.machine !== from) return refused(403);
+  const state: TakeState = takeState(taking, handover ? { switch: id, term: handover.term, slots: handover.slots } : null);
+  return { status: 200, body: state };
+}
+
+/* What the target answers of this switch: that it leads once it recorded the handover, else how far it is. */
+async function saidOf(sql: Sql, taking: Taking): Promise<TakeState> {
+  const handover = await handoverOf(sql, taking.switch);
+  return takeState(taking, handover ? { switch: taking.switch, term: handover.term, slots: handover.slots } : null);
+}
+
+/* The switch is given up while this machine wrote no term: what it wrote down says so, with the term the old leader
+   leads again under, and its subscription follows again. Once its term is written nothing takes the server back. */
+async function abortNow(p: Paths, taking: Taking, termWritten: boolean, why: Taking['why']): Promise<TakeState> {
+  if (!termWritten && taking.phase !== 'aborted' && taking.phase !== 'promoted') {
+    taking = { ...taking, phase: 'aborted', at: p.now(), why };
+    writeTaking(p.dir, taking);
+    await p.subscription.enable();
+  }
+  return saidOf(p.sql, taking);
+}
+
+/* The term of this attempt, when this machine wrote it: its own, above the old leader's, and of no handed-over time. */
+async function ownTerm(sql: Sql, taking: Taking, machine: string): Promise<boolean> {
+  const term = await termOf(sql);
+  return term !== null && term.machine === machine && term.handedLsn === null && term.number > taking.term.number;
+}
+
+export type TakerOptions = {
+  /* The keeper's own folder. */
+  dir: string;
+  sql: Sql;
+  /* The machine this keeper's link names as the leader now, by its network id, with the name it goes by. */
+  leader: () => { networkId: string; hostname: string } | null;
+  /* Whether this machine's copy holds every table. */
+  copyReady: () => boolean;
+  subscription: OwnSubscription;
+  /* Ends this keeper, so that it starts again as the one that takes the server over. */
+  exit: () => void;
+  now?: () => number;
+  log: (line: string) => void;
+};
+
+/* In the follow keeper of the machine the server moves to: it answers the keeper that hands the server over. An offer
+   is taken only from the machine its link names as the leader, and only while its copy is ready and follows; the go
+   only from the machine that offered, before the deadline and while its apply worker runs. With the go written down
+   and its subscription stopped, the keeper ends and starts again as the one that takes over. The deadline is counted
+   on this machine's own clock from the moment the offer came, so two clocks that differ change nothing. */
+export class Taker {
+  constructor(private readonly opts: TakerOptions) {}
+
+  private now(): number {
+    return this.opts.now?.() ?? Date.now();
+  }
+
+  private paths(): Paths {
+    return { dir: this.opts.dir, sql: this.opts.sql, subscription: this.opts.subscription, now: () => this.now(), log: this.opts.log };
+  }
+
+  /* from: the network id of the machine that asks, as its certificate names its row. */
+  async handle(from: string, method: string, path: string, body: unknown): Promise<SwitchAnswer> {
+    const what = asked(method, path, body);
+    if (!what) return refused(404);
+    if (what.name === 'state') return stateOf(this.paths(), from, what.switch);
+    if (what.name === 'offer') return this.offer(from, what.body);
+    if (what.name === 'go') return this.go(from, what.body);
+    return this.abort(from, what.body);
+  }
+
+  /* Each second: an offer nobody followed ends at its deadline, and a switch that was given up is forgotten in time. */
+  async tick(): Promise<void> {
+    const taking = readTaking(this.opts.dir, this.opts.log);
+    const step = nextTakeStep({ now: this.now(), taking, termWritten: false, registered: false, probed: false, appLeads: false });
+    if (step.do === 'expire' || step.do === 'forget') forgetTaking(this.opts.dir);
+  }
+
+  /* Whether a go was taken, and this keeper is to end: its subscription stays stopped from then on. */
+  going(): boolean {
+    return readTaking(this.opts.dir)?.phase === 'go';
+  }
+
+  private async offer(from: string, body: unknown): Promise<SwitchAnswer> {
+    const offer = Offer.safeParse(body);
+    const leader = this.opts.leader();
+    if (!leader || leader.networkId !== from) return refused(403);
+    if (!offer.success) return refused(409, 'not_ready');
+    const taking = readTaking(this.opts.dir, this.opts.log);
+    if (taking && taking.phase !== 'aborted') {
+      return taking.switch === offer.data.switch && taking.phase === 'offered' && taking.from.networkId === from ? OK : refused(409, 'not_ready');
+    }
+    if (!this.opts.copyReady() || !(await this.opts.subscription.enabled())) return refused(409, 'not_ready');
+    const at = this.now();
+    writeTaking(this.opts.dir, {
+      switch: offer.data.switch, from: { networkId: from, hostname: leader.hostname }, term: offer.data.term, at, deadline: at + SWITCH_MS,
+      phase: 'offered', w: null, copies: null, slots: null, why: null,
+    });
+    return OK;
+  }
+
+  private async go(from: string, body: unknown): Promise<SwitchAnswer> {
+    const go = Go.safeParse(body);
+    const taking = readTaking(this.opts.dir, this.opts.log);
+    if (!taking || taking.from.networkId !== from) return refused(403);
+    if (!go.success || taking.switch !== go.data.switch) return refused(409);
+    if (taking.phase === 'go') return OK;
+    if (taking.phase !== 'offered' || this.now() >= taking.deadline) return refused(409);
+    if (!(await this.opts.subscription.applying())) return refused(409);
+    writeTaking(this.opts.dir, { ...taking, phase: 'go', w: go.data.w, copies: go.data.copies });
+    await this.opts.subscription.disable();
+    this.opts.log(`Taking the server over from ${taking.from.hostname || 'the machine that led'}.`);
+    return { ...OK, after: () => this.opts.exit() };
+  }
+
+  private async abort(from: string, body: unknown): Promise<SwitchAnswer> {
+    const abort = Abort.safeParse(body);
+    const taking = readTaking(this.opts.dir, this.opts.log);
+    if (!taking || taking.from.networkId !== from) return refused(403);
+    if (!abort.success || taking.switch !== abort.data.switch) return refused(409);
+    /* A follow keeper writes no term: the machine that takes over does, once it started again. */
+    return { status: 200, body: await abortNow(this.paths(), taking, false, null) };
+  }
+}
+
+export type PromoterOptions = {
+  /* The keeper's own folder, and the control folder it shares with the updater. */
+  dir: string;
+  controlDir: string;
+  sql: Sql;
+  /* The id this machine's keeper runs under. */
+  machine: { networkId: string };
+  /* Whether hornhoof.org names this keeper's own link client for the company's name now. */
+  registered: () => Promise<boolean>;
+  /* A request through the company's link for the proof of the lease, with a nonce of this keeper's. */
+  probe: (nonce: string) => Promise<{ machine: string; nonce: string } | null>;
+  tunnel: { start(): void; stop(): Promise<void> };
+  subscription: OwnSubscription;
+  appLeads: () => boolean;
+  exit: () => void;
+  /* The promotion, answering the slot made for each machine; the steps below unless a test says otherwise. */
+  promote?: (taking: Taking) => Promise<Record<string, string>>;
+  now?: () => number;
+  log: (line: string) => void;
+  everyMs?: number;
+};
+
+/* In a leading keeper that is taking the server over. Until it promoted, the keeper takes no lease. It starts its
+   link's client, waits until hornhoof.org names that client for the company's name, sends a nonce of its own through
+   the link and takes only its own answer for proof that the name leads to this machine; then it promotes its database.
+   When the name does not come before the deadline it gives the server back: the old leader leads again. Once its term
+   is written there is no way back, and it promotes whatever the time. */
+export class Promoter {
+  private timer: NodeJS.Timeout | null = null;
+  private working: Promise<void> | null = null;
+  private stopped = false;
+  private started = false;
+  private probed = false;
+  private probedAt = -Infinity;
+  private promoted = false;
+  private failing = false;
+
+  constructor(private readonly opts: PromoterOptions) {}
+
+  private now(): number {
+    return this.opts.now?.() ?? Date.now();
+  }
+
+  private paths(): Paths {
+    return { dir: this.opts.dir, sql: this.opts.sql, subscription: this.opts.subscription, now: () => this.now(), log: this.opts.log };
+  }
+
+  async start(): Promise<void> {
+    await this.look();
+    this.timer = setInterval(() => void this.look(), this.opts.everyMs ?? EVERY_MS);
+    this.timer.unref();
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    await this.working;
+  }
+
+  /* Promoted: the keeper may take its lease and start what a leading keeper runs. */
+  leads(): boolean {
+    return this.promoted;
+  }
+
+  /* One look at a time; a look that fails changes nothing, and is said once an outage. */
+  look(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    this.working ??= this.lookOnce()
+      .then(
+        () => void (this.failing = false),
+        (err: unknown) => {
+          if (!this.failing) this.opts.log(`The keeper could not go on taking the server over: ${reasonOf(err)}`);
+          this.failing = true;
+        },
+      )
+      .finally(() => void (this.working = null));
+    return this.working;
+  }
+
+  /* The paths of a switch, as the machine that offered asks them of a keeper that is taking over. */
+  async handle(from: string, method: string, path: string, body: unknown): Promise<SwitchAnswer> {
+    const what = asked(method, path, body);
+    if (!what) return refused(404);
+    if (what.name === 'state') return stateOf(this.paths(), from, what.switch);
+    const taking = readTaking(this.opts.dir, this.opts.log);
+    if (!taking || taking.from.networkId !== from) return refused(403);
+    if (what.name === 'offer') return refused(409, 'not_ready');
+    const named = z.object({ switch: z.uuid() }).safeParse(what.body);
+    if (!named.success || named.data.switch !== taking.switch) return refused(409);
+    /* The go was taken before this keeper started: the same one again changes nothing. */
+    if (what.name === 'go') return taking.phase === 'aborted' ? refused(409) : OK;
+    const written = await ownTerm(this.opts.sql, taking, this.opts.machine.networkId);
+    if (written || taking.phase === 'promoted') return { status: 409, body: await saidOf(this.opts.sql, taking) };
+    const gave = taking.phase !== 'aborted';
+    const state = await this.giveBack(taking, null);
+    return { status: 200, body: state, ...(gave ? { after: () => this.opts.exit() } : {}) };
+  }
+
+  private async lookOnce(): Promise<void> {
+    const { opts } = this;
+    const taking = readTaking(opts.dir, opts.log);
+    if (!taking) {
+      /* Nothing written down: the switch ended, and this keeper leads as any other. */
+      this.promoted = true;
+      return;
+    }
+    if (taking.phase === 'promoted') this.promoted = true;
+    const termWritten = taking.phase === 'go' ? await ownTerm(opts.sql, taking, opts.machine.networkId) : false;
+    const registered = taking.phase === 'go' && !termWritten ? await opts.registered().catch(() => false) : false;
+    const step = nextTakeStep({ now: this.now(), taking, termWritten, registered, probed: this.probed, appLeads: opts.appLeads() });
+    /* The link's client runs from the first look that goes on, also in a keeper that started again and finds the name
+       its own already, or its database promoted. */
+    if (taking.phase === 'promoted' || step.do === 'register' || step.do === 'probe' || step.do === 'promote') this.register();
+    if (step.do === 'none' || step.do === 'lead' || step.do === 'register') return;
+    if (step.do === 'probe') return this.probe();
+    if (step.do === 'promote') return this.promote(taking);
+    if (step.do === 'abort') {
+      await this.giveBack(taking, step.why);
+      return opts.exit();
+    }
+    if (step.do === 'done') {
+      const term = await termOf(opts.sql);
+      forgetTaking(opts.dir);
+      opts.log(`This machine leads the company now, under term ${term?.number ?? '?'}.`);
+      return;
+    }
+    forgetTaking(opts.dir);
+  }
+
+  private register(): void {
+    if (this.started) return;
+    this.started = true;
+    this.opts.tunnel.start();
+  }
+
+  /* Once a second: a nonce of this keeper's own goes through the link, and only an answer that names this machine and
+     that nonce counts. An answer of the old leader's, or of anyone else, proves nothing. */
+  private async probe(): Promise<void> {
+    const now = this.now();
+    if (now - this.probedAt < PROBE_EVERY_MS) return;
+    this.probedAt = now;
+    const nonce = randomBytes(16).toString('base64url');
+    const answer = await this.opts.probe(nonce).catch(() => null);
+    this.probed = answer?.machine === this.opts.machine.networkId && answer.nonce === nonce;
+  }
+
+  private async promote(taking: Taking): Promise<void> {
+    const { opts } = this;
+    const slots = await (opts.promote ?? (t => this.promotion(t)))(taking);
+    rmSync(join(opts.controlDir, REPLICA_FILE), { force: true });
+    rmSync(join(opts.dir, COPY_STATE), { force: true });
+    writeTaking(opts.dir, { ...taking, phase: 'promoted', slots });
+    this.promoted = true;
+  }
+
+  /* The steps by which this machine's database becomes the leader's, each doing nothing when its work is done: the
+     term, the subscription gone, the sequences raised, the publication, a slot for the old leader and for each copy
+     that held everything the old leader wrote, and the record of the handover, which ends the CEO's request. A slot is
+     named after the attempt following the machine's last copy, so no old subscription of that machine attaches to it. */
+  private async promotion(taking: Taking): Promise<Record<string, string>> {
+    const { sql, machine } = this.opts;
+    if (taking.w === null) throw new Error('what it wrote down names no end of the old leader\'s log');
+    await writeTerm(sql, { above: taking.term.number, machine: machine.networkId });
+    await dropSubscriptions(sql);
+    await raiseSequences(sql);
+    await ensurePublication(sql);
+    const named = [...new Set([machine.networkId, taking.from.networkId, ...(taking.copies ?? [])])];
+    const { rows } = await sql.query<{ id: string; networkId: string; copyName: string | null }>(
+      'SELECT id::text AS id, network_id AS "networkId", copy_name AS "copyName" FROM public.machines WHERE network_id = ANY($1::text[]) AND revoked_at IS NULL', [named]);
+    const mine = rows.find(row => row.networkId === machine.networkId);
+    const old = rows.find(row => row.networkId === taking.from.networkId);
+    if (!mine || !old) throw new Error(`${mine ? 'the machine that led' : 'this machine'} has no row here`);
+    const slots: Record<string, string> = {};
+    for (const row of rows) if (row !== mine) slots[row.networkId] = copyName(row.networkId, Number(/_(\d+)$/.exec(row.copyName ?? '')?.[1] ?? 0) + 1);
+    await makeSlots(sql, Object.values(slots));
+    await recordHandover(sql, { id: taking.switch, from: old.id, term: taking.term, applied: taking.w, to: mine.id, at: new Date(this.now()), slots });
+    return slots;
+  }
+
+  /* The name did not come, or the old leader called the switch off: the link's client stops, the subscription follows
+     again, and what is written down says the old leader leads under its next term. */
+  private async giveBack(taking: Taking, why: Taking['why']): Promise<TakeState> {
+    const gave = taking.phase !== 'aborted';
+    if (gave) await this.opts.tunnel.stop();
+    const state = await abortNow(this.paths(), taking, false, why);
+    if (gave) this.opts.log(`Gave the server back to ${taking.from.hostname || 'the machine that led'}: ${why === 'no_link' ? "hornhoof.org did not give this machine the company's name in time" : 'that machine called the move off'}.`);
+    return state;
+  }
+}

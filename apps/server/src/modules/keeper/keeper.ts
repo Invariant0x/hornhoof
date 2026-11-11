@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import type http from 'node:http';
 import { join } from 'node:path';
 import type { Config } from '../../config.js';
+import { eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
+import { machines } from '../../db/schema.js';
 import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
@@ -98,6 +100,25 @@ export type KeeperOptions = {
      a session for the chores of the copies' slots, with the free room of the database's disk. linkPauseMs: for how long
      the link's frpc stays stopped after a lease ended while another machine holds the data. */
   sync?: Pick<SyncControllerOptions, 'catalog' | 'relay' | 'everyMs' | 'routeEveryMs'> & { slots?: { sql: Sql; diskFree: () => number | null; everyMs?: number }; linkPauseMs?: number };
+  /* This keeper's part of a planned switch of the server to this machine, made with what the keeper gives it: the
+     link's client to start and stop, whether this keeper leads, and the company's link as its own client logs in, with
+     its address. While that part does not lead, the keeper is taking the server over. takingEveryMs: how often it
+     looks whether that part leads now. */
+  taking?: (parts: { tunnel: { start(): void; stop(): Promise<void> }; appLeads: () => boolean; link: () => OwnLink | null | undefined }) => TakingPart;
+  takingEveryMs?: number;
+};
+
+/* The company's link as this keeper's own frpc logs in at the relay: its name, its key, the id that client goes by,
+   and the link's address. */
+export type OwnLink = { name: string; key: string; client: string; url: string };
+
+/* What takes the server over for this keeper: it leads once this machine's database is promoted, or at once where
+   no switch is on its way, and answers the paths of a switch to the data machine that asks, named by its network id. */
+export type TakingPart = {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  leads(): boolean;
+  handle(from: string, method: string, path: string, body: unknown): Promise<{ status: number; body: object; after?: () => void }>;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -108,6 +129,7 @@ const LINK_EVERY_MS = 3000;
 const GUARD_EVERY_MS = 10_000;
 const BACKUP_KEYS_RETRY_MS = 60_000;
 const FRPC_RESTART_MS = 2000;
+const TAKING_EVERY_MS = 250;
 /* After a lease ended with another data machine listed, the link's frpc stays stopped this long, so the name is free
    for a machine that takes over; then it starts again, so this keeper holds its route and the relay can be told. */
 const LINK_PAUSE_MS = 30_000;
@@ -187,7 +209,9 @@ function oneAtATime(work: () => Promise<unknown>): () => Promise<void> {
 }
 
 /* Holds this machine's lease and sets the app's mode by it, runs the public link's frpc as its child, ends the link's TLS,
-   and carries what comes in from front and the link to the app. */
+   and carries what comes in from front and the link to the app. A keeper that is taking the server over in a planned
+   switch serves its peers and the link's doors as any other, but takes no lease, tells its app to stay off and keeps its
+   front door closed until its database is promoted; from then on it leads as any other. */
 export class Keeper {
   private readonly holder: LeaseHolder;
   private readonly identity: MachineIdentity | null;
@@ -203,6 +227,12 @@ export class Keeper {
   /* Reads what the peer server sent each machine, ten times a second, for as long as the keeper runs. */
   private readonly throughput: Pick<Throughput, 'start' | 'stop' | 'best'>;
   private readonly sync: SyncController | null;
+  private readonly taker: TakingPart | null;
+  /* Taking the server over: no lease yet, and the app off. */
+  private taking = false;
+  private takingTimer: NodeJS.Timeout | null = null;
+  /* The link's frpc stays stopped while this is set. */
+  private linkHeld = false;
   /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
   private settingsNow: TunnelSettings | null | undefined = undefined;
   private linkPausedUntil = 0;
@@ -239,6 +269,9 @@ export class Keeper {
             log: opts.log,
           })
         : null;
+    this.taker = opts.taking
+      ? opts.taking({ tunnel: { start: () => void (this.linkHeld = false), stop: async () => void (this.linkHeld = true) }, appLeads: () => this.mode() === 'lead', link: () => this.ownLink() })
+      : null;
     this.holder = new LeaseHolder({
       lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log,
       sync: this.sync ?? undefined,
@@ -312,36 +345,75 @@ export class Keeper {
           return now;
         }
       : null;
-    /* Whether another machine holds the data, and the controller's first look, come before the first lease: a machine
-       with copies leads only under the flag the controller gives. */
-    if (this.sync) {
-      await read?.();
-      await this.holder.guard();
-      await this.sync.start();
+    /* A switch of the server to this machine that is on its way: until its part leads, the link's frpc runs only once
+       that part starts it. */
+    if (this.taker) {
+      this.linkHeld = true;
+      await this.taker.start();
+      this.taking = !this.taker.leads();
+      if (!this.taking) this.linkHeld = false;
     }
-    /* The lease and the fences come before the first word, so a healthy machine leads from it. */
     const tick = oneAtATime(() => this.holder.tick().then(() => this.giveWord()));
-    await this.holder.tick();
-    await this.holder.look();
-    this.giveWord();
-    const front = await listenOn(this.door(visitorFromFront(frontHost)), at.front, host);
+    const lead = async (): Promise<void> => {
+      /* Whether another machine holds the data, and the controller's first look, come before the first lease: a
+         machine with copies leads only under the flag the controller gives. */
+      if (this.sync) {
+        await read?.();
+        await this.holder.guard();
+        await this.sync.start();
+      }
+      /* The lease and the fences come before the first word, so a healthy machine leads from it. */
+      await this.holder.tick();
+      await this.holder.look();
+      this.giveWord();
+    };
+    const leaseTimers = (): void => {
+      this.timer = setInterval(() => void tick(), everyMs);
+      this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
+    };
+    const afterLead = (): void => {
+      this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
+      this.guardTimer.unref();
+      if (this.opts.sync?.slots) {
+        this.slotsTimer = setInterval(() => void this.keepSlots(), this.opts.sync.slots.everyMs ?? SLOTS_EVERY_MS);
+        this.slotsTimer.unref();
+        void this.keepSlots();
+      }
+    };
+    const frontDoor = this.door(visitorFromFront(frontHost));
+    const takingNow = this.taking;
+    let front = at.front;
+    if (takingNow) this.giveWord();
+    else {
+      await lead();
+      front = await listenOn(frontDoor, at.front, host);
+    }
     const linkHttp = await listenOn(this.door(visitorFromLink, { link: true }), at.linkHttp, LINK_HOST);
     const linkTls = await this.listener.listen(at.linkTls);
-    this.timer = setInterval(() => void tick(), everyMs);
-    this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
+    if (!takingNow) leaseTimers();
     if (db && read) this.carryLink(db, () => this.linkUnlessPaused(read), { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
     this.throughput.start();
     this.carrier?.start();
     if (this.identity) void this.takeBackups();
-    this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
-    this.guardTimer.unref();
     if (read) await this.servePeers(read, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
-    if (this.opts.sync?.slots) {
-      this.slotsTimer = setInterval(() => void this.keepSlots(), this.opts.sync.slots.everyMs ?? SLOTS_EVERY_MS);
-      this.slotsTimer.unref();
-      void this.keepSlots();
+    if (!takingNow) afterLead();
+    else {
+      /* Once its database is promoted this keeper leads as any other: the lease, the word, the front door, and the
+         rest of what a leader runs, once. */
+      const takeOver = oneAtATime(async () => {
+        if (!this.taking || this.stopped || !this.taker?.leads()) return;
+        this.taking = false;
+        if (this.takingTimer) clearInterval(this.takingTimer);
+        this.takingTimer = null;
+        await lead();
+        await listenOn(frontDoor, at.front, host).catch((err: unknown) => this.opts.log(`The keeper could not open its front door: ${reasonOf(err)}`));
+        if (this.stopped) return;
+        leaseTimers();
+        afterLead();
+      });
+      this.takingTimer = setInterval(() => void takeOver(), this.opts.takingEveryMs ?? TAKING_EVERY_MS);
     }
     return { front, linkHttp, linkTls };
   }
@@ -353,8 +425,10 @@ export class Keeper {
     if (this.fencesTimer) clearInterval(this.fencesTimer);
     if (this.guardTimer) clearInterval(this.guardTimer);
     if (this.slotsTimer) clearInterval(this.slotsTimer);
+    if (this.takingTimer) clearInterval(this.takingTimer);
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = null;
     this.stopped = true;
+    await this.taker?.stop();
     await this.sync?.stop();
     if (this.backupsTimer) clearTimeout(this.backupsTimer);
     await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.links?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
@@ -381,6 +455,8 @@ export class Keeper {
       peerClientFor: this.opts.peerClientFor,
       backups: this.peerBackups(),
       uploads: this.uploads().peer(),
+      /* A switch is answered to a data machine of the company, by the id its keeper runs under. */
+      switches: this.taker ? { handle: async (peer, method, path, body) => this.taker!.handle(await this.networkIdOf(peer.machine), method, path, body) } : undefined,
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
@@ -401,6 +477,13 @@ export class Keeper {
       ...this.opts.copies,
     });
     this.links.start();
+  }
+
+  /* The id the keeper of that machine runs under; none for a row this database does not hold. */
+  private async networkIdOf(machine: string): Promise<string> {
+    if (!this.opts.db) return '';
+    const [row] = await this.opts.db.select({ networkId: machines.networkId }).from(machines).where(eq(machines.id, machine));
+    return row?.networkId ?? '';
   }
 
   /* The link's settings: the database's own; and while it has none, on a server that is being restored from a recovery
@@ -471,10 +554,10 @@ export class Keeper {
 
   /* The company's link as this keeper's own frpc logs in at the relay, for the sync controller: null without a link,
      undefined before the settings were read. */
-  private ownLink(): { name: string; key: string; client: string } | null | undefined {
+  private ownLink(): OwnLink | null | undefined {
     const settings = this.settingsNow;
     if (!settings) return settings;
-    return { name: settings.name, key: settings.key, client: linkClientId(settings.name, this.opts.config.machineId!) };
+    return { name: settings.name, key: settings.key, client: linkClientId(settings.name, this.opts.config.machineId!), url: settings.url };
   }
 
   /* A lease of this machine ended. With another machine holding the data, the link's frpc stops for a while: the
@@ -487,7 +570,7 @@ export class Keeper {
      settings again after that, so it starts anew, holds its route, and the relay can be told what is true now. */
   private async linkUnlessPaused(read: () => Promise<TunnelSettings | null | undefined>): Promise<TunnelSettings | null | undefined> {
     const settings = await read();
-    return settings && performance.now() < this.linkPausedUntil ? null : settings;
+    return settings && (this.linkHeld || performance.now() < this.linkPausedUntil) ? null : settings;
   }
 
   /* The chores of the copies' slots, while this machine leads: how much of the log a copy that fell behind is kept,
@@ -517,7 +600,7 @@ export class Keeper {
     const dir = this.opts.config.controlDir;
     try {
       writeKeeperState(dir, {
-        mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [],
+        mode: this.taking ? 'off' : this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [],
         /* How fast this machine sent to each of the others at its best in the last day, for the server order. */
         throughput: this.throughput.best(Date.now()),
       });

@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { copyName } from '../../src/modules/keeper/copy.js';
 import { keeperSql, leaseStore, type Sql } from '../../src/modules/keeper/lease-store.js';
 import { applyRunning, dropSlots, dropSubscriptions, handoverOf, joinSlot, makeSlots, markHanded, raiseSequences, recordHandover, termOf, writeTerm } from '../../src/modules/keeper/promote.js';
 import { ensurePublication, REPLICA_ROLE } from '../../src/modules/keeper/replica.js';
+import { SWITCH_MS } from '../../src/modules/keeper/switch-step.js';
+import { pgSubscription, Promoter, readTaking, writeTaking } from '../../src/modules/keeper/taking.js';
 import { pair, type Pair } from './pair.js';
 import type { RealCluster } from './pg.js';
 
@@ -26,6 +31,7 @@ let p: Pair;
 let lead: Side;
 let follow: Side;
 let tasks = 1;
+const folders: string[] = [];
 
 async function connected(url: string): Promise<pg.Client> {
   const client = new pg.Client({ connectionString: url });
@@ -78,8 +84,9 @@ const confirmed = async (on: Side, slot: string, lsn: string): Promise<boolean> 
 
 /* The machine that leads stops writing, the one that follows it reaches the end of its log and is promoted, and the
    old leader joins it over the slot made for it: the steps of a planned switch, in their order, each by the function
-   the keepers run. checkpoint: a checkpoint is the last thing in the old leader's log. */
-async function handOver(opts: { checkpoint?: boolean } = {}): Promise<void> {
+   the keepers run. checkpoint: a checkpoint is the last thing in the old leader's log. promoter: the promotion is
+   the taking keeper's own, from what it wrote down at the go. */
+async function handOver(opts: { checkpoint?: boolean; promoter?: boolean } = {}): Promise<void> {
   const [a, b] = [lead, follow];
   const followed = b.follows!;
   const id = randomUUID();
@@ -101,20 +108,46 @@ async function handOver(opts: { checkpoint?: boolean } = {}): Promise<void> {
   }
 
   /* The promotion. */
-  const term = await writeTerm(b.sql, { above: led.number, machine: b.networkId });
-  expect(term).toEqual({ number: expect.any(Number) as number, machine: b.networkId, split: false });
-  expect(term.number).toBeGreaterThan(led.number);
-  expect(await termOf(b.sql)).toEqual({ ...term, handedLsn: null });
-  expect(await dropSubscriptions(b.sql)).toEqual([followed]);
-  expect((await raiseSequences(b.sql)).filter(name => name.endsWith('task_events_id_seq'))).toHaveLength(1);
-  await ensurePublication(b.sql);
   const slot = copyName(a.networkId, a.attempt + 1);
-  await makeSlots(b.sql, [slot]);
   const slots = { [a.networkId]: slot };
   const at = new Date();
-  await recordHandover(b.sql, { id, from: a.machine, term: led, applied: w, to: b.machine, at, slots });
+  if (opts.promoter) {
+    /* As the keeper that started again after the go: the name is its own, its nonce comes back, and it promotes. */
+    const [dir, controlDir] = [mkdtempSync(join(tmpdir(), 'hh-switch-keeper-')), mkdtempSync(join(tmpdir(), 'hh-switch-control-'))];
+    folders.push(dir, controlDir);
+    writeTaking(dir, {
+      switch: id, from: { networkId: a.networkId, hostname: 'the old leader' }, term: { number: led.number, machine: led.machine, split: false },
+      at: Date.now(), deadline: Date.now() + SWITCH_MS, phase: 'go', w, copies: [], slots: null, why: null,
+    });
+    const lines: string[] = [];
+    const promoter = new Promoter({
+      dir, controlDir, sql: b.sql, machine: { networkId: b.networkId },
+      registered: async () => true,
+      probe: async nonce => ({ machine: b.networkId, nonce }),
+      tunnel: { start: () => undefined, stop: async () => undefined },
+      subscription: pgSubscription(b.sql, async () => followed),
+      appLeads: () => false, exit: () => lines.push('exit'), log: line => lines.push(line),
+    });
+    await promoter.look();
+    expect(promoter.leads()).toBe(false);
+    await promoter.look();
+    expect(lines).toEqual([]);
+    expect([promoter.leads(), readTaking(dir)]).toEqual([true, expect.objectContaining({ phase: 'promoted', slots })]);
+    expect(await dropSubscriptions(b.sql)).toEqual([]);
+  } else {
+    expect(await dropSubscriptions(b.sql)).toEqual([followed]);
+    const written = await writeTerm(b.sql, { above: led.number, machine: b.networkId });
+    expect((await raiseSequences(b.sql)).filter(name => name.endsWith('task_events_id_seq'))).toHaveLength(1);
+    await ensurePublication(b.sql);
+    await makeSlots(b.sql, [slot]);
+    await recordHandover(b.sql, { id, from: a.machine, term: led, applied: w, to: b.machine, at, slots });
+    expect(written.number).toBeGreaterThan(led.number);
+  }
+  const term = (await termOf(b.sql))!;
+  expect(term).toEqual({ number: expect.any(Number) as number, machine: b.networkId, split: false, handedLsn: null });
+  expect(term.number).toBeGreaterThan(led.number);
   /* Each step again changes nothing: a keeper that starts again in the middle goes on. */
-  expect(await writeTerm(b.sql, { above: led.number, machine: b.networkId })).toEqual(term);
+  expect(await writeTerm(b.sql, { above: led.number, machine: b.networkId })).toEqual({ number: term.number, machine: term.machine, split: false });
   expect(await dropSubscriptions(b.sql)).toEqual([]);
   expect(await raiseSequences(b.sql)).toEqual([]);
   await makeSlots(b.sql, [slot]);
@@ -142,6 +175,8 @@ async function handOver(opts: { checkpoint?: boolean } = {}): Promise<void> {
   /* What the new leader writes reaches the old one, and its numbers stand above every one the old leader gave out. */
   const made = await write(b);
   expect(made > last).toBe(true);
+  /* As the old leader's keeper reports the copy it follows with now. */
+  await b.db.query('UPDATE machines SET copy_name = $1 WHERE id = $2', [slot, a.machine]);
   await until(() => holds(a, tasks), 10_000, "the new leader's rows on the old one");
   await until(() => applyRunning(a.sql, slot), 10_000, 'the old leader applying');
   expect(await differing(b, a)).toEqual([]);
@@ -166,11 +201,14 @@ beforeAll(async () => {
     ).rows[0]!.id;
   const machines = [await machine('leader', LEADER_ID, 1), await machine('copy', p.networkId, 2)] as const;
   await p.until(() => p.maker.report()?.state === 'ready');
+  /* As the copy's keeper reports the copy it made. */
+  await p.leader.admin.query('UPDATE machines SET copy_name = $1 WHERE id = $2', [copyName(p.networkId, 1), machines[1]]);
   lead = { cluster: p.leader, networkId: LEADER_ID, machine: machines[0], sql: keeperSql(p.leader.url, { timeoutMs: 120_000 }), db: await connected(p.leader.url), attempt: 0, follows: null };
   follow = { cluster: p.copy, networkId: p.networkId, machine: machines[1], sql: keeperSql(p.copyUrl('hornhoof'), { timeoutMs: 120_000 }), db: await connected(p.copyUrl('hornhoof')), attempt: 1, follows: copyName(p.networkId, 1) };
 }, 900_000);
 
 afterAll(async () => {
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
   for (const side of [lead, follow]) {
     await side?.sql.close().catch(() => undefined);
     await side?.db.end().catch(() => undefined);
@@ -188,7 +226,7 @@ describe('a planned switch between two Postgres servers', () => {
   it('reaches W when only a checkpoint follows', LONG, async () => {
     /* Back the way it came: the machine that handed the server over takes it again, under a term above both. */
     for (let n = 0; n < 5; n++) await write(lead);
-    await handOver({ checkpoint: true });
+    await handOver({ checkpoint: true, promoter: true });
     expect(lead.cluster).toBe(p.leader);
     expect(await termOf(lead.sql)).toMatchObject({ machine: LEADER_ID, handedLsn: null });
   });

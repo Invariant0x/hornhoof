@@ -38,6 +38,7 @@ import {
   type PeerServerOptions,
 } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
+import { until } from './helpers-basic.js';
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -335,6 +336,11 @@ describe('routeOf', () => {
     ['a bundle with more after its id', asked('GET', `/peer/backups/${INVOCATION}/head`), 'peer', 'worker', db, refused(404)],
     ['a bundle with a query', asked('GET', `/peer/backups/${INVOCATION}?x=1`), 'peer', 'worker', db, refused(404)],
     ['another method at a bundle', asked('DELETE', `/peer/backups/${INVOCATION}`), 'peer', 'data', db, refused(404)],
+    ['an offer of a switch', asked('POST', '/peer/switch/offer'), 'peer', 'data', db, { to: 'switch', method: 'POST', path: '/peer/switch/offer' }],
+    ['the state of a switch', asked('GET', `/peer/switch/state?switch=${INVOCATION}`), 'peer', 'data', db, { to: 'switch', method: 'GET', path: `/peer/switch/state?switch=${INVOCATION}` }],
+    ['a switch from a worker', asked('POST', '/peer/switch/go'), 'peer', 'worker', db, refused(403)],
+    ['a switch through the app door', asked('POST', '/peer/switch/go'), 'app', 'data', db, refused(403)],
+    ['another method at a switch', asked('PUT', '/peer/switch/go'), 'peer', 'data', db, refused(404)],
   ] as const)('%s', (_, headers, kind, role, here, route) => {
     expect(routeOf(headers, kind, role, here)).toEqual(route);
   });
@@ -747,6 +753,53 @@ describe('PeerServer', () => {
     six.end(randomBytes(1024));
     expect(await within(5000, statusOf(six))).toBe(201);
     expect(u.files().filter(name => name.endsWith('.done'))).toEqual([]);
+  });
+
+  it('passes the paths of a switch to what handles them, with the body as JSON', async () => {
+    const asked: unknown[] = [];
+    const done: string[] = [];
+    const stand = await standUp({
+      switches: {
+        handle: async (peer, method, path, body) => {
+          asked.push([peer.machine, method, path, body]);
+          return path.endsWith('/go') ? { status: 200, body: { ok: true }, after: () => void done.push('after') } : { status: 409, body: { ok: false, why: 'not_ready' } };
+        },
+      },
+    });
+    const door = await stand.open('peer');
+    const session = clientOf(stand, door.port, stand.data);
+    const post = async (path: string, body: string) => {
+      const stream = session.request({ ':method': 'POST', ':path': path, 'content-type': 'application/json' });
+      stream.end(body);
+      const status = await within(5000, statusOf(stream));
+      return [status, status === null ? '' : await textOf(stream)];
+    };
+    expect(await post('/peer/switch/offer', JSON.stringify({ switch: INVOCATION }))).toEqual([409, JSON.stringify({ ok: false, why: 'not_ready' })]);
+    expect(done).toEqual([]);
+    /* What comes after the answer is done once the answer has gone out. */
+    expect(await post('/peer/switch/go', JSON.stringify({ switch: INVOCATION, w: '0/1', copies: [] }))).toEqual([200, JSON.stringify({ ok: true })]);
+    await until(() => done.length === 1);
+    const state = session.request({ ':method': 'GET', ':path': `/peer/switch/state?switch=${INVOCATION}` });
+    state.end();
+    expect(await within(5000, statusOf(state))).toBe(409);
+    expect(asked).toEqual([
+      [DATA_ID, 'POST', '/peer/switch/offer', { switch: INVOCATION }],
+      [DATA_ID, 'POST', '/peer/switch/go', { switch: INVOCATION, w: '0/1', copies: [] }],
+      [DATA_ID, 'GET', `/peer/switch/state?switch=${INVOCATION}`, undefined],
+    ]);
+    /* A body that is no JSON, or too long, reaches nothing. */
+    expect((await post('/peer/switch/offer', '{'))[0]).toBe(400);
+    expect((await post('/peer/switch/offer', JSON.stringify({ pad: 'x'.repeat(70_000) })))[0]).toBe(400);
+    expect(asked).toHaveLength(3);
+    /* A worker is refused, and a keeper that takes part in no switch knows no such path. */
+    const worker = clientOf(stand, door.port, stand.worker).request({ ':method': 'POST', ':path': '/peer/switch/offer' });
+    worker.end('{}');
+    expect(await within(5000, statusOf(worker))).toBe(403);
+    const plain = await standUp();
+    const other = await plain.open('peer');
+    const none = clientOf(plain, other.port, plain.data).request({ ':method': 'POST', ':path': '/peer/switch/offer' });
+    none.end('{}');
+    expect(await within(5000, statusOf(none))).toBe(404);
   });
 
   it('answers anything else with 404, and a door that cannot connect with 502', async () => {
