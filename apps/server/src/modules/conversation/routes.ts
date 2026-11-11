@@ -6,13 +6,14 @@ import type { Ctx } from '../../app.js';
 import { maskEvent, viewerOf } from '../../auth/agent-view.js';
 import { companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { agentFor } from '../agents/find.js';
+import type { Person } from '../../auth/session.js';
+import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
+import { answerBy, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -23,12 +24,44 @@ const MessageBody = z
   .object({ text: Text.trim().default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
   .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
 
-function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[]) {
+/* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
+   back to and the update it was. */
+export type TelegramOrigin = { bot: string; chat: number; update: number };
+
+function writtenBy(me: Person, text: string, pictures: MessagePicture[], telegram?: TelegramOrigin) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
+  if (telegram) return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
   return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
+}
+
+type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin };
+
+/* A person's words to an agent, from its window or through its Telegram bot, under that person's own rights: whoever calls
+   this has checked that they see the agent. Returns the turn the words went into. */
+export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input: Written): Promise<string> {
+  if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
+  const pictures = await ownPictures(ctx, me, agent.id, input.pictures);
+  if (!(await agentState(ctx, agent.id)).ready) {
+    throw agent.kind === 'orchestrator'
+      ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
+      : new ApiError(409, 'conflict', 'This employee cannot answer right now. See the window for what to do.', 'agent_not_ready');
+  }
+  /* Pictures alone read as their names wherever the words of a message show. */
+  const words = input.text || pictures.map(p => p.name).join(', ');
+  const { actor, turn } = writtenBy(me, words, pictures, input.telegram);
+  const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
+  ctx.bus.publish(me.companyId, {
+    type: 'pulse',
+    from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
+    to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
+  });
+  /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
+     answers requests with its own tool. */
+  if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, input.text));
+  return jobId;
 }
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
@@ -48,26 +81,8 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
-    const { text, task: ref, pictures: ids } = MessageBody.parse(req.body);
-    if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
-    const pictures = await ownPictures(ctx, me, agent.id, ids);
-    if (!(await agentState(ctx, agent.id)).ready) {
-      throw agent.kind === 'orchestrator'
-        ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
-        : new ApiError(409, 'conflict', 'This employee cannot answer right now. See the window for what to do.', 'agent_not_ready');
-    }
-    /* Pictures alone read as their names wherever the words of a message show. */
-    const words = text || pictures.map(p => p.name).join(', ');
-    const { actor, turn } = writtenBy(me, words, pictures);
-    const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: ref, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
-    ctx.bus.publish(me.companyId, {
-      type: 'pulse',
-      from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
-      to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
-    });
-    /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
-       answers requests with its own tool. */
-    if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, text));
+    const { text, task, pictures } = MessageBody.parse(req.body);
+    const jobId = await writeToAgent(ctx, me, agent, { text, task, pictures });
     reply.code(202);
     return { jobId };
   });

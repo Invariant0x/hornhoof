@@ -1,0 +1,67 @@
+/* The few calls of the Telegram Bot API a head's bot makes, at config.telegramApiUrl. The token goes only into the address
+   of a call, so an error here carries Telegram's code and words, never the address or the token. */
+
+export type TelegramUser = { id: number; is_bot: boolean; first_name: string; username?: string; language_code?: string };
+export type TelegramMessage = { message_id: number; from?: TelegramUser; chat: { id: number; type: string }; text?: string };
+export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
+
+/* code: Telegram's own, or none when it could not be reached. retryAfter: the seconds it asks to wait, when it asks. */
+export class TelegramError extends Error {
+  constructor(
+    readonly code: number | null,
+    message: string,
+    readonly retryAfter: number | null = null,
+  ) {
+    super(message);
+  }
+}
+
+type Answer = { ok?: boolean; result?: unknown; error_code?: number; description?: string; parameters?: { retry_after?: number } };
+
+export async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${base}/bot${token}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params), signal });
+  } catch {
+    throw new TelegramError(null, 'Telegram could not be reached.');
+  }
+  const answer = (await res.json().catch(() => null)) as Answer | null;
+  if (!answer?.ok) {
+    const words = (answer?.description ?? `Telegram answered ${res.status}.`).replaceAll(token, '[token]');
+    throw new TelegramError(answer?.error_code ?? res.status, words, answer?.parameters?.retry_after ?? null);
+  }
+  return answer.result as T;
+}
+
+/* How long getUpdates waits for news before it answers with none, in seconds: Telegram's own long polling. */
+export const POLL_SECONDS = 30;
+
+export const getMe = (base: string, token: string) => callTelegram<TelegramUser>(base, token, 'getMe', {});
+
+export const getUpdates = (base: string, token: string, offset: number, signal: AbortSignal) =>
+  callTelegram<TelegramUpdate[]>(base, token, 'getUpdates', { offset, timeout: POLL_SECONDS, allowed_updates: ['message'] }, signal);
+
+/* Plain text, with no formatting, so no character in an answer can break it. */
+export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
+  callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
+
+/* The most one Telegram message holds. */
+export const TELEGRAM_TEXT_MAX = 4096;
+
+const highHalf = (code: number) => code >= 0xd800 && code <= 0xdbff;
+
+/* A text in pieces Telegram takes: each at most max long, cut after a line break in its second half when there is one,
+   and never between the two halves of one character. */
+export function splitForTelegram(text: string, max = TELEGRAM_TEXT_MAX): string[] {
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const atLine = rest.lastIndexOf('\n', max - 1) + 1;
+    let cut = atLine > max / 2 ? atLine : max;
+    if (highHalf(rest.charCodeAt(cut - 1))) cut -= 1;
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}

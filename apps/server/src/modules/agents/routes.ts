@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
-import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
+import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -24,6 +24,7 @@ import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type P
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
+import { telegramOf, type TelegramView } from '../telegram/routes.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -62,6 +63,8 @@ export type AgentCard = FailureState & {
   /* Wakes every so many minutes to do its order, and with forWork only while there is work to look at; lastAt is when the
      last round started or was skipped, or when the timer was set. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
+  /* The Telegram bot people of the company write to it through, by its name; only heads and the orchestrator have one. */
+  telegram: TelegramView;
 };
 
 const Text = z.string().max(8000);
@@ -273,6 +276,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     canEdit: await mayEdit(ctx, me, agent),
     on: !agent.switchedOffAt,
     timer: timerOf(agent),
+    telegram: await telegramOf(db, agent.id),
   };
 }
 
@@ -520,6 +524,8 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
     await db.transaction(async tx => {
       await checkRemoval(ctx, tx, agent);
       await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
+      /* Its bot goes with it, and with the bot what it still owed to chats. */
+      await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id));
       await tx
         .update(jobs)
         .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
@@ -529,6 +535,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
     const left = await leaveWork(ctx, actorOf(me), agent);
     await wakeAll(ctx, left.wakes);
   });
+  await ctx.telegram.refresh([found.id]);
   ctx.bus.publish(found.companyId, { type: 'org' });
   return reply.code(204).send();
 }

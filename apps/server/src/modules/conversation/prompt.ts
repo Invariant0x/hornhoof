@@ -49,7 +49,7 @@ function noticeLine(message: MessageEnvelope): string {
 export function messageHeading(message: MessageEnvelope): string {
   const senders = message.senders?.length ? message.senders.map(partyLine).join(', ') : partyLine(message.from);
   if (message.from.kind === 'hornhoof') return `From Hornhoof, ${noticeLine(message)} to ${partyLine(message.to)}:`;
-  const sender = message.notification ? `${senders} via Hornhoof, ${noticeLine(message)}` : senders;
+  const sender = message.notification ? `${senders} via Hornhoof, ${noticeLine(message)}` : message.channel === 'telegram' ? `${senders} via Telegram` : senders;
   return `From ${sender} to ${partyLine(message.to)}:`;
 }
 
@@ -57,6 +57,11 @@ export function messageHeading(message: MessageEnvelope): string {
 export function addressed(text: string, message: MessageEnvelope): string {
   const heading = messageHeading(message);
   return text.startsWith(`${heading}\n`) ? text : `${heading}\n\n${text}`;
+}
+
+/* Below a person's message that came through the agent's Telegram bot: where the answer goes. */
+export function answerInTelegram(author: { name: string }): string {
+  return `${author.name} wrote this in Telegram. Your answer in this window goes back to them there as plain text, so write it without formatting.`;
 }
 
 /* An employee's message to another agent, which reads it as the employee's words, not as orders. */

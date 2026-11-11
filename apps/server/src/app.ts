@@ -49,6 +49,8 @@ import { readCommit, type CommitReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
+import { TelegramBots } from './modules/telegram/bots.js';
+import { telegramRoutes } from './modules/telegram/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
 import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
@@ -66,7 +68,7 @@ export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logg
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
-   repository's branch is at and the mark a full test run leaves on a commit. */
+   repository's branch is at, the mark a full test run leaves on a commit and the heads' Telegram bots. */
 export type Ctx = Deps & {
   /* When this server came up: it did not hear of any machine before then. */
   startedAt: Date;
@@ -81,6 +83,7 @@ export type Ctx = Deps & {
   computer: ComputerAccess;
   templates: Templates;
   links: PublicLinks;
+  telegram: TelegramBots;
 };
 
 declare module 'fastify' {
@@ -120,9 +123,13 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
+  ctx.telegram = new TelegramBots(ctx);
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());
   app.addHook('onReady', async () => ctx.links.sync());
+  /* A bot stops before the database and the nodes go, so a message it is taking reaches its agent first. */
+  app.addHook('onReady', async () => ctx.telegram.start());
+  app.addHook('preClose', async () => ctx.telegram.stop());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   /* After the socket plugin, so a refused socket is closed by it. */
@@ -163,5 +170,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   outboundRoutes(app, ctx);
+  telegramRoutes(app, ctx);
   return app;
 }
