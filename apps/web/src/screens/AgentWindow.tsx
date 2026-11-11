@@ -549,6 +549,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const authorOf = (e: LogEvent): string => {
     if (!isMessage(e)) return e.person?.id === me.person.id ? t.window.chat.you : (e.person?.name ?? '');
     const name = e.message.from.id === me.person.id ? t.window.chat.you : partyName(t, language, e.message.from);
+    if (e.message.channel === 'assistant' && e.message.assistant) return t.window.chat.viaAssistant(name, e.message.assistant.name);
     return e.message.channel === 'telegram' ? t.window.chat.viaTelegram(name) : name;
   };
 

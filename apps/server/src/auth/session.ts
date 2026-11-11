@@ -27,7 +27,7 @@ export type Person = {
   id: string;
   companyId: string;
   name: string;
-  email: string;
+  email: string | null;
   title: string;
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
@@ -37,6 +37,9 @@ export type Person = {
   via?: string;
   /* The orchestrator takes a decision for this person, whom its turn answers: the turn and the message that says so. */
   decision?: { jobId: string; sourceSeq: number | null };
+  /* The person's own assistant acting for them with its key, under their rights as they are now: what it does is recorded as
+     done by it for them. */
+  assistant?: { id: string; name: string };
 };
 
 /* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. A session starts only

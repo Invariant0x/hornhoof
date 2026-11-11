@@ -11,8 +11,9 @@ const Party = z.object({
   role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
   agentKind: z.enum(['orchestrator', 'head', 'worker']).optional(),
 });
-/* channel: the way a person's message came when not from the agent's window. */
-export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.literal('telegram').optional() });
+/* channel: the way a person's message came when not from the agent's window. assistant: the person's assistant that wrote it
+   for them. */
+export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.enum(['telegram', 'assistant']).optional(), assistant: z.object({ id: z.string(), name: z.string() }).optional() });
 export type MessageParty = z.infer<typeof Party>;
 export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
 export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
@@ -31,15 +32,20 @@ export async function agentParty(ctx: PartyContext, companyId: string, agentId: 
   return { kind: 'agent', id: agent.id, name: agent.name, role: agentRole(ctx, agent), department: await agentDepartment(ctx, agent.departmentId), agentKind: agent.kind };
 }
 
-function agentRole(ctx: PartyContext, agent: typeof agents.$inferSelect) {
+export function agentRole(ctx: Pick<PartyContext, 'templates'>, agent: Pick<typeof agents.$inferSelect, 'kind' | 'roleKey'>) {
   return agent.kind === 'orchestrator' ? { en: 'Orchestrator', ru: 'Оркестратор' } : ctx.templates.roles.get(agent.roleKey ?? '')?.title ?? null;
 }
+
+/* A department as a message names it, in both languages. */
+export const departmentParty = (dept: typeof departments.$inferSelect): NonNullable<MessageParty['department']> => ({
+  id: dept.id,
+  name: { en: deptName(dept), ru: dept.name ?? (dept.templateKey ? DEPARTMENT_RU[dept.templateKey] : '') },
+});
 
 async function agentDepartment(ctx: PartyContext, id: string | null): Promise<MessageParty['department']> {
   if (!id) return null;
   const [dept] = await ctx.db.select().from(departments).where(eq(departments.id, id));
-  if (!dept) return null;
-  return { id: dept.id, name: { en: deptName(dept), ru: dept.name ?? (dept.templateKey ? DEPARTMENT_RU[dept.templateKey] : '') } };
+  return dept ? departmentParty(dept) : null;
 }
 
 export async function personParty(ctx: PartyContext, companyId: string, personId: string): Promise<MessageParty> {
@@ -50,12 +56,22 @@ export async function personParty(ctx: PartyContext, companyId: string, personId
 
 const field = (data: unknown, key: string): unknown => data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined;
 
+const AssistantMark = z.object({ id: z.string(), name: z.string() });
+
+/* The way a person's message came, as Hornhoof kept it with the message: Telegram, or the person's assistant. */
+function channelOf(data: unknown): Pick<MessageEnvelope, 'channel' | 'assistant'> {
+  if (field(data, 'channel') === 'telegram') return { channel: 'telegram' };
+  const assistant = AssistantMark.safeParse(field(data, 'assistant'));
+  if (field(data, 'channel') === 'assistant' && assistant.success) return { channel: 'assistant', assistant: { id: assistant.data.id, name: assistant.data.name } };
+  return {};
+}
+
 /* Sender identity comes from stored ids and authenticated callers, never from the words of the message. */
 export async function incomingEnvelope(ctx: PartyContext, companyId: string, agentId: string, personId: string | null | undefined, data: unknown): Promise<MessageEnvelope> {
   const to = await agentParty(ctx, companyId, agentId);
   const notice = field(data, 'notification');
   if (notice !== undefined) return noticeEnvelope(data, to);
-  if (personId) return { direction: 'in', from: await personParty(ctx, companyId, personId), to, ...(field(data, 'channel') === 'telegram' ? { channel: 'telegram' as const } : {}) };
+  if (personId) return { direction: 'in', from: await personParty(ctx, companyId, personId), to, ...channelOf(data) };
   const by = field(data, 'by');
   if (field(data, 'from') === 'agent' && typeof by === 'string') return { direction: 'in', from: await agentParty(ctx, companyId, by), to };
   if (field(data, 'from') === 'orchestrator') {

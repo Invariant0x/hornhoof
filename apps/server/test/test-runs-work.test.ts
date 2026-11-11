@@ -211,7 +211,7 @@ describe('the pool of machines', () => {
     /* A part on her own machine stays nameless to her while the agent who runs it is on someone else's plan. */
     expect((await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json().machines[0].parts).toEqual([]);
     const [annRow] = await c.db.select().from(people).where(eq(people.name, 'Ann'));
-    await ownPlan(c.db, annRow!.email, c.bruno.id);
+    await ownPlan(c.db, annRow!.email!, c.bruno.id);
     const seen = (await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json();
     expect(seen.machines.map((m: { name: string }) => m.name)).toEqual(['ann-pc']);
     expect(seen.machines[0].parts).toEqual([expect.objectContaining({ run: 1, part: 1 })]);

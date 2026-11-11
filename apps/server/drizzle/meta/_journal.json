@@ -694,6 +694,13 @@
       "when": 1794415684004,
       "tag": "0099_map_layouts",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794423399683,
+      "tag": "0100_assistants",
+      "breakpoints": true
     }
   ]
 }
