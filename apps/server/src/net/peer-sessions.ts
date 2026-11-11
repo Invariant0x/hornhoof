@@ -1,6 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import http2, { type ClientHttp2Session } from 'node:http2';
-import type { Duplex } from 'node:stream';
+import type { Duplex, Readable } from 'node:stream';
 import tls from 'node:tls';
 import { z } from 'zod';
 import { MACHINE_ROLES, type LinkPath } from '../db/schema.js';
@@ -31,6 +31,8 @@ export type PeerSessionsOptions = {
   directEveryMs?: number;
   /* A session whose ping is not answered by the next one is ended. */
   pingMs?: number;
+  /* A stream of its own on which no byte moves for this long is cut. */
+  streamIdleMs?: number;
   /* Called when a session came or went, or a hello said something new. */
   changed?: () => void;
 };
@@ -40,6 +42,7 @@ const EVERY_MS = 5000;
 const HELLO_MS = 10_000;
 const DIRECT_EVERY_MS = 60_000;
 const PING_MS = 15_000;
+const STREAM_IDLE_MS = 30_000;
 const WINDOW = 1024 * 1024;
 const HELLO_BYTES = 64 * 1024;
 const LOOPBACK = '127.0.0.1';
@@ -148,6 +151,34 @@ export class PeerSessions {
         reject(new Error(`The leader did not open its app: ${String(headers[':status'])}.`));
       });
       stream.once('close', () => reject(new Error(NO_LEADER)));
+    });
+  }
+
+  /* A stream of its own on the session to the leader's keeper, for what is too long to go as a request to the app: a
+     bundle, asked for or sent. It is answered with the status as soon as the keeper gives one, also before a body that is
+     being sent has ended; whoever asked reads the answer's body to its end or destroys it. A stream on which no byte
+     moves for half a minute is cut, with an error for whoever reads it. */
+  stream(method: 'GET' | 'PUT', path: string, body?: Readable): Promise<{ status: number; length: number | null; body: Readable }> {
+    const session = this.leading()?.session;
+    if (!session) return Promise.reject(new Error(NO_LEADER));
+    return new Promise((resolve, reject) => {
+      /* A session that ended since throws here, and the promise rejects with it. */
+      const stream = session.h2.request({ ':method': method, ':path': path }, { endStream: !body });
+      let answered = false;
+      stream.setTimeout(this.opts.streamIdleMs ?? STREAM_IDLE_MS, () => stream.destroy(new Error('The stream to the leader stopped moving.')));
+      stream.on('error', err => void (answered || reject(err)));
+      stream.once('response', headers => {
+        answered = true;
+        const length = headers['content-length'];
+        resolve({ status: Number(headers[':status']), length: length === undefined ? null : Number(length), body: stream });
+      });
+      stream.once('close', () => {
+        body?.destroy();
+        if (!answered) reject(new Error(NO_LEADER));
+      });
+      if (!body) return;
+      body.on('error', () => stream.close(http2.constants.NGHTTP2_CANCEL));
+      body.pipe(stream);
     });
   }
 

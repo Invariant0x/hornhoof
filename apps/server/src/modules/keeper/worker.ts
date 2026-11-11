@@ -14,11 +14,13 @@ import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
 import { ownAddresses } from './addresses.js';
+import { ageKey } from './age-key.js';
 import { answerOf, askApp, type AppAnswer } from './app-call.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { Following } from './following.js';
+import { HolderKeeper } from './holder.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 import { pinKey, readPin } from './owner-pin.js';
@@ -70,6 +72,9 @@ export type WorkerKeeperOptions = {
   sessions?: Partial<PeerSessionsOptions>;
   /* How often the keeper asks for its machine's computer access; the carrier's own paces unless a test says otherwise. */
   computer?: Pick<ComputerCarrierOptions, 'openEveryMs' | 'closedEveryMs' | 'deafMs'>;
+  /* How often the keeper asks which of the company's backups to hold, and tries again for its key for backups. */
+  holderEveryMs?: number;
+  backupKeyRetryMs?: number;
 };
 
 type View = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link: WorkerLink | null };
@@ -85,6 +90,9 @@ const ASK_MS = 10_000;
 const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const STOP_GRACE_MS = 5000;
+const BACKUP_KEY_RETRY_MS = 60_000;
+/* How many of the bundles a machine holds its report names. */
+const REPORTED_BUNDLES = 16;
 const LOOPBACK = '127.0.0.1';
 const KEEPER_PATH = '/api/keeper';
 const JSON_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
@@ -164,6 +172,12 @@ export class WorkerKeeper {
   private readonly hourly = new Hourly();
   /* Carries this machine's computer access from the leader to its updater. */
   private readonly carrier: ComputerCarrier;
+  /* Keeps the company's backups this machine was picked to hold. */
+  private readonly holder: HolderKeeper;
+  /* The public half of this machine's key for backups, once its folder keeps one. */
+  private ageRecipient: string | null = null;
+  private ageTimer: NodeJS.Timeout | null = null;
+  private ageSaid = false;
   /* The ticket that let this machine in and whose owner's key is not kept yet. */
   private owed: string | null = null;
   /* Ends what the keeper has asked the server for when it stops. */
@@ -185,6 +199,21 @@ export class WorkerKeeper {
       ...opts.computer,
     });
     this.door = new LeaderDoor({ connect: () => this.sessions.connectApp() });
+    this.holder = new HolderKeeper({
+      dir: opts.config.dir,
+      link: {
+        leader: () => this.leader(),
+        request: async (method, path) => {
+          const res = await this.askLeader(method, path);
+          if (!res) throw new Error('no leader of the company is in reach');
+          return answerOf(res);
+        },
+        stream: (method, path, body) => this.sessions.stream(method, path, body),
+      },
+      held: () => (this.disconnected ? null : (this.certificates?.current() ?? null)),
+      log: opts.log,
+      everyMs: opts.holderEveryMs,
+    });
   }
 
   async start(): Promise<{ front: number }> {
@@ -215,6 +244,8 @@ export class WorkerKeeper {
     else this.certificates.start();
     this.sessions.use(this.targets());
     this.carrier.start();
+    this.holder.start();
+    void this.takeAgeKey();
     this.every(this.opts.lookEveryMs ?? LOOK_EVERY_MS, () => this.look());
     this.every(this.opts.viewEveryMs ?? VIEW_EVERY_MS, () => void this.readView());
     this.every(this.opts.reportEveryMs ?? REPORT_EVERY_MS, () => void this.report());
@@ -239,9 +270,24 @@ export class WorkerKeeper {
     this.stopped = true;
     this.stopping.abort();
     for (const timer of this.timers.splice(0)) clearInterval(timer);
+    if (this.ageTimer) clearTimeout(this.ageTimer);
     this.certificates?.stop();
     this.measures.stop();
-    await Promise.all([this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
+    await Promise.all([this.holder.stop(), this.carrier.stop(), this.tunnel?.stop(), this.sessions?.close(), this.door.stop(), this.front ? closeWithin(this.front, STOP_GRACE_MS) : null]);
+  }
+
+  /* The machine's own key for backups, which the company seals to once this machine holds its data. A folder that
+     cannot keep it is said once and tried again each minute. */
+  private async takeAgeKey(): Promise<void> {
+    if (this.stopped) return;
+    try {
+      this.ageRecipient = (await ageKey(this.opts.config.dir)).recipient;
+    } catch (err) {
+      if (!this.ageSaid) this.opts.log(`The keeper cannot keep this machine's key for backups in ${this.opts.config.dir}: ${reasonOf(err)}. It tries again each minute.`);
+      this.ageSaid = true;
+      this.ageTimer = setTimeout(() => void this.takeAgeKey(), this.opts.backupKeyRetryMs ?? BACKUP_KEY_RETRY_MS);
+      this.ageTimer.unref();
+    }
   }
 
   private every(ms: number, work: () => void): void {
@@ -555,7 +601,11 @@ export class WorkerKeeper {
         pin: this.pinPrint(),
         ...(this.opts.config.hostOs ? { os: this.opts.config.hostOs } : {}),
       };
-      const res = await this.askLeader('POST', '/api/network/report', body);
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.held().slice(0, REPORTED_BUNDLES) };
+      let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
+      /* A leader an update took back to the build before refuses words it does not know: the report goes again at once
+         without them. */
+      if (res?.status === 400) res = await this.askLeader('POST', '/api/network/report', body);
       if (res && !res.ok && !this.disconnected) throw new Error(`the company server answered ${res.status}`);
     } catch (err) {
       if (!this.stopped) this.sayHourly('report', `Could not report this machine to the company server: ${reasonOf(err)}`);

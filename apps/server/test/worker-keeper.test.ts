@@ -1,14 +1,17 @@
-import { generateKeyPairSync, sign, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { companies, computerRuns, machines, people, personKeys } from '../src/db/schema.js';
+import { bundleRows } from '../src/modules/backups/records.js';
+import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
@@ -56,13 +59,49 @@ function ask(port: number, options: http.RequestOptions = {}, body?: unknown): P
   });
 }
 
+/* What a request to the app is answered with in the app's place, as a status; null lets it through. */
+type Intercept = (asked: { method: string; url: string; via: string; body: unknown }) => number | null;
+
+/* A door before the app, as an app of another build would answer some of what it is asked: the rest goes on to it. */
+async function doorBefore(appPort: number, intercept: Intercept): Promise<number> {
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks);
+      let body: unknown = null;
+      try {
+        body = raw.length > 0 ? JSON.parse(raw.toString()) : null;
+      } catch {
+        /* No JSON: the test's answer does not go by it. */
+      }
+      const status = intercept({ method: req.method ?? '', url: req.url ?? '', via: String(req.headers['x-hornhoof-via'] ?? ''), body });
+      if (status) return void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { code: status === 404 ? 'not_found' : 'validation', message: 'An older build.' } }));
+      const out = http.request({ host: '127.0.0.1', port: appPort, method: req.method, path: req.url, headers: req.headers, agent: false }, answer => {
+        res.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(res);
+      });
+      out.on('error', () => void res.writeHead(502).end());
+      out.end(raw);
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  onTestFinished(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return (server.address() as AddressInfo).port;
+}
+
 /* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
    reports the test's own address as the place to dial it at. */
-async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}) {
+async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
   const ceo = await setUpCompany(app);
   await app.listen({ host: '127.0.0.1', port: 0 });
   const appPort = (app.server.address() as AddressInfo).port;
+  /* Where the keeper finds its app: the app itself, unless the test answers some of it in the app's place. */
+  const keeperApp = intercept ? await doorBefore(appPort, intercept) : appPort;
   const lines: string[] = [];
   let peerPort = 1;
   /* The folder the server's keeper shares with its updater. */
@@ -71,7 +110,7 @@ async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEn
     config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: control, HORNHOOF_MACHINE_ID: HOST_ID, ACME_DIRECTORY: 'off', ...keeperEnv }),
     db,
     lease: fakeLease(),
-    app: { host: '127.0.0.1', port: appPort },
+    app: { host: '127.0.0.1', port: keeperApp },
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
@@ -80,6 +119,7 @@ async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEn
     linkEveryMs: 50,
     peerEveryMs: 20,
     reportEveryMs: 30,
+    backupsEveryMs: 20,
     dir: folder(),
     clientFor: () => SLEEPER,
     peerClientFor: () => SLEEPER,
@@ -204,6 +244,80 @@ describe("a worker's keeper", () => {
     expect(said.json()).toEqual(w.status());
     /* The app has no such address: a request passed on would come back as its 404. */
     expect((await c.app.inject({ url: '/api/keeper' })).statusCode).toBe(404);
+  });
+
+  /* The test in the updater's place on the server: it answers every request for a dump, until the test ends. */
+  function updaterOf(c: Company): void {
+    const request = join(c.control, 'dump.json');
+    const dumps = join(c.control, 'dumps');
+    const timer = setInterval(() => {
+      try {
+        const { id } = JSON.parse(readFileSync(request, 'utf8')) as { id: string };
+        if (existsSync(join(dumps, `${id}.json`))) return;
+        mkdirSync(dumps, { recursive: true });
+        writeFileSync(join(dumps, `${id}.sql.gz`), gzipSync('-- a dump of the hornhoof database\n'));
+        writeFileSync(join(dumps, `${id}.json`), JSON.stringify({ id, reason: 'timer', at: new Date().toISOString(), migrations: 106 }));
+      } catch {
+        /* No request now. */
+      }
+    }, 10);
+    onTestFinished(() => clearInterval(timer));
+  }
+
+  /* The CEO saves the recovery file, so the next bundle gets machines to hold it, and the worker fetches it. */
+  async function bundleHeld(c: Company, w: { machine: string; config: WorkerConfig }): Promise<{ id: string; sha256: string }> {
+    updaterOf(c);
+    await until(async () => (await c.rowOf(w.machine)).reportAt !== null);
+    expect((await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) })).statusCode).toBe(200);
+    await until(async () => (await bundleRows(c.db, { limit: 1, withRecovery: true })).some(row => row.holders.includes(w.machine)));
+    const [row] = await bundleRows(c.db, { limit: 1, withRecovery: true });
+    await until(async () => (await c.rowOf(w.machine)).heldBackups.includes(row!.id));
+    return { id: row!.id, sha256: row!.sha256 };
+  }
+  const bundlesIn = (dir: string) => readdirSync(join(dir, BUNDLES_DIR)).filter(name => name.endsWith('.age')).sort();
+
+  it('reports its key for backups, and holds the bundles it is picked for until its owner says no', async () => {
+    const c = await company();
+    const w = await worker(c, { holderEveryMs: 30 });
+    await until(async () => Boolean((await c.rowOf(w.machine)).ageKey));
+    expect((await c.rowOf(w.machine)).ageKey).toMatch(/^age1[0-9a-z]{58}$/);
+    const held = await bundleHeld(c, w);
+    /* The very bundle the server recorded, which this machine cannot open. */
+    expect(bundlesIn(w.config.dir)).toEqual([`${held.id}.age`]);
+    const sealed = readFileSync(join(w.config.dir, BUNDLES_DIR, `${held.id}.age`));
+    expect(createHash('sha256').update(sealed).digest('hex')).toBe(held.sha256);
+    expect(sealed.includes('a dump of the hornhoof database')).toBe(false);
+    /* Its owner unticks "Keep company backups": what it holds goes, and its report says so. */
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${w.machine}`, payload: { keepsBackups: false }, ...as(c.ceo) })).statusCode).toBe(200);
+    await until(() => bundlesIn(w.config.dir).length === 0);
+    await until(async () => (await c.rowOf(w.machine)).heldBackups.length === 0);
+  });
+
+  it('keeps its bundles behind an older leader, and goes on reporting to it', async () => {
+    /* A leader an update took back to the build before: it knows nothing of backups. */
+    let older = false;
+    const seen: { via: string; words: boolean }[] = [];
+    const c = await company({}, {}, {}, ({ method, url, via, body }) => {
+      if (!older) return null;
+      if (method === 'GET' && url === '/api/network/backups') return 404;
+      if (method !== 'POST' || url !== '/api/network/report') return null;
+      const words = Boolean(body) && ('ageKey' in (body as object) || 'heldBackups' in (body as object));
+      seen.push({ via, words });
+      return words ? 400 : null;
+    });
+    const w = await worker(c, { holderEveryMs: 30 });
+    const held = await bundleHeld(c, w);
+    older = true;
+    const before = (await c.rowOf(w.machine)).reportAt;
+    /* Its report is refused with the new words and goes again at once without them. */
+    const mine = () => seen.filter(report => report.via !== 'keeper');
+    await until(() => mine().length >= 4);
+    expect(mine().slice(0, 4).map(report => report.words)).toEqual([true, false, true, false]);
+    await until(async () => (await c.rowOf(w.machine)).reportAt!.getTime() > before!.getTime());
+    /* The server's own keeper does the same. */
+    expect(seen.filter(report => report.via === 'keeper').slice(0, 2).map(report => report.words)).toEqual([true, false]);
+    expect(bundlesIn(w.config.dir)).toEqual([`${held.id}.age`]);
+    expect([...w.lines, ...c.lines].filter(line => line.includes('Could not report'))).toEqual([]);
   });
 
   it("refuses the network routes to whoever comes to the worker's web port", async () => {

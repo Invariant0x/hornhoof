@@ -1,8 +1,11 @@
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
+import { buffer } from 'node:stream/consumers';
 import tls from 'node:tls';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import type { PeerBackups } from '../src/modules/keeper/backups.js';
 import type { MachineRole } from '../src/db/schema.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
@@ -60,7 +63,7 @@ async function echoApp() {
 }
 
 /* A data machine's peer link as its keeper serves it, and a worker of the same company with its certificate. */
-async function standUp(as: { id?: string; role?: MachineRole } = {}) {
+async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBackups } = {}) {
   const authority = await makeAuthority(COMPANY);
   const server = await machineOf(authority, as.id ?? SERVER_ID, as.role ?? 'data');
   const worker = await machineOf(authority, WORKER_ID, 'worker');
@@ -77,6 +80,7 @@ async function standUp(as: { id?: string; role?: MachineRole } = {}) {
     door,
     db: null,
     hello: (peer: Peer) => (state.hellos++, { machine: server.id, role: server.role, lead: state.lead, commit: 'c0ffee', asked: peer.machine }),
+    backups: as.backups,
     log: line => lines.push(line),
   });
   onTestFinished(() => peers.close());
@@ -197,6 +201,59 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(toCut.leader()).toBeNull();
     expect(toCut.state()).toEqual({ path: null, directFails: false, refused: false });
     expect(cut.state.hellos).toBe(0);
+  });
+
+  it("streams a bundle over the leader's session", async () => {
+    const [BUNDLE, REFUSED, STALLS] = ['0f0f0f0f-0000-4000-8000-0000000000a1', '0f0f0f0f-0000-4000-8000-0000000000a2', '0f0f0f0f-0000-4000-8000-0000000000a3'];
+    const bytes = randomBytes(5 * MiB);
+    const taken: { peer: string; id: string; sha256: string }[] = [];
+    const sha256 = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+    const backups: PeerBackups = {
+      get: (_peer, id) => {
+        if (id === BUNDLE) return { status: 200, length: bytes.length, stream: () => Readable.from([bytes.subarray(0, MiB), bytes.subarray(MiB)]) };
+        /* The first bytes come, and then no more. */
+        if (id === STALLS) {
+          let first = true;
+          return { status: 200, length: bytes.length, stream: () => new Readable({ read() { if (first) this.push(bytes.subarray(0, 1024)); first = false; } }) };
+        }
+        return { status: 404 };
+      },
+      put: async (peer, id, body) => {
+        if (id === REFUSED) return 403;
+        taken.push({ peer: peer.machine, id, sha256: sha256(await buffer(body)) });
+        return 201;
+      },
+    };
+    const stand = await standUp({ backups });
+    const sessions = stand.sessionsWith({ streamIdleMs: 300 });
+    /* Without a leader there is nobody to ask. */
+    await expect(sessions.stream('GET', `/peer/backups/${BUNDLE}`)).rejects.toThrow('No leader of the company is in reach.');
+    sessions.use([stand.target()]);
+    await until(() => sessions.leader() !== null);
+
+    const got = await sessions.stream('GET', `/peer/backups/${BUNDLE}`);
+    expect([got.status, got.length]).toEqual([200, bytes.length]);
+    expect(sha256(await buffer(got.body))).toBe(sha256(bytes));
+    const none = await sessions.stream('GET', `/peer/backups/${REFUSED}`);
+    expect([none.status, none.length]).toEqual([404, null]);
+    none.body.destroy();
+
+    const sent = await sessions.stream('PUT', `/peer/backups/${BUNDLE}`, Readable.from([bytes.subarray(0, 2 * MiB), bytes.subarray(2 * MiB)]));
+    expect(sent.status).toBe(201);
+    sent.body.destroy();
+    expect(taken).toEqual([{ peer: WORKER_ID, id: BUNDLE, sha256: sha256(bytes) }]);
+    /* One that is refused is answered at once, and what was being sent is let go of. */
+    const source = Readable.from((async function* () { for (let sentMiB = 0; sentMiB < 64; sentMiB += 1) yield bytes.subarray(0, MiB); })());
+    const refusedPut = await sessions.stream('PUT', `/peer/backups/${REFUSED}`, source);
+    expect(refusedPut.status).toBe(403);
+    refusedPut.body.destroy();
+    await until(() => source.destroyed);
+
+    /* A stream on which nothing moves is cut, with an error for whoever reads it. */
+    const stalled = await sessions.stream('GET', `/peer/backups/${STALLS}`);
+    await expect(buffer(stalled.body)).rejects.toThrow('stopped moving');
+    /* And the session is as good as before. */
+    expect((await sessions.stream('GET', `/peer/backups/${BUNDLE}`)).status).toBe(200);
   });
 
   it('follows what the hello says of who leads', async () => {
