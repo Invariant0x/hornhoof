@@ -15,6 +15,7 @@ import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
 import { leaderBuild, refreshBuild, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
+import { seenAccess } from '../computer/seen.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
@@ -262,6 +263,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
     const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
+    /* Each machine's computer access as this person sees it; the server's card carries its own machine's. */
+    const access = await seenAccess(ctx, me);
+    const accessOf = (machineId: string | undefined) => access.find(view => view.machine.id === machineId) ?? null;
     const sight = await viewerOf(db, me);
     const allParts = await db
       .select({ machineId: testParts.machineId, builtin: testParts.builtin, runBy: testRuns.agentId, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
@@ -292,6 +296,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               browserError: hub.browserErrorOf(BUILTIN),
               webPort: ownRow?.webPort ?? null,
               refusedBy,
+              access: accessOf(ownRow?.id),
             }
           : null,
       machines: rows.map(m => ({
@@ -310,6 +315,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
         core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
         needsCore: needsCore(m),
+        access: accessOf(m.id),
         drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),

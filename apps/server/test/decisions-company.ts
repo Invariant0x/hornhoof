@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -6,14 +6,15 @@ import { expect, it } from 'vitest';
 import { agents, companies, departments, people, proposals, requests, subscriptions, teams } from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
 
-type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; department: { id: string; name: string } | null };
+type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'machine_owner'; department: { id: string; name: string } | null };
 
 type View = {
   requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; explained: string | null; task: { number: number } }[];
   proposals: { id: string; kind: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; brief: string; department: { id: string } | null }[];
   addressed: { id: string; canAnswer: boolean; ownerPersonId: string }[];
-  computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } } | null;
+  computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } }[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -21,10 +22,11 @@ type View = {
    who sees the whole company; and Tia, who reaches one team of Development. */
 export async function company() {
   const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
-  writeFileSync(join(control, 'alive'), '');
-  const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control });
+  const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
   const ceo = await setUpCompany(app);
   const ctx = app.ctx;
+  /* The machine the server runs on, which the CEO owns and the orchestrator asks access to. */
+  const machine = await serverMachine(app);
   const [acme] = await db.select().from(companies);
   const [sub] = await db.select().from(subscriptions);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
@@ -52,7 +54,8 @@ export async function company() {
     return { task, request: (await ask(ctx, workers[where].id, task.id, q)).request };
   };
   const view = async (token: string, query = ''): Promise<View> => (await app.inject({ url: `/api/requests${query}`, ...as(token) })).json();
-  return { app, db, ctx, control, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
+  const askComputer = (reason: string) => ctx.computer.ask(acme!.id, machine, reason);
+  return { app, db, ctx, control, machine, askComputer, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
 }
 
 /* Every kind of decision at once: a department question with its own person, an approval there, a question on a topic
@@ -71,7 +74,7 @@ export async function everyKind() {
   const at = Date.now();
   const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
   const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
-  c.ctx.computer.ask('Inspect disk space.');
+  await c.askComputer('Inspect disk space.');
   return { ...c, devQuestion, devApproval, devPeople, devPlain, salesQuestion, mktQuestion, structure: structure!, staff: staff! };
 }
 

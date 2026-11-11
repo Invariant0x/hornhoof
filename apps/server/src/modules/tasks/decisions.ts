@@ -7,7 +7,7 @@ import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
-import { canViewComputer, type Asked } from '../computer/access.js';
+import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
 import { seesTask, type TaskPlace } from './sight.js';
@@ -31,7 +31,8 @@ export type Decisions = {
   /* known: read with its task and agent; otherwise it shows only because it is this person's to answer. */
   requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; known: boolean }[];
   proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
-  computer: { asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
+  /* The orchestrator's requests for machines: each is its machine's owner's to answer. */
+  computers: { view: AccessView; asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
   machines: MachineAway[];
   counts: Counts;
 };
@@ -96,16 +97,23 @@ export async function mayOpenRequest(db: Db, me: Person, request: Request, task:
 
 const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAnswer;
 
-/* What the orchestrator asks of people, for those who see him: his pending cards for people who see the whole company, and
-   his request for the computer. The control folder is read once, for the item and for the counts alike. Only a screen of a
-   person takes it. */
-async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ id: string | null; cards: ProposalRow[]; asked: Asked | null }> {
+/* What the orchestrator asks of people: his pending cards, for people who see the whole company and see him, and his
+   requests for machines. A request for a machine shows to its owner, whose it is to answer, whether they see him or
+   not, and to the people who see the whole company and see him. Only a screen of a person takes it. */
+async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ cards: ProposalRow[]; computers: Decisions['computers'] }> {
   const { db } = ctx;
   const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
-  if (!seesAgentId(viewer, orchestrator?.id)) return { id: null, cards: [], asked: null };
-  const cards = me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
-  return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? ctx.computer.view().asked : null };
+  if (!orchestrator || me.via) return { cards: [], computers: [] };
+  const seesHim = seesAgentId(viewer, orchestrator.id);
+  const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
+  const computers = (await ctx.computer.views(me))
+    .filter(view => view.asked && (view.canOpen || (seesHim && canViewComputer(me))))
+    .map(view => ({ view, asked: view.asked!, agentId: orchestrator.id, ownerPersonId: view.machine.personId, canAnswer: view.canOpen, decidedBy: machineDecidedBy(view) }));
+  return { cards, computers };
 }
+
+/* The server's own machine while it needs no key is the CEO's and the delegate's to open; any other only its owner's. */
+const machineDecidedBy = (view: AccessView): DecidedBy => ({ kind: view.key === 'not_needed' ? 'ceo_and_delegate' : 'machine_owner', departmentId: null });
 
 /* A machine still away waits for each of its people, on each one's card as this person sees them. */
 function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
@@ -117,8 +125,8 @@ function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
 }
 
 /* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
-   by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
-   computer for people who see the whole company and see him. */
+   by an agent they see, or that are theirs to answer, the orchestrator's pending cards for people who see the whole
+   company and see him, and its requests for machines for their owners and for those people. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
@@ -136,16 +144,15 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'start
     .filter(r => canReach(access, taskSpot(r.task)))
     .map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)), known: knowsRequest(viewer, r.request, r.task) }))
     .filter(shows);
-  const { id: orchestratorId, cards, asked } = await orchestratorAsks(ctx, me, viewer);
+  const { cards, computers } = await orchestratorAsks(ctx, me, viewer);
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
-  const computer = asked && orchestratorId ? { asked, agentId: orchestratorId, ...judged({ source: 'computer_access' }) } : null;
   const counts = counted(viewer, [
     ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
-    ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),
+    ...computers.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.agentId })),
   ]);
   const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
-  return { requests: seen, proposals: shownCards, computer, machines, counts: withMachines(counts, machines.filter(card => !card.back), me) };
+  return { requests: seen, proposals: shownCards, computers, machines, counts: withMachines(counts, machines.filter(card => !card.back), me) };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the

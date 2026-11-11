@@ -1,59 +1,128 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { computerPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { people } from '../../db/schema.js';
+import { machinePrincipal, withInputLock } from '../conversation/decision-context.js';
 import { appendEvent, appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
-import { decisionPerson } from '../tasks/decisions.js';
-import { ONLY_CEO } from '../tools/control.js';
 import type { ToolJob } from '../tools/job.js';
-import { onMachine, RUN_DEFAULT_S, RUN_MAX_S, serverMachine, type Waited } from './access.js';
+import { onMachine, RUN_DEFAULT_S, RUN_MAX_S, type AccessMachine, type AccessState, type Waited } from './access.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
+type Said = ReturnType<typeof say>;
 
-const UNREACHABLE = "Hornhoof cannot reach the computer it runs on: its updater does not run there. Tell the CEO in a line that running Hornhoof's install command on that computer again brings it back.";
-const CLOSED = 'Access to the computer is closed. Ask the CEO for it with ask_computer_access and the reason in a line, then go on once it opens.';
+const NO_OWN = "The machine this server runs on has none of the company's core yet. Call machines for the ones that have.";
+const noSuch = (name: string) => `There is no machine of the company with a core named ${name}. Call machines for their names.`;
+const ambiguous = (name: string) => `More than one machine is called ${name}. Name it by its id from machines.`;
+const unreachable = (name: string) => `Hornhoof cannot reach ${name} now: its core has not answered for a minute. Tell its owner in a line; never ask anyone to type commands.`;
+const closed = (name: string) => `Access to ${name} is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.`;
+const notTheirs = (owner: string, name: string) =>
+  `Only the CEO, the CEO delegate or ${owner}, who owns ${name}, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.`;
+
+const MACHINE = z.string().trim().min(1).max(200).optional().describe('The machine, by its name or its id from machines. Left out: the machine the company server runs on.');
+
+/* The machine the orchestrator named, or what it is told when there is no such one. */
+async function named(ctx: Ctx, job: ToolJob, machine: string | undefined): Promise<AccessMachine | Said> {
+  const found = await ctx.computer.find(job.companyId, machine);
+  if (found === 'ambiguous') return say(ambiguous(machine ?? ''), true);
+  if (found === 'none') return say(machine === undefined ? NO_OWN : noSuch(machine), true);
+  return found;
+}
+
+const isSaid = (value: AccessMachine | Said): value is Said => 'content' in value;
+
+async function ownerName(ctx: Ctx, personId: string): Promise<string> {
+  const [owner] = await ctx.db.select({ name: people.name }).from(people).where(eq(people.id, personId));
+  return owner?.name ?? 'its owner';
+}
 
 /* What a wait for a command comes to, for the orchestrator. */
-function answer(id: string, waited: Waited, seconds: number) {
-  if (waited === 'gone') return say('The updater has no such command: its answer was taken already, or it was forgotten. Look before you run it again.', true);
-  if (waited === 'running') return say(`Still running. Call computer_result with id ${id} for its result; each call waits up to ${seconds} seconds.`);
+async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promise<Said> {
+  if (waited === 'gone') return say('There is no such command: it was never made, or it ended more than a day ago. Look before you run it again.', true);
+  const machine = await ctx.computer.machineOfRun(id, job.companyId);
+  const name = machine?.name ?? 'the machine';
+  if (waited === 'lost') return say(`The command's outcome is unknown: ${name}'s core lost it. Look at the machine before you run it again.`, true);
+  if (waited === 'running') {
+    if (machine && !ctx.computer.reachable(machine.id)) return say(`${name} does not answer now; the command's outcome is unknown until it does. Call computer_result with id ${id} later.`);
+    return say(`Still running. Call computer_result with id ${id} for its result; each call waits up to ${Math.round(ctx.computer.waitMs / 1000)} seconds.`);
+  }
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
 }
 
-/* A command starts only in a turn that answers the CEO or the CEO delegate now, or that their click opening the computer
-   opened, kept under the input lock from words that would change it meanwhile, and while access is open: its id, or why
-   it did not start. */
-function started(ctx: Ctx, job: ToolJob, command: string, seconds: number) {
+/* A command starts only while the machine's access is open, and only in a turn that answers the CEO, the CEO delegate
+   or the machine's owner now, or that their click opening a machine opened, kept under the input lock from words that
+   would change it meanwhile: its id, or why it did not start. */
+function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
   return withInputLock(ctx, job.agentId, async () => {
-    if (!(await computerPrincipal(ctx.db, job.id))) return say(ONLY_CEO, true);
-    if (!ctx.computer.openUntil()) return say(CLOSED, true);
-    if (!ctx.computer.available()) return say(UNREACHABLE, true);
-    return ctx.computer.start(command, seconds);
+    if (!(await ctx.computer.openUntil(machine.id))) return say(closed(machine.name), true);
+    if (!(await machinePrincipal(ctx.db, job.id, machine.personId))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
+    if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
+    const run = await ctx.computer.start(job, machine.id, command, seconds);
+    if (run === 'closed') return say(closed(machine.name), true);
+    return run === 'none' ? say(noSuch(machine.name), true) : run;
   });
 }
 
-/* The orchestrator's way out of its container: it asks the CEO for the computer the server runs on, and while the CEO
-   keeps access open it runs commands there as root, in turns that answer the CEO. */
+/* One machine in a line, for the orchestrator. */
+function lineOf(state: AccessState, owner: string): string {
+  const { machine } = state;
+  const access = state.until ? `access open until ${state.until}` : state.asked ? `asked: ${state.asked.reason}` : 'closed';
+  return [
+    `${machine.name} (${machine.id})`,
+    machine.role ?? 'no role',
+    `owner ${owner}`,
+    machine.os ?? 'unknown',
+    ...(machine.data ? ["holds the company's data"] : []),
+    state.reachable ? 'reachable' : 'not answering',
+    access,
+    ...(state.key === 'not_held' ? ['its owner must give it their key first (its card says how)'] : []),
+  ].join(', ');
+}
+
+/* The orchestrator's way out of its container: it asks a machine's owner for that machine, and while the owner keeps
+   access open it runs commands there as root, in turns that answer the CEO, the CEO delegate or that owner. */
 export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  server.registerTool(
+    'machines',
+    {
+      description:
+        "Lists the company's machines that have its core: name, id, role, owner, system, whether it holds the company's data, whether Hornhoof reaches it, and its computer access. " +
+        'Computer access is per machine, and only each machine\'s owner opens it, with their own key.',
+      inputSchema: {},
+    },
+    async () => {
+      const states = await ctx.computer.states(job.companyId);
+      if (states.length === 0) return say("No machine of the company has its core yet, so there is no computer access to ask for.");
+      const owners = await ctx.db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, [...new Set(states.map(state => state.machine.personId))]));
+      const names = new Map(owners.map(owner => [owner.id, owner.name]));
+      return say(states.map(state => lineOf(state, names.get(state.machine.personId) ?? 'unknown')).join('\n'));
+    },
+  );
+
   server.registerTool(
     'ask_computer_access',
     {
       description:
-        'Asks the CEO for access to the computer the server runs on, for a day, when a fix needs the computer itself: Docker, the system, files outside Hornhoof. ' +
-        'The CEO sees the reason in your window and opens it with one click; then you get a note and go on by yourself. Never ask the CEO to type commands.',
-      inputSchema: { reason: z.string().trim().min(1).max(500).describe('What you need the computer for, in a line.') },
+        'Asks the owner of a machine of the company for access to it, for a day, when a fix needs the machine itself: Docker, the system, files outside Hornhoof. ' +
+        'The owner sees the reason and opens it with one click; then you get a note and go on by yourself. Never ask anyone to type commands.',
+      inputSchema: { machine: MACHINE, reason: z.string().trim().min(1).max(500).describe('What you need the machine for, in a line.') },
     },
-    async ({ reason }) => {
-      if (!ctx.computer.available()) return say(UNREACHABLE, true);
-      const until = ctx.computer.openUntil();
-      if (until) return say(`Access to the computer is open until ${until}. Use computer.`);
-      ctx.computer.ask(reason);
+    async ({ machine: asked, reason }) => {
+      const machine = await named(ctx, job, asked);
+      if (isSaid(machine)) return machine;
+      if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
+      const until = await ctx.computer.openUntil(machine.id);
+      if (until) return say(`Access to ${machine.name} is open until ${until}. Use computer with machine ${machine.id}.`);
+      await ctx.computer.ask(job.companyId, machine.id, reason);
       ctx.bus.publish(job.companyId, { type: 'computer' });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(await serverMachine(ctx, job.companyId)) } });
-      const personId = await decisionPerson(ctx, job.companyId, { source: 'computer_access' });
-      await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, personId) });
-      return say('The CEO sees your request in your window and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.');
+      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(machine.name) } });
+      await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, machine.personId) });
+      const state = (await ctx.computer.states(job.companyId)).find(one => one.machine.id === machine.id);
+      const keyless = state?.key === 'not_held' ? ` ${machine.name} does not hold their key yet, and its card tells them what to do. Do not tell anyone to type commands.` : '';
+      return say(
+        `The owner of ${machine.name}, ${await ownerName(ctx, machine.personId)}, sees your request and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.${keyless}`,
+      );
     },
   );
 
@@ -61,18 +130,21 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'computer',
     {
       description:
-        'Runs a bash command as root on the computer the server runs on, while the CEO keeps access open, and gives back its exit code and the end of its output. ' +
-        "It runs in a helper container with every privilege, in the computer's processes and network: docker reaches the computer's Docker, the computer's files are at /host, " +
-        "and chroot /host sh -c '...' runs a command on the computer itself (Linux; on a Mac the computer is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
-        'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran and why.',
+        'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
+        "It runs in a helper container with every privilege, in the machine's processes and network: docker reaches the machine's Docker, the machine's files are at /host, " +
+        "and chroot /host sh -c '...' runs a command on the machine itself (Linux; on a Mac the machine is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
+        'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran, where and why.',
       inputSchema: {
+        machine: MACHINE,
         command: z.string().min(1).max(20_000).describe('The bash command.'),
         timeoutSeconds: z.number().int().min(1).max(RUN_MAX_S).optional().describe(`How long it may run, ${RUN_DEFAULT_S} when left out.`),
       },
     },
-    async ({ command, timeoutSeconds }) => {
-      const id = await started(ctx, job, command, timeoutSeconds ?? RUN_DEFAULT_S);
-      return typeof id === 'string' ? answer(id, await ctx.computer.wait(id), Math.round(ctx.computer.waitMs / 1000)) : id;
+    async ({ machine: asked, command, timeoutSeconds }) => {
+      const machine = await named(ctx, job, asked);
+      if (isSaid(machine)) return machine;
+      const run = await started(ctx, job, machine, command, timeoutSeconds ?? RUN_DEFAULT_S);
+      return 'id' in run ? answer(ctx, job, run.id, await ctx.computer.wait(run.id, job.companyId)) : run;
     },
   );
 
@@ -82,6 +154,6 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       description: 'Waits for the result of a command that computer said still runs, and gives back its exit code and the end of its output once it ended.',
       inputSchema: { id: z.uuid().describe('The id computer gave.') },
     },
-    async ({ id }) => answer(id, await ctx.computer.wait(id), Math.round(ctx.computer.waitMs / 1000)),
+    async ({ id }) => answer(ctx, job, id, await ctx.computer.wait(id, job.companyId)),
   );
 }

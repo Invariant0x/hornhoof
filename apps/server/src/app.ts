@@ -38,7 +38,7 @@ import { loadTemplates, type Templates } from './modules/templates/load.js';
 import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
-import { ComputerAccess } from './modules/computer/access.js';
+import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
@@ -89,7 +89,7 @@ export type Ctx = Deps & {
   terminals: TerminalRelay;
   updates: UpdateCheck;
   updater: UpdaterControl;
-  computer: ComputerAccess;
+  computer: Computers;
   templates: Templates;
   links: PublicLinks;
   challenges: Challenges;
@@ -169,7 +169,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
   ctx.updater = new UpdaterControl(config.controlDir);
-  ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
+  ctx.computer = new Computers(ctx);
+  ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   ctx.challenges = new Challenges();
@@ -180,6 +181,14 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
      registry only when asked waits for the first machine that wants to know. */
   ctx.mode.whenLead(() => void (config.updateCheckMs > 0 && refreshBuild(ctx)), () => undefined);
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+  /* The first time this app leads it takes over the server's own computer access as an app from before left it, and
+     tries again every second while that fails and it still leads. */
+  const takeOverAccess = (): void =>
+    void ctx.computer.importLegacy(config.controlDir).catch((err: unknown) => {
+      ctx.log.warn({ error: loggable(err) }, "Could not take over the computer access an older build left. Computer access is not served until it is.");
+      if (ctx.mode.current() === 'lead') setTimeout(takeOverAccess, 1000).unref();
+    });
+  ctx.mode.whenLead(takeOverAccess, () => undefined);
   ctx.mode.whenLeaving(() => closeOpenSockets(app));
   app.addHook('onReady', async () => {
     ctx.mode.start();

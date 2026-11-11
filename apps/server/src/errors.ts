@@ -143,6 +143,13 @@ export type ErrorReason =
   | 'renew_refused'
   | 'core_present'
   | 'key_exists'
+  | 'not_machine_owner'
+  | 'machine_unreachable'
+  | 'no_core'
+  | 'grant_needed'
+  | 'bad_grant'
+  | 'key_not_held'
+  | 'no_key'
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';

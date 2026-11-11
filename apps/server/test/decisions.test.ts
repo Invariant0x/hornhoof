@@ -64,9 +64,8 @@ describe('decisionOwner', () => {
     expect(decisionOwner(question({ departmentId: null }), [ceo, dan])).toBe('ceo');
   });
 
-  it("gives the CEO the orchestrator's cards and the request for the computer", () => {
+  it("gives the CEO the orchestrator's cards", () => {
     expect(decisionOwner({ source: 'proposal' }, [ceo, dan])).toBe('ceo');
-    expect(decisionOwner({ source: 'computer_access' }, [ceo, dan])).toBe('ceo');
   });
 
   it('never makes someone else the CEO', () => {
@@ -91,7 +90,7 @@ describe('decisions waiting for people', () => {
       [c.structure.id, 'structure', c.ids.ivan],
       [c.staff.id, 'staff', c.ids.ivan],
     ]);
-    expect(all.computerAccess).toMatchObject({ kind: 'computer_access', id: 'server', ownerPersonId: c.ids.ivan, canAnswer: true, view: { asked: { reason: 'Inspect disk space.' } } });
+    expect(all.computerAccess).toMatchObject([{ kind: 'computer_access', id: c.machine, ownerPersonId: c.ids.ivan, canAnswer: true, view: { asked: { reason: 'Inspect disk space.' } } }]);
     expect(all.counts.byPerson).toEqual({ [c.ids.ivan]: 8, [c.ids.dan]: 1 });
     expect(all.counts.byAgent).toEqual({ [c.workers.dev.id]: 4, [c.workers.sales.id]: 1, [c.workers.mkt.id]: 1, [c.orchestrator.id]: 3 });
     expect(all.counts.total).toBe(9);
@@ -121,7 +120,7 @@ describe('decisions waiting for people', () => {
     const his = await c.view(c.tokens.dan);
     expect(his.requests.map(r => r.id).sort()).toEqual([c.devQuestion, c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
     expect(his.proposals).toEqual([]);
-    expect(his.computerAccess).toBeNull();
+    expect(his.computerAccess).toEqual([]);
     expect(his.counts).toEqual({ byPerson: { [c.ids.dan]: 1, [c.ids.ivan]: 3 }, byAgent: { [c.workers.dev.id]: 4 }, total: 4 });
     /* He takes his department's own decisions; approvals, the CEO's topics and a question without a topic are the CEO's. */
     expect(Object.fromEntries(his.requests.map(r => [r.id, r.canAnswer]))).toEqual({
@@ -145,7 +144,7 @@ describe('decisions waiting for people', () => {
   it('show a person of the whole company without the delegate mark only what their agents ask, and let them take none', async () => {
     const c = await everyKind();
     const none = await c.view(c.tokens.zed);
-    expect([none.requests, none.addressed, none.proposals, none.computerAccess, none.counts.total]).toEqual([[], [], [], null, 0]);
+    expect([none.requests, none.addressed, none.proposals, none.computerAccess, none.counts.total]).toEqual([[], [], [], [], 0]);
     await ownPlan(c.db, 'zed@acme.com', c.workers.dev.id, c.orchestrator.id);
     const his = await c.view(c.tokens.zed);
     expect(his.requests).toHaveLength(4);
@@ -154,7 +153,7 @@ describe('decisions waiting for people', () => {
       [c.structure.id, false, { kind: 'ceo_and_delegate', department: null }],
       [c.staff.id, false, { kind: 'ceo_and_delegate', department: null }],
     ]);
-    expect(his.computerAccess).toMatchObject({ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } });
+    expect(his.computerAccess).toMatchObject([{ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } }]);
     expect(his.counts.total).toBe(7);
     expect(his.counts.byPerson[c.ids.ivan]).toBe(6);
   });
@@ -165,7 +164,8 @@ describe('decisions waiting for people', () => {
     for (const token of [c.tokens.ceo, c.tokens.zed]) {
       const v = await c.view(token);
       expect(v.requests).toHaveLength(6);
-      expect([...v.requests, ...v.proposals, v.computerAccess!].every(d => d.canAnswer)).toBe(true);
+      expect(v.computerAccess).toHaveLength(1);
+      expect([...v.requests, ...v.proposals, ...v.computerAccess].every(d => d.canAnswer)).toBe(true);
     }
   });
 
@@ -174,12 +174,12 @@ describe('decisions waiting for people', () => {
     const mine = await c.view(c.tokens.ceo, `?person=${c.ids.dan}`);
     expect(mine.requests.map(r => r.id)).toEqual([c.devQuestion.request.id]);
     expect(mine.proposals).toEqual([]);
-    expect(mine.computerAccess).toBeNull();
+    expect(mine.computerAccess).toEqual([]);
     expect(mine.counts.total).toBe(9);
     const ceos = await c.view(c.tokens.ceo, `?person=${c.ids.ivan}`);
     expect(ceos.requests).toHaveLength(5);
     expect(ceos.proposals).toHaveLength(2);
-    expect(ceos.computerAccess).not.toBeNull();
+    expect(ceos.computerAccess).toHaveLength(1);
     /* The filter is no key: someone else's decisions stay out of sight, and a stranger's filter shows nothing. */
     await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     const sarasForDan = await c.view(c.tokens.dan, `?person=${c.ids.ivan}`);
@@ -233,17 +233,18 @@ describe('decisions on the map', () => {
 });
 
 describe('telling screens that decisions changed', () => {
-  it('tells people who see the whole company that the request for the computer changed, without what it says', async () => {
+  it('tells every person that computer access changed, without what it says', async () => {
     const c = await company();
     await listen(c.app);
     /* A stream hears from its headers on: the server listens to the bus in the same step as it sends them. */
     const streams = { ceo: await openStream(c.app, c.tokens.ceo), zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
-    c.ctx.computer.ask('Inspect disk space.');
+    await c.askComputer('Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => streams.ceo.messages.some(m => m.type === 'computer'));
     expect(streams.ceo.messages.filter(m => m.type === 'computer')).toEqual([{ type: 'computer' }]);
     await until(() => streams.zed.messages.some(m => m.type === 'computer'));
-    expect(streams.dan.messages.some(m => m.type === 'computer')).toBe(false);
+    /* It carries nothing, so each person's screens load what is theirs to see: a machine may be anybody's. */
+    await until(() => streams.dan.messages.some(m => m.type === 'computer'));
   });
 
   it('tells the orchestrator acting for the CEO nothing of the request for the computer, which it may not read', async () => {
@@ -253,7 +254,7 @@ describe('telling screens that decisions changed', () => {
     expect((await c.app.inject({ url: '/api/computer', headers })).statusCode).toBe(403);
     const inside = await openStream(c.app, undefined, headers);
     expect(inside.res.status).toBe(200);
-    c.ctx.computer.ask('Inspect disk space.');
+    await c.askComputer('Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     /* What comes after the change on the same stream shows the change itself went by. */
     c.ctx.bus.publish(c.acme.id, { type: 'org' });

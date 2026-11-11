@@ -32,7 +32,6 @@ const rows: Row[] = [
   ['an approval of a commit', request('approval', 'task'), false],
   ['an approval of a release', request('approval', 'release'), false],
   ['a structure or staff card', { source: 'proposal' }, false],
-  ['the request for the computer', { source: 'computer_access' }, false],
 ];
 
 describe('canDecide', () => {

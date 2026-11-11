@@ -12,7 +12,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
+import { answerBy, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt, type WrittenFrom } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -24,12 +24,12 @@ const MessageBody = z
   .object({ text: Text.trim().default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
   .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
 
-function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[]) {
+function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[], from?: WrittenFrom) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
-  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
+  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures), from), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
@@ -59,7 +59,10 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     /* Pictures alone read as their names wherever the words of a message show. */
     const words = text || pictures.map(p => p.name).join(', ');
-    const { actor, turn } = writtenBy(me, words, pictures);
+    /* The orchestrator is told which machine of the company a person writes from, when they sit at one. */
+    const here = !me.via && agent.kind === 'orchestrator' ? await ctx.computer.here(req, me.companyId) : null;
+    const from = here ? { machine: here.name, until: await ctx.computer.openUntil(here.id) } : undefined;
+    const { actor, turn } = writtenBy(me, words, pictures, from);
     const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: ref, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
     ctx.bus.publish(me.companyId, {
       type: 'pulse',

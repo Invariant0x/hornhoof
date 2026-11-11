@@ -1,0 +1,566 @@
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { webcrypto } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { and, desc, eq } from 'drizzle-orm';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agentEvents, agents, companies, computerRuns, departments, jobs, machineAccess, machines, people, personKeys, subscriptions } from '../src/db/schema.js';
+import { Computers, HELD_GRACE_S, LEGACY_FILE, SEEN_MS, type AccessView } from '../src/modules/computer/access.js';
+import type { Grant } from '../src/modules/computer/grant.js';
+import { keyPrint } from '../src/modules/computer/owner-key.js';
+import { VIA } from '../src/modules/network/via.js';
+import { identityOf } from '../src/modules/nodes/hub.js';
+import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, viaLink } from './helpers.js';
+import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
+
+const NODE_KEY = 'k'.repeat(40);
+const TOKEN = 'tool-token-0123456789abcdef0123456789';
+const DAY_S = 24 * 3600;
+const { subtle } = webcrypto;
+const b64 = (bytes: ArrayBuffer | Uint8Array): string => Buffer.from(bytes as ArrayBuffer).toString('base64url');
+
+/* A person's key as their browser makes it, and what they sign with it. */
+async function browserKey() {
+  const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const publicKey = b64(await subtle.exportKey('spki', pair.publicKey));
+  const grant = async (machine: string, over: Record<string, unknown> = {}): Promise<Grant> => {
+    const at = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify({ v: 1, machine, until: at + DAY_S, at, nonce: b64(webcrypto.getRandomValues(new Uint8Array(16))), ...over });
+    return { payload, signature: b64(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(payload))) };
+  };
+  return { publicKey, grant };
+}
+
+/* What the keeper of a machine sends: its machine's id as the peer door names it, with the mark of the keeper's own
+   request; the server's own keeper names itself. */
+const keeperOf = (machine: string) => ({ remoteAddress: '127.0.0.1', headers: { [VIA]: machine, 'x-hornhoof-keeper': '1' } });
+const OWN_KEEPER = { remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } };
+
+type Result = { content: { type: string; text: string }[]; isError?: boolean };
+const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
+const text = (res: Result) => res.content[0]!.text;
+
+/* A company whose server's own machine and Marat's Mac both have the core, with their keepers asking. Marat reaches one
+   department; Zed sees the whole company; Dan reaches the same department as Marat. The Mac holds Marat's key. */
+async function company(env: NodeJS.ProcessEnv = {}) {
+  const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+  const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', ...SERVER_MACHINE_ENV, ...env });
+  const url = await listen(app);
+  const ceo = await setUpCompany(app);
+  const [acme] = await db.select().from(companies);
+  const server = await serverMachine(app);
+  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
+  const tokens = {
+    ceo,
+    marat: await invitePerson(app, ceo, { name: 'Marat', email: 'marat@acme.com', access: { departments: [dev!.id], teams: [] } }),
+    zed: await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } }),
+    dan: await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev!.id], teams: [] } }),
+  };
+  const ids = Object.fromEntries((await db.select().from(people)).map(p => [p.name.toLowerCase(), p.id])) as Record<'ivan' | 'marat' | 'zed' | 'dan', string>;
+  const key = await browserKey();
+  await db.insert(personKeys).values({ personId: ids.marat, companyId: acme!.id, publicKey: key.publicKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 });
+  const NETWORK_ID = 'c'.repeat(64);
+  const [mac] = await db.insert(machines).values({ companyId: acme!.id, personId: ids.marat, machineKey: 'mac-0001-abcd', hostname: 'marat-mac', os: 'darwin', role: 'worker', networkId: NETWORK_ID, ownerPin: keyPrint(key.publicKey) }).returning();
+  app.ctx.computer.seen(mac!.id, true);
+
+  const builtin = await connectNode(url, NODE_KEY);
+  onTestFinished(() => builtin.close());
+  builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+  await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [sub] = await db.select().from(subscriptions);
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  /* A running turn of the orchestrator that a person started and nobody else wrote into. */
+  const running = async (token: string, createdBy: string | null) => {
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, orchestrator!.id), eq(jobs.status, 'running')));
+    return db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), createdBy });
+  };
+  await running(TOKEN, ids.ivan);
+  const open = async (token: string, machine: string, body: object = {}) => app.inject({ method: 'POST', url: `/api/machines/${machine}/access/open`, payload: body, ...as(token) });
+  const openMac = async () => expect((await open(tokens.marat, mac!.id, { grant: await key.grant(NETWORK_ID) })).statusCode).toBe(200);
+  const views = async (token: string) => ((await app.inject({ url: '/api/machines/access', ...as(token) })).json() as { views: AccessView[] }).views;
+  const accessOf = async (machine: string) => (await db.select().from(machineAccess).where(eq(machineAccess.machineId, machine)))[0];
+  const runsOf = (machine: string) => db.select().from(computerRuns).where(eq(computerRuns.machineId, machine)).orderBy(computerRuns.createdAt, computerRuns.id);
+  const job = { id: (await db.select().from(jobs).where(eq(jobs.status, 'running')))[0]!.id, agentId: orchestrator!.id, companyId: acme!.id };
+  /* Each a moment after the one before, so the order they were made in is the order of their times. */
+  let made = 0;
+  const start = async (machine: string, command = 'true') => {
+    const { id } = (await app.ctx.computer.start(job, machine, command, 300)) as { id: string };
+    await db.update(computerRuns).set({ createdAt: new Date(Date.now() + ++made) }).where(eq(computerRuns.id, id));
+    return id;
+  };
+  return { app, db, control, acme: acme!, server, mac: mac!.id, NETWORK_ID, key, tokens, ids, orchestrator: orchestrator!, running, open, openMac, views, accessOf, runsOf, start, builtin };
+}
+
+describe('computer access to a machine of the company', () => {
+  it("opens only for the machine's owner", async () => {
+    const c = await company();
+    const grant = { grant: await c.key.grant(c.NETWORK_ID) };
+    /* The CEO, a person who sees the whole company, a person of the same department, and the orchestrator acting for
+       the CEO: nobody but Marat, also from localhost and through the machine itself. */
+    for (const action of ['open', 'decline']) {
+      for (const token of [c.tokens.ceo, c.tokens.zed, c.tokens.dan]) {
+        const res = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, ...as(token) });
+        expect([res.statusCode, res.json().error.reason], action).toEqual([403, 'not_machine_owner']);
+        const forged = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, cookies: as(token).cookies, remoteAddress: '127.0.0.1', headers: { host: 'localhost:8080', [VIA]: c.mac } });
+        expect(forged.statusCode, action).toBe(403);
+      }
+      const acting = await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/${action}`, payload: grant, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+      expect([acting.statusCode, acting.json().error.reason], action).toEqual([403, 'not_machine_owner']);
+    }
+    expect(await c.accessOf(c.mac)).toBeUndefined();
+    /* The server's own machine holds no key, and is the CEO's. */
+    expect((await c.open(c.tokens.marat, c.server)).json().error.reason).toBe('not_machine_owner');
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    await c.openMac();
+    /* Once disabled, Marat is signed out, and his machine's access went with the machine. */
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.marat}`, payload: { status: 'disabled' }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
+    expect((await c.open(c.tokens.marat, c.mac, grant)).statusCode).toBe(401);
+    expect(await c.accessOf(c.mac)).toBeUndefined();
+  });
+
+  it("lets the CEO close any machine's access, and nobody else but its owner", async () => {
+    const c = await company();
+    await c.openMac();
+    for (const token of [c.tokens.zed, c.tokens.dan]) expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(token) })).statusCode).toBe(403);
+    expect((await c.accessOf(c.mac))!.until).not.toBeNull();
+    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.ceo) })).statusCode).toBe(200);
+    expect(await c.accessOf(c.mac)).toMatchObject({ until: null, grant: null });
+    await c.openMac();
+    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) })).statusCode).toBe(200);
+  });
+
+  it('asks for a named machine, and its owner opens it for a day', async () => {
+    const c = await company();
+    const client = await mcp(c.app, TOKEN);
+    const asked = await call(client, 'ask_computer_access', { machine: 'Marat-Mac', reason: 'Clean Docker images.' });
+    expect(text(asked)).toBe('The owner of marat-mac, Marat, sees your request and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.');
+    /* It is Marat's to answer, and shows in nobody else's requests. */
+    const mine = (await c.views(c.tokens.marat)).filter(view => view.asked);
+    expect(mine).toMatchObject([{ machine: { id: c.mac, name: 'marat-mac', os: 'darwin', data: false }, asked: { reason: 'Clean Docker images.' }, canOpen: true, key: 'held', reachable: true }]);
+    const requestsOf = async (token: string) => ((await c.app.inject({ url: '/api/requests', ...as(token) })).json() as { computerAccess: { id: string; canAnswer: boolean; ownerPersonId: string; decidedBy: { kind: string } }[] }).computerAccess;
+    expect(await requestsOf(c.tokens.marat)).toMatchObject([{ id: c.mac, canAnswer: true, ownerPersonId: c.ids.marat, decidedBy: { kind: 'machine_owner' } }]);
+    for (const token of [c.tokens.dan, c.tokens.zed]) expect(await requestsOf(token)).toEqual([]);
+    /* The CEO sees him, and so sees the request without the right to answer it. */
+    expect(await requestsOf(c.tokens.ceo)).toMatchObject([{ id: c.mac, canAnswer: false }]);
+
+    const grant = await c.key.grant(c.NETWORK_ID);
+    const opened = await c.open(c.tokens.marat, c.mac, { grant });
+    expect(opened.statusCode).toBe(200);
+    const until_ = (JSON.parse(grant.payload) as { until: number }).until;
+    expect(opened.json()).toMatchObject({ until: new Date(until_ * 1000).toISOString(), asked: null });
+    expect(await c.accessOf(c.mac)).toMatchObject({ until: new Date(until_ * 1000), grant, openedBy: c.ids.marat, askedReason: null });
+    const said = (await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer')))).map(event => event.data);
+    expect(said).toEqual([
+      { state: 'asked', reason: 'Clean Docker images.', machine: 'marat-mac' },
+      { state: 'opened', until: opened.json().until, machine: 'marat-mac' },
+    ]);
+    /* The note is Marat's order: the turn it starts may use his machine. */
+    const [note] = await c.db.select().from(jobs).where(eq(jobs.agentId, c.orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
+    expect(note).toMatchObject({ createdBy: c.ids.marat });
+    expect(note!.prompt).toContain('Marat opened access to marat-mac until');
+    expect(note!.prompt).toContain('Clean Docker images.');
+    /* Asked again while it is open, he is told to use it. */
+    expect(text(await call(client, 'ask_computer_access', { machine: c.mac, reason: 'More.' }))).toBe(`Access to marat-mac is open until ${opened.json().until}. Use computer with machine ${c.mac}.`);
+  });
+
+  it('opens a machine that holds a key only with what its owner signed for it', async () => {
+    const c = await company();
+    const other = await browserKey();
+    const bad = async (body: object, status: number, reason: string) => {
+      const res = await c.open(c.tokens.marat, c.mac, body);
+      expect([res.statusCode, res.json().error.reason]).toEqual([status, reason]);
+    };
+    await bad({}, 400, 'grant_needed');
+    await bad({ grant: await other.grant(c.NETWORK_ID) }, 400, 'bad_grant');
+    await bad({ grant: await c.key.grant('d'.repeat(64)) }, 400, 'bad_grant');
+    const now = Math.floor(Date.now() / 1000);
+    await bad({ grant: await c.key.grant(c.NETWORK_ID, { until: now + 2 * DAY_S }) }, 400, 'bad_grant');
+    await bad({ grant: await c.key.grant(c.NETWORK_ID, { at: now + 3600, until: now + 7200 }) }, 400, 'bad_grant');
+    expect(await c.accessOf(c.mac)).toBeUndefined();
+
+    const grant = await c.key.grant(c.NETWORK_ID);
+    expect((await c.open(c.tokens.marat, c.mac, { grant })).statusCode).toBe(200);
+    /* His keeper is given that very grant, to check it by itself. */
+    const taken = (await c.app.inject({ url: '/api/network/computer?updater=1', ...keeperOf(c.mac) })).json() as { access: { untilSec: number; grant: Grant } };
+    expect(taken.access).toMatchObject({ grant, untilSec: (JSON.parse(grant.payload) as { until: number }).until });
+
+    /* A new key of his, after a reset: the machine still holds the old one. */
+    await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) });
+    await c.db.update(personKeys).set({ publicKey: other.publicKey }).where(eq(personKeys.personId, c.ids.marat));
+    await bad({ grant: await other.grant(c.NETWORK_ID) }, 409, 'key_not_held');
+    expect((await c.views(c.tokens.marat)).find(view => view.machine.id === c.mac)).toMatchObject({ key: 'not_held', canOpen: true });
+    /* With no key at all he has none to sign with, and a machine that holds none opens to nobody. */
+    await c.db.delete(personKeys).where(eq(personKeys.personId, c.ids.marat));
+    await bad({ grant: await other.grant(c.NETWORK_ID) }, 409, 'no_key');
+    await c.db.insert(personKeys).values({ personId: c.ids.marat, companyId: c.acme.id, publicKey: c.key.publicKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 });
+    await c.db.update(machines).set({ ownerPin: null }).where(eq(machines.id, c.mac));
+    await bad({ grant: await c.key.grant(c.NETWORK_ID) }, 409, 'key_not_held');
+    /* The server's own machine with no key opens on its app's word. */
+    expect((await c.views(c.tokens.ceo)).find(view => view.machine.id === c.server)).toMatchObject({ key: 'not_needed', canOpen: true });
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+  });
+
+  it('is not reachable without its keeper', async () => {
+    const c = await company();
+    let now = Date.now();
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now) });
+    computer.moveLegacy(c.control);
+    c.app.ctx.computer = computer;
+    const grant = async () => ({ grant: await c.key.grant(c.NETWORK_ID) });
+    const res = await c.open(c.tokens.marat, c.mac, await grant());
+    expect([res.statusCode, res.json().error.reason]).toEqual([409, 'machine_unreachable']);
+    /* An ask of its keeper whose updater is alive makes it reachable, for a minute. */
+    expect((await c.app.inject({ url: '/api/network/computer?updater=0', ...keeperOf(c.mac) })).statusCode).toBe(200);
+    expect((await c.open(c.tokens.marat, c.mac, await grant())).statusCode).toBe(409);
+    expect((await c.app.inject({ url: '/api/network/computer?updater=1', ...keeperOf(c.mac) })).statusCode).toBe(200);
+    now += SEEN_MS + 1000;
+    expect((await c.open(c.tokens.marat, c.mac, await grant())).statusCode).toBe(409);
+    expect((await c.app.inject({ url: '/api/network/computer?updater=1', ...keeperOf(c.mac) })).statusCode).toBe(200);
+    expect((await c.open(c.tokens.marat, c.mac, await grant())).statusCode).toBe(200);
+    /* A machine without the core has no access to open. */
+    const [bare] = await c.db.insert(machines).values({ companyId: c.acme.id, personId: c.ids.marat, machineKey: 'tower-0002-abcd', hostname: 'tower' }).returning();
+    const none = await c.open(c.tokens.marat, bare!.id, await grant());
+    expect([none.statusCode, none.json().error.reason]).toEqual([404, 'no_core']);
+  });
+
+  it("keeps each machine's commands to its own keeper, one at a time", async () => {
+    const c = await company();
+    await c.openMac();
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    const onServer = await c.start(c.server, 'uname -a');
+    const [first, second] = [await c.start(c.mac, 'df -h'), await c.start(c.mac, 'docker ps')];
+    const ask = async (who: object, held: string[] = []) => c.app.inject({ url: `/api/network/computer?updater=1&held=${held.join(',')}`, ...who });
+    /* Whoever comes through the Mac's web port is named as the Mac, without the keeper's mark: no keeper. */
+    const through = await c.app.inject({ url: '/api/network/computer?updater=1', remoteAddress: '127.0.0.1', headers: { [VIA]: c.mac } });
+    expect([through.statusCode, through.json().error.reason]).toEqual([403, 'not_keeper']);
+    expect((await c.app.inject({ url: '/api/network/computer?updater=1', ...as(c.tokens.ceo) })).statusCode).toBe(403);
+    expect((await c.runsOf(c.mac)).map(run => run.state)).toEqual(['waiting', 'waiting']);
+
+    expect(((await ask(OWN_KEEPER)).json() as { runs: { id: string; command: string; timeout: number }[] }).runs).toEqual([{ id: onServer, command: 'uname -a', timeout: 300 }]);
+    expect(((await ask(keeperOf(c.mac))).json() as { runs: { id: string }[] }).runs.map(run => run.id)).toEqual([first]);
+    /* The next comes only once the one that is out has its answer. */
+    expect(((await ask(keeperOf(c.mac), [first])).json() as { runs: unknown[] }).runs).toEqual([]);
+    /* An answer for another machine's command is no answer. */
+    const answer = (who: object, id: string, body: object = { exit: 0, output: 'ok' }) => c.app.inject({ method: 'POST', url: `/api/network/computer/${id}`, payload: body, ...who });
+    expect((await answer(keeperOf(c.mac), onServer)).statusCode).toBe(404);
+    expect((await answer(OWN_KEEPER, first)).statusCode).toBe(404);
+    expect((await answer(keeperOf(c.mac), first, { exit: 3, output: 'x'.repeat(40_000) })).statusCode).toBe(204);
+    const [done] = await c.runsOf(c.mac);
+    expect(done).toMatchObject({ state: 'done', exit: 3 });
+    expect(done!.output).toHaveLength(30_000);
+    /* Answered once. */
+    expect((await answer(keeperOf(c.mac), first)).statusCode).toBe(404);
+    expect(((await ask(keeperOf(c.mac))).json() as { runs: { id: string }[] }).runs.map(run => run.id)).toEqual([second]);
+    for (const bad of ['held=nonsense', `held=${Array<string>(9).fill(first).join(',')}`, 'updater=2']) expect((await c.app.inject({ url: `/api/network/computer?${bad}`, ...keeperOf(c.mac) })).statusCode).toBe(400);
+  });
+
+  it('keeps a command its keeper holds, and counts one it lost as lost, never sending it again', async () => {
+    const c = await company();
+    let now = Date.now();
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    computer.moveLegacy(c.control);
+    computer.seen(c.mac, true);
+    c.app.ctx.computer = computer;
+    await c.openMac();
+    const [held, next] = [await c.start(c.mac), await c.start(c.mac)];
+    expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([held]);
+    /* Named by its keeper it stays out, however long its updater takes, and nothing else goes out meanwhile. */
+    now += 3_600_000;
+    await c.db.update(machineAccess).set({ until: new Date(now + 3_600_000) }).where(eq(machineAccess.machineId, c.mac));
+    expect((await computer.take(c.mac, [held])).runs).toEqual([]);
+    expect(await computer.wait(held, c.acme.id)).toBe('running');
+    /* No longer named: lost, and the next goes out. */
+    expect((await computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([next]);
+    expect(await computer.wait(held, c.acme.id)).toBe('lost');
+    expect(await computer.answer(c.mac, held, { exit: 0, output: '' })).toBe(false);
+    /* One just taken is given its keeper a moment to write it down. */
+    now += (HELD_GRACE_S - 1) * 1000;
+    expect((await computer.take(c.mac, [])).runs).toEqual([]);
+    expect((await c.runsOf(c.mac)).map(run => run.state)).toEqual(['lost', 'sent']);
+    /* A command of another company's id is none. */
+    expect(await computer.wait(next, '0f0f0f0f-0000-4000-8000-00000000000a')).toBe('gone');
+  });
+
+  it('ends the commands nobody took when access closes, and gives none on a closed machine', async () => {
+    const c = await company();
+    await c.openMac();
+    const [out, waiting] = [await c.start(c.mac), await c.start(c.mac)];
+    expect((await c.app.ctx.computer.take(c.mac, [])).runs.map(run => run.id)).toEqual([out]);
+    await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) });
+    expect((await c.runsOf(c.mac)).map(run => [run.id, run.state, run.exit, run.output])).toEqual([
+      [out, 'sent', null, null],
+      [waiting, 'done', 126, 'Access to marat-mac is closed.'],
+    ]);
+    expect(await c.app.ctx.computer.start({ id: (await c.db.select().from(jobs))[0]!.id, agentId: c.orchestrator.id, companyId: c.acme.id }, c.mac, 'true', 300)).toBe('closed');
+    /* Its keeper hears that it is closed, and takes nothing. */
+    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [] });
+    /* A command written past the app onto a closed machine never runs either. */
+    await c.db.insert(computerRuns).values({ companyId: c.acme.id, machineId: c.mac, command: 'id', timeoutS: 300 });
+    expect(await c.app.ctx.computer.take(c.mac, [out])).toEqual({ access: null, runs: [] });
+    expect((await c.runsOf(c.mac)).at(-1)).toMatchObject({ state: 'done', exit: 126 });
+  });
+
+  it('closes a machine that is disconnected, with its commands', async () => {
+    const c = await company();
+    await c.openMac();
+    const [out, waiting] = [await c.start(c.mac), await c.start(c.mac)];
+    await c.app.ctx.computer.take(c.mac, []);
+    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/disconnect`, ...as(c.tokens.marat) })).statusCode).toBe(204);
+    expect(await c.accessOf(c.mac)).toBeUndefined();
+    expect((await c.runsOf(c.mac)).map(run => [run.id, run.state, run.exit])).toEqual([
+      [out, 'lost', null],
+      [waiting, 'done', 126],
+    ]);
+    expect((await c.views(c.tokens.marat)).map(view => view.machine.id)).not.toContain(c.mac);
+  });
+
+  it('closes the other machines when a new build leads', async () => {
+    const c = await company();
+    await c.openMac();
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    const waiting = await c.start(c.mac);
+    const report = async (commit: string) => expect((await c.app.inject({ method: 'POST', url: '/api/network/report', payload: { commit }, ...OWN_KEEPER })).statusCode).toBe(204);
+    await report('a'.repeat(40));
+    /* The first word of its build, and the same build again, change nothing. */
+    await report('a'.repeat(40));
+    expect((await c.accessOf(c.mac))!.until).not.toBeNull();
+    await report('b'.repeat(40));
+    expect(await c.accessOf(c.mac)).toMatchObject({ until: null, grant: null });
+    expect((await c.runsOf(c.mac)).map(run => [run.id, run.state, run.exit])).toEqual([[waiting, 'done', 126]]);
+    expect((await c.accessOf(c.server))!.until).not.toBeNull();
+  });
+
+  it('tells where a person sits, and nothing to who is elsewhere', async () => {
+    const c = await company();
+    const here = async (over: object) => ((await c.app.inject({ url: '/api/machines/here', cookies: as(c.tokens.ceo).cookies, ...over })).json() as { machine: { id: string } | null; view: AccessView | null });
+    /* The server's own front door on localhost: the server's machine, which the CEO sees. */
+    expect((await here({ headers: { host: 'localhost:8080' } })).machine).toMatchObject({ id: c.server });
+    expect(await here({ headers: { host: '127.0.0.1:8080' } })).toMatchObject({ machine: { id: c.server }, view: { canOpen: true } });
+    /* Through Marat's machine, as its peer door names it. */
+    expect((await here({ remoteAddress: '127.0.0.1', headers: { host: 'localhost:8081', [VIA]: c.mac } })).machine).toMatchObject({ id: c.mac });
+    const asMarat = (await c.app.inject({ url: '/api/machines/here', cookies: as(c.tokens.marat).cookies, remoteAddress: '127.0.0.1', headers: { host: 'localhost:8081', [VIA]: c.mac } })).json() as { view: AccessView };
+    expect(asMarat.view).toMatchObject({ machine: { id: c.mac }, canOpen: true });
+    /* By an address of the local network, behind another name, or over the link: nowhere. */
+    for (const headers of [{ host: '192.0.2.5:8080' }, { host: 'localhost:8080', 'x-forwarded-host': 'corp.hornhoof.test' }]) expect(await here({ headers })).toEqual({ machine: null, view: null });
+    const overLink = { ...viaLink(c.tokens.ceo), remoteAddress: '127.0.0.1', headers: { 'x-forwarded-proto': 'https', host: 'localhost:8080' } };
+    expect((await c.app.inject({ url: '/api/machines/here', ...overLink })).json()).toEqual({ machine: null, view: null });
+    /* Dan sits at the server and sees nothing of its access. */
+    expect((await c.app.inject({ url: '/api/machines/here', cookies: as(c.tokens.dan).cookies, headers: { host: 'localhost:8080' } })).json()).toEqual({ machine: null, view: null });
+  });
+
+  it('tells every person to look again, and the orchestrator acting for them nothing', async () => {
+    const c = await company();
+    const streams = { marat: await openStream(c.app, c.tokens.marat), dan: await openStream(c.app, c.tokens.dan) };
+    await c.openMac();
+    for (const stream of Object.values(streams)) await until(() => stream.messages.some(message => message.type === 'computer'));
+    /* What each then loads is their own: Dan sees no machine's access. */
+    expect(await c.views(c.tokens.dan)).toEqual([]);
+    expect((await c.views(c.tokens.zed)).map(view => [view.machine.name, view.canOpen, view.canClose])).toEqual([['the company server', false, false], ['marat-mac', false, false]]);
+    expect((await c.app.inject({ url: '/api/machines/access', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
+  });
+
+  it('tells the orchestrator which machine a person writes from, when they sit at one', async () => {
+    const c = await company();
+    const done = () => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
+    const asked = async (text: string, token: string, over: object) => {
+      await done();
+      expect((await c.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text }, cookies: as(token).cookies, ...over })).statusCode).toBe(202);
+      const [job] = await c.db.select().from(jobs).where(eq(jobs.agentId, c.orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
+      /* What the turn was asked, before what went before in the conversation was put around it. */
+      return job!.requestedPrompt;
+    };
+    expect(await asked('Fix the disk here.', c.tokens.ceo, { headers: { host: 'localhost:8080' } })).toBe('Ivan writes this from the company server; access to it is closed.\nIvan (CEO): Fix the disk here.');
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    const until_ = (await c.accessOf(c.server))!.until!.toISOString();
+    expect(await asked('And now?', c.tokens.ceo, { headers: { host: 'localhost:8080' } })).toBe(`Ivan writes this from the company server; access to it is open until ${until_}.\nIvan (CEO): And now?`);
+    /* From anywhere else nothing is said of a machine. */
+    expect(await asked('From home.', c.tokens.ceo, { headers: { host: '192.0.2.5:8080' } })).toBe('Ivan (CEO): From home.');
+  });
+
+  it("tells the screens when a person makes their key, and when a machine holds another", async () => {
+    const c = await company();
+    const stream = await openStream(c.app, c.tokens.marat);
+    const heard = () => stream.messages.filter(message => message.type === 'computer').length;
+    const zeds = await browserKey();
+    const put = await c.app.inject({ method: 'PUT', url: '/api/me/key', payload: { password: 'correct horse battery', publicKey: zeds.publicKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 }, ...as(c.tokens.zed) });
+    expect(put.statusCode).toBe(204);
+    await until(() => heard() === 1);
+    /* The Mac's keeper reports the key it holds: the same changes nothing, another is news. */
+    const report = async (pin: string) => expect((await c.app.inject({ method: 'POST', url: '/api/network/report', payload: { pin }, ...keeperOf(c.mac) })).statusCode).toBe(204);
+    await report(keyPrint(c.key.publicKey));
+    await report(keyPrint(zeds.publicKey));
+    await until(() => heard() === 2);
+    expect((await c.views(c.tokens.marat)).find(view => view.machine.id === c.mac)).toMatchObject({ key: 'not_held' });
+  });
+
+  it("shows each machine's access on its card", async () => {
+    const c = await company();
+    await c.openMac();
+    type Listed = { builtin: { access: AccessView | null } | null; machines: { id: string; access: AccessView | null }[] };
+    const listed = async (token: string) => (await c.app.inject({ url: '/api/machines', ...as(token) })).json() as Listed;
+    const ceos = await listed(c.tokens.ceo);
+    expect(ceos.builtin!.access).toMatchObject({ machine: { id: c.server, data: true }, canOpen: true, key: 'not_needed' });
+    expect(ceos.machines.find(machine => machine.id === c.mac)!.access).toMatchObject({ until: expect.any(String), canOpen: false, canClose: true });
+    const marats = await listed(c.tokens.marat);
+    expect(marats.builtin).toBeNull();
+    expect(marats.machines.find(machine => machine.id === c.mac)!.access).toMatchObject({ canOpen: true, canClose: true, key: 'held' });
+  });
+});
+
+describe("the orchestrator's commands on a machine", () => {
+  type Company = Awaited<ReturnType<typeof company>>;
+  /* The machine's keeper's side: takes the next command and answers it. */
+  async function answerAs(c: Company, machine: string, output: string) {
+    let run: { id: string; command: string; timeout: number } | undefined;
+    await until(async () => (run = (await c.app.ctx.computer.take(machine, [])).runs[0]) !== undefined);
+    expect(await c.app.ctx.computer.answer(machine, run!.id, { exit: 0, output })).toBe(true);
+    return run!;
+  }
+  /* A running turn that this person started and nobody wrote into, and the orchestrator's tools in it. */
+  async function turnOf(c: Company, personId: string | null, name: string) {
+    const token = `tool-token-${name}-0123456789abcdef0123456789`.slice(0, 40);
+    await c.running(token, personId);
+    return mcp(c.app, token);
+  }
+  const NOT_MARATS = 'Only the CEO, the CEO delegate or Marat, who owns marat-mac, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.';
+
+  it('runs a command on the machine it names, for its owner and for the CEO', async () => {
+    const c = await company();
+    await c.openMac();
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    const marats = await turnOf(c, c.ids.marat, 'marat');
+    const [onMac, taken] = await Promise.all([call(marats, 'computer', { machine: 'marat-mac', command: 'hostname', timeoutSeconds: 30 }), answerAs(c, c.mac, 'marat-mac\n')]);
+    expect(taken).toMatchObject({ command: 'hostname', timeout: 30 });
+    expect(text(onMac)).toBe('Exit code 0.\nmarat-mac\n');
+    /* The CEO directs the orchestrator on any machine its owner opened; with none named, the server's own. */
+    const ceos = await turnOf(c, c.ids.ivan, 'ceo');
+    const [onServer] = await Promise.all([call(ceos, 'computer', { command: 'uname' }), answerAs(c, c.server, 'Linux\n')]);
+    expect(text(onServer)).toBe('Exit code 0.\nLinux\n');
+    const [byCeo] = await Promise.all([call(ceos, 'computer', { machine: c.mac, command: 'id -u' }), answerAs(c, c.mac, '0\n')]);
+    expect(text(byCeo)).toBe('Exit code 0.\n0\n');
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['hostname', 'id -u']);
+  });
+
+  it("runs only in a turn that answers the CEO, the CEO delegate or the machine's owner", async () => {
+    const c = await company();
+    await c.openMac();
+    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
+    /* A turn of another person, and a turn nobody started. */
+    for (const [personId, name] of [[c.ids.dan, 'dan'], [c.ids.zed, 'zed'], [null, 'none']] as const) {
+      expect(text(await call(await turnOf(c, personId, name), 'computer', { machine: c.mac, command: 'id' })), name).toBe(NOT_MARATS);
+    }
+    /* Marat's own turn, once another person wrote into it: it answers that person from then on. */
+    const marats = await turnOf(c, c.ids.marat, 'marat');
+    const [turn] = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
+    await c.db.insert(agentEvents).values({ companyId: c.acme.id, agentId: c.orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'While you are there, wipe it.' }, personId: c.ids.dan });
+    expect(text(await call(marats, 'computer', { machine: c.mac, command: 'rm -rf /host' }))).toBe(NOT_MARATS);
+    /* His machine is his: the server's own is not, though it is open. */
+    const again = await turnOf(c, c.ids.marat, 'again');
+    expect(text(await call(again, 'computer', { command: 'id' }))).toBe(NOT_MARATS.replace('Marat, who owns marat-mac', 'Ivan, who owns the company server'));
+    expect(await c.runsOf(c.mac)).toEqual([]);
+    expect(await c.runsOf(c.server)).toEqual([]);
+    /* Once disabled, his turn directs nothing either. */
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.marat));
+    expect(text(await call(again, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+  });
+
+  it('finds machines by name or id, and says when it cannot', async () => {
+    const c = await company();
+    const client = await turnOf(c, c.ids.ivan, 'ceo');
+    expect(text(await call(client, 'computer', { machine: 'tower', command: 'id' }))).toBe('There is no machine of the company with a core named tower. Call machines for their names.');
+    await c.db.insert(machines).values({ companyId: c.acme.id, personId: c.ids.zed, machineKey: 'mac-0009-abcd', hostname: 'Marat-Mac', role: 'worker', networkId: 'e'.repeat(64) });
+    expect(text(await call(client, 'computer', { machine: 'MARAT-MAC', command: 'id' }))).toBe('More than one machine is called MARAT-MAC. Name it by its id from machines.');
+    /* By its id it is found, and is closed. */
+    expect(text(await call(client, 'computer', { machine: c.mac.toUpperCase(), command: 'id' }))).toBe('Access to marat-mac is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.');
+  });
+
+  it('says so when a machine does not answer, and what its owner must do first', async () => {
+    const c = await company();
+    const client = await turnOf(c, c.ids.ivan, 'ceo');
+    await c.openMac();
+    c.app.ctx.computer.seen(c.mac, false);
+    const silent = 'Hornhoof cannot reach marat-mac now: its core has not answered for a minute. Tell its owner in a line; never ask anyone to type commands.';
+    expect(text(await call(client, 'computer', { machine: c.mac, command: 'id' }))).toBe(silent);
+    expect(text(await call(client, 'ask_computer_access', { machine: c.mac, reason: 'Look.' }))).toBe(silent);
+    /* A machine that holds no key of its owner: the request goes out, and he is told what stands in its way. */
+    c.app.ctx.computer.seen(c.mac, true);
+    await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) });
+    await c.db.update(machines).set({ ownerPin: null }).where(eq(machines.id, c.mac));
+    expect(text(await call(client, 'ask_computer_access', { machine: c.mac, reason: 'Look.' }))).toContain('marat-mac does not hold their key yet, and its card tells them what to do. Do not tell anyone to type commands.');
+  });
+
+  it('lists the machines with the core', async () => {
+    const c = await company();
+    await c.openMac();
+    const client = await turnOf(c, c.ids.ivan, 'ceo');
+    const until_ = (await c.accessOf(c.mac))!.until!.toISOString();
+    expect(text(await call(client, 'machines')).split('\n')).toEqual([
+      `the company server (${c.server}), data, owner Ivan, unknown, holds the company's data, reachable, closed`,
+      `marat-mac (${c.mac}), worker, owner Marat, darwin, reachable, access open until ${until_}`,
+    ]);
+  });
+});
+
+describe('what an app from before access was per machine left', () => {
+  const legacy = (control: string, said: object) => writeFileSync(join(control, 'computer.json'), JSON.stringify(said));
+
+  /* The next start of the app on the same control folder, as after an update: it leads at once. */
+  function nextStart(app: Awaited<ReturnType<typeof testApp>>['app'], control: string, server: string): Computers {
+    const computer = new Computers(app.ctx);
+    computer.moveLegacy(control);
+    computer.seen(server, true);
+    app.ctx.computer = computer;
+    return computer;
+  }
+
+  it('carries an open window over, once this app leads, and once only', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    const untilSec = Math.floor(Date.now() / 1000) + 3600;
+    legacy(control, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: { reason: 'Look at the disk.', at: '2026-11-10T10:00:00.000Z' } });
+    const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', ...SERVER_MACHINE_ENV });
+    /* Set aside at start, by one rename. */
+    expect([existsSync(join(control, 'computer.json')), existsSync(join(control, LEGACY_FILE))]).toEqual([false, true]);
+    const ceo = await setUpCompany(app);
+    /* A server that led before its own machine had a row keeps the file for its next start. */
+    await until(() => app.ctx.computer.ready());
+    expect(existsSync(join(control, LEGACY_FILE))).toBe(true);
+    const server = await serverMachine(app);
+    const computer = nextStart(app, control, server);
+    /* Nothing of computer access is served before the file is taken over. */
+    expect(computer.ready()).toBe(false);
+    expect((await app.inject({ url: '/api/network/computer?updater=1', ...OWN_KEEPER })).statusCode).toBe(503);
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(ceo) })).statusCode).toBe(503);
+    await computer.importLegacy(control);
+    expect(computer.ready()).toBe(true);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    expect((await db.select().from(machineAccess))[0]).toMatchObject({ machineId: server, until: new Date(untilSec * 1000), openedBy: owner!.id, askedReason: 'Look at the disk.', grant: null });
+    expect(existsSync(join(control, LEGACY_FILE))).toBe(false);
+    /* The owner's close after it stays: nothing is carried over twice, at this start or the next. */
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${server}/access/close`, ...as(ceo) })).statusCode).toBe(200);
+    await computer.importLegacy(control);
+    const again = nextStart(app, control, server);
+    expect(again.ready()).toBe(true);
+    await again.importLegacy(control);
+    expect((await db.select().from(machineAccess))[0]).toMatchObject({ until: null });
+  });
+
+  it('carries a closed one over as closed, and leaves what a keeper wrote', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    legacy(control, { untilSec: null, until: null, asked: null });
+    const first = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
+    await setUpCompany(first.app);
+    await nextStart(first.app, control, await serverMachine(first.app)).importLegacy(control);
+    expect((await first.db.select().from(machineAccess))[0]).toMatchObject({ until: null, openedBy: null, askedReason: null });
+
+    const keepers = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    legacy(keepers, { untilSec: null, until: null, asked: null, by: 'keeper' });
+    const second = await testApp({ HORNHOOF_CONTROL_DIR: keepers, ...SERVER_MACHINE_ENV });
+    expect(second.app.ctx.computer.ready()).toBe(true);
+    expect(JSON.parse(readFileSync(join(keepers, 'computer.json'), 'utf8'))).toMatchObject({ by: 'keeper' });
+    expect(existsSync(join(keepers, LEGACY_FILE))).toBe(false);
+  });
+});

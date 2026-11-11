@@ -1,21 +1,22 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { PglitePreparedQuery } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, improvements, jobs, people, requests, subscriptions } from '../src/db/schema.js';
-import { ComputerAccess } from '../src/modules/computer/access.js';
+import { agentEvents, agents, companies, computerRuns, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { onAgent, pump } from '../src/modules/conversation/queue.js';
 import { readMessage } from '../src/modules/events/parties.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
+import { hostIdOf } from '../src/modules/network/join.js';
+import { thisMachine } from '../src/modules/network/store.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
@@ -25,14 +26,21 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /* A wait for a command's answer that no test outlasts, for commands that are answered. */
 const NEVER_MS = 2_147_483_647;
 const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+/* The server's own machine, with no name its keeper told yet, which the CEO owns. */
+const SERVER = 'the company server';
+const NOT_THEIRS = `Only the CEO, the CEO delegate or Ivan, who owns ${SERVER}, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.`;
+const HOST_ID = hostIdOf('server-0001-abcd');
 
-/* A company whose server has an updater, and a running turn of the orchestrator that answers the CEO. */
+/* A company whose server's own machine has its keeper asking, with its updater alive, and a running turn of the
+   orchestrator that answers the CEO. */
 async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
-  if (updater) writeFileSync(join(control, 'alive'), '');
-  const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, ...env });
+  const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, HORNHOOF_MACHINE_ID: HOST_ID, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
+  const [acme] = await db.select().from(companies);
+  const machine = (await thisMachine(db, app.ctx.config, acme!.id)).id;
+  app.ctx.computer.seen(machine, updater);
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
   builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
@@ -45,25 +53,37 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   const running = (token: string, answersCeo: boolean) =>
     db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo, createdBy: answersCeo ? owner!.id : null });
   await running(TOKEN, true);
-  return { app, db, ceo, control, orchestrator: orchestrator!, running, builtin };
+  return { app, db, ceo, control, machine, orchestrator: orchestrator!, running, builtin };
 }
+
+type Company = Awaited<ReturnType<typeof company>>;
+
+/* The same access with another wait for a command's answer. */
+function withWait(c: Pick<Company, 'app' | 'control' | 'machine'>, waitMs: number): Computers {
+  const computer = new Computers(c.app.ctx, { waitMs });
+  computer.moveLegacy(c.control);
+  computer.seen(c.machine, true);
+  c.app.ctx.computer = computer;
+  return computer;
+}
+
+const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
+/* The commands that wait for the machine's keeper or are out with it. */
+const pending = (db: Company['db']) => db.select({ id: computerRuns.id }).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
-const settings = (control: string) => JSON.parse(readFileSync(join(control, 'computer.json'), 'utf8'));
 const lines = async (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>
   (await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'computer')))).map(e => e.data);
 
-/* The updater's side: answers the first command it finds with this output. */
-async function answerAs(control: string, output: string, exit = 0) {
-  const dir = join(control, 'computer');
-  await until(() => existsSync(dir) && readdirSync(dir).some(f => !f.endsWith('.out.json')));
-  const file = readdirSync(dir).find(f => !f.endsWith('.out.json'))!;
-  const asked = JSON.parse(readFileSync(join(dir, file), 'utf8'));
-  writeFileSync(join(dir, `${asked.id}.out.json`), JSON.stringify({ id: asked.id, exit, output }));
-  return asked as { id: string; command: string; timeout: number };
+/* The machine's keeper's side: takes the next command and answers it with this output. */
+async function answerAs(c: Pick<Company, 'app' | 'machine'>, output: string, exit = 0) {
+  let run: { id: string; command: string; timeout: number } | undefined;
+  await until(async () => (run = (await c.app.ctx.computer.take(c.machine, [])).runs[0]) !== undefined);
+  expect(await c.app.ctx.computer.answer(c.machine, run!.id, { exit, output })).toBe(true);
+  return run!;
 }
 
 async function retryTurnOn(c: Awaited<ReturnType<typeof company>>, failedJobId: string) {
@@ -141,7 +161,8 @@ function messageReader(next: () => Promise<ServerMessage>) {
 
 describe('access to the computer the server runs on', () => {
   it('keeps the access question as an outgoing message from the orchestrator to the CEO', async () => {
-    const { app, db, orchestrator } = await company();
+    const c = await company();
+    const { app, db, orchestrator } = c;
     const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
     expect((await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' })).isError).toBeFalsy();
     const outgoing = (await listEvents(db, orchestrator.id, 0)).find(e => e.message?.direction === 'out');
@@ -149,11 +170,12 @@ describe('access to the computer the server runs on', () => {
   });
 
   it('opens for a day with one click of the CEO when the orchestrator asks, and the orchestrator goes on by itself', async () => {
-    const { app, db, ceo, control, orchestrator } = await company();
+    const c = await company();
+    const { app, db, ceo, orchestrator } = c;
     const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: SERVER, canAnswer: true, machineId: c.machine });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
@@ -161,11 +183,11 @@ describe('access to the computer the server runs on', () => {
     const until_ = Date.parse(opened.json().until);
     expect(until_).toBeGreaterThanOrEqual(before + DAY_MS - 1000);
     expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
-    expect(settings(control)).toMatchObject({ untilSec: Math.floor(until_ / 1000), asked: null });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true });
+    expect(await accessOf(c)).toMatchObject({ until: new Date(until_), askedReason: null, askedAt: null, grant: null });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: SERVER, canAnswer: true, machineId: c.machine });
     expect(await lines(db, orchestrator.id)).toEqual([
-      { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
-      { state: 'opened', until: opened.json().until },
+      { state: 'asked', reason: 'Restart the nodes outside AppArmor.', machine: SERVER },
+      { state: 'opened', until: opened.json().until, machine: SERVER },
     ]);
     /* The note that it is open is the CEO's order, so the turn it starts may use the computer. */
     const [note] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id)).orderBy(desc(jobs.createdAt)).limit(1);
@@ -174,21 +196,21 @@ describe('access to the computer the server runs on', () => {
   });
 
   it("runs the orchestrator's command through the updater and gives back the exit code and output", async () => {
-    const { app, ceo, control } = await company();
+    const c = await company();
+    const { app, ceo } = c;
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     const client = await mcp(app, TOKEN);
-    const [res, asked] = await Promise.all([call(client, 'computer', { command: 'uname -a', timeoutSeconds: 30 }), answerAs(control, 'Linux debian 6.12\n', 3)]);
+    const [res, asked] = await Promise.all([call(client, 'computer', { command: 'uname -a', timeoutSeconds: 30 }), answerAs(c, 'Linux debian 6.12\n', 3)]);
     expect(asked).toMatchObject({ command: 'uname -a', timeout: 30 });
     expect(res.isError).toBeFalsy();
     expect(text(res)).toBe('Exit code 3.\nLinux debian 6.12\n');
-    expect(readdirSync(join(control, 'computer'))).toEqual([]);
   });
 
   /* Codex gives up on a tool after a minute, so a long command answers that it runs, and its result comes later. */
   it('tells the orchestrator a long command still runs, and gives its result when asked for it', async () => {
-    const { app, ceo, control } = await company();
-    const computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 300 });
-    app.ctx.computer = computer;
+    const c = await company();
+    const { app, ceo } = c;
+    const computer = withWait(c, 300);
     const waits = vi.spyOn(computer, 'wait');
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     const client = await mcp(app, TOKEN);
@@ -205,15 +227,17 @@ describe('access to the computer the server runs on', () => {
     const id = text(started).match(/computer_result with id ([0-9a-f-]{36})/)![1]!;
     expect(text(started)).toMatch(/^Still running\./);
     expect(text(await outwaited(call(client, 'computer_result', { id }), 2))).toMatch(/^Still running\./);
-    await answerAs(control, 'Upgraded 3 packages.\n');
+    await answerAs(c, 'Upgraded 3 packages.\n');
     expect(text(await call(client, 'computer_result', { id }))).toBe('Exit code 0.\nUpgraded 3 packages.\n');
-    expect(readdirSync(join(control, 'computer'))).toEqual([]);
-    const gone = await call(client, 'computer_result', { id });
+    /* The answer is kept for a day, and a command nobody made is none. */
+    expect(text(await call(client, 'computer_result', { id }))).toBe('Exit code 0.\nUpgraded 3 packages.\n');
+    const gone = await call(client, 'computer_result', { id: '0f0f0f0f-0000-4000-8000-00000000000a' });
     expect(gone.isError).toBe(true);
   });
 
   it("queues the orchestrator's note while its machine is offline, so it goes on once the machine is back", async () => {
-    const { app, db, ceo, orchestrator, builtin } = await company();
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
     builtin.close();
     await until(async () => !(await app.inject({ method: 'GET', url: '/api/agents/orchestrator/events?after=0', ...as(ceo) })).json().state.ready);
@@ -224,34 +248,36 @@ describe('access to the computer the server runs on', () => {
   });
 
   it('refuses commands while access is closed, after its day, and in a turn that does not answer the CEO', async () => {
-    const { app, db, ceo, control, orchestrator, running } = await company();
+    const c = await company();
+    const { app, db, ceo, orchestrator, running } = c;
     const closed = await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' });
     expect(closed.isError).toBe(true);
     expect(text(closed)).toContain('ask_computer_access');
-    writeFileSync(join(control, 'computer.json'), JSON.stringify({ untilSec: Math.floor(Date.now() / 1000) - 1, until: new Date(Date.now() - 1000).toISOString(), asked: null }));
+    await db.insert(machineAccess).values({ machineId: c.machine, companyId: orchestrator.companyId, until: new Date(Date.now() - 1000) });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().until).toBeNull();
     expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
 
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 50 });
+    withWait(c, 50);
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     const woke = 'tool-token-woke-0123456789abcdef0123';
     await running(woke, false);
     const refused = await call(await mcp(app, woke), 'computer', { command: 'uname -a' });
-    expect(text(refused)).toBe(ONLY_CEO);
+    expect(text(refused)).toBe(NOT_THEIRS);
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const [wokeJob] = await db.update(jobs).set({ createdBy: owner!.id }).where(and(eq(jobs.agentId, orchestrator.id), eq(jobs.status, 'running'))).returning();
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.' } });
-    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(ONLY_CEO);
+    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(NOT_THEIRS);
     await db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, wokeJob!.id));
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'typed', data: {}, personId: null });
-    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(ONLY_CEO);
-    expect(existsSync(join(control, 'computer'))).toBe(false);
+    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
   });
 
   it("lets the turn the CEO's click opens use the computer and nothing else only the CEO may, until a person without the right writes into it", async () => {
-    const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
+    withWait(c, NEVER_MS);
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
@@ -260,7 +286,7 @@ describe('access to the computer the server runs on', () => {
     let note = await builtin.next();
     while (note.type !== 'job.run') note = await builtin.next();
     const client = await mcp(app, note.toolToken!);
-    const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(control, 'Plenty.\n')]);
+    const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
     /* A click answers no question: the turn takes no decision for the CEO and asks for nothing else only the CEO may. */
     const request = await approvalAsked(app);
@@ -269,13 +295,14 @@ describe('access to the computer the server runs on', () => {
     expect(text(await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
     expect((await db.select().from(people).where(eq(people.name, 'Eve')))).toEqual([]);
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
-    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(ONLY_CEO);
-    expect(readdirSync(join(control, 'computer'))).toEqual([]);
+    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
   });
 
   it('keeps computer access in a running turn when Hornhoof types improvement notices or an employee writes into it', async () => {
-    const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
+    withWait(c, NEVER_MS);
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -288,7 +315,7 @@ describe('access to the computer the server runs on', () => {
     while (note.type !== 'job.run') note = await builtin.next();
     const client = await mcp(app, note.toolToken!);
 
-    const [first] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(control, 'Plenty.\n')]);
+    const [first] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(first)).toBe('Exit code 0.\nPlenty.\n');
 
     const filed = await db
@@ -307,19 +334,20 @@ describe('access to the computer the server runs on', () => {
     const events = await db.select().from(agentEvents).where(and(eq(agentEvents.jobId, note.jobId), eq(agentEvents.kind, 'message')));
     expect(events.length).toBe(6);
 
-    const answering = answerAs(control, 'Healthy.\n').catch(() => null);
+    const answering = answerAs(c, 'Healthy.\n').catch(() => null);
     const second = await call(client, 'computer', { command: 'journalctl -n 5' });
     expect(text(second)).toBe('Exit code 0.\nHealthy.\n');
     await answering;
     expect(text(await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
 
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
-    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(ONLY_CEO);
+    expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
   });
 
   it('keeps the computer-opening click through retries without granting decision rights, while a plain notice retry grants neither', async () => {
-    const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
+    withWait(c, NEVER_MS);
     const retryRun = async (failedJobId: string) => {
       builtin.send({ type: 'job.done', jobId: failedJobId, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Overloaded.', result: '', failure: { kind: 'overloaded', retryable: true, text: 'Provider overloaded.' } });
       await until(async () => (await db.select().from(jobs).where(eq(jobs.continueOf, failedJobId))).length === 1);
@@ -338,7 +366,7 @@ describe('access to the computer the server runs on', () => {
 
     const retried = await retryRun(note.jobId);
     const retryClient = await mcp(app, retried.toolToken!);
-    const answering = answerAs(control, 'Plenty.\n').catch(() => null);
+    const answering = answerAs(c, 'Plenty.\n').catch(() => null);
     const ran = await call(retryClient, 'computer', { command: 'df -h' });
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
     await answering;
@@ -350,7 +378,7 @@ describe('access to the computer the server runs on', () => {
 
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: retried.jobId, kind: 'typed', data: {}, personId: null });
     const clearedRetry = await retryRun(retried.jobId);
-    expect(text(await call(await mcp(app, clearedRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
+    expect(text(await call(await mcp(app, clearedRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, clearedRetry.jobId));
 
     const [filed] = await db.insert(improvements).values({ companyId: orchestrator.companyId, agentId: orchestrator.id, title: 'Fix logs', text: 'Case 1' }).returning();
@@ -359,7 +387,7 @@ describe('access to the computer the server runs on', () => {
     while (plain.type !== 'job.run') plain = await builtin.next();
     const plainRetry = await retryRun(plain.jobId);
     const plainClient = await mcp(app, plainRetry.toolToken!);
-    expect(text(await call(plainClient, 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
+    expect(text(await call(plainClient, 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
     expect((await call(plainClient, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
     expect(text(await call(plainClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
@@ -367,7 +395,7 @@ describe('access to the computer the server runs on', () => {
 
   it('refuses computer on a second retry after pending input was not kept on a click retry', async () => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
+    withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -375,7 +403,7 @@ describe('access to the computer the server runs on', () => {
     c.builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [retried.jobId] });
     await until(() => c.app.ctx.hub.hasTerminals({ kind: 'builtin' }));
     const retryClient = await mcp(c.app, retried.toolToken!);
-    const [first] = await Promise.all([call(retryClient, 'computer', { command: 'df -h' }), answerAs(c.control, 'Plenty.\n')]);
+    const [first] = await Promise.all([call(retryClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(first)).toBe('Exit code 0.\nPlenty.\n');
 
     const unkept = deliverLive(c.app.ctx, c.orchestrator.id, 'Stop.', { source: { personId: zed!.id, data: { text: 'Stop.' } } }, async () => {});
@@ -383,16 +411,16 @@ describe('access to the computer the server runs on', () => {
     while (say.type !== 'agent.say') say = await c.builtin.next();
     c.builtin.send({ type: 'agent.said', ref: say.ref, ok: false });
     expect(await unkept).toBeNull();
-    expect(text(await call(retryClient, 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
+    expect(text(await call(retryClient, 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
 
     const secondRetry = await retryTurnOn(c, retried.jobId);
-    expect(text(await call(await mcp(c.app, secondRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
-    expect(readdirSync(join(c.control, 'computer'))).toEqual([]);
+    expect(text(await call(await mcp(c.app, secondRetry.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
   });
 
   it.each(['unheard', 'queued'] as const)('refuses computer when saved marked words are replayed via %s after a non-CEO message', async mode => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
+    withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -403,18 +431,18 @@ describe('access to the computer the server runs on', () => {
     const replayText = addressed((data as { text: string }).text, message!);
 
     const validReplay = await replaySavedWords(c, mode, retried.jobId, replayText);
-    const [first] = await Promise.all([call(await mcp(c.app, validReplay.toolToken), 'computer', { command: 'df -h' }), answerAs(c.control, 'Plenty.\n')]);
+    const [first] = await Promise.all([call(await mcp(c.app, validReplay.toolToken), 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(first)).toBe('Exit code 0.\nPlenty.\n');
 
     await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: validReplay.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
     const afterZed = await replaySavedWords(c, mode, validReplay.jobId, replayText);
-    expect(text(await call(await mcp(c.app, afterZed.toolToken), 'computer', { command: 'rm -rf /host/srv' }))).toBe(ONLY_CEO);
-    expect(readdirSync(join(c.control, 'computer'))).toEqual([]);
+    expect(text(await call(await mcp(c.app, afterZed.toolToken), 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
   });
 
   it.each(['unheard', 'queued'] as const)('refuses computer when live input lands between the %s replay read and its store', async mode => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
+    withWait(c, NEVER_MS);
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -442,7 +470,7 @@ describe('access to the computer the server runs on', () => {
 
     c.builtin.send({ type: 'agent.said', ref: say.ref, ok: false });
     expect(await unkept).toBeNull();
-    expect(text(await call(await mcp(c.app, retried.toolToken!), 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
+    expect(text(await call(await mcp(c.app, retried.toolToken!), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
 
     let replayToken: string;
     if (mode === 'unheard') {
@@ -456,15 +484,16 @@ describe('access to the computer the server runs on', () => {
       replayToken = (await take('turn.opened')).toolToken!;
       c.builtin.send({ type: 'job.done', jobId: retried.jobId, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
     }
-    expect(text(await call(await mcp(c.app, replayToken), 'computer', { command: 'df -h' }))).toBe(ONLY_CEO);
-    expect(existsSync(join(c.control, 'computer'))).toBe(false);
+    expect(text(await call(await mcp(c.app, replayToken), 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
   });
 
   it('closes when the CEO takes it back, and the CEO can say no to a request', async () => {
-    const { app, db, ceo, control, orchestrator } = await company();
+    const c = await company();
+    const { app, db, ceo, orchestrator } = c;
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
-    expect(settings(control)).toMatchObject({ untilSec: null, until: null });
+    expect(await accessOf(c)).toMatchObject({ until: null });
     expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
 
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
@@ -474,12 +503,10 @@ describe('access to the computer the server runs on', () => {
   });
 
   /* The server's computer joined as a machine too: the CEO sees which machine the access is to, wherever they look from. */
-  it('names the machine the server runs on, in what the CEO sees and in the log', async () => {
-    const hostId = createHash('sha256').update('hornhoof-host:debian-0001-abcd').digest('hex');
-    const { app, db, ceo, orchestrator } = await company({ env: { HORNHOOF_HOST_ID: hostId } });
-    const { command } = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
-    const join_ = { code: command.split('--join ')[1], machineId: 'debian-0001-abcd', hostname: 'debian-box', os: 'linux', arch: 'x86_64' };
-    expect((await app.inject({ method: 'POST', url: '/api/nodes/join', payload: join_ })).statusCode).toBe(200);
+  it("names the machine by the name its keeper told, in what its owner sees and in the log", async () => {
+    const c = await company();
+    const { app, db, ceo, orchestrator } = c;
+    await db.update(machines).set({ hostname: 'debian-box' }).where(eq(machines.id, c.machine));
 
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().machine).toBe('debian-box');
@@ -493,19 +520,20 @@ describe('access to the computer the server runs on', () => {
   });
 
   it('is opened and closed by the CEO and the delegate alone, never by another person or through the orchestrator', async () => {
-    const { app, db, ceo, control, orchestrator } = await company();
+    const c = await company();
+    const { app, db, ceo, orchestrator } = c;
     const lena = await invitePerson(app, ceo, { name: 'Lena', email: 'lena@example.com', access: { whole: true } });
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     for (const action of ['open', 'close', 'decline']) {
       const byLena = await app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(lena) });
       expect(byLena.statusCode).toBe(403);
-      expect(byLena.json().error.reason).toBe('decision_not_allowed');
+      expect(byLena.json().error.reason).toBe('not_machine_owner');
       expect((await app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
     }
     /* She sees it without the buttons; the orchestrator does not see it. */
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(lena) })).json()).toMatchObject({ available: true, canAnswer: false });
     expect((await app.inject({ method: 'GET', url: '/api/computer', headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
-    expect(existsSync(join(control, 'computer.json'))).toBe(false);
+    expect(await accessOf(c)).toBeUndefined();
 
     const [lenaRow] = await db.select().from(people).where(eq(people.name, 'Lena'));
     await app.inject({ method: 'PUT', url: `/api/people/${lenaRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
@@ -516,7 +544,8 @@ describe('access to the computer the server runs on', () => {
   });
 
   it('is not offered on a server without an updater', async () => {
-    const { app, ceo } = await company({ updater: false });
+    const c = await company({ updater: false });
+    const { app, ceo } = c;
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toMatchObject({ available: false });
     expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).statusCode).toBe(409);
     const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Look at the disk.' });

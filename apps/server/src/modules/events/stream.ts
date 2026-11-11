@@ -4,14 +4,15 @@ import type { Ctx } from '../../app.js';
 import { canReach, type Access } from '../../auth/access.js';
 import { viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
-import { canViewComputer } from '../computer/access.js';
 import type { StreamMessage } from './bus.js';
 import { heardBy } from './stream-view.js';
 
 /* Whether a message is for this person at all, by where they reach and what is theirs. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
   if ('spot' in m && !canReach(access, m.spot)) return false;
-  if (m.type === 'computer' && !canViewComputer(me)) return false;
+  /* It carries nothing, so every person's screens load the access that is theirs to see; the orchestrator acting for
+     anyone sees none of it. */
+  if (m.type === 'computer' && me.via) return false;
   return m.type !== 'subscription.signin' || m.owner === me.id;
 }
 

@@ -39,6 +39,18 @@ const ReportBody = z.object({
   pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });
 
+/* held: the commands whose files the keeper still has, a few at most, as its updater runs one at a time. */
+const ComputerQuery = z.object({
+  updater: z.enum(['0', '1']).default('0'),
+  held: z
+    .string()
+    .max(8 * 37)
+    .default('')
+    .transform(text => (text ? text.split(',') : []))
+    .pipe(z.array(z.uuid()).max(8)),
+});
+const ComputerAnswer = z.object({ exit: z.number().int().min(0).max(255), output: z.string() });
+
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
@@ -141,10 +153,41 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A report that says nothing of the pin keeps the one the machine said before. */
       const pinned = pin === undefined ? {} : { ownerPin: pin };
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* The server's own keeper names another build than its row held: a new build leads, and the other machines close. */
+      const newBuild = who.own && said.commit !== undefined && Boolean(row?.commit) && row?.commit !== said.commit;
+      if (newBuild) await ctx.computer.newBuild(tx, machine.id);
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
-      return Boolean(row && after && installs(row, now) && !installs(after, now));
+      return { installed: Boolean(row && after && installs(row, now) && !installs(after, now)), looked: newBuild || (pin !== undefined && pin !== row?.ownerPin), companyId: row?.companyId };
     });
-    if (installed) void releaseHeld(ctx);
+    if (installed.installed) void releaseHeld(ctx);
+    /* The screens load the machines' access again: a machine holds another key now, or the others were closed. */
+    if (installed.looked && installed.companyId) ctx.bus.publish(installed.companyId, { type: 'computer' });
+    return reply.code(204).send();
+  });
+
+  /* Computer access of the asker's own machine is served only by an app that leads and has taken over what an older app
+     left: anything else is no answer, and the keeper keeps what it holds for a while and then closes. */
+  async function computerOf(who: Asker): Promise<Holder> {
+    if (!leading() || !ctx.computer.ready()) throw new ApiError(503, 'unavailable', 'This server does not serve computer access now.');
+    const machine = await machineOf(who);
+    if (!machine) throw notAMachine();
+    return machine;
+  }
+
+  /* A machine's keeper asks for its machine's access and its next command, saying whether its updater is alive and
+     which commands it still holds. Asking is what makes the machine reachable. */
+  app.get('/api/network/computer', async req => {
+    const machine = await computerOf(await requireKeeper(req));
+    const { updater, held } = ComputerQuery.parse(req.query);
+    ctx.computer.seen(machine.id, updater === '1');
+    return ctx.computer.take(machine.id, held);
+  });
+
+  /* The keeper brings back the answer of a command it took. */
+  app.post('/api/network/computer/:id', { bodyLimit: 256 * 1024 }, async (req, reply) => {
+    const machine = await computerOf(await requireKeeper(req));
+    const { id } = z.object({ id: z.uuid() }).parse(req.params);
+    if (!(await ctx.computer.answer(machine.id, id, ComputerAnswer.parse(req.body)))) throw new ApiError(404, 'not_found', 'This machine has no such command out.');
     return reply.code(204).send();
   });
 

@@ -48,7 +48,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'targets', path: /^\/api\/nodes\/update$/, rule: 'node key and builtin scope for server updates' },
   { name: 'identify', path: /^\/api\/nodes\/socket$/, rule: 'node key before websocket upgrade' },
   { name: 'nodeOf', path: /^\/api\/harness\/(?:claim|:key\/(?:done|failed|bundle|parts\/:index))$/, rule: 'node key, and a build of that node or of a product whose tests it may take' },
-  { name: 'requireKeeper', path: /^\/api\/network\/(?:certificate|peers|report)$/, rule: "this machine's keeper alone: its address together with the header no door lets through" },
+  { name: 'requireKeeper', path: /^\/api\/network\/(?:certificate|peers|report|computer(?:\/:id)?)$/, rule: "this machine's keeper alone: its address together with the header no door lets through" },
   { name: 'redeemTicket', path: /^\/api\/network\/join$/, rule: "the one-use ticket a join command gave the machine's installer" },
   { name: 'signedRenewal', path: /^\/api\/network\/renew$/, rule: "a request signed with the machine's own key, of this moment and taken once" },
   { name: 'ownSession', path: /^\/api\/me\/key$/, rule: "the person's own session, never one the orchestrator acts in" },

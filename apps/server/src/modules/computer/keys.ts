@@ -63,6 +63,8 @@ export function keyRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (isUniqueViolation(err)) throw keyExists();
       throw err;
     }
+    /* Their machines hold this key or do not: the screens load each machine's access again. */
+    ctx.bus.publish(me.companyId, { type: 'computer' });
     return reply.code(204).send();
   });
 }

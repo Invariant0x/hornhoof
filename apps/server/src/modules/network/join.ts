@@ -9,6 +9,7 @@ import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { certificates, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, publicLinks, type MachineRole } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
+import { dropAccess } from '../computer/access.js';
 import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { CERT_DAYS, RENEW_AFTER_DAYS, type Issued } from './authority.js';
@@ -94,6 +95,7 @@ export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date)
   const these = inArray(machines.id, machineIds);
   const cored = await tx.select({ id: machines.id }).from(machines).where(and(these, isNotNull(machines.networkId)));
   await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.machineId, machineIds), isNull(certificates.revokedAt)));
+  await dropAccess(tx, machineIds, now);
   await tx.update(machines).set({ networkId: null }).where(and(these, eq(machines.role, 'worker')));
   await tx.delete(machineTickets).where(and(inArray(machineTickets.machineId, machineIds), isNull(machineTickets.usedAt)));
   await tx.update(nodeCodes).set({ usedAt: now }).where(and(inArray(nodeCodes.machineId, machineIds), isNull(nodeCodes.usedAt)));
