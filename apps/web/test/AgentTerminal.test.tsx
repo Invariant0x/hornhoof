@@ -217,10 +217,13 @@ vi.mock('../src/ui/terminal-fit', async importOriginal => {
 /* The browser tells of a new size of the terminal's box; jsdom has no layout, so a test says when. */
 class FakeResizeObserver {
   static all: FakeResizeObserver[] = [];
+  targets: Element[] = [];
   constructor(private fn: () => void) {
     FakeResizeObserver.all.push(this);
   }
-  observe() {}
+  observe(target: Element) {
+    this.targets.push(target);
+  }
   disconnect() {}
   resized() {
     this.fn();
@@ -946,6 +949,46 @@ describe("an agent's live terminal in its window", () => {
     for (const ro of FakeResizeObserver.all) ro.resized();
     expect(term.cols).toBe(47);
     expect(ws.sent).toEqual([{ type: 'resize', cols: 47, rows: 35 }]);
+  });
+
+  it('sends fewer columns to the session when its own box gets narrower with no change of the browser window, and more when it widens back', async () => {
+    /* A side panel or a card beside the terminal takes room from its box alone: the browser window keeps its size. */
+    const { container } = open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    const box = container.querySelector<HTMLElement>('.t-xterm')!;
+    const viewport = term.element.querySelector<HTMLElement>('.xterm-viewport')!;
+    const scrollArea = document.createElement('div');
+    scrollArea.className = 'xterm-scroll-area';
+    viewport.appendChild(scrollArea);
+    term.element.style.padding = '6px 8px 4px 10px';
+    Object.assign(term._core, {
+      _charSizeService: { width: 7.201171875, height: 14 },
+      _renderService: { dimensions: { css: { cell: { width: 7.2, height: 14 } } }, clear() {} },
+    });
+    const wide = (width: number) => {
+      const rect = (w: number, h: number) => () => ({ x: 0, y: 0, left: 0, top: 0, right: w, bottom: h, width: w, height: h, toJSON: () => ({}) });
+      box.getBoundingClientRect = rect(width, 500);
+      viewport.getBoundingClientRect = rect(width, 500);
+      scrollArea.getBoundingClientRect = rect(width - 15, 1200);
+      /* Only what watches the terminal's own box hears of it. */
+      for (const ro of FakeResizeObserver.all) if (ro.targets.includes(box)) ro.resized();
+    };
+    const windowResized = vi.fn();
+    window.addEventListener('resize', windowResized);
+
+    /* (1000 - 18 - 15) / 7.201171875 = 134 columns; (820 - 18 - 15) / 7.201171875 = 109. */
+    wide(1000);
+    wide(820);
+    wide(1000);
+    window.removeEventListener('resize', windowResized);
+    expect(windowResized).not.toHaveBeenCalled();
+    expect(ws.sent).toEqual([
+      { type: 'resize', cols: 134, rows: 35 },
+      { type: 'resize', cols: 109, rows: 35 },
+      { type: 'resize', cols: 134, rows: 35 },
+    ]);
   });
 
   it('lets a person write messages without control of the program, and silently drops automatic terminal reports', async () => {
