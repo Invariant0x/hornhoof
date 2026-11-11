@@ -54,7 +54,7 @@ CREATE TABLE net.merge_conflicts (
   key jsonb NOT NULL,
   op text NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
   kind text NOT NULL CHECK (kind IN ('differs', 'changed_removed', 'removed_changed', 'still_used', 'refused')),
-  topic text NOT NULL CHECK (topic IN ('people', 'access', 'plans', 'machines', 'work')),
+  topic text NOT NULL CHECK (topic IN ('people', 'access', 'plans', 'machines', 'protected', 'work')),
   task_id uuid,
   cols text[] NOT NULL DEFAULT '{}',
   here jsonb,
