@@ -16,7 +16,7 @@ const KeeperStateShape = z.object({
   doors: z.record(z.string(), z.number().int().min(1).max(65535)).optional(),
   /* How each copy does, as the keeper that leads reads it from its own Postgres, by the copy's name. */
   copies: z.array(z.object({ name: z.string(), state: z.enum(['sync', 'pace', 'behind', 'silent']) })).optional(),
-  /* How fast the keeper that leads sent to each machine at its best in the last day, in Mbit/s, by the machine's id. */
+  /* How fast the keeper that leads sent to each machine at its best in the last week, in Mbit/s, by the machine's id. */
   throughput: z.record(z.string(), z.object({ mbps: z.number().int().min(0), at: z.string() })).optional(),
 });
 export type KeeperState = z.infer<typeof KeeperStateShape>;

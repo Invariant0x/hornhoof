@@ -701,7 +701,6 @@ describe('Machines', () => {
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.",
       'Cannot take the server: the company has no link at hornhoof.org; turn it on in Settings.',
       'Cannot take the server: measuring this machine.',
-      'Cannot take the server: it still gives up the copy it held.',
       'Cannot take the server: 12 GB free; it needs 40.5 GB.',
       'Cannot take the server: the disk saves slowly (72.4 ms); it needs under 50 ms.',
     ]],
@@ -714,7 +713,6 @@ describe('Machines', () => {
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.',
       'Не может взять сервер: у компании нет ссылки на hornhoof.org; включите ее в Настройках.',
       'Не может взять сервер: машина еще измеряется.',
-      'Не может взять сервер: она еще отдает копию, которую хранила.',
       'Не может взять сервер: свободно 12 ГБ; нужно 40,5 ГБ.',
       'Не может взять сервер: диск сохраняет медленно (72,4 мс); нужно меньше 50 мс.',
     ]],
@@ -722,7 +720,7 @@ describe('Machines', () => {
     const reasons: object[] = [
       { why: 'phone' }, { why: 'no_core' }, { why: 'memory', memory: 3.2 * GIB },
       { why: 'scope', person: 'Anna', departments: 1 }, { why: 'scope', person: 'Anna', departments: 2 }, { why: 'scope', person: 'Anna', departments: 0 },
-      { why: 'no_link' }, { why: 'measuring' }, { why: 'leaving' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
+      { why: 'no_link' }, { why: 'measuring' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
     ];
     shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
     await screen.findByRole('table');

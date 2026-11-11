@@ -59,7 +59,8 @@ export async function cutReplication(replication: Replication, leaving: { networ
    those of the peer services at once, the link's key started here and finished after the commit. What the leader
    already took from one of them is not asked for again. lost false: a copy
    the ranking handed to another machine. Its owner still sees the whole company, so it keeps its place in the order
-   and no key changes: it gets a worker's role, owes what it holds, and its certificates are revoked, nothing else. */
+   and no key changes: it gets a worker's role, owes what it holds, and its certificates are revoked, nothing else.
+   While it owes that it is given no data. */
 export async function leaveData(ctx: Ctx, tx: Db, machineIds: string[], now: Date, opts: { lost?: boolean } = {}): Promise<void> {
   if (machineIds.length === 0) return;
   const lost = opts.lost ?? true;

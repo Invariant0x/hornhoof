@@ -566,7 +566,6 @@ export const en = {
           `the company's data stays only on machines of people who see the whole company, and ${person} ${departments === undefined ? 'does not' : departments === 0 ? 'sees no department' : departments === 1 ? 'sees one department' : `sees ${departments} departments`}.`,
         noLink: 'the company has no link at hornhoof.org; turn it on in Settings.',
         measuring: 'measuring this machine.',
-        leaving: 'it still gives up the copy it held.',
         disk: (free: string, need: string) => `${free} GB free; it needs ${need} GB.`,
         fsync: (ms: string) => `the disk saves slowly (${ms} ms); it needs under 50 ms.`,
       },

@@ -193,8 +193,6 @@ export class PeerServer {
     this.sweep();
   }
 
-  /* The bytes this machine's database sent that machine on its streams since this server started: whether a copy still
-     takes what it is sent. */
   /* Every byte written to each peer's streams so far, by the peer's machine: what its database sent it, an app's
      answers, bundles and hellos. How fast the leader sends to a machine is read from how this grows. */
   sentBytes(): ReadonlyMap<string, number> {
@@ -205,6 +203,8 @@ export class PeerServer {
     this.sent.set(peer.machine, (this.sent.get(peer.machine) ?? 0) + bytes);
   }
 
+  /* The bytes this machine's database sent that machine on its streams since this server started: whether a copy still
+     takes what it is sent. */
   dbBytes(machine: string): number {
     return this.toDb.get(machine) ?? 0;
   }

@@ -4,13 +4,14 @@ import type { MachineRole } from '../../db/schema.js';
 export const MEMORY_MIN = 3.5 * 2 ** 30;
 export const DISK_SPARE = 10 * 2 ** 30;
 export const FSYNC_MAX_MS = 50;
+/* A machine that has not reported for this long is away: its copy is said to sleep, and it is given no data to copy. */
+export const REPORT_FRESH_MS = 120_000;
 
 /* Why a machine holds no copy of the company's data. */
 export type Unfit =
   | { why: 'phone' }
   | { why: 'no_core' }
   | { why: 'scope'; person: string; departments?: number }
-  | { why: 'leaving' }
   | { why: 'no_link' }
   | { why: 'measuring' }
   | { why: 'memory'; memory: number }
@@ -19,7 +20,8 @@ export type Unfit =
 
 /* A live machine with what decides whether it may hold the data. server: the row of the machine an app itself runs on,
    which no one joined. owner.company: its person sees the whole company; owner.departments: the places a person who
-   does not is given. owes: it stopped holding the data and has not given up everything it held yet. share: how much of
+   does not is given; none for one who is switched off. owes: it stopped holding the data and has not given up
+   everything it held yet, so it gets no data for now. share: how much of
    the last week it was online. pin: the place its owner's CEO gave it by hand, or 'none'. number: its place so far. */
 export type Candidate = {
   id: string;
@@ -55,12 +57,11 @@ export function unfit(m: Candidate, o: { dbSize: number; link: boolean; now?: Da
   if (m.kind !== 'computer') return { why: 'phone' };
   if (!m.networkId && !m.server) return { why: 'no_core' };
   if (!seesAll(m.owner)) return { why: 'scope', person: m.owner.name, ...(m.owner.departments === undefined ? {} : { departments: m.owner.departments }) };
-  /* A machine that still gives up the copy it held takes no new one before it holds nothing of the old. */
-  if (m.owes) return { why: 'leaving' };
   if (!o.link) return { why: 'no_link' };
   if (m.memory === null || m.diskFree === null || m.fsyncP99Ms === null) return { why: 'measuring' };
   if (m.memory < MEMORY_MIN) return { why: 'memory', memory: m.memory };
-  const need = 3 * o.dbSize + DISK_SPARE;
+  /* A machine that holds a copy has one of the three already. */
+  const need = (m.role === 'data' ? 2 : 3) * o.dbSize + DISK_SPARE;
   if (m.diskFree < need) return { why: 'disk', free: m.diskFree, need };
   if (m.fsyncP99Ms >= FSYNC_MAX_MS) return { why: 'fsync', p99: m.fsyncP99Ms };
   return null;

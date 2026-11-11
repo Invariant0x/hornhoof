@@ -4,7 +4,7 @@ import { machines } from '../../db/schema.js';
 import { freshState } from '../keeper/state.js';
 
 /* How fast the leader sends to each machine, as its keeper last measured it, into the machines' rows: each live row
-   the keeper names whose value differs gets the new one. A row it does not name keeps what it has, as after a day with
+   the keeper names whose value differs gets the new one. A row it does not name keeps what it has, as after a week with
    nothing sent to it or after a change of leader. The rows written. */
 export async function storeThroughput(ctx: Ctx, now = Date.now()): Promise<number> {
   const said = freshState(ctx.config.controlDir, now)?.throughput;

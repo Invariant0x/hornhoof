@@ -211,15 +211,35 @@ describe("a worker's keeper", () => {
     const held = await bundleHeld(c, w);
     older = true;
     const before = (await c.rowOf(w.machine)).reportAt;
-    /* Its report is refused with the new words and goes again at once without them. */
-    const mine = () => seen.filter(report => report.via !== 'keeper');
+    /* Its report is refused with the new words and goes again at once without them: first without its newest words
+       alone, which this leader refuses as well, then bare. */
+    const mine = () => seen.filter(report => report.via !== 'keeper').map(report => report.words).filter((words, at, all) => words !== all[at - 1]);
     await until(() => mine().length >= 4);
-    expect(mine().slice(0, 4).map(report => report.words)).toEqual([true, false, true, false]);
+    expect(mine().slice(0, 4)).toEqual([true, false, true, false]);
     await until(async () => (await c.rowOf(w.machine)).reportAt!.getTime() > before!.getTime());
     /* The server's own keeper does the same. */
     expect(seen.filter(report => report.via === 'keeper').slice(0, 2).map(report => report.words)).toEqual([true, false]);
     expect(bundlesIn(w.config.dir)).toEqual([`${held.id}.age`]);
     expect([...w.lines, ...c.lines].filter(line => line.includes('Could not report'))).toEqual([]);
+  });
+
+  it('goes on telling a leader of the build before of its copy and its backups, without the measures that one refuses', async () => {
+    /* A leader an update took back one build: it knows backups and copies, and nothing of the server order's measures. */
+    let older = false;
+    const seen: { measures: boolean; backups: boolean }[] = [];
+    const c = await company({}, {}, {}, ({ method, url, via, body }) => {
+      if (!older || via === 'keeper' || method !== 'POST' || url !== '/api/network/report') return null;
+      const measures = ['linkRttMs', 'internetRttMs', 'internetMbps'].some(word => word in (body as object));
+      seen.push({ measures, backups: 'heldBackups' in (body as object) });
+      return measures ? 400 : null;
+    });
+    const w = await worker(c);
+    await until(async () => (await c.rowOf(w.machine)).linkRttMs !== null);
+    older = true;
+    await until(() => seen.length >= 4);
+    /* Refused with the measures, each report goes again at once with everything else it had to say. */
+    expect(seen.slice(0, 4)).toEqual([{ measures: true, backups: true }, { measures: false, backups: true }, { measures: true, backups: true }, { measures: false, backups: true }]);
+    expect(w.lines.filter(line => line.includes('Could not report'))).toEqual([]);
   });
 
   it("refuses the network routes to whoever comes to the worker's web port", async () => {

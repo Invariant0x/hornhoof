@@ -205,8 +205,10 @@ describe('the network routes the keeper calls', () => {
     const [row] = await c.serverRows();
     expect(row).toMatchObject(full);
     expect(row!.reportAt).toBeInstanceOf(Date);
+    /* A keeper that just started has not timed its disk yet: the row keeps what it last said, so a machine does not
+       read as never measured after each restart. */
     expect((await report({ fsyncP99Ms: null })).statusCode).toBe(204);
-    expect((await c.serverRows())[0]).toMatchObject({ ...full, fsyncP99Ms: null });
+    expect((await c.serverRows())[0]).toMatchObject(full);
     for (const bad of [{ diskFree: -1 }, { webPort: 0 }, { peerPort: 70_000 }, { commit: 'x'.repeat(65) }, { uptimeS: 1.5 }]) expect((await report(bad)).statusCode, JSON.stringify(bad)).toBe(400);
 
     const worker = await c.joined('worker', newKey());
@@ -299,16 +301,22 @@ describe('the network routes the keeper calls', () => {
     expect((await report({ wiped: true }, left.id)).statusCode).toBe(204);
     /* The name stays: the next copy on this machine starts at the attempt above it, so no name is used twice. */
     expect(await rowOf(left.id)).toMatchObject({ uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: held.copyName, copyOld: null });
-    /* A merge of an old copy that was never read is ended: that database is gone. */
+    /* The merges of its old copies give their names up, should a keeper ever count from 1 again, and one that was
+       never read is ended: that database is gone. */
     const merges = (await c.db.execute(sql`SELECT source, status, error FROM net.merges WHERE machine = ${left.id} ORDER BY source`) as unknown as { rows: { source: string; status: string; error: string | null }[] }).rows;
     expect(merges.map(merge => merge.status)).toEqual(['done', 'done']);
-    expect(merges.map(merge => merge.source)).toEqual([`machine:${left.id}:5`, `machine:${left.id}:6`]);
+    for (const merge of merges) expect(merge.source).toMatch(new RegExp(`^machine:${left.id}:[56]:wiped:[0-9a-f-]{36}$`));
     expect(merges[1]!.error).toBe('The machine was wiped before its old copy was read.');
     /* A machine that holds the data again is not one that left, whatever an old keeper says. */
     const copy = await c.joined('data', newKey(), held);
     expect((await report({ wiped: true }, copy.id)).statusCode).toBe(204);
     expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyName: held.copyName, copyOld: 6 });
     expect((await report({ wiped: false }, left.id)).statusCode).toBe(400);
+    /* It holds the data again and could not be set up: what it says of that names no copy, and the row keeps the name
+       of the last one, above which the next begins. */
+    const again = await c.joined('data', newKey(), { copyName: held.copyName });
+    expect((await report({ copy: { state: 'stopped', progress: null, error: 'setup', at: null, name: null, old: null } }, again.id)).statusCode).toBe(204);
+    expect(await rowOf(again.id)).toMatchObject({ copyState: 'stopped', copyError: 'setup', copyName: held.copyName });
   });
 
   it('stores memory and cores', async () => {

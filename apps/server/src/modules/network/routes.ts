@@ -215,7 +215,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, update, pin, copy, wiped, ...said } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, pin, copy, wiped, fsyncP99Ms, ...told } = ReportBody.parse(req.body ?? {});
+    /* A keeper that just started has not timed its disk yet: the row keeps the last it said. */
+    const said = { ...told, ...(fsyncP99Ms == null ? {} : { fsyncP99Ms }) };
     const machine = await machineOf(who);
     if (!machine) return reply.code(204).send();
     const installed = await db.transaction(async tx => {
@@ -235,16 +237,19 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const copied =
         copy === undefined || who.own || row?.role !== 'data'
           ? {}
-          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name, copyOld: copy.old?.attempt ?? null };
+          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? row?.copyName ?? null, copyOld: copy.old?.attempt ?? null };
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
       const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null } : {};
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
-      /* A merge of an old copy of its that the leader never read is ended: that database is gone. */
+      /* The next copy on that machine starts above the last, by the name the row keeps. Should a keeper ever count
+         from 1 again all the same, the merges of its old copies give their names up here, and one the leader never
+         read is ended: that database is gone. */
       if ('uploadState' in left) {
         await queryOf(tx)(
-          `UPDATE net.merges SET status = 'done', done_at = now(), error = $2
-            WHERE machine = $1::uuid AND source ~ '^machine:[0-9a-f-]{36}:[0-9]+$' AND status IN ('pending', 'applied')`,
+          `UPDATE net.merges SET source = source || ':wiped:' || id::text, status = 'done', done_at = COALESCE(done_at, now()),
+                  error = CASE WHEN status IN ('pending', 'applied') THEN $2 ELSE error END
+            WHERE machine = $1::uuid AND source ~ '^machine:[0-9a-f-]{36}:[0-9]+$'`,
           [machine.id, 'The machine was wiped before its old copy was read.'],
         );
       }

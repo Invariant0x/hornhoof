@@ -1,15 +1,15 @@
-import { and, asc, count, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { machines, people, personAccess, publicLinks } from '../../db/schema.js';
+import { machines, people, personAccess, publicLinks, teams } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { storeThroughput } from './measured.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
-import { onlineShare } from '../network/join.js';
+import { onlineShares } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
-import { seesAll, unfit, type Candidate } from './qualify.js';
+import { REPORT_FRESH_MS, seesAll, unfit, type Candidate } from './qualify.js';
 import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js';
 import { ALWAYS_SHARE, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
 
@@ -82,8 +82,10 @@ export const HANDOVER_EVERY_MS = 86_400_000;
 export type Roles = { grant: string[]; retire: string | null; handover: boolean };
 
 /* Who holds a copy after a ranking. numbered: the machines with a place from 2 on. data: the machines that hold the
-   data besides the leader; out: kept from the server by hand. eligible: may get the data. ready: its copy is up to
-   date; sync: the one commits wait for. The machines at 2 and 3 are to hold the copies. A free seat is filled at once.
+   data besides the leader; out: kept from the server by hand. eligible: may get the data now: it is there, and holds
+   nothing of a copy it gave up. ready: its copy is up to date; sync: the one commits wait for. The machines at 2 and 3
+   are to hold the copies. A free seat is filled at once, by the first machine in the order that may get the data, so a
+   machine that is away does not leave the company short of a copy; back, it takes its copy by a handover.
    With none free, a copy is handed over: the machine at 2 or 3 without one gets the data, at most one a day unless the
    CEO asked, and only while no other copy is being made. The copy that was ranked out goes only once both places hold
    an up-to-date copy, never the one commits wait for, and one that only stopped qualifying stays until a machine took
@@ -102,7 +104,8 @@ export function planRoles(o: {
   const top = o.numbered.filter(row => row.number <= COPIES + 1).sort((a, b) => a.number - b.number);
   const without = top.filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
   const seats = COPIES - o.data.length;
-  const grant = seats > 0 ? without.slice(0, seats) : [];
+  const there = [...o.numbered].sort((a, b) => a.number - b.number).filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
+  const grant = seats > 0 ? there.slice(0, seats) : [];
   const made = top.filter(row => holding.has(row.id)).every(row => o.ready.has(row.id));
   const due = o.ceo || o.handoverAt === null || o.now.getTime() - o.handoverAt.getTime() >= HANDOVER_EVERY_MS;
   const handover = seats <= 0 && without.length > 0 && made && due;
@@ -114,29 +117,34 @@ export function planRoles(o: {
   return { grant, retire: settled ? (outside[0]?.id ?? null) : null, handover };
 }
 
-/* The live machines with their owners, what they measure, and how much of the last week each was online. */
-export async function candidates(db: Db, now = new Date()): Promise<Candidate[]> {
+/* The live machines with their owners, what they measure, and how much of the last week each was online; shares
+   false leaves that out, for a reader that only asks whether a machine fits. */
+export async function candidates(db: Db, now = new Date(), opts: { shares?: boolean } = {}): Promise<Candidate[]> {
   const rows = await db
     .select({ machine: machines, isOwner: people.isOwner, scopeKind: people.scopeKind, status: people.status, name: people.name, personId: people.id })
     .from(machines)
     .innerJoin(people, eq(people.id, machines.personId))
     .where(isNull(machines.revokedAt))
     .orderBy(asc(machines.createdAt), asc(machines.id));
-  /* The places a person who does not see the whole company is given; none for one who is switched off. */
-  const places = await db.select({ personId: personAccess.personId, n: count() }).from(personAccess).groupBy(personAccess.personId);
+  /* The departments a person who does not see the whole company sees, each once: one given whole, or one a team of
+     theirs is in. */
+  const places = await db
+    .select({ personId: personAccess.personId, n: sql<number>`count(DISTINCT COALESCE(${personAccess.departmentId}, ${teams.departmentId}))::int` })
+    .from(personAccess)
+    .leftJoin(teams, eq(teams.id, personAccess.teamId))
+    .groupBy(personAccess.personId);
   const placesOf = new Map(places.map(row => [row.personId, Number(row.n)]));
-  return Promise.all(
-    rows.map(async ({ machine: m, ...person }) => ({
-      id: m.id, kind: m.kind, networkId: m.networkId, server: m.machineKey.startsWith(SERVER_KEY), role: m.role, createdAt: m.createdAt, reportAt: m.reportAt,
-      memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
-      cores: m.cores, share: await onlineShare(db, m.id, now), linkRttMs: m.linkRttMs, linkMbps: m.linkMbps, internetRttMs: m.internetRttMs, internetMbps: m.internetMbps,
-      pin: m.serverPin, number: m.serverOrder,
-      owner: {
-        isOwner: person.isOwner, company: person.scopeKind === 'company', active: person.status === 'active', name: person.name,
-        departments: person.status === 'active' ? (placesOf.get(person.personId) ?? 0) : 0,
-      },
-    })),
-  );
+  const shares = opts.shares === false ? null : await onlineShares(db, now);
+  return rows.map(({ machine: m, ...person }) => ({
+    id: m.id, kind: m.kind, networkId: m.networkId, server: m.machineKey.startsWith(SERVER_KEY), role: m.role, createdAt: m.createdAt, reportAt: m.reportAt,
+    memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
+    cores: m.cores, share: shares?.get(m.id) ?? null, linkRttMs: m.linkRttMs, linkMbps: m.linkMbps, internetRttMs: m.internetRttMs, internetMbps: m.internetMbps,
+    pin: m.serverPin, number: m.serverOrder,
+    owner: {
+      isOwner: person.isOwner, company: person.scopeKind === 'company', active: person.status === 'active', name: person.name,
+      ...(person.status === 'active' ? { departments: placesOf.get(person.personId) ?? 0 } : {}),
+    },
+  }));
 }
 
 /* Whether a machine may take the server: it fits and was not kept out by hand. */
@@ -235,7 +243,7 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     const roles = planRoles({
       numbered,
       data: holding.map(row => ({ id: row.id, number: places.get(row.id)?.number ?? null, out: pinOf.get(row.id) === 'none' })),
-      eligible: new Set(others.filter(m => unfit(m, fit) === null).map(m => m.id)),
+      eligible: new Set(others.filter(m => unfit(m, fit) === null && !m.owes && m.reportAt !== null && now.getTime() - m.reportAt.getTime() <= REPORT_FRESH_MS).map(m => m.id)),
       ready, sync,
       handoverAt: kept?.handover_at ? new Date(kept.handover_at) : null,
       now, ceo: Boolean(opts.ceo),

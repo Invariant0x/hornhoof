@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { certificates, companies, machineOnline, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
+import { certificates, companies, departments, machineOnline, machines, peerSecrets, people, personAccess, publicLinks, teams } from '../src/db/schema.js';
 import { storeThroughput } from '../src/modules/copies/measured.js';
-import { planRoles, rank, Ranking, rankOf } from '../src/modules/copies/order.js';
+import { candidates, planRoles, rank, Ranking, rankOf } from '../src/modules/copies/order.js';
+import { onlineShare } from '../src/modules/network/join.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { unfit, type Candidate } from '../src/modules/copies/qualify.js';
 import { setUpCompany, testApp, until } from './helpers.js';
@@ -112,9 +113,18 @@ describe('the order of the machines that may hold the data', () => {
     expect(unfit(candidate('x', { memory: 3.5 * GIB }), OPTS)).toBeNull();
   });
 
-  it('says of a machine that still gives up a copy that it does', () => {
-    expect(unfit(candidate('a', { owes: true }), OPTS)).toEqual({ why: 'leaving' });
-    expect(ranked([LEADER, candidate('a', { owes: true })]).a).toEqual({ number: null, why: null });
+  it('keeps the place of a machine that still gives up a copy', () => {
+    /* It gets no data while it owes what it held, which is the roles' to say; its place is its own. */
+    expect(unfit(candidate('a', { owes: true }), OPTS)).toBeNull();
+    expect(ranked([LEADER, candidate('a', { owes: true })]).a).toEqual({ number: 2, why: 'new' });
+  });
+
+  it('asks a machine that holds a copy for the room of two more, not three', () => {
+    /* A copy is made again beside the old one, which a holder already has. */
+    const room = 2 * GIB + 10 * GIB;
+    expect(unfit(candidate('a', { role: 'data', diskFree: room }), OPTS)).toBeNull();
+    expect(unfit(candidate('a', { role: 'data', diskFree: room - 1 }), OPTS)).toEqual({ why: 'disk', free: room - 1, need: room });
+    expect(unfit(candidate('a', { diskFree: room }), OPTS)).toEqual({ why: 'disk', free: room, need: 3 * GIB + 10 * GIB });
   });
 
   it('gives no copy without a link', () => {
@@ -256,6 +266,15 @@ describe('who holds a copy after a ranking', () => {
   it('gives no data to a machine being wiped', () => {
     expect(plan({ numbered: [at('A', 2), at('B', 3)], eligible: new Set(['A']) })).toEqual({ grant: ['A'], retire: null, handover: false });
   });
+
+  it('gives a free seat to the next machine that is there when the one above is away', () => {
+    /* B at 3 is asleep, or still gives up what it held: the copy is not left unmade for it. */
+    expect(plan({ numbered: [at('A', 2), at('B', 3), at('C', 4), at('D', 5)], data: [holds('A', 2)], eligible: new Set(['A', 'C', 'D']) })).toEqual({ grant: ['C'], retire: null, handover: false });
+    /* Back, it takes its copy by a handover, and the machine that stood in keeps its own until that one is up to date. */
+    const back = { numbered: [at('A', 2), at('B', 3), at('C', 4)], data: [holds('A', 2), holds('C', 4)] };
+    expect(plan({ ...back, ready: new Set(['A', 'C']) })).toEqual({ grant: ['B'], retire: null, handover: true });
+    expect(plan({ ...back, data: [...back.data, holds('B', 3)], ready: new Set(['A', 'B', 'C']), sync: 'A' })).toEqual({ grant: [], retire: 'C', handover: false });
+  });
 });
 
 const MACHINE_ID = 'a1b2c3d4'.repeat(4);
@@ -352,7 +371,8 @@ describe('the ranking on the server', () => {
     /* Its owner lost the scope and has it back, and the machine has not been wiped yet. */
     const leaving = await c.joined(c.ownerId, 3, { uploadState: 'received', dataLeftAt: new Date() });
     await rank(c.ctx);
-    expect(await c.places()).toMatchObject({ m1: [null, null, 'worker'] });
+    /* It has its place, and no data while it owes what it held. */
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'worker'] });
     /* Once it holds nothing of before, it is a machine like any other. */
     await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, leaving.id));
     await rank(c.ctx);
@@ -556,5 +576,54 @@ describe('the ranking on the server', () => {
     /* Its owner still sees the whole company: no key of the company changes. */
     expect(await c.db.select().from(peerSecrets)).toEqual(secrets);
     expect((await c.db.select().from(publicLinks))[0]!.nextKeyEnc).toBeNull();
+  });
+  it('gives the data only to a machine that reports, and none back to one that still owes what it held', async () => {
+    const c = await company();
+    /* The first is asleep since yesterday, the second still gives up the copy it held: the third and fourth get the data. */
+    const asleep = await c.joined(c.ownerId, 1, { reportAt: new Date(Date.now() - 30 * 3_600_000) });
+    const owing = await c.joined(c.ownerId, 2, { uploadState: 'waiting' });
+    await c.joined(c.ownerId, 3);
+    await c.joined(c.ownerId, 4);
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'worker'], m2: [3, expect.any(String), 'worker'], m3: [4, 'next', 'data'], m4: [5, 'next', 'data'] });
+    /* Awake again, the first takes its copy by a handover; the second waits its day, and the machines that stood in
+       keep their copies meanwhile. */
+    await c.db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, asleep.id));
+    await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, owing.id));
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'worker'], m3: [4, 'handing', 'data'], m4: [5, 'handing', 'data'] });
+  });
+
+  it("counts the departments a person sees once each, and none for one who is switched off", async () => {
+    const c = await company();
+    const [acme] = await c.db.select().from(companies);
+    const [sales, support] = await c.db.insert(departments).values([{ companyId: acme!.id, name: 'Sales', roleCode: 'CSO' }, { companyId: acme!.id, name: 'Support', roleCode: 'CCO' }]).returning();
+    const [one, two] = await c.db.insert(teams).values([{ companyId: acme!.id, departmentId: sales!.id, name: 'One' }, { companyId: acme!.id, departmentId: sales!.id, name: 'Two' }]).returning();
+    const [zed] = await c.db.insert(people).values({ companyId: acme!.id, name: 'Zed', email: 'zed@acme.test', status: 'active', scopeKind: 'listed' }).returning();
+    /* One department whole and two teams of it, then a team of another department. */
+    await c.db.insert(personAccess).values([{ companyId: acme!.id, personId: zed!.id, departmentId: sales!.id }, { companyId: acme!.id, personId: zed!.id, teamId: one!.id }, { companyId: acme!.id, personId: zed!.id, teamId: two!.id }]);
+    const his = await c.joined(zed!.id, 1);
+    const seen = async () => (await candidates(c.db)).find(m => m.id === his.id)!.owner.departments;
+    expect(await seen()).toBe(1);
+    const [other] = await c.db.insert(teams).values({ companyId: acme!.id, departmentId: support!.id, name: 'Other' }).returning();
+    await c.db.insert(personAccess).values({ companyId: acme!.id, personId: zed!.id, teamId: other!.id });
+    expect(await seen()).toBe(2);
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, zed!.id));
+    expect(await seen()).toBeUndefined();
+  });
+
+  it('reads every share in one look, as each machine alone would give it', async () => {
+    const c = await company();
+    const [a, b] = [await c.joined(c.ownerId, 1), await c.joined(c.ownerId, 9)];
+    const now = new Date();
+    for (let back = 0; back <= 8; back++) {
+      const day = new Date(now.getTime() - back * 86_400_000).toISOString().slice(0, 10);
+      await c.db.insert(machineOnline).values([{ machineId: a.id, day, seconds: 43_200 }, { machineId: b.id, day, seconds: 20_000 }]);
+    }
+    const shares = Object.fromEntries((await candidates(c.db, now)).map(m => [m.id, m.share]));
+    for (const id of [a.id, b.id]) expect(shares[id]).toBeCloseTo((await onlineShare(c.db, id, now))!, 10);
+    expect(shares[a.id]).toBeGreaterThan(0.4);
+    /* The Machines tab reads no share: it only says why a machine cannot take the server. */
+    expect((await candidates(c.db, now, { shares: false })).every(m => m.share === null)).toBe(true);
   });
 });

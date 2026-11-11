@@ -137,6 +137,31 @@ describe("a machine's connection to the internet", () => {
     }
   });
 
+  it('ends a download that runs when it stops, whatever else it asked meanwhile', async () => {
+    let closed = false;
+    let pinged = 0;
+    const s = await server((req, res) => {
+      if (req.method === 'HEAD') {
+        pinged += 1;
+        return void res.writeHead(200, { 'content-length': '5' }).end();
+      }
+      /* A download that never ends by itself. */
+      res.writeHead(206);
+      res.write(Buffer.alloc(1024));
+      res.on('close', () => (closed = true));
+    });
+    const m = measures({ pingUrl: `${s.url}/`, downloadUrl: `${s.url}/file`, ca: s.ca });
+    const download = m.made.download();
+    await pause(100);
+    /* A round trip is not timed while the download fills the line: it would say more of the download than of the way. */
+    await m.made.ping();
+    expect([pinged, m.made.snapshot().internetRttMs]).toEqual([0, null]);
+    m.made.stop();
+    await download;
+    for (let tries = 0; tries < 100 && !closed; tries++) await pause(20);
+    expect(closed).toBe(true);
+  });
+
   it('downloads once a day, and first ten minutes after it started', () => {
     let now = Date.parse('2026-11-11T12:00:00Z');
     const m = measures({ now: () => now });

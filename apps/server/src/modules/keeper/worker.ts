@@ -718,13 +718,18 @@ export class WorkerKeeper {
          internet. */
       const rtt = this.sessions.linkRttMs();
       const network = { ...this.measures.network(), ...(rtt === null ? {} : { linkRttMs: rtt }) };
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}), ...network };
-      let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
-      /* The leader heard that this machine holds nothing any more: the updater's word of it has done its work. */
-      if (res?.ok && wiped) rmSync(join(this.opts.config.controlDir, WIPED_FILE), { force: true });
-      /* A leader an update took back to the build before refuses words it does not know: the report goes again at once
-         without them. */
-      if (res?.status === 400) res = await this.askLeader('POST', '/api/network/report', body);
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}) };
+      /* A leader an update took back to a build before refuses words it does not know: the report goes again at once
+         without the newest of them, the measures, and then without any, so what an older leader does take is not lost
+         with what it does not. */
+      const tries = [{ ...body, ...backups, ...network }, ...(Object.keys(network).length > 0 ? [{ ...body, ...backups }] : []), body];
+      let res: AppAnswer | null = null;
+      for (const words of tries) {
+        res = await this.askLeader('POST', '/api/network/report', words);
+        /* The leader heard that this machine holds nothing any more: the updater's word of it has done its work. */
+        if (res?.ok && wiped && 'wiped' in words) rmSync(join(this.opts.config.controlDir, WIPED_FILE), { force: true });
+        if (res?.status !== 400) break;
+      }
       if (res && !res.ok && !this.disconnected) throw new Error(`the company server answered ${res.status}`);
     } catch (err) {
       if (!this.stopped) this.sayHourly('report', `Could not report this machine to the company server: ${reasonOf(err)}`);

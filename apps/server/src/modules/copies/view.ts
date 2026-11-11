@@ -5,10 +5,8 @@ import { freshState } from '../keeper/state.js';
 import { queryOf } from '../merge/leader.js';
 import { findThisMachine } from '../network/store.js';
 import { candidates } from './order.js';
-import { unfit, type Unfit } from './qualify.js';
+import { REPORT_FRESH_MS, unfit, type Unfit } from './qualify.js';
 
-/* A copy whose machine has not reported for this long is said to sleep. */
-const REPORT_FRESH_MS = 120_000;
 /* A copy this far behind the leader's last pulse is said to be behind, in whole minutes. */
 const BEHIND_MS = 60_000;
 
@@ -86,7 +84,7 @@ async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<
   const [sized] = await queryOf(db)<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
   const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
   const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link), now };
-  const byId = new Map((await candidates(db)).map(candidate => [candidate.id, candidate]));
+  const byId = new Map((await candidates(db, now, { shares: false })).map(candidate => [candidate.id, candidate]));
   return new Map(
     rows.map(row => {
       const candidate = byId.get(row.id);

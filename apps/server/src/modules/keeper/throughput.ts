@@ -8,8 +8,11 @@ export const THROUGHPUT_TICK_MS = 100;
 /* A sliding minute of reads. */
 export const THROUGHPUT_SLOTS = 600;
 export const THROUGHPUT_MIN_BYTES = 4 * 2 ** 20;
-/* In the keeper's folder: each machine's best rate of each hour, for a day. */
+/* In the keeper's folder: each machine's best rate of each hour, for a week. */
 export const THROUGHPUT_FILE = 'throughput.json';
+/* A rate read from what flows anyway says the link is at least that fast, so the best stands for as long as the
+   online share looks back: a day of changes trickling to a copy does not replace what making the copy showed. */
+export const THROUGHPUT_KEEP_MS = 7 * DAY_MS;
 const MINUTE_MS = THROUGHPUT_SLOTS * THROUGHPUT_TICK_MS;
 const HOUR_MS = 3_600_000;
 
@@ -20,7 +23,7 @@ type Slot = { bytes: number; ms: number; at: number };
 /* How fast the leader's peer server sends to each machine, from what it sends anyway: the copy's stream, a backup, an
    app's answer. No transfer is made to measure. The rate is that of the time the bytes flowed in, never a minute's
    average, and it counts only once a minute held 4 MiB, since less says little of a link. The best of each hour is kept
-   for a day, also across a restart. */
+   for a week, also across a restart. */
 export class Throughput {
   private timer: NodeJS.Timeout | undefined;
   private readonly base = new Map<string, number>();
@@ -38,7 +41,7 @@ export class Throughput {
     return join(this.opts.dir, THROUGHPUT_FILE);
   }
 
-  /* Reads what the day before a restart held; a file of another shape is no file. */
+  /* Reads what the week before a restart held; a file of another shape is no file. */
   start(): void {
     try {
       const read = Kept.safeParse(JSON.parse(readFileSync(this.file(), 'utf8')));
@@ -93,7 +96,7 @@ export class Throughput {
 
   private prune(now: number): void {
     for (const [machine, hours] of Object.entries(this.kept)) {
-      for (const [hour, best] of Object.entries(hours)) if (Date.parse(best.at) < now - DAY_MS) delete hours[hour];
+      for (const [hour, best] of Object.entries(hours)) if (Date.parse(best.at) < now - THROUGHPUT_KEEP_MS) delete hours[hour];
       if (Object.keys(hours).length === 0) delete this.kept[machine];
     }
   }
@@ -103,11 +106,11 @@ export class Throughput {
     try {
       writePrivately(this.file(), JSON.stringify(this.kept));
     } catch {
-      /* The day is still held here; the next change writes it. */
+      /* The week is still held here; the next change writes it. */
     }
   }
 
-  /* Each machine's best rate of the last day, with the moment it was measured. */
+  /* Each machine's best rate of the last week, with the moment it was measured. */
   best(now: number): Record<string, { mbps: number; at: string }> {
     this.prune(now);
     return Object.fromEntries(

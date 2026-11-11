@@ -47,7 +47,8 @@ export type InternetMeasuresOptions = {
 export class InternetMeasures {
   private readonly trips = new RoundTrips({ everyMs: 0 });
   private timers: NodeJS.Timeout[] = [];
-  private under: http.ClientRequest | null = null;
+  /* Every request that has not ended yet: a round trip and a download may run at once, and a stop ends them all. */
+  private readonly asked = new Set<http.ClientRequest>();
   private stopped = false;
   private startedAt: number | null = null;
   private mbps: number | null = null;
@@ -90,8 +91,8 @@ export class InternetMeasures {
     this.stopped = true;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
-    this.under?.destroy();
-    this.under = null;
+    for (const req of this.asked) req.destroy();
+    this.asked.clear();
   }
 
   /* How long until the next download: a day after the last try, and ten minutes after the keeper started at the
@@ -111,7 +112,8 @@ export class InternetMeasures {
   private request(url: string, method: 'HEAD' | 'GET', agent: https.Agent, headers: Record<string, string> = {}): Promise<{ res: http.IncomingMessage; at: number }> {
     return new Promise((resolve, reject) => {
       const req = https.request(url, { method, agent, headers, ca: this.opts.ca, timeout: PING_TIMEOUT_MS });
-      this.under = req;
+      this.asked.add(req);
+      req.once('close', () => this.asked.delete(req));
       req.once('timeout', () => req.destroy(new Error('no answer in time')));
       req.once('error', reject);
       req.once('response', res => resolve({ res, at: this.clock() }));
@@ -122,7 +124,8 @@ export class InternetMeasures {
   /* Two requests in a row on one connection, the second timed: it holds no handshake, unless the server closed the
      connection in between, and then the sample holds a new one and stands. */
   async ping(): Promise<void> {
-    if (this.stopped) return;
+    /* Not while a download fills the line: its round trip would say more of the download than of the way. */
+    if (this.stopped || this.downloading) return;
     const agent = new https.Agent({ keepAlive: true, maxSockets: 1 });
     const url = this.opts.pingUrl ?? PING_URL;
     try {
@@ -135,7 +138,6 @@ export class InternetMeasures {
     } catch {
       /* No sample. */
     } finally {
-      this.under = null;
       agent.destroy();
     }
   }
@@ -158,7 +160,6 @@ export class InternetMeasures {
         this.opts.log?.(`Could not keep this machine's download rate in its folder: ${err instanceof Error ? err.message : String(err)}`);
       }
     } finally {
-      this.under = null;
       this.downloading = false;
       agent.destroy();
     }

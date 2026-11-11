@@ -335,7 +335,6 @@ function unfitText(t: Messages, language: Language, unfit: Unfit, host: string):
     case 'scope': return u.scope(unfit.person, unfit.departments);
     case 'no_link': return u.noLink;
     case 'measuring': return u.measuring;
-    case 'leaving': return u.leaving;
     case 'memory': return u.memory;
     case 'disk': return u.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
     case 'fsync': return u.fsync(tenths(language, unfit.p99));

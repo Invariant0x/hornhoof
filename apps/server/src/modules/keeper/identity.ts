@@ -141,11 +141,20 @@ export class MachineIdentity {
       const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...told, ...place };
       /* What only a newer app takes: the machine's key for backups with what it holds, and its way to the internet. */
       const network = this.measures.network();
-      const backups = this.opts.backups?.() || Object.keys(network).length > 0 ? { ...this.opts.backups?.(), ...network } : null;
-      let res = await askApp(this.opts.app, 'POST', '/api/network/report', { ...body, ...backups }, this.stopping.signal);
-      /* An app of the build before, which runs for a while during an update, refuses words it does not know: the report
-         goes again at once without them, so the machine's measures are not lost meanwhile. */
-      if (res.status === 400 && backups) res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
+      const backups = this.opts.backups?.() ?? null;
+      /* An app of a build before, which runs for a while during an update, refuses words it does not know: the report
+         goes again at once without the newest of them, then without any, so the machine's measures are not lost
+         meanwhile. */
+      const tries = [
+        ...(Object.keys(network).length > 0 ? [{ ...body, ...backups, ...network }] : []),
+        ...(backups ? [{ ...body, ...backups }] : []),
+        body,
+      ];
+      let res = await askApp(this.opts.app, 'POST', '/api/network/report', tries[0]!, this.stopping.signal);
+      for (const words of tries.slice(1)) {
+        if (res.status !== 400) break;
+        res = await askApp(this.opts.app, 'POST', '/api/network/report', words, this.stopping.signal);
+      }
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {
       if (this.stopped) return;

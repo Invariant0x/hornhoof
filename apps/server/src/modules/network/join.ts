@@ -214,15 +214,28 @@ export async function countOnline(tx: Db, machineId: string, prevReportAt: Date 
 export async function onlineShare(db: Db, machineId: string, now = new Date()): Promise<number | null> {
   const [row] = await db.select({ createdAt: machines.createdAt }).from(machines).where(eq(machines.id, machineId));
   if (!row) return null;
-  const start = Math.max(now.getTime() - SHARE_DAYS * DAY_MS, row.createdAt.getTime());
+  const days = await db.select().from(machineOnline).where(and(eq(machineOnline.machineId, machineId), gte(machineOnline.day, dayOf(new Date(now.getTime() - SHARE_DAYS * DAY_MS))), lte(machineOnline.day, dayOf(now))));
+  return shareOf(row.createdAt, days, now);
+}
+
+/* The same for every live machine, from one look at their days. */
+export async function onlineShares(db: Db, now = new Date()): Promise<Map<string, number | null>> {
+  const rows = await db.select({ id: machines.id, createdAt: machines.createdAt }).from(machines).where(isNull(machines.revokedAt));
+  const days = await db.select().from(machineOnline).where(and(gte(machineOnline.day, dayOf(new Date(now.getTime() - SHARE_DAYS * DAY_MS))), lte(machineOnline.day, dayOf(now))));
+  const byMachine = new Map<string, typeof days>();
+  for (const day of days) byMachine.set(day.machineId, [...(byMachine.get(day.machineId) ?? []), day]);
+  return new Map(rows.map(row => [row.id, shareOf(row.createdAt, byMachine.get(row.id) ?? [], now)]));
+}
+
+function shareOf(createdAt: Date, days: { day: string; seconds: number }[], now: Date): number | null {
+  const start = Math.max(now.getTime() - SHARE_DAYS * DAY_MS, createdAt.getTime());
   const length = now.getTime() - start;
   if (length < 60_000) return null;
   const firstDay = dayOf(new Date(start));
   const firstDayStart = Date.parse(`${firstDay}T00:00:00Z`);
   const firstDayEnd = Math.min(firstDayStart + DAY_MS, now.getTime());
-  const firstDayShare = (firstDayEnd - start) / (firstDayEnd - Math.max(firstDayStart, row.createdAt.getTime()));
-  const days = await db.select().from(machineOnline).where(and(eq(machineOnline.machineId, machineId), gte(machineOnline.day, firstDay), lte(machineOnline.day, dayOf(now))));
-  const online = days.reduce((sum, { day, seconds }) => sum + (day === firstDay ? seconds * firstDayShare : seconds), 0);
+  const firstDayShare = (firstDayEnd - start) / (firstDayEnd - Math.max(firstDayStart, createdAt.getTime()));
+  const online = days.filter(({ day }) => day >= firstDay).reduce((sum, { day, seconds }) => sum + (day === firstDay ? seconds * firstDayShare : seconds), 0);
   return Math.min(1, Math.max(0, (online * 1000) / length));
 }
 

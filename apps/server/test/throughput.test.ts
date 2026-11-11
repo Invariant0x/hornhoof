@@ -49,7 +49,7 @@ describe('how fast the leader sends to each machine', () => {
     expect(s.rate()).toBe(168);
   });
 
-  it('keeps the best of the day', () => {
+  it('keeps the best of the week', () => {
     const s = stand();
     s.tick();
     for (let n = 0; n < 4; n++) s.tick(MIB, 168);
@@ -57,11 +57,24 @@ describe('how fast the leader sends to each machine', () => {
     s.tick(0, HOUR);
     for (let n = 0; n < 4; n++) s.tick(MIB, 420);
     expect(s.rate()).toBe(50);
-    /* A day and an hour on, the first is no part of the day any more. */
-    s.tick(0, 24 * HOUR);
+    /* A week and an hour on, the first is no part of the week any more. */
+    s.tick(0, 7 * 24 * HOUR);
     expect(s.rate()).toBe(20);
     s.tick(0, 2 * HOUR);
     expect(s.rate()).toBeNull();
+  });
+
+  it('keeps what a transfer showed while only a trickle flows', () => {
+    const s = stand();
+    s.tick();
+    /* A copy being made: 40 MiB in four seconds, about 84 Mbit/s. */
+    for (let n = 0; n < 40; n++) s.tick(MIB);
+    expect(s.rate()).toBe(84);
+    /* Two days of changes trickling after it, 20 KiB in each read: under 2 Mbit/s, which says how little there was to
+       send and nothing of the link. */
+    s.tick(0, 48 * HOUR);
+    for (let n = 0; n < 600; n++) s.tick(20 * 1024);
+    expect(s.rate()).toBe(84);
   });
 
   it('starts from the counts it finds', () => {

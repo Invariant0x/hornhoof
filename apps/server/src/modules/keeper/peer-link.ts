@@ -122,12 +122,12 @@ export class PeerLink {
     return new Set(this.answer?.revoked ?? this.crl?.serials ?? []);
   }
 
-  /* The bytes this machine's database sent that machine over the peer link. */
   /* Every byte its peer server wrote to each machine's streams so far; none before it listens. */
   sentBytes(): ReadonlyMap<string, number> {
     return this.server?.sentBytes() ?? NOTHING_SENT;
   }
 
+  /* The bytes this machine's database sent that machine over the peer link. */
   dbBytes(machine: string): number {
     return this.server?.dbBytes(machine) ?? 0;
   }
