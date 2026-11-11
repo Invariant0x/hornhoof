@@ -583,10 +583,12 @@ describe('headers', () => {
   it('passes the stamp and the signature of a signed delivery receipt, which only their own check believes', async () => {
     const { target, seen } = await recording();
     const proxy = await through(target);
-    await send(proxy, { headers: { 'x-hornhoof-timestamp': '1794300000', 'x-hornhoof-signature': 'abc', 'x-hornhoof-internal': 'forged' } });
+    await send(proxy, { headers: { 'x-hornhoof-timestamp': '1794300000', 'x-hornhoof-signature': 'abc', 'x-hornhoof-internal': 'forged', 'x-hornhoof-recovery': 'a-proof' } });
     const { headers } = seen[0];
     expect(headers['x-hornhoof-timestamp']).toBe('1794300000');
     expect(headers['x-hornhoof-signature']).toBe('abc');
+    /* The proof a machine that survived sends with a bundle is made outside too, and only its check believes it. */
+    expect(headers['x-hornhoof-recovery']).toBe('a-proof');
     expect(headers['x-hornhoof-internal']).toBeUndefined();
   });
 

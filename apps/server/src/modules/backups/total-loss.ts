@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { clientAddress } from '../../auth/tunnel.js';
 import { ApiError } from '../../errors.js';
-import { UUID } from '../../net/proxy.js';
+import { RECOVERY_PROOF, UUID } from '../../net/proxy.js';
 import { isSetupCode, setupNeeded } from '../setup/code.js';
 import { answerChallenge, answerProof, BundleRefused, checkHead, MAX_CHALLENGE, uploadProof } from './bundle.js';
 import { parseRecoveryFile, type RecoveryFile } from './recovery.js';
@@ -27,7 +27,6 @@ const INCOMING = ['restore', 'incoming'];
 const MAX_FILE = 16 * 1024;
 /* How many answered challenges are remembered; past it the oldest are let go. */
 const NONCES_KEPT = 10_000;
-const PROOF_HEADER = 'x-hornhoof-recovery';
 
 export type RecoveryView = {
   company: string;
@@ -158,7 +157,7 @@ export function totalLossRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Whether a bundle comes with the proof of a challenge this server answered for that very bundle, or with the setup
      code. */
   const proven = (req: FastifyRequest, id: string): boolean => {
-    const proof = String(req.headers[PROOF_HEADER] ?? '');
+    const proof = String(req.headers[RECOVERY_PROOF] ?? '');
     const code = CodeQuery.parse(req.query).code;
     return Boolean((proof && loss.takes(id, proof)) || (code && isSetupCode(config.secret, code)));
   };

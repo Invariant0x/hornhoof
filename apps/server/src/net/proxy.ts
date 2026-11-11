@@ -95,8 +95,11 @@ function framingOf(req: http.IncomingMessage): http.OutgoingHttpHeaders {
 }
 
 /* Hornhoof's own headers say who a request is from, so none that came in goes on. The stamp and the signature of a
-   delivery receipt do: a sender outside signs them, and only the check of that signature believes them. */
-const SIGNED_OUTSIDE: ReadonlySet<string> = new Set(['x-hornhoof-timestamp', 'x-hornhoof-signature']);
+   delivery receipt do: a sender outside signs them, and only the check of that signature believes them. So does the
+   proof a machine that survived the loss of its server sends with each bundle, which is made from a number only the
+   recovery file's holder could read. */
+export const RECOVERY_PROOF = 'x-hornhoof-recovery';
+const SIGNED_OUTSIDE: ReadonlySet<string> = new Set(['x-hornhoof-timestamp', 'x-hornhoof-signature', RECOVERY_PROOF]);
 const hornhoofsOwn = (name: string): boolean => name.startsWith('x-hornhoof-') && !SIGNED_OUTSIDE.has(name);
 
 /* What of a request's headers goes on to the next hop: none that ends at this one, none that says who the request is

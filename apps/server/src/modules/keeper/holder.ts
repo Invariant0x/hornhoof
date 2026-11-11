@@ -1,6 +1,7 @@
 import { statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
+import { RECOVERY_PROOF } from '../../net/proxy.js';
 import { z } from 'zod';
 import { answerProof, checkHead, makeChallenge, uploadProof } from '../backups/bundle.js';
 import { BundleStore, IDLE_MS, type StoredBundle } from '../backups/store.js';
@@ -20,7 +21,6 @@ export const SENT_FOR_MS = 3_000_000;
 const CHALLENGE_MS = 10_000;
 const CHALLENGE_PATH = '/api/recovery/challenge';
 const RECOVERY_BUNDLE_PATH = '/api/recovery/bundles/';
-const PROOF_HEADER = 'x-hornhoof-recovery';
 
 const BACKUPS_PATH = '/api/network/backups';
 const BUNDLE_PATH = '/peer/backups/';
@@ -249,7 +249,7 @@ export class HolderKeeper {
     try {
       const res = await (survivor.fetch ?? fetch)(`${sent.target}${RECOVERY_BUNDLE_PATH}${id}`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/octet-stream', 'content-length': String(bundle.length), [PROOF_HEADER]: uploadProof(sent.nonce, id) },
+        headers: { 'content-type': 'application/octet-stream', 'content-length': String(bundle.length), [RECOVERY_PROOF]: uploadProof(sent.nonce, id) },
         body: Readable.toWeb(watched) as ReadableStream<Uint8Array>,
         duplex: 'half',
         signal: cut.signal,
