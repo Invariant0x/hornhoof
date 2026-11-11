@@ -127,6 +127,50 @@ describe('a department owner on the screen', () => {
   });
 });
 
+describe('what a department owner sees', () => {
+  /* Bruno works in Development on the CEO's plan, Sid in Sales. */
+  it('opens, changes and removes every employee of their department on whoever\'s plan, as the CEO does', async () => {
+    const c = await company();
+    const card = () => send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}`);
+    expect((await card()).json().error.reason).toBe('agent_hidden');
+    expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).statusCode).toBe(403);
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await card()).json()).toMatchObject({ name: 'Bruno', canEdit: true, canRemove: true });
+    expect((await send(c, c.danaToken, 'PATCH', `/api/agents/${c.worker.id}`, { name: 'Bob' })).json().name).toBe('Bob');
+    expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assignee).toMatchObject({ id: c.worker.id });
+    const [ira] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Ira', roleKey: 'DEV-BE', departmentId: c.dev.id, productId: c.product.id, model: '', subscriptionId: c.worker.subscriptionId }).returning();
+    expect((await send(c, c.danaToken, 'DELETE', `/api/agents/${ira!.id}`)).statusCode).toBe(204);
+    /* The numbers of the whole department open to her; there are none before a turn. */
+    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.dev.id}/pipeline`)).json().error.reason).toBe('turn_unknown');
+    expect((await send(c, c.danaToken, 'GET', `/api/agents/${c.seller.id}`)).json().error.reason).toBe('agent_hidden');
+    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.sales.id}/pipeline`)).json().error.reason).toBe('ceo_view_only');
+  });
+
+  it('sees the work of an employee placed in a sub-unit of their department itself', async () => {
+    const c = await owned();
+    const [kai] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.product.id, model: '', subscriptionId: c.worker.subscriptionId }).returning();
+    await c.db.update(tasks).set({ assigneeAgentId: kai!.id }).where(eq(tasks.id, c.task.id));
+    expect((await send(c, c.danaToken, 'GET', `/api/agents/${kai!.id}`)).statusCode).toBe(200);
+    expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assignee).toMatchObject({ id: kai!.id, name: 'Kai' });
+  });
+
+  it('reads nothing of the key of a plan that is not theirs', async () => {
+    const c = await owned();
+    await c.db.update(subscriptions).set({ last4: '7a2f' }).where(eq(subscriptions.id, c.worker.subscriptionId!));
+    expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().subscription.last4).toBe('7a2f');
+    const card = (await send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}`)).json();
+    expect(card.subscription).toMatchObject({ id: c.worker.subscriptionId, last4: null });
+    expect(JSON.stringify(card)).not.toContain('7a2f');
+  });
+
+  it('watches the terminal of an employee on another\'s plan without typing into it', async () => {
+    const c = await owned();
+    const events = await send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}/events?after=0`);
+    expect(events.statusCode).toBe(200);
+    expect(events.json().state.canType).toBe(false);
+  });
+});
+
 describe('a department owner\'s decisions', () => {
   const dev = 'd0000000-0000-4000-8000-000000000001';
   const owns = { whole: false, departments: new Set([dev]), teams: new Set<string>(), owns: new Set([dev]) };

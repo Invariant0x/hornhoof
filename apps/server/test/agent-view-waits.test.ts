@@ -86,13 +86,13 @@ describe('wait routes use real role and personal-card authority', () => {
     expect((await c.db.select().from(waitNotices).where(eq(waitNotices.id, own.id)))[0]).toMatchObject({ acknowledgedByPersonId: c.ids[viewer], acknowledgedAt: expect.any(Date) as Date });
   });
 
-  it('does not let a department owner read or replan hidden-agent work, or change another department policy', async () => {
-    const c = await aclCompany(), { task, wait } = await waiting(c, 'other');
+  it('does not let a department owner read or replan hidden-agent work of another department, or change its policy', async () => {
+    const c = await aclCompany(), { task, wait } = await waiting(c, 'far');
     expect((await c.get(`/api/tasks/${task.id}/waits`, c.tokens.olga)).statusCode).toBe(403);
     const result = await c.app.inject({ method: 'POST', url: `/api/waits/${wait.id}/replan`,
       payload: { expectedGeneration: 1, plan: plan(c), reason: 'Not a visibility grant.' }, ...as(c.tokens.olga) });
     expect(result.statusCode).toBe(403);
-    expect(leaks(result, [c.crew.other, { id: task.id, name: task.title }])).toEqual([]);
+    expect(leaks(result, [c.crew.far, { id: task.id, name: task.title }])).toEqual([]);
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.sales.id}/wait-policy/after`, payload: DATES, ...as(c.tokens.olga) })).statusCode).toBe(403);
     expect((await c.db.select().from(taskWaits))[0]!.generation).toBe(1);
     expect(await c.db.select().from(waitPolicies)).toEqual([]);

@@ -79,7 +79,8 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
   { name: 'own plan, other department', viewer: 'ann', agent: 'away', closed: true },
   { name: "another's plan, other department", viewer: 'ann', agent: 'far', closed: true },
   { name: 'department owner, own plan', viewer: 'olga', agent: 'owned', closed: false },
-  { name: "department owner, another's plan", viewer: 'olga', agent: 'other', closed: true },
+  { name: "department owner, another's plan", viewer: 'olga', agent: 'other', closed: false },
+  { name: "department owner, another's plan, other department", viewer: 'olga', agent: 'far', closed: true },
   { name: 'whole company, own plan', viewer: 'wes', agent: 'wide', closed: false },
   { name: "whole company, another's plan", viewer: 'wes', agent: 'other', closed: true },
   { name: 'delegate', viewer: 'lisa', agent: 'far', closed: false },
@@ -108,7 +109,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
-  { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
+  { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 200, wes: 403, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
@@ -193,7 +194,7 @@ async function busy() {
 }
 
 /* What each person may read of the crew. */
-const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['owned'], wes: ['wide'] };
+const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['mine', 'other', 'head', 'owned'], wes: ['wide'] };
 
 describe('every real route', () => {
   it('has its place in the table', async () => {

@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
-import { viewerOf } from '../../auth/agent-view.js';
+import { ownsPlace, viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger } from '../../auth/departments.js';
@@ -192,11 +192,12 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 }
 
-/* Who holds a role is who an employee is: it goes with the full view, as the employees do. */
+/* Who holds a role is who an employee is: it goes with the full view and to the department's owner, as the employees do. */
 async function stateSeen(db: Db, me: Person, dept: Parameters<typeof requiredState>[1]) {
   const held = await requiredState(db, dept);
-  const { full } = await viewerOf(db, me);
-  return (role: string) => (full ? held(role) : { ...held(role), holder: null });
+  const viewer = await viewerOf(db, me);
+  const whole = viewer.full || ownsPlace(viewer, { departmentId: dept.id, parentId: dept.parentId });
+  return (role: string) => (whole ? held(role) : { ...held(role), holder: null });
 }
 
 /* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */

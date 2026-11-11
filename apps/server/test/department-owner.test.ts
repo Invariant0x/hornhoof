@@ -224,13 +224,13 @@ describe('approvals with a department owner', () => {
   const asked = async (c: Awaited<ReturnType<typeof company>>) => (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Merge?', commit: COMMIT })).request;
   const waiting = async (c: Awaited<ReturnType<typeof company>>, token: string): Promise<Waiting> => (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(token) })).json();
 
-  it('sends an approval to the named owner, and shows it as theirs', async () => {
+  it('sends an approval to the named owner, and shows it as theirs with its work, as she sees every employee there', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const request = await asked(c);
     const hers = await waiting(c, c.danaToken);
-    expect(hers.requests).toEqual([]);
-    expect(hers.addressed).toMatchObject([{ id: request.id, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: { id: c.dev.id } } }]);
+    expect(hers.requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: { id: c.dev.id } } }]);
+    expect(hers.addressed).toEqual([]);
     expect(hers.counts.byPerson[c.ids.dana]).toBe(1);
   });
 
@@ -281,6 +281,6 @@ describe('approvals with a department owner', () => {
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.wes);
     const refused = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(c.danaToken) });
     expect(refused.statusCode).toBe(403);
-    expect((await waiting(c, c.wholeToken)).addressed).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);
+    expect((await waiting(c, c.wholeToken)).requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);
   });
 });

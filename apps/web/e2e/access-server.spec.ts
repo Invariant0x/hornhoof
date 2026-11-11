@@ -181,13 +181,11 @@ test('real server applies both plan and department to map, schema, tree and list
   }
 });
 
-test('real server lets the department owner see only their own agent and full viewers see all', async ({ browser, server }) => {
+test('real server lets the department owner see every agent of their department and full viewers see all', async ({ browser, server }) => {
   try {
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
     await olga.goto(`/departments/${server.dev.id}`);
-    await expect(olga.locator('.dcanvas')).toContainText('Oleg');
-    await expect(olga.locator('.dcanvas')).not.toContainText('Mina');
-    await expect(olga.locator('.dcanvas')).not.toContainText('Otto');
+    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(olga.locator('.dcanvas')).toContainText(name);
     for (const who of ['ceo', 'lisa'] as const) {
       const viewer = await signedIn(browser, server, who, 'en', 'light', 1440);
       await viewer.goto(`/departments/${server.dev.id}`);
