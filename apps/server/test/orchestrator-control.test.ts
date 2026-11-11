@@ -439,6 +439,16 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(heard).toEqual(['org']);
   });
 
+  it('stays out of the merge records', async () => {
+    const { app } = await company();
+    const client = await mcp(app, TOKEN);
+    for (const table of ['net.merges', 'net.merge_rows', 'net.merge_conflicts']) {
+      const res = await call(client, 'database', { sql: `SELECT * FROM ${table}` });
+      expect(res.isError, table).toBe(true);
+      expect(text(res), table).toMatch(/permission denied/);
+    }
+  });
+
   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);

@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 const SERVER = fileURLToPath(new URL('..', import.meta.url));
 const SRC = join(SERVER, 'src');
 
-const POOL_OWNERS = ['src/db/client.ts', 'src/db/agent-sql.ts', 'src/modules/keeper/lease-store.ts'];
+/* The merge's source reads a database that came back, on a connection of its own that only reads. */
+const POOL_OWNERS = ['src/db/client.ts', 'src/db/agent-sql.ts', 'src/modules/keeper/lease-store.ts', 'src/modules/merge/source.ts'];
 const LOOSE_COMMIT_ALLOWED = ['src/modules/keeper/lease-store.ts'];
 
 type Rule = { name: string; matches: (line: string) => boolean; allowedIn?: string[]; sample: string };
@@ -72,6 +73,12 @@ describe('the lint of the fences', () => {
     expect(brokenBy('src/db/agent-sql.ts', 'new pg.Client({ connectionString: url })')).toBeUndefined();
     expect(brokenBy('src/modules/keeper/lease-store.ts', 'new pg.Client({ connectionString: url })')).toBeUndefined();
     expect(brokenBy('src/modules/keeper/lease-store.ts', 'SET synchronous_commit = off')).toBeUndefined();
+  });
+
+  it('lets the merge source alone open a client', () => {
+    expect(POOL_OWNERS).toEqual(['src/db/client.ts', 'src/db/agent-sql.ts', 'src/modules/keeper/lease-store.ts', 'src/modules/merge/source.ts']);
+    expect(brokenBy('src/modules/merge/source.ts', 'const client = new Client({ connectionString: url });')).toBeUndefined();
+    expect(brokenBy('src/modules/merge/apply.ts', 'const client = new Client({ connectionString: url });')?.name).toBe('a pool or client opened outside the files that own them');
   });
 
   it('takes turning synchronous_commit on, and what follows it, for no loose commit', () => {

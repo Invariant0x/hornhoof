@@ -686,9 +686,66 @@ describe('migrations 0105 and 0106, the backups', () => {
         values (gen_random_uuid(), gen_random_uuid(), now(), now(), ${over.reason ?? 'timer'}, ${over.size ?? 10}, ${over.sha256 ?? 'a'.repeat(64)}, gen_random_uuid(), 'ab', '{}', 106, '{}')`);
     await backup();
     await backup({ reason: 'update' });
-    expect(await codeOf(backup({ reason: 'fork' }))).toBe('23514');
+    expect(await codeOf(backup({ reason: 'other' }))).toBe('23514');
     expect(await codeOf(backup({ size: 0 }))).toBe('23514');
     expect(await codeOf(backup({ sha256: 'XYZ' }))).toBe('23514');
     expect((await db.execute(sql`select holders from net.backups limit 1`)).rows).toEqual([{ holders: [] }]);
+  });
+});
+
+describe('migration 0107, the merge records', () => {
+  const RECORDS = ['merges', 'merge_rows', 'merge_conflicts', 'merge_consumed', 'restores', 'horizon'];
+
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds the merge records, fenced', async () => {
+    const db = await fullyMigrated();
+    const fenced = await db.execute<{ name: string; deferrable: boolean; deferred: boolean }>(sql`select c.relname as name, t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence'
+      where c.relnamespace = 'net'::regnamespace and c.relname = any(${sql.raw(`'{${RECORDS.join(',')}}'`)}::text[]) order by c.relname`);
+    expect(fenced.rows).toEqual([...RECORDS].sort().map(name => ({ name, deferrable: true, deferred: true })));
+  });
+
+  it('takes a fork among the reasons of a backup', async () => {
+    const db = await fullyMigrated();
+    const backup = (reason: string) =>
+      db.execute(sql`insert into net.backups (id, company_id, dumped_at, made_at, reason, size, sha256, signer, serial, recipients, migrations, head)
+        values (gen_random_uuid(), gen_random_uuid(), now(), now(), ${reason}, 10, ${'a'.repeat(64)}, gen_random_uuid(), 'ab', '{}', 107, '{}')`);
+    for (const reason of ['timer', 'update', 'fork']) await backup(reason);
+    expect(await codeOf(backup('other'))).toBe('23514');
+  });
+
+  it('takes only the merges, conflicts and rows there are', async () => {
+    const db = await fullyMigrated();
+    const merge = (source: string, status = 'pending') => db.execute<{ id: string }>(sql`insert into net.merges (source, label, status) values (${source}, 'a database', ${status}) returning id`);
+    const id = (await merge('kept:hornhoof_before_20261110_090000')).rows[0]!.id;
+    await merge('machine:0f0f');
+    expect(await codeOf(merge('other:x'))).toBe('23514');
+    expect(await codeOf(merge('kept:other', 'other'))).toBe('23514');
+    expect(await codeOf(merge('kept:hornhoof_before_20261110_090000'))).toBe('23505');
+    const conflict = (over: { kind?: string; op?: string; key?: string; carried?: string | null } = {}) =>
+      db.execute(sql`insert into net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, why)
+        values (${id}, ${over.carried ?? null}, 'tasks', ${over.key ?? '{"id": "1"}'}::jsonb, ${over.op ?? 'update'}, ${over.kind ?? 'differs'}, 'work', 'Both changed it.')`);
+    await conflict();
+    expect(await codeOf(conflict({ kind: 'other' }))).toBe('23514');
+    expect(await codeOf(conflict({ op: 'other' }))).toBe('23514');
+    /* One conflict of a merge for a row, but for those carried from other databases, each by the id it had there. */
+    expect(await codeOf(conflict())).toBe('23505');
+    await conflict({ carried: '0f0f0f0f-0000-4000-8000-00000000000a' });
+    await conflict({ carried: '0f0f0f0f-0000-4000-8000-00000000000b' });
+    const row = (how: string) => db.execute(sql`insert into net.merge_rows (merge, tbl, key, how) values (${id}, 'tasks', '{"id": "1"}'::jsonb, ${how})`);
+    await row('rewritten');
+    expect(await codeOf(row('other'))).toBe('23514');
+    await db.execute(sql`insert into net.horizon (below) values (now())`);
+    expect(await codeOf(db.execute(sql`insert into net.horizon (id, below) values (false, now())`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into net.horizon (below) values (now())`))).toBe('23505');
   });
 });
