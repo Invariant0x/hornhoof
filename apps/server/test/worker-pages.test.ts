@@ -59,7 +59,7 @@ describe("a worker keeper's settings", () => {
 
   it("reads the worker's own lines, and no secret of the company", () => {
     const config = workerConfig({ ...ENV, HORNHOOF_SECRET: 's'.repeat(44), NODE_KEY: 'n'.repeat(40), DATABASE_URL: 'postgres://x', POSTGRES_PASSWORD: 'p' });
-    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], ownerKey: null, hostOs: null });
+    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], ownerKey: null, hostOs: null, survivorMs: 600_000 });
     expect(JSON.stringify(config)).not.toMatch(/ssss|nnnn|postgres/);
   });
 
@@ -67,6 +67,11 @@ describe("a worker keeper's settings", () => {
     expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'darwin' }).hostOs).toBe('darwin');
     expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'linux' }).hostOs).toBe('linux');
     expect(workerConfig({ ...ENV, HORNHOOF_HOST_OS: 'windows' }).hostOs).toBeNull();
+    /* How long without a leader before it looks for a restored server: ten minutes, or what a stand shortens it to. */
+    expect(workerConfig(ENV).survivorMs).toBe(600_000);
+    expect(workerConfig({ ...ENV, HORNHOOF_SURVIVOR_S: '' }).survivorMs).toBe(600_000);
+    expect(workerConfig({ ...ENV, HORNHOOF_SURVIVOR_S: '20' }).survivorMs).toBe(20_000);
+    for (const odd of ['9', '3601', '12.5', 'soon', '-20']) expect(workerConfig({ ...ENV, HORNHOOF_SURVIVOR_S: odd }).survivorMs).toBe(600_000);
   });
 
   it('takes the ticket, the ports, the addresses and the name the installer wrote', () => {

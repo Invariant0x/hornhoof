@@ -40,6 +40,7 @@ import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
 import { refreshHolders } from './modules/backups/holders.js';
 import { Restores } from './modules/backups/restore.js';
+import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
 import { backupRoutes } from './modules/backups/routes.js';
 import { Computers } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
@@ -94,6 +95,8 @@ export type Ctx = Deps & {
   updater: UpdaterControl;
   /* Restores of the company from a backup, and what follows one. */
   restores: Restores;
+  /* A restore from a recovery file on a server that has no company yet. */
+  totalLoss: TotalLoss;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -183,6 +186,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   ctx.updater = new UpdaterControl(config.controlDir);
   ctx.restores = new Restores(ctx);
+  ctx.totalLoss = new TotalLoss(ctx);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
@@ -299,6 +303,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   networkRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);
+  totalLossRoutes(app, ctx);
   outboundRoutes(app, ctx);
   challengeRoutes(app, ctx.challenges);
   return app;

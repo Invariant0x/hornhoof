@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -7,7 +7,7 @@ import * as age from 'age-encryption';
 import { eq } from 'drizzle-orm';
 import { expect } from 'vitest';
 import { companies, machines, people } from '../src/db/schema.js';
-import { sealBundle } from '../src/modules/backups/bundle.js';
+import { headLine, sealBundle } from '../src/modules/backups/bundle.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { hostIdOf } from '../src/modules/network/join.js';
@@ -45,11 +45,14 @@ export async function backupCompany(env: NodeJS.ProcessEnv = {}, logger?: Deps['
   /* A bundle's head as the server's keeper makes it; the sealed part stays in the test's folder. */
   const head = async (over: Partial<Parameters<typeof sealBundle>[0]> = {}) => {
     const id = over.id ?? randomUUID();
+    const out = over.out ?? join(dir, `${id}-${randomUUID()}.age`);
     const sealed = await sealBundle({
       dump: Readable.from([randomBytes(2048)]), id, company: acme!.id, dumpedAt: new Date(), reason: 'timer', migrations: 106, secrets: { HORNHOOF_SECRET: 's', NODE_KEY: 'n', RELAY_URL: 'r' },
-      recipients: [ownAge], recovery: null, recoveryLink: null, key, held, out: join(dir, `${id}-${randomUUID()}.age`), ...over,
+      recipients: [ownAge], recovery: null, recoveryLink: null, key, held, out, ...over,
     });
-    return { id, ...sealed };
+    /* As it travels to another machine: its two lines, then the sealed part. */
+    const travels = () => Buffer.concat([Buffer.from(headLine(sealed.head)), readFileSync(out)]);
+    return { id, out, travels, ...sealed };
   };
   const record = (said: string, who: object = OWN) => app.inject({ method: 'POST', url: '/api/network/backups', payload: { head: said }, ...who });
   const view = async <T>(who: object = OWN) => (await app.inject({ url: '/api/network/backups', ...who })).json() as T;

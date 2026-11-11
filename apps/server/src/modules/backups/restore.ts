@@ -11,7 +11,8 @@ import { ApiError, type ErrorReason } from '../../errors.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { disablePerson } from '../people/routes.js';
-import { parseRecoveryFile } from './recovery.js';
+import type { Manifest } from './bundle.js';
+import { parseRecoveryFile, type RecoveryFile } from './recovery.js';
 import { bundleRow, type BackupRow } from './records.js';
 import type { Carry, RestoreOrder, RestoreStatus, RestoreStep } from './types.js';
 
@@ -195,6 +196,20 @@ export class Restores {
       this.ctx.updater.free(attempt);
       throw err;
     }
+  }
+
+  /* After a total loss: a bundle that was sent to this server, restored with the recovery file it was given. There is
+     no database to check the bundle against, and none to carry anything over from. Answers the attempt. */
+  startIncoming(file: RecoveryFile, manifest: Manifest): string {
+    this.order();
+    if (!this.ctx.updater.present()) throw new ApiError(503, 'unavailable', 'The updater is not running, so nothing can be restored now.', 'updater_missing');
+    if (this.ctx.mode.current() !== 'lead') throw new ApiError(503, 'unavailable', 'This server does not lead the company now.');
+    if (manifest.migrations > knownMigrations()) throw refused('newer_build', LINES.newer_build);
+    const attempt = randomUUID();
+    if (this.ctx.updater.claim('restore', attempt)) throw refused('restore_busy', 'A restore or an update is running.');
+    const order: RestoreOrder = { attempt, id: manifest.id, dumpedAt: manifest.dumpedAt, source: 'incoming', identity: file.identity, expect: null, company: file.company, authorityPem: file.authorityPem, carry: false };
+    this.current = { order, at: Date.now(), from: null };
+    return attempt;
   }
 
   /* The recovery identity the order carries: none when this server's own key opens the bundle, else the one of the file

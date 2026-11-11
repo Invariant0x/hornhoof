@@ -1,6 +1,7 @@
 import { isP256 } from '../computer/owner-key.js';
 import { hostOsOf, NETWORK_ID, type HostOs } from '../network/ids.js';
 import { addressesIn } from './addresses.js';
+import { SURVIVOR_MS } from './holder.js';
 import { publishedFrom, type Published } from './identity.js';
 import { KEEPER_DIR } from './machine-keys.js';
 
@@ -22,7 +23,15 @@ export type WorkerConfig = {
   ownerKey: string | null;
   /* The system of the computer, as the installer wrote it down. */
   hostOs: HostOs | null;
+  /* For how long this machine is without a leader before it looks for a server restored from the recovery file. */
+  survivorMs: number;
 };
+
+/* HORNHOOF_SURVIVOR_S, which a stand sets to wait less: a whole number of seconds from 10 to an hour. */
+function survivorMsOf(value: string | undefined): number {
+  const seconds = /^\d{2,4}$/.test(value ?? '') ? Number(value) : 0;
+  return seconds >= 10 && seconds <= 3600 ? seconds * 1000 : SURVIVOR_MS;
+}
 
 const RUN_AGAIN = 'Run the join command from Hornhoof on this machine again.';
 const NO_PIN = `HORNHOOF_OWNER_KEY is not a key, so this machine pins no owner. ${RUN_AGAIN}`;
@@ -54,5 +63,6 @@ export function workerConfig(env: NodeJS.ProcessEnv, log: (line: string) => void
     addresses: addressesIn(env),
     ownerKey: ownerKey && isP256(ownerKey) ? ownerKey : null,
     hostOs: hostOsOf(env.HORNHOOF_HOST_OS),
+    survivorMs: survivorMsOf(env.HORNHOOF_SURVIVOR_S),
   };
 }

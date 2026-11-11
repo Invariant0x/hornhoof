@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs';
 import type http from 'node:http';
+import { join } from 'node:path';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
-import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
+import { Settings, TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
 import { servedCertificate } from '../tls/store.js';
 import { certInfo } from '../tls/x509.js';
@@ -17,7 +19,7 @@ import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
-import { REPORTED_BUNDLES } from '../backups/types.js';
+import { RECOVERY_LINK, REPORTED_BUNDLES } from '../backups/types.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
@@ -259,7 +261,7 @@ export class Keeper {
     this.timer = setInterval(() => void tick(), everyMs);
     this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
     /* One reader of the link's settings for both frpc children, so an outage of the database is said once. */
-    const settings = db ? keepingOnFailure(() => tunnelSettings(db, this.opts.config), () => this.opts.log(SETTINGS_KEPT)) : null;
+    const settings = db ? keepingOnFailure(() => this.linkSettings(db), () => this.opts.log(SETTINGS_KEPT)) : null;
     if (db && settings) this.carryLink(db, settings, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
@@ -305,6 +307,20 @@ export class Keeper {
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
+  }
+
+  /* The link's settings: the database's own; and while it has none, on a server that is being restored from a recovery
+     file, the link of that file, so the machines that survived find this server under the company's name. In http: the
+     link's certificate comes back with the restored database. */
+  private async linkSettings(db: Db): Promise<TunnelSettings | null> {
+    const own = await tunnelSettings(db, this.opts.config);
+    if (own) return own;
+    try {
+      const said = Settings.safeParse({ ...(JSON.parse(readFileSync(join(this.opts.config.controlDir, RECOVERY_LINK), 'utf8')) as object), mode: 'http' });
+      return said.success ? said.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /* The backups wait for the machine's key and for its key for backups, both kept in the keeper's folder. A folder

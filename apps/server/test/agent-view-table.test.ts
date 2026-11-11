@@ -166,6 +166,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/harness/claim', 'POST /api/harness/:key/done', 'POST /api/harness/:key/failed', 'GET /api/harness/:key/bundle', 'PUT /api/harness/:key/parts/:index',
   'PATCH /api/people/:id', 'PUT /api/people/:id/ceo-delegate', 'POST /api/people/:id/invite', 'POST /api/people/invite',
   'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
+  'POST /api/recovery', 'GET /api/recovery', 'POST /api/recovery/restore', 'POST /api/recovery/challenge', 'PUT /api/recovery/bundles/:id',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
   'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
   'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',

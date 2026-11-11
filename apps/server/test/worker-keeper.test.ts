@@ -22,6 +22,7 @@ import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
 import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
+import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { fakeLease } from './fake-lease.js';
 import { as, SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
@@ -186,11 +187,11 @@ async function workerOn(c: Company, config: WorkerConfig, over: Partial<WorkerKe
   return { keeper, front, lines, stop, status };
 }
 
-async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}) {
+async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}, more: Partial<WorkerConfig> = {}) {
   const { machine, ticket } = await c.joined();
   const config: WorkerConfig = {
     machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(),
-    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'], ownerKey: null, hostOs: 'linux',
+    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'], ownerKey: null, hostOs: 'linux', survivorMs: 600_000, ...more,
   };
   return { machine, config, ...(await workerOn(c, config, over)) };
 }
@@ -265,14 +266,16 @@ describe("a worker's keeper", () => {
   }
 
   /* The CEO saves the recovery file, so the next bundle gets machines to hold it, and the worker fetches it. */
-  async function bundleHeld(c: Company, w: { machine: string; config: WorkerConfig }): Promise<{ id: string; sha256: string }> {
+  async function bundleHeld(c: Company, w: { machine: string; config: WorkerConfig }): Promise<{ id: string; sha256: string; recoveryFile: string }> {
     updaterOf(c);
     await until(async () => (await c.rowOf(w.machine)).reportAt !== null);
-    expect((await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) })).statusCode).toBe(200);
+    const saved = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) });
+    expect(saved.statusCode).toBe(200);
+    const recoveryFile = (saved.json() as { text: string }).text;
     await until(async () => (await bundleRows(c.db, { limit: 1, withRecovery: true })).some(row => row.holders.includes(w.machine)));
     const [row] = await bundleRows(c.db, { limit: 1, withRecovery: true });
     await until(async () => (await c.rowOf(w.machine)).heldBackups.includes(row!.id));
-    return { id: row!.id, sha256: row!.sha256 };
+    return { id: row!.id, sha256: row!.sha256, recoveryFile };
   }
   const bundlesIn = (dir: string) => readdirSync(join(dir, BUNDLES_DIR)).filter(name => name.endsWith('.age')).sort();
 
@@ -291,6 +294,33 @@ describe("a worker's keeper", () => {
     expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${w.machine}`, payload: { keepsBackups: false }, ...as(c.ceo) })).statusCode).toBe(200);
     await until(() => bundlesIn(w.config.dir).length === 0);
     await until(async () => (await c.rowOf(w.machine)).heldBackups.length === 0);
+  });
+
+  it('finds the server set up in the place of the one that was lost, and sends it the bundles it holds', async () => {
+    const c = await company();
+    /* It looks for a restored server after a moment without a leader, where a real one waits ten minutes. */
+    const w = await worker(c, { holderEveryMs: 30 }, { survivorMs: 300 });
+    const held = await bundleHeld(c, w);
+    /* The server is lost with everything on it. */
+    await c.stop();
+    /* A new one is set up at the old address, and whoever has its setup code gives it the recovery file. */
+    const control = folder();
+    const fresh = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: hostIdOf('new-server-0001') });
+    await fresh.app.listen({ host: '127.0.0.1', port: c.appPort });
+    const code = setupCode(fresh.config.secret);
+    const begun = await fresh.app.inject({ method: 'POST', url: '/api/recovery', payload: { code, file: held.recoveryFile } });
+    expect(begun.statusCode).toBe(200);
+    /* The machine that survived finds it by a challenge only that file answers, and sends what it holds. */
+    const listed = async () => ((await fresh.app.inject({ url: `/api/recovery?code=${code}` })).json() as { bundles: { id: string }[] }).bundles;
+    await until(async () => (await listed()).length === 1);
+    expect((await listed())[0]!.id).toBe(held.id);
+    const sent = readFileSync(join(control, 'restore', 'incoming', `${held.id}.age`));
+    expect(createHash('sha256').update(sent).digest('hex')).toBe(held.sha256);
+    expect(w.lines.filter(line => line.startsWith('survivor:') && line.endsWith('answered'))).toHaveLength(1);
+    /* The CEO can restore it there, with no database to check it against. */
+    writeFileSync(join(control, 'alive'), '');
+    const restore = await fresh.app.inject({ method: 'POST', url: '/api/recovery/restore', payload: { code, id: held.id } });
+    expect(restore.statusCode).toBe(202);
   });
 
   it('keeps its bundles behind an older leader, and goes on reporting to it', async () => {
@@ -475,7 +505,7 @@ describe("a worker's keeper", () => {
     const keyOf = () => generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
     const ownerKey = keyOf();
     const { machine, ticket } = await c.joined();
-    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: null };
+    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: null, survivorMs: 600_000 };
     const w = await workerOn(c, config);
     await until(() => hasLeader(w.status()));
     expect(readPin(config.dir)).toBe(ownerKey);
@@ -502,7 +532,7 @@ describe("a worker's keeper", () => {
     const c = await company();
     const ownerKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
     const { machine, ticket } = await c.joined();
-    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: null };
+    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: null, survivorMs: 600_000 };
     /* A folder stands where the pin goes, so the key cannot be written there. */
     mkdirSync(join(config.dir, PIN_FILE, 'taken'), { recursive: true });
     const w = await workerOn(c, config);
@@ -590,7 +620,7 @@ describe("a worker's keeper", () => {
     const [owner] = await c.db.select().from(people).where(eq(people.isOwner, true));
     await c.db.insert(personKeys).values({ personId: owner!.id, companyId: acme!.id, publicKey: ownerKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 });
     const { machine, ticket } = await c.joined();
-    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: 'darwin' };
+    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: 'darwin', survivorMs: 600_000 };
     updaterAlive(config.controlDir);
     const w = await workerOn(c, config);
     await until(() => hasLeader(w.status()));

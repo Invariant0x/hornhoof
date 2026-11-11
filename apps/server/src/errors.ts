@@ -156,6 +156,10 @@ export type ErrorReason =
   | 'newer_build'
   | 'not_held'
   | 'needs_recovery_file'
+  | 'challenge_refused'
+  | 'bundle_refused'
+  | 'have_it'
+  | 'not_recovering'
   | 'no_authority'
   | 'not_owner_session'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`

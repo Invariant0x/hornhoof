@@ -274,6 +274,36 @@ describe('the link in the keeper', () => {
     expect(wordOfLink()).toEqual({ host: null, fingerprint256: null });
   });
 
+  it('runs the link from the recovery file while the database has none', async () => {
+    /* A server set up anew after the old one was lost: no company, and so no link of its own. */
+    const { db } = await testApp();
+    const { frpc, dir } = await keeperOn(db);
+    await sleep(150);
+    expect(frpc.started()).toEqual([]);
+    /* What is no link's settings starts nothing. */
+    writeFileSync(join(dir, 'recovery-link.json'), '{"name": "acme"');
+    await sleep(150);
+    expect(frpc.started()).toEqual([]);
+    const link = { name: 'acme', url: `https://${HOST}`, key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' } };
+    writeFileSync(join(dir, 'recovery-link.json'), JSON.stringify(link));
+    await until(() => frpc.started().length === 1);
+    /* In http: the certificate comes back with the restored database. */
+    expect(frpc.config()).toContain('subdomain = "acme"');
+    expect(frpc.config()).toContain('type = "http"');
+    /* The file gone, as after the restore, with no link in the database still: the link stops. */
+    rmSync(join(dir, 'recovery-link.json'));
+    await until(() => !frpc.alive(frpc.started()[0]!));
+
+    /* A database that has a link goes by its own, whatever a file says. */
+    const own = await companyWithLink();
+    const beside = await keeperOn(own.db);
+    writeFileSync(join(beside.dir, 'recovery-link.json'), JSON.stringify({ ...link, name: 'other', url: 'https://other.hornhoof.test' }));
+    await until(() => beside.frpc.started().length === 1);
+    await sleep(150);
+    expect(beside.frpc.config()).not.toContain('other');
+    expect(beside.frpc.started()).toHaveLength(1);
+  });
+
   it('runs no link without a machine id', async () => {
     const { db } = await companyWithLink();
     const { frpc, lines, namesCertificate } = await keeperOn(db, { HORNHOOF_MACHINE_ID: '' });

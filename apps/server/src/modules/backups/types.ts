@@ -5,6 +5,9 @@ import type { Manifest, RecoveryLink } from './bundle.js';
 /* The free disk a machine needs to take a bundle, in bundles: the app picks holders by it, and each machine checks it
    again before it takes one. */
 export const ROOM = 3;
+/* The link of a recovery file, in the control folder of a server that is being restored from one: the app writes it,
+   and the keeper's link child goes by it while the database has no link. */
+export const RECOVERY_LINK = 'recovery-link.json';
 /* How many of the bundles a machine holds its report names, newest first. */
 export const REPORTED_BUNDLES = 16;
 

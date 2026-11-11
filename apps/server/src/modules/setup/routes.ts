@@ -170,7 +170,11 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   }
 
-  app.get('/api/setup', async () => ({ needed: await setupNeeded(db), linkDomain: ctx.links.domain() }));
+  /* recovering: whoever has the setup code gave this server a recovery file, and it waits for a backup to restore. */
+  app.get('/api/setup', async () => {
+    const needed = await setupNeeded(db);
+    return { needed, linkDomain: ctx.links.domain(), recovering: needed && ctx.totalLoss.active() !== null };
+  });
 
   app.get('/api/setup/names/:name', async req => {
     await setupOnly(CodeQuery.parse(req.query).code);
@@ -192,6 +196,8 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The check repeats it, so a failure here does not lose the company that is already set up. */
     await ensureOperations(ctx, made.company.id).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'Staffing Operations of the new company failed.'));
     await startSession(reply, db, config, made.person.id, passwordHash);
+    /* A company made anew: whatever was begun of a recovery ends. */
+    ctx.totalLoss.end();
     reply.code(201);
     return setupAnswer(made, bound, config.publicUrl);
   });

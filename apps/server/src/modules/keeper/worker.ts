@@ -213,6 +213,7 @@ export class WorkerKeeper {
       held: () => (this.disconnected ? null : (this.certificates?.current() ?? null)),
       log: opts.log,
       everyMs: opts.holderEveryMs,
+      survivor: { view: () => this.view, joinServer: opts.config.joinServer, fetch: opts.fetch, afterMs: opts.config.survivorMs },
     });
   }
 
