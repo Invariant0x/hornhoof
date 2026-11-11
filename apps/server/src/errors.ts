@@ -140,6 +140,7 @@ export type ErrorReason =
   | 'assistant_no_sign_in'
   | 'assistant_has_owner_rights'
   | 'assistant_key_invalid'
+  | 'assistant_owner_inactive'
   | 'assistant_not_allowed'
   | 'assistant_agent_refused';
 

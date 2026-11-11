@@ -18,6 +18,10 @@ export const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
 /* The topics of a department's work its named owner decides too, as the CEO does: its repository and its releases. */
 export const OWNED: readonly DecisionTopic[] = ['repositories', 'release'];
 
+/* The topics that administer the company. A person decides them in Hornhoof themselves, never their assistant for them. */
+export const ADMINISTRATION: readonly DecisionTopic[] = ['people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates'];
+export const administers = (topic: DecisionTopic | null): boolean => topic !== null && ADMINISTRATION.includes(topic);
+
 function ceoOf(people: readonly Candidate[]): string {
   const ceo = people.find(p => p.isOwner && p.status === 'active');
   if (!ceo) throw new Error('The company has no active CEO to give its decisions to.');
