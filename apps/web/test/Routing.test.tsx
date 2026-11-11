@@ -46,7 +46,7 @@ describe('shareable workspace', () => {
     ['/departments/d2', 'heading', 'Development'],
     ['/profile', 'dialog', 'Settings'],
     ['/about', 'dialog', 'About Hornhoof'],
-    ['/settings', 'dialog', 'Share access'],
+    ['/settings', 'dialog', 'Company settings'],
   ])('opens %s directly', async (path, role, name) => {
     fixture();
     history.replaceState(null, '', path!);

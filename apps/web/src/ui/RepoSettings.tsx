@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { Department, Repository } from '../types';
 import { Field } from './Field';
+import { DepartmentRepoHost } from './RepoHost';
 
 type Props = {
   /* The department or product whose agents clone it. */
@@ -209,27 +210,31 @@ function AddRepository({ departmentId }: { departmentId: string }) {
 }
 
 /* The repositories a department's agents work in, for the people who set them: the department's own first, which a task
-   with no product changes, then one on each product. Another one comes as a new product. */
-export function Repositories({ department }: { department: Pick<Department, 'id' | 'repository' | 'products'> }) {
+   with no product changes, then one on each product. Another one comes as a new product. Below, the GitHub key the
+   orchestrator creates them with. */
+export function Repositories({ department }: { department: Pick<Department, 'id' | 'repository' | 'products' | 'repoHost'> }) {
   const t = useT();
   const id = useId();
   return (
-    <section aria-labelledby={`${id}-repos`}>
-      <h3 id={`${id}-repos`}>{t.dept.repositories}</h3>
-      <p className="muted">{t.dept.repositoriesAbout}</p>
-      <ul className="dv-list">
-        <li aria-labelledby={`${id}-own`}>
-          <b id={`${id}-own`}>{t.dept.ownRepository}</b>
-          <RepoSettings placeId={department.id} repository={department.repository} />
-        </li>
-        {department.products.map(p => (
-          <li key={p.id} aria-labelledby={`${id}-${p.id}`}>
-            <b id={`${id}-${p.id}`}>{p.name}</b>
-            <RepoSettings placeId={p.id} repository={p.repository} compact />
+    <>
+      <section aria-labelledby={`${id}-repos`}>
+        <h3 id={`${id}-repos`}>{t.dept.repositories}</h3>
+        <p className="muted">{t.dept.repositoriesAbout}</p>
+        <ul className="dv-list">
+          <li aria-labelledby={`${id}-own`}>
+            <b id={`${id}-own`}>{t.dept.ownRepository}</b>
+            <RepoSettings placeId={department.id} repository={department.repository} />
           </li>
-        ))}
-      </ul>
-      <AddRepository departmentId={department.id} />
-    </section>
+          {department.products.map(p => (
+            <li key={p.id} aria-labelledby={`${id}-${p.id}`}>
+              <b id={`${id}-${p.id}`}>{p.name}</b>
+              <RepoSettings placeId={p.id} repository={p.repository} compact />
+            </li>
+          ))}
+        </ul>
+        <AddRepository departmentId={department.id} />
+      </section>
+      <DepartmentRepoHost departmentId={department.id} host={department.repoHost ?? null} />
+    </>
   );
 }

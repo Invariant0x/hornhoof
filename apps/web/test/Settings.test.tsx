@@ -10,11 +10,11 @@ import { decl } from './css';
 
 const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
 
-describe('Share access', () => {
+describe('Company settings', () => {
   it('shows the public link with a copy button', async () => {
     mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
     render(<Settings me={ME} onClose={() => {}} />);
-    const dialog = await screen.findByRole('dialog', { name: 'Share access' });
+    const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
     expect(within(dialog).getByText('Hornhoof opens from anywhere at this link:')).toBeInTheDocument();
     expect(await within(dialog).findByRole('link', { name: 'https://acme.hornhoof.org' })).toHaveAttribute('href', 'https://acme.hornhoof.org');
     expect(within(dialog).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('your own name', () => {
   });
 });
 
-describe('Share access in the account menu', () => {
+describe('Company settings in the account menu', () => {
   afterEach(() => localStorage.clear());
 
   it('opens for people who see the whole company', async () => {
@@ -144,8 +144,8 @@ describe('Share access in the account menu', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Share access' }));
-    expect(await screen.findByRole('dialog', { name: 'Share access' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Company settings' }));
+    expect(await screen.findByRole('dialog', { name: 'Company settings' })).toBeInTheDocument();
   });
 
   it('has its Russian name in the menu and on the window', async () => {
@@ -158,8 +158,8 @@ describe('Share access in the account menu', () => {
       </LanguageProvider>,
     );
     await user.click(screen.getByRole('button', { name: 'Аккаунт' }));
-    await user.click(screen.getByRole('button', { name: 'Общий доступ' }));
-    expect(await screen.findByRole('dialog', { name: 'Общий доступ' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Настройки компании' }));
+    expect(await screen.findByRole('dialog', { name: 'Настройки компании' })).toBeInTheDocument();
   });
 
   it('is not there for people who see only some departments', async () => {
@@ -167,6 +167,6 @@ describe('Share access in the account menu', () => {
     const user = userEvent.setup();
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(screen.queryByRole('button', { name: 'Share access' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Company settings' })).not.toBeInTheDocument();
   });
 });
