@@ -562,6 +562,7 @@ export const ru: Messages = {
       scope: person => `${person} видит не всю компанию.`,
       noLink: 'у компании нет ссылки на hornhoof.org; включите ее в Настройках.',
       measuring: 'машина еще измеряется.',
+      leaving: 'она еще отдает копию, которую хранила.',
       memory: gigabytes => `Docker получает здесь ${gigabytes} ГБ памяти; копии нужно 4 ГБ.`,
       disk: (free, need) => `свободно ${free} ГБ; копии нужно ${need} ГБ.`,
       fsync: ms => `диск сохраняет медленно (${ms} мс); копии нужно меньше 50 мс.`,

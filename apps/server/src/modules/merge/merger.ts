@@ -45,7 +45,7 @@ export async function forkWanted(db: Ctx['db']): Promise<{ id: string; database:
 }
 
 type MergeRow = { id: string; source: string; label: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; fork: string | null; tries: number; tried_at: string | Date | null; machine: string | null };
-type CopyMachine = { id: string; hostname: string; network_id: string | null; revoked_at: unknown; copy_old: number | null };
+type CopyMachine = { id: string; hostname: string; network_id: string | null; revoked_at: unknown; copy_old: number | null; role: string | null };
 
 /* Runs the merges of the databases that came back, one at a time, while the app leads: it finds the databases restores
    set aside, applies each merge and then checks it, and drops a database once it is merged or left out and saved as a
@@ -69,7 +69,7 @@ export class Merger {
   async doors(): Promise<string[]> {
     const rows = await queryOf(this.ctx.db)<{ id: string }>(
       `SELECT DISTINCT m.network_id AS id FROM net.merges g JOIN public.machines m ON m.id = g.machine
-        WHERE g.source LIKE 'machine:%' AND g.status IN ('pending', 'applied') AND m.revoked_at IS NULL AND m.network_id IS NOT NULL ORDER BY 1`,
+        WHERE g.source LIKE 'machine:%' AND g.status IN ('pending', 'applied') AND m.revoked_at IS NULL AND m.role = 'data' AND m.network_id IS NOT NULL ORDER BY 1`,
     );
     return rows.map(row => row.id);
   }
@@ -163,13 +163,14 @@ export class Merger {
 
   /* A copy that was made again says which attempt's old database waits on its machine: a merge for each that has none
      yet. One that was merged is done once its machine named another attempt, or none, or left: the machine itself
-     drops the database, and the leader drops nothing. */
+     drops the database, and the leader drops nothing. Only a machine that holds the data is asked: no door leads to
+     the database of one that stopped holding it. */
   private async copies(): Promise<void> {
     const q = queryOf(this.ctx.db);
     await q(
       `INSERT INTO net.merges (source, label, status, machine)
        SELECT 'machine:' || m.id::text || ':' || m.copy_old::text, m.hostname || '''s copy from before it was made again', 'pending', m.id FROM public.machines m
-        WHERE m.revoked_at IS NULL AND m.copy_old IS NOT NULL AND (m.role = 'data' OR m.upload_state IS NOT NULL)
+        WHERE m.revoked_at IS NULL AND m.copy_old IS NOT NULL AND m.role = 'data'
        ON CONFLICT (source) DO NOTHING`,
     );
     await q(
@@ -231,13 +232,14 @@ export class Merger {
   /* The machine a merge of a copy's old database reads, and the port of the keeper's door to it; no port while the
      keeper holds none. */
   private async machineOf(row: MergeRow): Promise<{ machine: CopyMachine | undefined; port: number | undefined }> {
-    const [machine] = await queryOf(this.ctx.db)<CopyMachine>('SELECT id, hostname, network_id, revoked_at, copy_old FROM public.machines WHERE id = $1::uuid', [row.machine]);
+    const [machine] = await queryOf(this.ctx.db)<CopyMachine>('SELECT id, hostname, network_id, revoked_at, copy_old, role FROM public.machines WHERE id = $1::uuid', [row.machine]);
     const doors = readKeeperState(this.ctx.config.controlDir)?.doors ?? {};
     return { machine, port: machine?.network_id ? doors[machine.network_id] : undefined };
   }
 
   /* The oldest merge that waits and is due: applied when it is pending, then checked. A copy's old database waits for
-     its door without a try being counted, and ends unread when its machine left. */
+     its door without a try being counted, and ends unread when its machine left the company or stopped holding its
+     data. */
   private async next(): Promise<void> {
     const q = queryOf(this.ctx.db);
     const waiting = await q<MergeRow>("SELECT id, source, label, status, fork, tries, tried_at, machine FROM net.merges WHERE status IN ('pending', 'applied') ORDER BY created_at, source");
@@ -251,7 +253,7 @@ export class Merger {
         break;
       }
       const at = await this.machineOf(found);
-      if (!at.machine || at.machine.revoked_at) {
+      if (!at.machine || at.machine.revoked_at || at.machine.role !== 'data') {
         await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [found.id, `${at.machine?.hostname || 'The machine'} left before its old copy was read.`]);
         continue;
       }

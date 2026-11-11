@@ -67,11 +67,25 @@ describe('a worker that is given the data', () => {
     const s = await stand();
     writeFileSync(join(s.controlDir, ROLE_FILE), '{}');
     expect(await s.becoming.step({ role: 'data' })).toBe('idle');
-    rmSync(join(s.controlDir, ROLE_FILE));
-    writeFileSync(join(s.controlDir, REPLICA_FILE), '{}');
-    expect(await s.becoming.step({ role: 'data' })).toBe('idle');
     expect(s.state.asked).toEqual([]);
     expect(s.state.renewed).toBe(0);
+    /* The updater took the request this keeper wrote and works on it: the marker alone asks nothing more. */
+    rmSync(join(s.controlDir, ROLE_FILE));
+    expect(await s.becoming.step({ role: 'data' })).toBe('asked');
+    rmSync(join(s.controlDir, ROLE_FILE));
+    expect(await s.becoming.step({ role: 'data' })).toBe('idle');
+    expect(await s.becoming.step({ role: 'data' })).toBe('idle');
+    expect(s.state.asked).toHaveLength(1);
+  });
+
+  it('asks again when a keeper before it left the marker and no request', async () => {
+    const s = await stand();
+    /* A keeper stopped between the marker and the request: the updater never heard of it, and a worker's keeper that
+       starts beside the marker alone is the proof. */
+    writeFileSync(join(s.controlDir, REPLICA_FILE), JSON.stringify({ since: '2026-11-10T00:00:00.000Z' }));
+    expect(await s.becoming.step({ role: 'data' })).toBe('asked');
+    expect(s.has(ROLE_FILE)).toBe(true);
+    expect(s.state.asked).toEqual(['POST /api/network/secrets']);
   });
 
   it('does nothing for a worker', async () => {

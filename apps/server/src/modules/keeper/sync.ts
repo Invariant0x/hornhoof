@@ -33,9 +33,12 @@ const HAS_COPIES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE 
    which is not among the others. A database of the build before knows no copies, and then there are none. */
 export function pgCatalog(sql: Sql, slow: Sql, machineId: string): SyncCatalog {
   const one = async <R>(on: Sql, text: string, params?: unknown[]): Promise<R | undefined> => (await on.query<R>(text, params)).rows[0];
+  /* Asked until the answer is yes, which no later update takes back. */
+  let knowsCopies = false;
   return {
     machines: async () => {
-      if (!(await one<{ there: boolean }>(sql, HAS_COPIES))?.there) return [];
+      knowsCopies ||= (await one<{ there: boolean }>(sql, HAS_COPIES))?.there === true;
+      if (!knowsCopies) return [];
       const { rows } = await sql.query<{ machine: string; networkId: string; number: number | null; copyName: string | null; ready: boolean }>(
         `SELECT id::text AS machine, network_id AS "networkId", server_order AS number, copy_name AS "copyName", copy_state IS NOT DISTINCT FROM 'ready' AS ready
            FROM public.machines WHERE role = 'data' AND revoked_at IS NULL AND network_id IS NOT NULL AND network_id <> $1 ORDER BY server_order NULLS LAST, id`,

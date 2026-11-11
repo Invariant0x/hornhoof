@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines, people, publicLinks } from '../../db/schema.js';
@@ -54,7 +54,7 @@ export async function candidates(db: Db): Promise<Candidate[]> {
     .orderBy(asc(machines.createdAt), asc(machines.id));
   return rows.map(({ machine: m, ...person }) => ({
     id: m.id, kind: m.kind, networkId: m.networkId, server: m.machineKey.startsWith(SERVER_KEY), role: m.role, createdAt: m.createdAt, reportAt: m.reportAt,
-    memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms,
+    memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
     owner: { isOwner: person.isOwner, company: person.scopeKind === 'company', active: person.status === 'active', name: person.name },
   }));
 }
@@ -82,6 +82,9 @@ export async function rank(ctx: Ctx, now = new Date()): Promise<{ changed: numbe
 async function place(ctx: Ctx, now: Date): Promise<{ changed: number; leave: Leaving[] }> {
   const { db, config } = ctx;
   return db.transaction(async tx => {
+    /* A machine that left holds no number, however it left: one still on its row would keep that number from every
+       machine that is there. */
+    await tx.update(machines).set({ serverOrder: null, serverWhy: null }).where(and(isNotNull(machines.revokedAt), isNotNull(machines.serverOrder)));
     const before = await tx
       .select({ id: machines.id, networkId: machines.networkId, serverOrder: machines.serverOrder, serverWhy: machines.serverWhy, role: machines.role })
       .from(machines)

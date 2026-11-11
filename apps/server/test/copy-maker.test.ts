@@ -76,14 +76,16 @@ function cluster() {
     }
     throw new Error(`The fake does not know: ${text}`);
   };
-  const sqlOn = (on: string): Sql & { close(): Promise<void> } => ({
+  /* Every connection that was opened, by its database. */
+  const opened: string[] = [];
+  const sqlOn = (on: string): Sql & { close(): Promise<void> } => (opened.push(on), {
     query: async <R>(text: string, params?: unknown[]) => {
       run.push(`${on}: ${text.startsWith('DO $replica$') ? 'DO $replica$' : text}`);
       return { rows: answer(on, text, params) as R[] };
     },
     close: async () => undefined,
   });
-  return { databases, run, add, sqlOn };
+  return { databases, run, add, sqlOn, opened };
 }
 
 function stand(over: { diskFree?: number } = {}) {
@@ -373,6 +375,12 @@ describe('the maker of a copy', () => {
     expect(maker.report()).toMatchObject({ state: 'remaking', name: NEXT, old: null });
     expect(maker.mode()).toBe('read');
     expect(s.state.lines).toEqual(["This machine's copy is made again: the company server no longer keeps what this copy had still to read. The old one is read until the new one is whole."]);
+    /* While the new one fills, the old one is asked how far it reaches on one connection, not on a new one each second. */
+    s.loaded(2, 'hornhoof_next');
+    await until(s, maker, 'sync');
+    const before = s.opened.filter(database => database === 'hornhoof').length;
+    for (let n = 0; n < 5; n++) await maker.tick({ ...ORDER });
+    expect(s.opened.filter(database => database === 'hornhoof').length - before).toBeLessThanOrEqual(1);
   });
 
   it('remakes after two views without its slot', async () => {

@@ -400,6 +400,11 @@ describe('joining the company as a machine', () => {
     const [row] = await c.db.select().from(machines).where(eq(machines.id, w.machine));
     await c.db.execute(sql`UPDATE people SET is_owner = false, scope_kind = 'listed', status = 'active' WHERE id = ${row!.personId}`);
     expect(((await c.peers(keeperOf(w.machine))).json() as Said).link.dataSecret).toBeNull();
+    /* Nor a certificate that opens the data, by a renewal it signs any more than by the one it asks through the link. */
+    await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.machineId, w.machine));
+    const renewed = JSON.parse(((await c.renew(w)).json() as { payload: string }).payload) as { role: string; certPem: string };
+    expect(renewed.role).toBe('worker');
+    expect(certFacts(renewed.certPem)).toMatchObject({ machineId: w.machine, role: 'worker' });
     /* The server's own keeper is told no role: it is the one that leads. */
     expect((await c.peers()).json()).not.toHaveProperty('role');
   });

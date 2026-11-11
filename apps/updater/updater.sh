@@ -1035,10 +1035,15 @@ data_up() {
 }
 
 # stay_worker <what failed>: the machine could not become one that keeps a copy, so everything is as before: the
-# settings of before, nothing of a database, and the two a worker runs. The keeper reads role.failed, tells the company,
+# settings of before, with the password of a database that was started, no database running, and the two a worker runs. The keeper reads role.failed, tells the company,
 # and tries again an hour later.
 stay_worker() {
+  local password
+  # The password its database was started with stays: the database's volume was made with it, and the next try would
+  # else make another that the volume does not take.
+  password=$(env_value POSTGRES_PASSWORD)
   if [ -f "$SERVER_DIR/.env.before-data" ]; then as_env "$SERVER_DIR/.env.before-data" || true; fi
+  if [ -n "$password" ] && [ -z "$(env_value POSTGRES_PASSWORD)" ]; then PUT_VALUE=$password put_env POSTGRES_PASSWORD || true; fi
   rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json" "$CONTROL/replica.json"
   COMPOSE_PROFILES=data compose rm -sf db migrate app > /dev/null 2>&1 || true
   HORNHOOF_ROLE=worker compose up -d --no-build front keeper > /dev/null 2>&1 || true
@@ -1317,7 +1322,8 @@ load_request() {
   max=$(jq -r '.unpackMax // empty | tostring' "$request" 2> /dev/null || true)
   name=${file##*/}
   name=${name%.tar.gz}
-  if ! [[ "$name" =~ ^[0-9A-Fa-f]{64}-[0-9a-f-]{36}$ ]] || [ -f "$CONTROL/uploads/$name.done" ] || [ -f "$CONTROL/uploads/$name.failed" ]; then
+  # The id of the machine it came from, in the length today's installs have or the one older installs had.
+  if ! [[ "$name" =~ ^([0-9a-f]{32}|[0-9a-f]{64})-[0-9a-f-]{36}$ ]] || [ -f "$CONTROL/uploads/$name.done" ] || [ -f "$CONTROL/uploads/$name.failed" ]; then
     rm -f "$request"
     return 0
   fi

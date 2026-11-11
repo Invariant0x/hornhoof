@@ -530,6 +530,7 @@ export const en = {
       scope: (person: string) => `${person} does not see the whole company.`,
       noLink: 'the company has no link at hornhoof.org; turn it on in Settings.',
       measuring: 'measuring this machine.',
+      leaving: 'it still gives up the copy it held.',
       memory: (gigabytes: string) => `Docker has ${gigabytes} GB of memory here; a copy needs 4 GB.`,
       disk: (free: string, need: string) => `${free} GB free; a copy needs ${need} GB.`,
       fsync: (ms: string) => `the disk saves slowly (${ms} ms); a copy needs under 50 ms.`,

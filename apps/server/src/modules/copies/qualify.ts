@@ -11,6 +11,7 @@ export type Unfit =
   | { why: 'phone' }
   | { why: 'no_core' }
   | { why: 'scope'; person: string }
+  | { why: 'leaving' }
   | { why: 'no_link' }
   | { why: 'measuring' }
   | { why: 'memory'; memory: number }
@@ -18,7 +19,8 @@ export type Unfit =
   | { why: 'fsync'; p99: number };
 
 /* A live machine with what decides whether it may hold the data. server: the row of the machine an app itself runs on,
-   which no one joined. owner.company: its person sees the whole company. */
+   which no one joined. owner.company: its person sees the whole company. owes: it stopped holding the data and has not
+   given up everything it held yet. */
 export type Candidate = {
   id: string;
   kind: string;
@@ -30,6 +32,7 @@ export type Candidate = {
   memory: number | null;
   diskFree: number | null;
   fsyncP99Ms: number | null;
+  owes?: boolean;
   owner: { isOwner: boolean; company: boolean; active: boolean; name: string };
 };
 
@@ -42,6 +45,8 @@ export function unfit(m: Candidate, o: { dbSize: number; link: boolean; now: Dat
   if (m.kind !== 'computer') return { why: 'phone' };
   if (!m.networkId && !m.server) return { why: 'no_core' };
   if (!seesAll(m.owner)) return { why: 'scope', person: m.owner.name };
+  /* A machine that still gives up the copy it held takes no new one before it holds nothing of the old. */
+  if (m.owes) return { why: 'leaving' };
   if (!o.link) return { why: 'no_link' };
   const fresh = m.reportAt !== null && o.now.getTime() - m.reportAt.getTime() <= REPORT_FRESH_MS;
   if (!fresh || m.memory === null || m.diskFree === null || m.fsyncP99Ms === null) return { why: 'measuring' };

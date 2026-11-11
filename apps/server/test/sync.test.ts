@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Relay } from '../src/modules/link/relay.js';
 import { PACE_FOR_MS } from '../src/modules/keeper/sync-step.js';
-import { SyncController, type SyncCatalog } from '../src/modules/keeper/sync.js';
+import { pgCatalog, SyncController, type SyncCatalog } from '../src/modules/keeper/sync.js';
 import { fakeRelay } from './fake-relay.js';
 
 const CLIENT = 'acme-ab12cd34-link';
@@ -69,6 +69,30 @@ async function stand(over: { leads?: boolean } = {}) {
   const record = () => relay.syncs.get('acme') ?? null;
   return { relay, state, controller, clock, lines, look, looks, record, answering: (now: boolean) => void (state2.answers = now) };
 }
+
+describe('the catalog of a real Postgres', () => {
+  it('asks once whether the database knows copies, from the moment it does', async () => {
+    const asked: string[] = [];
+    const state = { knows: false };
+    const sql = {
+      query: async <R>(text: string) => {
+        asked.push(text);
+        return { rows: (text.includes('information_schema.columns') ? [{ there: state.knows }] : []) as R[] };
+      },
+    };
+    const catalog = pgCatalog(sql, sql, 'a'.repeat(64));
+    const probes = () => asked.filter(text => text.includes('information_schema.columns')).length;
+    /* A database of the build before: asked each time, since an update may bring the columns. */
+    await catalog.machines();
+    await catalog.machines();
+    expect([probes(), asked.length]).toEqual([2, 2]);
+    /* Once it knows them it always will. */
+    state.knows = true;
+    for (let n = 0; n < 4; n++) await catalog.machines();
+    expect(probes()).toBe(3);
+    expect(asked.filter(text => text.includes('FROM public.machines'))).toHaveLength(4);
+  });
+});
 
 describe('the sync controller', () => {
   it('leads alone where no other machine holds the data, and asks the relay once', async () => {

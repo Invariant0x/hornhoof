@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { CopyError, CopyState } from '../../db/schema.js';
+import { DB_DOOR_PORT } from '../../net/db-door.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 import { ensureReplica, PUBLICATION, REPLICA_ROLE } from './replica.js';
@@ -88,7 +89,8 @@ export function copyName(networkId: string, attempt: number): string {
 
 const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`;
-const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').replace('T', 't').slice(0, 15);
+/* A moment as the name of a database holds it: YYYYMMDDtHHMMSS, in UTC. */
+export const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').replace('T', 't').slice(0, 15);
 
 /* Makes this machine's copy of the company's database and keeps it: the leader's schema, loaded by the updater, then a
    subscription to the leader's publication, which copies every row and follows every change from then on. A copy that
@@ -99,6 +101,8 @@ const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').repl
 export class CopyMaker {
   private kept: Kept;
   private open: { database: string; sql: Closable } | null = null;
+  /* The connection to the copy that is still read while the next one is made beside it. */
+  private beside: Closable | null = null;
   private said: CopyReport;
   private busy = false;
   private disabledSince: number | null = null;
@@ -203,9 +207,11 @@ export class CopyMaker {
   }
 
   private async close(): Promise<void> {
-    const open = this.open;
+    const [open, beside] = [this.open, this.beside];
     this.open = null;
+    this.beside = null;
     await open?.sql.close().catch(() => undefined);
+    await beside?.close().catch(() => undefined);
   }
 
   /* Being made, or being made again beside the copy that is still read. */
@@ -226,7 +232,13 @@ export class CopyMaker {
   }
 
   private async step(order: CopyOrder | null): Promise<void> {
-    if (this.kept.swap) return this.swap();
+    if (this.kept.swap) {
+      /* No session of this keeper's own stays on a database that changes its name. */
+      const beside = this.beside;
+      this.beside = null;
+      await beside?.close().catch(() => undefined);
+      return this.swap();
+    }
     if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
     const sql = this.on(this.kept.database);
@@ -272,7 +284,7 @@ export class CopyMaker {
   }
 
   private publisher(): { host: string; port: number } {
-    return this.opts.publisher ?? { host: 'keeper', port: 7432 };
+    return this.opts.publisher ?? { host: 'keeper', port: DB_DOOR_PORT };
   }
 
   /* The role's rights are per database, so a merge can read this one too. */
@@ -351,12 +363,17 @@ export class CopyMaker {
     this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
   }
 
+  /* Asked each second for as long as the next copy fills, so on one connection that stays; one that failed is opened
+     anew at the next look. */
   private async oldPulse(): Promise<string | null> {
-    const sql = this.opts.db(FIRST_DB);
+    this.beside ??= this.opts.db(FIRST_DB);
     try {
-      return await this.pulse(sql);
-    } finally {
-      await sql.close().catch(() => undefined);
+      return await this.pulse(this.beside);
+    } catch (err) {
+      const failed = this.beside;
+      this.beside = null;
+      await failed.close().catch(() => undefined);
+      throw err;
     }
   }
 

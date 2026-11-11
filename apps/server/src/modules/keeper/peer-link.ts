@@ -9,6 +9,7 @@ import { PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import type { PeerBackups } from './backups.js';
+import { NETWORK_ID } from '../network/ids.js';
 import type { PeerUploads } from './uploads.js';
 import type { HeldCertificate } from './certificate.js';
 import type { MachineIdentity } from './identity.js';
@@ -33,7 +34,7 @@ const Answer = z.object({
   data: z.array(z.object({ machine: z.string(), networkId: z.string(), addresses: z.array(z.string()), peerPort: z.number().nullable() })).default([]),
   doors: z.array(z.string()).default([]),
   /* The machines that stopped holding the data and owe what they held, and how large that may be. */
-  uploads: z.array(z.object({ machine: z.string(), networkId: z.string().regex(/^[0-9A-Fa-f]{64}$/), max: z.number().min(0), unpackMax: z.number().min(0) })).default([]),
+  uploads: z.array(z.object({ machine: z.string(), networkId: z.string().regex(NETWORK_ID), max: z.number().min(0), unpackMax: z.number().min(0) })).default([]),
 });
 type Answer = z.infer<typeof Answer>;
 /* The authority's list as the keeper holds it: the list, and the serials it names. */

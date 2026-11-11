@@ -203,5 +203,20 @@ describe("the old database of a copy on another machine", () => {
     await left.look();
     expect((await left.merges())[0]).toMatchObject({ status: 'done', error: 'ivan-mac left before its old copy was read.' });
     expect(left.state.queries).toEqual([]);
+
+    /* A machine whose owner lost the scope holds the data no more: no door leads to it, so its old copy is asked for
+       no longer, and none is asked of a machine that left the data before the leader heard of an old copy. */
+    const gone = await stand();
+    await gone.copied();
+    gone.door(false);
+    await gone.look();
+    await gone.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, gone.machine.id));
+    expect(await gone.merger.doors()).toEqual([]);
+    await gone.look();
+    expect((await gone.merges())[0]).toMatchObject({ status: 'done', error: 'ivan-mac left before its old copy was read.' });
+    const never = await stand();
+    await never.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, never.machine.id));
+    await never.look();
+    expect(await never.merges()).toEqual([]);
   });
 });

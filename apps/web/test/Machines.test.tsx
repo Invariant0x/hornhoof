@@ -614,6 +614,7 @@ describe('Machines', () => {
       [{ why: 'scope', person: 'Anna' }, 'Holds no copy: Anna does not see the whole company.'],
       [{ why: 'no_link' }, 'Holds no copy: the company has no link at hornhoof.org; turn it on in Settings.'],
       [{ why: 'measuring' }, 'Holds no copy: measuring this machine.'],
+      [{ why: 'leaving' }, 'Holds no copy: it still gives up the copy it held.'],
       [{ why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, 'Holds no copy: 12 GB free; a copy needs 40.5 GB.'],
       [{ why: 'fsync', p99: 72.4 }, 'Holds no copy: the disk saves slowly (72.4 ms); a copy needs under 50 ms.'],
     ];

@@ -345,7 +345,8 @@ describe('the peer link in the keeper', () => {
     expect(await put(Buffer.from('rows'))).toBe(403);
     expect(existsSync(join(controlDir, 'load.json'))).toBe(false);
     /* Its owner lost the scope: the app names it, and the keeper takes its upload and asks the updater to load it. */
-    const networkId = `77cc${'3'.repeat(60)}`;
+    /* An id of the length older installs have, which is a machine's id as much as today's. */
+    const networkId = `77cc${'3'.repeat(28)}`;
     await c.db.update(machines).set({ networkId, uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, w.id));
     await until(async () => (await put(Buffer.from('rows'))) === 201);
     const load = JSON.parse(readFileSync(join(controlDir, 'load.json'), 'utf8')) as { machine: string; file: string; database: string; unpackMax: number };

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, ask, DIGESTS, JQ, runOnce, stand, startLoop, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
@@ -76,7 +76,12 @@ describe('the updater of a worker that is given the data', () => {
       const s = stand(WORKER_ENV);
       asked(s, secrets);
       const r = await runOnce(s, null, { ...WORKER, ...env });
-      expect(readFileSync(join(s.server, '.env'), 'utf8'), name).toBe(WORKER_ENV);
+      /* The settings of before come back. Where the database was started, its password stays with them: its volume
+         was made with it, and the next try finds it there. */
+      const started = env.STUB_UP === 'fail';
+      const settings = readFileSync(join(s.server, '.env'), 'utf8');
+      if (started) expect(settings, name).toMatch(new RegExp(`^${WORKER_ENV.replaceAll('.', '\\.')}POSTGRES_PASSWORD=[A-Za-z0-9]{24}\n$`));
+      else expect(settings, name).toBe(WORKER_ENV);
       expect([has(s, 'role.json'), has(s, 'replica.json'), existsSync(join(s.server, '.env.before-data'))], name).toEqual([false, false, false]);
       expect(readFileSync(join(s.control, 'role.failed'), 'utf8').trim(), name).toBe(FAILED_LINE);
       expect(statSync(join(s.control, 'role.failed')).mode & 0o777, name).toBe(0o600);
@@ -89,6 +94,14 @@ describe('the updater of a worker that is given the data', () => {
       expect(r.out, name).toContain('This machine stays a worker');
       expect(r.calls.some(c => c.includes('compose up -d --no-build updater')), name).toBe(false);
       expect(everything(s, r).includes(SECRETS.HORNHOOF_SECRET), name).toBe(false);
+      if (!started) continue;
+      /* The next try starts the database with the password its volume has. */
+      const password = envOf(s).POSTGRES_PASSWORD!;
+      expect([r.out, ...r.calls].join('\n').includes(password), name).toBe(false);
+      rmSync(join(s.control, 'role.failed'));
+      asked(s, secrets);
+      await runOnce(s, null, WORKER);
+      expect(envOf(s), name).toMatchObject({ POSTGRES_PASSWORD: password, HORNHOOF_ROLE: 'data' });
     }
   });
 

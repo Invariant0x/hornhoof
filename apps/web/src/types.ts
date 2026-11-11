@@ -646,7 +646,7 @@ export type MachineView = {
 
 /* Why a machine holds no copy of the company's data. */
 export type Unfit =
-  | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' }
+  | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' | 'leaving' }
   | { why: 'scope'; person: string }
   | { why: 'memory'; memory: number }
   | { why: 'disk'; free: number; need: number }

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Peer } from '../../net/peer-server.js';
+import { stampOf } from './copy.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 
 /* The path a machine that stopped holding the company's data puts what it held to, on the keeper that leads. */
@@ -31,7 +32,6 @@ export const WIPED_FILE = 'wiped.json';
 export type UploadAllowed = { machine: string; networkId: string; max: number; unpackMax: number };
 export type PeerUploads = { put(peer: Peer, id: string, body: Readable, length: number | null): Promise<201 | 400 | 403 | 409 | 413> };
 
-const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').replace('T', 't').slice(0, 15);
 
 /* Takes what a machine held when it stopped holding the company's data: only from a machine the app says owes it, one
    at a time, up to the size the app allows and only whole, into a folder only the keeper and the updater read. Nothing
@@ -86,13 +86,13 @@ export class UploadTaker {
     if (this.taking || existsSync(join(this.opts.controlDir, LOAD_FILE))) return 409;
     /* Taken before the first byte is read, so a second machine never writes beside the first. */
     this.taking = true;
-    mkdirSync(this.dir(), { recursive: true, mode: 0o700 });
-    rmSync(`${place}.failed`, { force: true });
     const file = `${place}${PACKED}`;
     const part = `${file}.part`;
     let size = 0;
     let tooLarge = false;
     try {
+      mkdirSync(this.dir(), { recursive: true, mode: 0o700 });
+      rmSync(`${place}.failed`, { force: true });
       await pipeline(
         body,
         async function* (chunks: AsyncIterable<Buffer>) {

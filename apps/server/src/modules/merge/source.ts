@@ -2,6 +2,7 @@ import pg from 'pg';
 import type { Config } from '../../config.js';
 import { stripSettings } from '../../db/client.js';
 import { keepErrors } from '../../db/confirm.js';
+import { REPLICA_ROLE } from '../keeper/replica.js';
 import type { Query } from './facts.js';
 
 /* A database of the company that came back, read in one snapshot: every query runs in one REPEATABLE READ READ ONLY
@@ -19,7 +20,6 @@ export const setAside = (name: string): boolean => KEPT_NAME.test(name) || UPLOA
 export const MACHINE_SOURCE = /^machine:([0-9a-f-]{36}):([1-9][0-9]{0,8})$/;
 /* The copy's own database, which a machine reads until its new copy has taken that place, and the role that only reads. */
 const COPY_DB = 'hornhoof';
-const READER = 'hornhoof_replica';
 
 /* The app's own address with another database in its path. The settings the app's address carries for its own sessions
    are left out: in pg a database named in the address wins over a database option, so the name is never passed beside
@@ -60,7 +60,7 @@ export async function keptSource(config: Config, database: string, label: string
 /* The old database of a copy on another machine, read through the door this server's keeper opened to it: the door's
    port on the keeper, and the role that reads and never writes. host: the keeper, unless a test stands in for it. */
 export async function peerSource(port: number, password: string, label: string, host = 'keeper'): Promise<MergeSource> {
-  const client = new pg.Client({ host, port, database: COPY_DB, user: READER, password, application_name: 'hornhoof-merge', options: '-c default_transaction_read_only=on' });
+  const client = new pg.Client({ host, port, database: COPY_DB, user: REPLICA_ROLE, password, application_name: 'hornhoof-merge', options: '-c default_transaction_read_only=on' });
   keepErrors(client);
   await client.connect();
   try {

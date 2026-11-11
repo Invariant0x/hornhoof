@@ -44,6 +44,8 @@ export type BecomingOptions = {
    runs this, and nothing of it once the machine keeps a copy. */
 export class Becoming {
   private failedLine: string | null = null;
+  /* This keeper wrote a request, which the updater may have taken since. */
+  private asked = false;
   private failedAt = 0;
 
   constructor(private readonly opts: BecomingOptions) {}
@@ -64,7 +66,10 @@ export class Becoming {
   /* One step, with each view of the network the keeper reads. renewing: a certificate of the new role is asked for.
      asked: the secrets are with the updater. failed: the updater could not write them, and an hour passes first. */
   async step(view: { role: MachineRole }): Promise<'idle' | 'renewing' | 'asked' | 'failed'> {
-    if (view.role !== 'data' || existsSync(this.file(ROLE_FILE)) || existsSync(this.file(REPLICA_FILE))) return 'idle';
+    if (view.role !== 'data' || existsSync(this.file(ROLE_FILE))) return 'idle';
+    /* The marker with no request: the updater works on the one this keeper wrote. A worker's keeper that finds the
+       marker without having asked follows a keeper that stopped between the two files, and asks anew. */
+    if (existsSync(this.file(REPLICA_FILE)) && this.asked) return 'idle';
     if (this.readFailure()) return 'failed';
     if (this.opts.heldRole() !== 'data') {
       this.opts.renew();
@@ -74,6 +79,7 @@ export class Becoming {
       const secrets = await this.secrets();
       this.writeMarker();
       writePrivately(this.file(ROLE_FILE), JSON.stringify({ id: randomUUID(), secrets }));
+      this.asked = true;
       return 'asked';
     } catch (err) {
       this.opts.log(`Could not get the company's settings for this machine yet: ${reasonOf(err)}`);

@@ -61,6 +61,9 @@ describe("what the Machines tab says of the company's data", () => {
     expect(await s.lineOf(full.id)).toEqual({ line: 'stopped', why: 'disk_full' });
     expect(await s.lineOf(setup.id)).toEqual({ line: 'stopped', why: 'setup' });
     expect(await s.lineOf(stopped.id)).toEqual({ line: 'stopped', why: null });
+    /* A machine that was just given the data and has said nothing of a copy yet is making one, not asleep. */
+    const fresh = await s.copy('m-fresh', { copyName: null }, false);
+    expect(await s.lineOf(fresh.id)).toEqual({ line: 'making', progress: 0 });
   });
 
   it('tells a copy that sleeps from one that is behind, catches up or is up to date', async () => {

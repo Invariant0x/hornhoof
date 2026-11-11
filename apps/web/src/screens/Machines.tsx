@@ -320,6 +320,7 @@ function unfitText(t: Messages, language: Language, unfit: Unfit): string {
     case 'scope': return c.scope(unfit.person);
     case 'no_link': return c.noLink;
     case 'measuring': return c.measuring;
+    case 'leaving': return c.leaving;
     case 'memory': return c.memory(gigabytes(language, unfit.memory));
     case 'disk': return c.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
     case 'fsync': return c.fsync(tenths(language, unfit.p99));

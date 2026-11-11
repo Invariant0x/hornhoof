@@ -277,8 +277,16 @@ describe('the network routes the keeper calls', () => {
     /* A report that says nothing of it keeps what the row has. */
     expect((await report({ uptimeS: 3 }, left.id)).statusCode).toBe(204);
     expect(await rowOf(left.id)).toMatchObject({ uploadState: 'kept', copyName: held.copyName });
+    /* A merge of an old copy of its: one the leader read, and one it never got to. */
+    await c.db.execute(sql`INSERT INTO net.merges (source, label, status, machine, merged_at, done_at) VALUES (${`machine:${left.id}:1`}, 'an old copy', 'done', ${left.id}, now(), now()), (${`machine:${left.id}:2`}, 'an old copy', 'pending', ${left.id}, NULL, NULL)`);
     expect((await report({ wiped: true }, left.id)).statusCode).toBe(204);
     expect(await rowOf(left.id)).toMatchObject({ uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: null, copyOld: null });
+    /* The machine counts its attempts from 1 again when it next keeps a copy, so the names of its old merges are free,
+       and one that was never read is ended. */
+    const merges = (await c.db.execute(sql`SELECT source, status, error FROM net.merges WHERE machine = ${left.id} ORDER BY source`) as unknown as { rows: { source: string; status: string; error: string | null }[] }).rows;
+    expect(merges.map(merge => merge.status)).toEqual(['done', 'done']);
+    for (const merge of merges) expect(merge.source).toMatch(new RegExp(`^machine:${left.id}:[12]:wiped:[0-9a-f-]{36}$`));
+    expect(merges[1]!.error).toBe('The machine was wiped before its old copy was read.');
     /* A machine that holds the data again is not one that left, whatever an old keeper says. */
     const copy = await c.joined('data', newKey(), held);
     expect((await report({ wiped: true }, copy.id)).statusCode).toBe(204);

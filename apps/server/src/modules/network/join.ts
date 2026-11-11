@@ -314,8 +314,11 @@ export async function signedRenewal(ctx: Ctx, ask: RenewAsk & { signature: strin
     const [held] = await tx.select().from(certificates).where(and(eq(certificates.serial, ask.serial), eq(certificates.machineId, row.id), isNull(certificates.revokedAt), gt(certificates.until, now)));
     const due = !held || held.until.getTime() - now.getTime() < (CERT_DAYS - RENEW_AFTER_DAYS) * DAY_MS;
     const authority = await makeAuthorityOnce(tx, ctx.config, row.companyId);
-    const issued = due ? await certify(tx, authority, { id: row.id, role: row.role, signKey: row.signKey }) : null;
-    return { role: row.role, issued, authorityPem: authority.certPem };
+    /* As with a certificate asked through the peer link: one that opens the data goes only to a row whose person sees
+       the whole company, whatever the row still says. */
+    const role = row.role === 'data' && !(await holdsData(tx, row.personId)) ? 'worker' : row.role;
+    const issued = due ? await certify(tx, authority, { id: row.id, role, signKey: row.signKey }) : null;
+    return { role, issued, authorityPem: authority.certPem };
   });
   if (!taken) return { status: 410, answer: await signedAnswer(ctx, ask, { disconnected: true }) };
   const body = {

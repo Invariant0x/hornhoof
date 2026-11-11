@@ -139,6 +139,20 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect(has(s, 'load.json')).toBe(false);
   });
 
+  it('loads the upload of a machine with an id of the older length', async () => {
+    const s = stand();
+    const id = randomUUID();
+    const older = '5'.repeat(32);
+    mkdirSync(join(s.control, 'uploads'), { recursive: true });
+    const file = join(s.control, 'uploads', `${older}-${id}.tar.gz`);
+    spawnSync('cp', [packed(s, id, { 'public.tasks.csv': TASKS }), file]);
+    spawnSync('rm', [join(s.control, 'uploads', `${NID}-${id}.tar.gz`)]);
+    load(s, id, file, { database: 'hornhoof_upload_5555555555555555_20261111t120005' });
+    const r = await runOnce(s, null);
+    expect(copies(r.calls)).toHaveLength(1);
+    expect(listed(s, 'uploads')).toEqual([`${older}-${id}.done`]);
+  });
+
   it('refuses what is not the data of a table', async () => {
     type Case = { name: string; files?: Record<string, string>; more?: (dir: string) => string[]; over?: object; env?: Record<string, string>; line: string; noDatabase?: boolean };
     const cases: Case[] = [

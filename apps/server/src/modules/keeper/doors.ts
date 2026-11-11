@@ -1,13 +1,14 @@
 import type http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { isAddressOf } from '../../auth/tunnel.js';
+import { DB_DOOR_PORT } from '../../net/db-door.js';
 import { firstForwarded, INVOCATION, socketAddress, startingAnswer, UUID, type Refusal } from '../../net/proxy.js';
 
 /* What every keeper's doors share, the keeper of a machine that keeps data and a worker's alike. */
 
 /* peerApp: what the relay's service for the app alone reaches, on this machine only. db: the door through which the
    database of a machine that keeps a copy reaches the leader's. */
-export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081, db: 7432 } as const;
+export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081, db: DB_DOOR_PORT } as const;
 
 const MAINTENANCE_JSON = JSON.stringify({
   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },

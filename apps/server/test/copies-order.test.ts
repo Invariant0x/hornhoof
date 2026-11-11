@@ -92,6 +92,11 @@ describe('the order of the machines that may hold the data', () => {
     expect(unfit(candidate('x', { memory: 3.5 * GIB }), OPTS)).toBeNull();
   });
 
+  it('says of a machine that still gives up a copy that it does', () => {
+    expect(unfit(candidate('a', { owes: true }), OPTS)).toEqual({ why: 'leaving' });
+    expect(ranked([LEADER, candidate('a', { owes: true })]).a).toEqual({ number: null, why: null, data: false });
+  });
+
   it('gives no copy without a link', () => {
     const a = candidate('a');
     const b = candidate('b', { owner: WHOLE });
@@ -167,6 +172,37 @@ describe('the ranking on the server', () => {
     await c.db.update(machines).set({ kind: 'computer', reportAt: new Date() }).where(eq(machines.id, phone.id));
     await c.db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, stale.id));
     expect(await rank(c.ctx)).toEqual({ changed: 0 });
+  });
+
+  it('takes over the number of a machine that left with it', async () => {
+    const c = await company();
+    const a = await c.joined(c.ownerId, 3);
+    await c.joined(c.ownerId, 5);
+    const waiting = await c.joined(c.mariaId, 7);
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [2, null, 'data'], m2: [3, null, 'data'], m3: [4, 'next', 'worker'] });
+    /* A machine goes with its number still on its row, as one that waited for a place does when it is disconnected,
+       and as the server's own row does when the company is restored onto another install. */
+    await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, waiting.id));
+    await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, a.id));
+    const later = await c.joined(c.mariaId, 9);
+    await rank(c.ctx);
+    const live = await c.db.select().from(machines).where(eq(machines.id, later.id));
+    expect(live[0]).toMatchObject({ serverOrder: 3, role: 'data' });
+    /* A row that left holds no number. */
+    expect((await c.db.select().from(machines).where(isNotNull(machines.revokedAt))).map(row => row.serverOrder)).toEqual([null, null]);
+  });
+
+  it('gives no copy to a machine that still gives up the one it held', async () => {
+    const c = await company();
+    /* Its owner lost the scope and has it back, and the machine has not been wiped yet. */
+    const leaving = await c.joined(c.ownerId, 3, { uploadState: 'received', dataLeftAt: new Date() });
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [null, null, 'worker'] });
+    /* Once it holds nothing of before, it is a machine like any other. */
+    await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, leaving.id));
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [2, null, 'data'] });
   });
 
   it('ranks every minute while it leads', async () => {

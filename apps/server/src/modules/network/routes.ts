@@ -233,6 +233,16 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy. */
       const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: null, copyOld: null } : {};
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* It counts the attempts of its copy from 1 again when it next keeps one, so the merges of its old copies give
+         their names up, and one the leader never read is ended: that database is gone. */
+      if ('uploadState' in left) {
+        await queryOf(tx)(
+          `UPDATE net.merges SET source = source || ':wiped:' || id::text, status = 'done', done_at = COALESCE(done_at, now()),
+                  error = CASE WHEN status IN ('pending', 'applied') THEN $2 ELSE error END
+            WHERE machine = $1::uuid AND source ~ '^machine:[0-9a-f-]{36}:[0-9]+$'`,
+          [machine.id, 'The machine was wiped before its old copy was read.'],
+        );
+      }
       /* The server's own keeper names another build than its row held: a new build leads, and the other machines close. */
       const newBuild = who.own && said.commit !== undefined && Boolean(row?.commit) && row?.commit !== said.commit;
       if (newBuild) await ctx.computer.newBuild(tx, machine.id);

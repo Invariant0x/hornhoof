@@ -54,6 +54,8 @@ async function read(ctx: Ctx, now: Date): Promise<Read> {
 }
 
 function lineOf(row: Row, o: { now: Date; pulseAt: number | null; reads: boolean; state: 'sync' | 'pace' | 'behind' | 'silent' | null }): CopyLine {
+  /* A machine that was given the data and has said nothing of a copy yet is at the start of making one. */
+  if (row.copyState === null) return { line: 'making', progress: 0 };
   if (row.copyState === 'making' || row.copyState === 'remaking') return { line: row.copyState, progress: row.copyProgress ?? 0 };
   if (row.copyState === 'stopped') return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
   const reported = row.reportAt !== null && o.now.getTime() - row.reportAt.getTime() <= REPORT_FRESH_MS;
