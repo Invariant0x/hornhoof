@@ -5,6 +5,23 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.7] - 2026-11-11
+
+The company map shows at a glance how many departments work in the current turn, and how far each of them has come.
+
+### Added
+
+- The hub of the company map shows one blue sector for each department that works in the current turn. Pointing at a
+  department lights its sector and names its role and turn. The card of each such department shows a strip of 20
+  squares and how many of its tasks in the turn are done.
+- Whoever runs a department chooses on its About panel whether it works in turns, with its tasks counted on the map, or
+  all the time, without turns.
+
+### Changed
+
+- The turn's progress no longer stands under the hub, and the words under the count of agents at work are gone; the
+  count keeps them as its hint.
+
 ## [0.18.6] - 2026-11-11
 
 An agent's window opens as a plain chat, each person arranges the company map as they like, and a department holds
