@@ -14,7 +14,8 @@ const ORDER: CopyOrder = { slot: 'ok', leaderSize: 4 * MIB, migrations: 108, old
 const FIRST: CopyOrder = { ...ORDER, slot: null };
 
 type Sub = { enabled: boolean; slot: string | null; rels: string[] };
-type Database = { tables: boolean; led: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub> };
+/* handed: its time as the leader ended in a handover. passfile: the file the replica role's password is read from is there. */
+type Database = { tables: boolean; led: boolean; handed: boolean; passfile: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub> };
 
 /* The copy's own database server, as far as the maker asks it: each statement it knows changes what a test set up, and
    every statement is kept, with the database it ran on. */
@@ -22,7 +23,7 @@ function cluster() {
   const databases = new Map<string, Database>();
   const run: string[] = [];
   const add = (name: string, over: Partial<Database> = {}) => {
-    const database: Database = { tables: false, led: false, migrations: 108, size: 0, pulse: null, subs: new Map(), ...over };
+    const database: Database = { tables: false, led: false, handed: false, passfile: false, migrations: 108, size: 0, pulse: null, subs: new Map(), ...over };
     databases.set(name, database);
     return database;
   };
@@ -31,7 +32,9 @@ function cluster() {
     const db = databases.get(on);
     if (on !== 'postgres' && !db) throw new Error(`database "${on}" does not exist`);
     if (text.includes("to_regclass('net_local.state')")) return [{ there: db!.tables }];
-    if (text.includes('FROM net_local.state')) return [{ led: db!.led }];
+    /* A row whose time as the leader ended in a handover counts only for a query that does not ask of that. */
+    if (text.includes('FROM net_local.state')) return [{ led: db!.led && !(db!.handed && text.includes('handed_lsn')) }];
+    if (text.includes('pg_stat_file')) return [{ there: db!.passfile }];
     if (text.includes('FROM pg_tables')) return [{ there: db!.tables }];
     if (text.includes('drizzle.__drizzle_migrations')) return [{ n: db!.migrations }];
     if (text.startsWith('DO $replica$')) return [];
@@ -47,7 +50,8 @@ function cluster() {
     if (text.startsWith('ALTER SYSTEM') || text === 'SELECT pg_reload_conf()') return [];
     if (text === 'SHOW data_directory') return [{ data_directory: '/var/lib/postgresql/data' }];
     if (text.startsWith('CREATE SUBSCRIPTION')) {
-      db!.subs.set(nameIn(text), { enabled: true, slot: nameIn(text), rels: ['i', 'i'] });
+      /* One that copies no data has every table ready at once. */
+      db!.subs.set(nameIn(text), { enabled: true, slot: nameIn(text), rels: text.includes('copy_data = false') ? ['r', 'r'] : ['i', 'i'] });
       return [];
     }
     if (text.includes('FROM pg_subscription_rel')) {
@@ -592,6 +596,126 @@ describe('the maker of a copy', () => {
     const again = s.run.length;
     await maker.halt();
     expect(s.run.slice(again).filter(line => !line.includes('SELECT'))).toEqual([]);
+  });
+
+  const A_ID = 'a0'.repeat(32);
+  const B_ID = 'b0'.repeat(32);
+  const FROM_A: CopyOrder = { ...ORDER, leader: A_ID, join: null };
+  /* A copy made on A, as the views of A named it. */
+  async function followingA(s: ReturnType<typeof stand>) {
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync', FROM_A);
+    const db = s.databases.get('hornhoof')!;
+    db.subs.get(NAME)!.rels = ['r'];
+    db.pulse = '2026-11-11T11:59:59.000Z';
+    db.passfile = true;
+    await until(s, maker, 'ready', FROM_A);
+    await maker.tick({ ...FROM_A });
+    expect([maker.report()?.state, s.kept().leader]).toEqual(['ready', A_ID]);
+    return maker;
+  }
+
+  it("waits for the new leader's word before a remake", async () => {
+    /* The server moved to B: A dropped its slots, so the copy's subscription stopped, and B does not list its slot. */
+    const joining = stand();
+    const first = await followingA(joining);
+    joining.databases.get('hornhoof')!.subs.get(NAME)!.enabled = false;
+    joining.later(ENABLE_FOR_MS + 1000);
+    await first.tick({ ...FROM_A, leader: B_ID, slot: 'missing', join: NEXT });
+    /* B made it a slot, since it held everything A wrote: it joins, and is not made again. */
+    expect(joining.kept()).toMatchObject({ attempt: 2, database: 'hornhoof', phase: 'join', slot: NEXT, leader: B_ID, old: null });
+    for (let ticks = 0; ticks < 4; ticks++) await first.tick({ ...FROM_A, leader: B_ID, slot: 'ok', join: null });
+    expect(joining.kept()).toMatchObject({ attempt: 2, database: 'hornhoof', phase: 'ready', leader: B_ID, old: null });
+    expect(first.report()).toMatchObject({ state: 'ready', name: NEXT, old: null });
+    expect(joining.state.lines).toEqual([]);
+
+    /* B names no slot for it, in two views in a row: it did not hold everything, and is made again from B. */
+    const behind = stand();
+    const second = await followingA(behind);
+    behind.databases.get('hornhoof')!.subs.get(NAME)!.enabled = false;
+    behind.later(ENABLE_FOR_MS + 1000);
+    const view = { ...FROM_A, leader: B_ID, slot: 'missing' as const, join: null };
+    for (let ticks = 0; ticks < 4; ticks++) await second.tick(view);
+    /* One view, however many ticks pass with it, decides nothing. */
+    expect(behind.kept()).toMatchObject({ attempt: 1, phase: 'ready', leader: A_ID, old: null });
+    await second.tick({ ...view });
+    expect(behind.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', phase: 'detach', leader: B_ID, old: { attempt: 1 } });
+    expect(behind.state.lines).toEqual(["This machine's copy is made again: the company server moved to a machine that does not hold a place for this copy. The old one is read until the new one is whole."]);
+    /* A view of A's again in between starts the count anew. */
+    const back = stand();
+    const third = await followingA(back);
+    await third.tick({ ...view });
+    await third.tick({ ...FROM_A });
+    await third.tick({ ...view });
+    expect(back.kept()).toMatchObject({ attempt: 1, phase: 'ready', leader: A_ID });
+  });
+
+  it('joins a slot with no copy of the data', async () => {
+    /* As a machine that handed the server over starts to follow: its database holds everything, and no passfile. */
+    const s = stand();
+    Object.assign(s.databases.get('hornhoof')!, { tables: true, led: true, handed: true, pulse: '2026-11-11T11:59:59.000Z' });
+    const slot = 'copy_99bb2233aabbccdd_1';
+    writeFileSync(join(s.dir, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'join', slot, leader: B_ID }));
+    const maker = s.maker();
+    const order = { ...ORDER, leader: B_ID, join: null, slot: 'ok' as const, migrations: 109 };
+    for (let ticks = 0; ticks < 3; ticks++) await maker.tick(order);
+    /* The updater is asked for the passfile alone, once. */
+    expect(s.request()).toEqual({ attempt: 1, database: 'hornhoof', port: 7432, password: PASSWORD, only: 'passfile' });
+    expect(changes(s)).toEqual([]);
+    expect([maker.report()?.state, maker.mode()]).toEqual(['making', 'off']);
+    s.databases.get('hornhoof')!.passfile = true;
+    rmSync(join(s.controlDir, SCHEMA_FILE));
+    for (let ticks = 0; ticks < 3; ticks++) await maker.tick(order);
+    expect(s.request()).toBeNull();
+    const made = s.run.filter(line => line.includes('CREATE SUBSCRIPTION'));
+    expect(made).toEqual([
+      `hornhoof: CREATE SUBSCRIPTION "${slot}" CONNECTION 'host=keeper port=7432 dbname=hornhoof user=hornhoof_replica passfile=/var/lib/postgresql/data/replica.pgpass' PUBLICATION "hornhoof" WITH (create_slot = false, slot_name = '${slot}', copy_data = false, synchronous_commit = 'local', binary = false, streaming = off, disable_on_error = true)`,
+    ]);
+    expect(s.run).toContain("hornhoof: ALTER SYSTEM SET wal_receiver_status_interval = '1s'");
+    expect(s.kept()).toMatchObject({ attempt: 1, database: 'hornhoof', phase: 'ready', leader: B_ID, migrations: 109 });
+    expect(maker.report()).toMatchObject({ state: 'ready', name: slot, at: '2026-11-11T11:59:59.000Z' });
+    expect(maker.mode()).toBe('read');
+    for (const text of [...s.run, ...s.state.lines]) expect(text).not.toContain(PASSWORD);
+  });
+
+  it("moves to the new leader's slot", async () => {
+    const s = stand();
+    const maker = await followingA(s);
+    const from = s.run.length;
+    const slot = 'copy_99bb2233aabbccdd_4';
+    const order = { ...FROM_A, leader: B_ID, slot: 'missing' as const, join: slot };
+    await maker.tick({ ...order });
+    /* Written down first, before the old subscription is touched. */
+    expect(s.kept()).toMatchObject({ attempt: 4, database: 'hornhoof', phase: 'join', slot, leader: B_ID });
+    expect(changes(s, from)).toEqual([]);
+    /* A keeper that starts again in the middle, with the old subscription still there, drops it before it joins. */
+    const again = s.maker();
+    for (let ticks = 0; ticks < 4; ticks++) await again.tick(order);
+    expect(changes(s, from)).toEqual([
+      `hornhoof: ALTER SUBSCRIPTION "${NAME}" DISABLE`,
+      `hornhoof: ALTER SUBSCRIPTION "${NAME}" SET (slot_name = NONE)`,
+      `hornhoof: DROP SUBSCRIPTION "${NAME}"`,
+      `hornhoof: CREATE SUBSCRIPTION "${slot}"`,
+    ]);
+    expect(s.kept()).toMatchObject({ attempt: 4, phase: 'ready', leader: B_ID });
+    expect(again.report()).toMatchObject({ state: 'ready', name: slot });
+    /* A slot that is not above its own attempt, as of a switch before, is none to join. */
+    await again.tick({ ...order, join: 'copy_99bb2233aabbccdd_3', slot: 'ok' });
+    expect(s.kept()).toMatchObject({ attempt: 4, phase: 'ready' });
+  });
+
+  it('counts a handed database as no led one', async () => {
+    const s = stand();
+    Object.assign(s.databases.get('hornhoof')!, { tables: true, led: true, handed: true });
+    const maker = s.maker();
+    for (let tries = 0; tries < 3; tries++) await maker.tick(ORDER);
+    expect(maker.report()?.error).not.toBe('led');
+    /* One that led and handed nothing over stays untouched, as before. */
+    s.databases.get('hornhoof')!.handed = false;
+    for (let tries = 0; tries < 3; tries++) await maker.tick(ORDER);
+    expect(maker.report()).toMatchObject({ state: 'stopped', error: 'led' });
   });
 
   it('keeps a database that led', async () => {

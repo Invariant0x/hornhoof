@@ -47,6 +47,8 @@ const PING_MS = 15_000;
 const STREAM_IDLE_MS = 30_000;
 const WINDOW = 1024 * 1024;
 const HELLO_BYTES = 64 * 1024;
+const ASK_MS = 5000;
+const ASK_BYTES = 256 * 1024;
 const LOOPBACK = '127.0.0.1';
 const NO_LEADER = 'No leader of the company is in reach.';
 const NO_SESSION = 'No session to that machine.';
@@ -163,6 +165,43 @@ export class PeerSessions {
         reject(new Error(`The leader did not open its app: ${String(headers[':status'])}.`));
       });
       stream.once('close', () => reject(new Error(NO_LEADER)));
+    });
+  }
+
+  /* One request to a data machine's own keeper, on the session to it, by the id that keeper runs under: JSON both
+     ways. None with no session to that machine, when no whole answer comes in time, and for an answer that is no
+     JSON. */
+  ask(networkId: string, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, timeoutMs = ASK_MS): Promise<{ status: number; body: unknown } | null> {
+    const session = this.kept.find(kept => kept.target.networkId === networkId)?.session;
+    if (!session) return Promise.resolve(null);
+    return new Promise(resolve => {
+      let stream: http2.ClientHttp2Stream;
+      try {
+        stream = session.h2.request({ ':method': method, ':path': path, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, { endStream: body === undefined });
+      } catch {
+        /* The session ended since. */
+        return resolve(null);
+      }
+      const chunks: Buffer[] = [];
+      let status = 0;
+      let size = 0;
+      const giveUp = setTimeout(() => stream.close(http2.constants.NGHTTP2_CANCEL), timeoutMs);
+      stream.on('error', ignore);
+      stream.once('response', headers => void (status = Number(headers[':status'])));
+      stream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        size += chunk.length;
+        if (size > ASK_BYTES) stream.close(http2.constants.NGHTTP2_CANCEL);
+      });
+      stream.once('close', () => {
+        clearTimeout(giveUp);
+        try {
+          resolve(status === 0 || size > ASK_BYTES ? null : { status, body: JSON.parse(Buffer.concat(chunks).toString()) as unknown });
+        } catch {
+          resolve(null);
+        }
+      });
+      if (body !== undefined) stream.end(JSON.stringify(body));
     });
   }
 

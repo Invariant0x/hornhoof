@@ -36,7 +36,7 @@ import { KEEPER_DIR, reasonOf } from './machine-keys.js';
 import type { LeaseStore, Sql } from './lease-store.js';
 import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
-import { updaterBusy } from './updater-status.js';
+import { updaterBusy, updaterRunning } from './updater-status.js';
 
 export { KEEPER_PORTS } from './doors.js';
 
@@ -106,11 +106,28 @@ export type KeeperOptions = {
      looks whether that part leads now. */
   taking?: (parts: { tunnel: { start(): void; stop(): Promise<void> }; appLeads: () => boolean; link: () => OwnLink | null | undefined }) => TakingPart;
   takingEveryMs?: number;
+  /* This keeper's part of a planned switch of the server away from this machine. */
+  handing?: (parts: HandingParts) => HandingPart;
 };
 
 /* The company's link as this keeper's own frpc logs in at the relay: its name, its key, the id that client goes by,
    and the link's address. */
 export type OwnLink = { name: string; key: string; client: string; url: string };
+
+/* What hands the server over for this keeper, made with what the keeper gives it. While it holds, the keeper takes no
+   lease, says it does not lead, and keeps its front door shut and its link's client stopped. */
+export type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean };
+export type HandingParts = {
+  front: { close(): Promise<void>; open(): void };
+  tunnel: { start(): void; stop(): Promise<void> };
+  lease: { fence(): Promise<void> };
+  leads: () => boolean;
+  term: () => Term | null;
+  sync: SyncController | null;
+  /* The keeper of another data machine, by its network id, on this keeper's session to it. */
+  peer: (networkId: string) => { request(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs?: number): Promise<{ status: number; body: unknown } | null> };
+  updating: () => boolean;
+};
 
 /* What takes the server over for this keeper: it leads once this machine's database is promoted, or at once where
    no switch is on its way, and answers the paths of a switch to the data machine that asks, named by its network id. */
@@ -228,6 +245,10 @@ export class Keeper {
   private readonly throughput: Pick<Throughput, 'start' | 'stop' | 'best'>;
   private readonly sync: SyncController | null;
   private readonly taker: TakingPart | null;
+  private readonly hander: HandingPart | null;
+  /* The front door, and where it listens, so that a switch may shut it and open it again. */
+  private frontDoor: http.Server | null = null;
+  private frontAt: { port: number; host: string } | null = null;
   /* Taking the server over: no lease yet, and the app off. */
   private taking = false;
   private takingTimer: NodeJS.Timeout | null = null;
@@ -272,10 +293,23 @@ export class Keeper {
     this.taker = opts.taking
       ? opts.taking({ tunnel: { start: () => void (this.linkHeld = false), stop: async () => void (this.linkHeld = true) }, appLeads: () => this.mode() === 'lead', link: () => this.ownLink() })
       : null;
+    this.hander = opts.handing
+      ? opts.handing({
+          front: { close: () => this.shutFront(), open: () => this.openFront() },
+          tunnel: { start: () => void (this.linkHeld = false), stop: async () => void (this.linkHeld = true) },
+          lease: { fence: async () => void (await opts.lease?.fence()) },
+          leads: () => this.mode() === 'lead',
+          term: () => this.term(),
+          sync: this.sync,
+          peer: networkId => ({ request: (method, path, body, timeoutMs) => this.links?.ask(networkId, method, path, body, timeoutMs) ?? Promise.resolve(null) }),
+          updating: () => updaterRunning(opts.config.controlDir),
+        })
+      : null;
     this.holder = new LeaseHolder({
       lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log,
       sync: this.sync ?? undefined,
       onEnd: () => this.leaseEnded(),
+      hold: () => this.hander?.holds() ?? false,
     });
     /* A machine without an id is none of the company's network, as it carries no public link. */
     this.identity = opts.config.machineId
@@ -323,13 +357,28 @@ export class Keeper {
     return this.identity?.certificate() ?? null;
   }
 
+  /* While it hands the server over it leads no more, from the moment it stopped. */
   mode(): Mode {
-    return this.holder.mode();
+    return this.hander?.holds() ? 'read' : this.holder.mode();
   }
 
   /* The term this machine holds, while its lease stands. */
   term(): Term | null {
-    return this.holder.term();
+    return this.hander?.holds() ? null : this.holder.term();
+  }
+
+  /* The front door takes nobody new, and what is on its way gets a moment to end. */
+  private async shutFront(): Promise<void> {
+    const door = this.frontDoor;
+    if (!door?.listening) return;
+    await closeWithin(door, STOP_GRACE_MS);
+    door.closeAllConnections();
+  }
+
+  private openFront(): void {
+    const [door, at] = [this.frontDoor, this.frontAt];
+    if (!door || !at || door.listening || this.stopped) return;
+    void listenOn(door, at.port, at.host).catch((err: unknown) => this.opts.log(`The keeper could not open its front door: ${reasonOf(err)}`));
   }
 
   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
@@ -381,12 +430,18 @@ export class Keeper {
       }
     };
     const frontDoor = this.door(visitorFromFront(frontHost));
+    this.frontDoor = frontDoor;
+    this.frontAt = { port: at.front, host };
     const takingNow = this.taking;
+    /* A keeper that starts in the middle of handing the server over: its door stays shut and its link's client
+       stopped, until the switch is over. */
+    const holdsNow = this.hander?.holds() ?? false;
+    if (holdsNow) this.linkHeld = true;
     let front = at.front;
     if (takingNow) this.giveWord();
     else {
       await lead();
-      front = await listenOn(frontDoor, at.front, host);
+      if (!holdsNow) front = await listenOn(frontDoor, at.front, host);
     }
     const linkHttp = await listenOn(this.door(visitorFromLink, { link: true }), at.linkHttp, LINK_HOST);
     const linkTls = await this.listener.listen(at.linkTls);
@@ -398,6 +453,7 @@ export class Keeper {
     this.carrier?.start();
     if (this.identity) void this.takeBackups();
     if (read) await this.servePeers(read, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
+    await this.hander?.start();
     if (!takingNow) afterLead();
     else {
       /* Once its database is promoted this keeper leads as any other: the lease, the word, the front door, and the
@@ -429,6 +485,7 @@ export class Keeper {
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = null;
     this.stopped = true;
     await this.taker?.stop();
+    await this.hander?.stop();
     await this.sync?.stop();
     if (this.backupsTimer) clearTimeout(this.backupsTimer);
     await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.links?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);

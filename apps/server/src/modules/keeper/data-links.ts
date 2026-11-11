@@ -97,6 +97,12 @@ export class DataLinks {
     return Object.fromEntries([...this.doorsOpen].flatMap(([id, open]) => (open.port === null ? [] : [[id, open.port]])));
   }
 
+  /* One request to the keeper of another data machine, on this keeper's session to it; none with no session to it or
+     no whole answer. */
+  ask(networkId: string, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, timeoutMs?: number): Promise<{ status: number; body: unknown } | null> {
+    return this.dial?.ask(networkId, method, path, body, timeoutMs) ?? Promise.resolve(null);
+  }
+
   /* The addresses the other data machines saw this machine come from. */
   seen(): string[] {
     return this.dial?.seen() ?? [];

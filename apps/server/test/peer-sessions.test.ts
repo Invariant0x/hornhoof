@@ -13,7 +13,7 @@ import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { issueCertificate, makeAuthority, makeCrl, type Authority } from '../src/modules/network/authority.js';
 import { LeaderDoor } from '../src/net/leader-door.js';
 import { PeerDoor } from '../src/net/peer-door.js';
-import { PeerServer, type Peer } from '../src/net/peer-server.js';
+import { PeerServer, type Peer, type PeerSwitches } from '../src/net/peer-server.js';
 import { PeerSessions, type DialTarget, type PeerSessionsOptions } from '../src/net/peer-sessions.js';
 import { until } from './helpers.js';
 
@@ -64,10 +64,10 @@ async function echoApp() {
 }
 
 /* A data machine's peer link as its keeper serves it, and a worker of the same company with its certificate. */
-async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBackups; db?: { host: string; port: number } } = {}) {
+async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBackups; db?: { host: string; port: number }; switches?: PeerSwitches; dialer?: MachineRole } = {}) {
   const authority = await makeAuthority(COMPANY);
   const server = await machineOf(authority, as.id ?? SERVER_ID, as.role ?? 'data');
-  const worker = await machineOf(authority, WORKER_ID, 'worker');
+  const worker = await machineOf(authority, WORKER_ID, as.dialer ?? 'worker');
   const state = { lead: true as boolean | string, hellos: 0, crl: await makeCrl(authority, []), revoked: new Set<string>() };
   const door = new PeerDoor({ app: await echoApp() });
   await door.start();
@@ -82,6 +82,7 @@ async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBack
     db: as.db ?? null,
     hello: (peer: Peer) => (state.hellos++, { machine: server.id, role: server.role, lead: state.lead, commit: 'c0ffee', asked: peer.machine }),
     backups: as.backups,
+    switches: as.switches,
     log: line => lines.push(line),
   });
   onTestFinished(() => peers.close());
@@ -417,6 +418,37 @@ describe("a worker's sessions to the company's data machines", () => {
     carried.write(Buffer.from('GET /api/still HTTP/1.1\r\nHost: app\r\nConnection: close\r\n\r\n'));
     await until(() => Buffer.concat(chunks).toString().includes('/api/still'));
     expect(Buffer.concat(chunks).toString()).toMatch(/^HTTP\/1\.1 200 /);
+  });
+
+  it('asks a data machine on its own session', async () => {
+    const asked: unknown[] = [];
+    const stand = await standUp({
+      dialer: 'data',
+      switches: {
+        handle: (peer, method, path, body) => {
+          asked.push([peer.machine, method, path, body]);
+          return path.endsWith('/never') ? new Promise(() => {}) : Promise.resolve({ status: 200, body: { machine: SERVER_ID, got: body ?? null } });
+        },
+      },
+    });
+    const sessions = stand.sessionsWith();
+    const other = `88bb0022${'2'.repeat(56)}`;
+    /* Another data machine is listed too, and nothing answers at its address. */
+    sessions.use([stand.target({ machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: other, addresses: [NOWHERE] }), stand.target()]);
+    await until(() => sessions.reaches(SERVER_ID));
+    expect(await sessions.ask(SERVER_NETWORK_ID, 'POST', '/peer/switch/offer', { a: 1 })).toEqual({ status: 200, body: { machine: SERVER_ID, got: { a: 1 } } });
+    expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/switch/state?switch=x')).toEqual({ status: 200, body: { machine: SERVER_ID, got: null } });
+    expect(asked).toEqual([[WORKER_ID, 'POST', '/peer/switch/offer', { a: 1 }], [WORKER_ID, 'GET', '/peer/switch/state?switch=x', undefined]]);
+    /* With no session to the machine, or to none of that id, the answer is none at once. */
+    const started = performance.now();
+    expect(await sessions.ask(other, 'POST', '/peer/switch/offer', {})).toBeNull();
+    expect(await sessions.ask('e'.repeat(64), 'POST', '/peer/switch/offer', {})).toBeNull();
+    expect(performance.now() - started).toBeLessThan(1000);
+    /* A machine that never answers, and an answer that is no JSON, are none too. */
+    expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/switch/never', undefined, 100)).toBeNull();
+    expect(await sessions.ask(SERVER_NETWORK_ID, 'GET', '/peer/nothing')).toBeNull();
+    /* The session itself goes on. */
+    expect(await sessions.ask(SERVER_NETWORK_ID, 'POST', '/peer/switch/go', { b: 2 })).toMatchObject({ status: 200 });
   });
 
   it('dials nobody without a certificate, and lets go of a machine it is no longer told', async () => {

@@ -312,6 +312,12 @@ describe('the updater and what a machine held when it stopped holding the data',
     expect([has(s, 'wiped.json'), has(s, 'dumps'), has(s, 'replica.json')]).toEqual([false, true, true]);
     expect(envOf(s)).toMatchObject({ HORNHOOF_SECRET: SECRETS.HORNHOOF_SECRET, HORNHOOF_ROLE: 'data' });
 
+    /* One that led and then handed the server over in a planned switch wrote nothing the new leader lacks: it goes. */
+    const handed = copyToWipe();
+    const wiped = await runOnce(handed.s, null, { ...COPY, STUB_LED: 'hornhoof', STUB_HANDED: 'hornhoof' });
+    expect(wiped.calls).toContain('docker volume rm hornhoof_pgdata');
+    expect(has(handed.s, 'wiped.json')).toBe(true);
+
     /* A database that cannot be asked is not wiped either. */
     const silent = copyToWipe();
     const unasked = await runOnce(silent.s, null, { ...COPY, STUB_STATE_ASK: 'fail' });

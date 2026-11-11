@@ -22,6 +22,12 @@ function said(dir: string, name: string): z.infer<typeof StatusShape> | { state:
   }
 }
 
+/* Whether an update runs now, in whatever step: the old build works on while images download, and still no server is
+   moved under an update. False when the file cannot be read. */
+export function updaterRunning(dir: string): boolean {
+  return said(dir, 'status.json')?.state === 'running';
+}
+
 /* Whether the updater's own status file says an update has the company in maintenance. The file outlives every
    container, so a restart of anything keeps the answer. Null when it cannot be told now: only a person removes the file,
    so a missing one means no update runs, while one that cannot be read or parsed says nothing either way. */

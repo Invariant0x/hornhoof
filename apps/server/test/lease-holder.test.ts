@@ -36,6 +36,33 @@ describe('the lease the keeper holds', () => {
     expect(k.lines).toEqual(['This machine leads under term 1.']);
   });
 
+  it('takes and renews nothing while the server is handed over, and a new term after', async () => {
+    const lease = fakeLease();
+    const said = { hold: false };
+    let now = T0;
+    const lines: string[] = [];
+    const ended: number[] = [];
+    const h = new LeaseHolder({ lease, updaterBusy: () => false, now: () => now, log: line => lines.push(line), hold: () => said.hold, onEnd: () => void ended.push(now.wall) });
+    const after = (ms: number) => void (now = { wall: now.wall + ms, mono: now.mono + ms });
+    await h.tick();
+    await h.look();
+    expect([h.mode(), h.term()?.number]).toEqual(['lead', 1]);
+    /* The keeper that hands over ended the lease itself: this one lets go of it, and asks the database nothing. */
+    said.hold = true;
+    const asked = lease.calls.length;
+    for (let ticks = 0; ticks < 5; ticks++) {
+      after(1000);
+      await h.tick();
+    }
+    expect([h.mode(), h.term(), lease.calls.length - asked, ended]).toEqual(['read', null, 0, []]);
+    /* The switch was called off: the next tick takes the next term. */
+    said.hold = false;
+    after(1000);
+    await h.tick();
+    expect([h.mode(), h.term()?.number, lease.calls.at(-1)?.method]).toEqual(['lead', 2, 'take']);
+    expect(lines).toEqual(['This machine leads under term 1.', 'This machine leads under term 2.']);
+  });
+
   it('renews on every tick, each renewal good for ten seconds from when it was sent', async () => {
     const k = holder();
     await k.h.tick();

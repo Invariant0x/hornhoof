@@ -122,7 +122,8 @@ export async function fastWay(db: Db, source: MergeSource): Promise<{ way: FastW
   const src = source.query;
   const whole = { way: 'whole' as const, restoreAt: null };
   const [state] = await src<{ there: boolean }>(`SELECT to_regclass('net_local.state') IS NOT NULL AS there`);
-  if (state?.there && (await src('SELECT 1 AS led FROM net_local.state LIMIT 1')).length > 0) return whole;
+  /* A term that ended in a planned handover wrote nothing the new leader lacks: such a database counts as a copy. */
+  if (state?.there && (await src(`SELECT 1 AS led FROM net_local.state s WHERE to_jsonb(s) ->> 'handed_lsn' IS NULL LIMIT 1`)).length > 0) return whole;
 
   const theirs = new Set(await restoresOf(src));
   const lacking = (await q<{ attempt: string; kept: string | null; at: Date | string }>('SELECT attempt, kept, dumped_at AS at FROM net.restores ORDER BY at, attempt')).filter(row => !theirs.has(row.attempt));

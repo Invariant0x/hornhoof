@@ -122,6 +122,17 @@ describe("the old database of a copy on another machine", () => {
     expect(await s.db.select().from(departments).where(eq(departments.id, mine!.id))).toHaveLength(1);
   });
 
+  it('takes a handed database as one that never wrote', async () => {
+    const s = await stand();
+    const old = await s.copied();
+    /* It led once, and handed the server over in a planned switch: everything it wrote reached the new leader first. */
+    await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster, handed_to, handed_lsn, handed_at) VALUES (9, 'copy', 'copy', 'cluster-of-the-copy', 'other', '0/3000000', now())`);
+    expect(await fastWay(s.db, await pgliteSource(old.client, 'the copy')).finally(() => old.client.exec('ROLLBACK'))).toEqual({ way: 'fast', restoreAt: null });
+    /* Leading again since, with no handover after it, it may hold what nobody else does. */
+    await old.client.exec('UPDATE net_local.state SET handed_to = NULL, handed_lsn = NULL, handed_at = NULL');
+    expect(await fastWay(s.db, await pgliteSource(old.client, 'the copy')).finally(() => old.client.exec('ROLLBACK'))).toEqual({ way: 'whole', restoreAt: null });
+  });
+
   it('compares across a restore', async () => {
     /* The leader went through a restore the copy knows nothing of, and the copy holds a department only it has. */
     const across = async (kept: (s: Awaited<ReturnType<typeof stand>>, attempt: string) => Promise<void>) => {

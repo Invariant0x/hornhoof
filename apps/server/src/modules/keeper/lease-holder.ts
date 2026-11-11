@@ -17,6 +17,9 @@ export type LeaseHolderOptions = {
   sync?: { flag(): LeaseSync | null; renew(): boolean };
   /* Called when a lease this machine held has ended. */
   onEnd?: () => void;
+  /* Whether the keeper hands the server over to another machine now: it ended its lease itself, and while this holds
+     none is taken or renewed. */
+  hold?: () => boolean;
 };
 
 const PRUNE_EVERY_MS = 60_000;
@@ -64,6 +67,13 @@ export class LeaseHolder {
     if (busy !== null) this.maintenance = busy;
     const { lease } = this.opts;
     if (!lease) return;
+    /* The keeper that hands the server over fenced the lease itself: this one lets go of it, and asks nothing until
+       the switch is over. A switch that was called off leaves it to take its next term. */
+    if (this.opts.hold?.()) {
+      this.held = null;
+      this.last = null;
+      return;
+    }
     const now = this.now();
     const step = nextLeaseStep({ now, last: this.last, held: this.held, maintenance: this.maintenance });
     this.last = now;

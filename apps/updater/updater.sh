@@ -1123,29 +1123,53 @@ load_schema() {
   docker exec -i "$db" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$database" < "$dump" > /dev/null 2>&1 ||
     { rm -f "$dump"; printf 'The schema could not be loaded into the database.'; return 1; }
   rm -f "$dump"
+  write_passfile "$db" || { printf "The password file of the copy could not be written."; return 1; }
+}
+
+# write_passfile: the password of the role that only reads, from the request, into the file the copy's subscription
+# reads it from, in the database's own folder. It stands on no command line and in no line said.
+write_passfile() {
+  local db=$1 request="$CONTROL/schema.json"
   # shellcheck disable=SC2016 # PGDATA is the database container's own, read there.
   jq -r '"*:*:*:hornhoof_replica:" + (.password // "")' "$request" 2> /dev/null |
-    docker exec -i -u postgres "$db" sh -c 'umask 077 && cat > "$PGDATA/replica.pgpass"' > /dev/null 2>&1 ||
-    { printf "The password file of the copy could not be written."; return 1; }
+    docker exec -i -u postgres "$db" sh -c 'umask 077 && cat > "$PGDATA/replica.pgpass"' > /dev/null 2>&1
+}
+
+# passfile_alone: for a copy that joins a slot of the leader's and holds every table already. It prints why it could
+# not.
+passfile_alone() {
+  local db
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || { printf "This machine's database does not run."; return 1; }
+  write_passfile "$db" || { printf "The password file of the copy could not be written."; return 1; }
 }
 
 # The keeper of a machine that keeps a copy asks, with schema.json {attempt, database, port, password}, for the leader's
 # schema in a database of this machine: the copy then fills it by itself. This answers in schema/<attempt>.done, or
 # .failed with a line, and removes the request. A request that names what no database, port or attempt is called is
-# dropped.
+# dropped. With only: "passfile" it asks for the password file alone, whatever was answered under that attempt before:
+# a copy that joins the slot a new leader made for it holds its tables already.
 schema_request() {
-  local request="$CONTROL/schema.json" attempt database port reason
+  local request="$CONTROL/schema.json" attempt database port only reason
   [ -f "$request" ] || return 0
   [ -n "$SERVER_DIR" ] || return 0
   attempt=$(jq -r '.attempt // empty | tostring' "$request" 2> /dev/null || true)
   database=$(jq -r '.database // empty | tostring' "$request" 2> /dev/null || true)
   port=$(jq -r '.port // empty | tostring' "$request" 2> /dev/null || true)
-  if ! plain_count "$attempt" || ! plain_database "$database" || ! plain_count "$port" || [ -f "$CONTROL/schema/$attempt.done" ] || [ -f "$CONTROL/schema/$attempt.failed" ]; then
+  only=$(jq -r '.only // empty | tostring' "$request" 2> /dev/null || true)
+  if ! plain_count "$attempt" || ! plain_database "$database" || ! plain_count "$port" || { [ -n "$only" ] && [ "$only" != passfile ]; }; then
+    rm -f "$request"
+    return 0
+  fi
+  if [ "$only" = passfile ]; then
+    mkdir -p "$CONTROL/schema" && owned "$CONTROL/schema" 700 || return 0
+    rm -f "$CONTROL/schema/$attempt.done" "$CONTROL/schema/$attempt.failed"
+  elif [ -f "$CONTROL/schema/$attempt.done" ] || [ -f "$CONTROL/schema/$attempt.failed" ]; then
     rm -f "$request"
     return 0
   fi
   mkdir -p "$CONTROL/schema" && owned "$CONTROL/schema" 700 || return 0
-  if reason=$(load_schema "$attempt" "$database" "$port"); then
+  if reason=$(if [ "$only" = passfile ]; then passfile_alone; else load_schema "$attempt" "$database" "$port"; fi); then
     (umask 077 && : > "$CONTROL/schema/$attempt.done") && owned "$CONTROL/schema/$attempt.done" 600 || true
   else
     (umask 077 && printf '%s\n' "$reason" > "$CONTROL/schema/$attempt.failed") && owned "$CONTROL/schema/$attempt.failed" 600 || true
@@ -1372,7 +1396,8 @@ wipe_check() {
     plain_database "$name" || return 1
     has=$(docker exec "$db" psql -U hornhoof -d "$name" -tAc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'net_local' AND c.relname = 'state'" 2> /dev/null | tr -d ' ') || return 1
     [ "$has" != 0 ] || continue
-    led=$(docker exec "$db" psql -U hornhoof -d "$name" -tAc 'SELECT count(*) FROM net_local.state' 2> /dev/null | tr -d ' ') || return 1
+    # A term that ended in a planned handover wrote nothing the new leader lacks, and does not count.
+    led=$(docker exec "$db" psql -U hornhoof -d "$name" -tAc "SELECT count(*) FROM net_local.state s WHERE to_jsonb(s) ->> 'handed_lsn' IS NULL" 2> /dev/null | tr -d ' ') || return 1
     [ "$led" = 0 ] || return 2
   done
 }

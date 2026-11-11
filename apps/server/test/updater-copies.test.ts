@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { APP, ask, DIGESTS, JQ, runOnce, stand, startLoop, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
@@ -199,6 +199,24 @@ describe('the updater of a worker that is given the data', () => {
     const again = await runOnce(s, null, env);
     expect(again.calls.filter(c => c.includes(' pg_dump '))).toHaveLength(2);
     expect(has(s, 'schema.json')).toBe(false);
+
+    /* A copy that joins a slot holds every table already: it asks for the password file alone, whatever was answered
+       under that attempt before. */
+    const joining = stand(copy);
+    request(joining, { only: 'passfile' });
+    mkdirSync(join(joining.control, 'schema'));
+    writeFileSync(join(joining.control, 'schema', '1.failed'), 'An earlier try.\n');
+    const alone = await runOnce(joining, null, { ...env, STUB_PUBLIC_TABLES: '3' });
+    expect(alone.calls.some(c => c.includes('pg_dump') || c.includes('ON_ERROR_STOP'))).toBe(false);
+    expect(readFileSync(join(joining.dir, 'passfile'), 'utf8')).toBe(`*:*:*:hornhoof_replica:${password}\n`);
+    expect([has(joining, 'schema/1.done'), has(joining, 'schema.json')]).toEqual([true, false]);
+    expect([alone.out, ...alone.calls].join('\n').includes(password)).toBe(false);
+    /* Another word in its place asks for nothing. */
+    const odd = stand(copy);
+    request(odd, { only: 'everything' });
+    const none = await runOnce(odd, null, env);
+    expect(none.calls.some(c => c.includes('pg_dump') || c.includes('replica.pgpass'))).toBe(false);
+    expect(has(odd, 'schema.json')).toBe(false);
 
     /* A database that holds tables already is left as it is. */
     const full = stand(copy);

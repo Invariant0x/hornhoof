@@ -33,6 +33,7 @@ async function dataKeeper(): Promise<Running> {
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
+  const { Hander } = await import('./modules/keeper/handing.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -87,6 +88,18 @@ async function dataKeeper(): Promise<Running> {
                 return base ? probeLink(base, nonce) : null;
               },
               tunnel: parts.tunnel, subscription: pgSubscription(sql, subscribed), appLeads: parts.appLeads, exit, log,
+            });
+          }
+        : undefined,
+    /* Its part of a planned switch of the server away from this machine, where copies may follow it. */
+    handing:
+      config.databaseUrl && config.machineId && sync
+        ? parts => {
+            if (!parts.sync) return { start: async () => undefined, stop: async () => undefined, holds: () => false };
+            return new Hander({
+              dir: KEEPER_DIR, controlDir: config.controlDir, sql: keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), secret: config.secret, machine: { networkId: config.machineId! },
+              lease: parts.lease, term: parts.term, sync: parts.sync, peer: parts.peer, front: parts.front, tunnel: parts.tunnel, leads: parts.leads, updating: parts.updating,
+              exit, log,
             });
           }
         : undefined,

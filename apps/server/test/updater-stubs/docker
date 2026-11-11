@@ -158,6 +158,9 @@ case "$1 $2" in
       *"relname = 'state'"*) [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2; echo 1 ;;
       *'FROM net_local.state'*)
         [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2
+        # STUB_HANDED: the databases whose time as the leader ended in a handover, which a question that asks of
+        # that does not count.
+        case "$*" in *handed_lsn*) case " ${STUB_HANDED:-} " in *" $(db_named "$@") "*) echo 0; exit 0 ;; esac ;; esac
         case " ${STUB_LED:-} " in *" $(db_named "$@") "*) echo 1 ;; *) echo 0 ;; esac ;;
       # What the updater had said by the time it first asked the database.
       *'FROM drizzle.__drizzle_migrations'*)

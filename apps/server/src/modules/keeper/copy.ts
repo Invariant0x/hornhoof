@@ -5,6 +5,7 @@ import type { CopyError, CopyState } from '../../db/schema.js';
 import { DB_DOOR_PORT } from '../../net/db-door.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
+import { joinSlot } from './promote.js';
 import { ensureReplica, PUBLICATION, REPLICA_ROLE } from './replica.js';
 
 /* In the control folder: what the copy maker asks its updater for, the leader's schema loaded into a database here.
@@ -21,6 +22,8 @@ export const DISK_FULL = 2 ** 30;
 export const NEXT_DB = 'hornhoof_next';
 /* A slot the leader does not list any more counts as gone after this many views in a row said so. */
 export const MISSING_VIEWS = 2;
+/* After this many views in a row of a new leader that name no slot for it, a copy is made again from that leader. */
+export const MOVED_VIEWS = 2;
 const ENABLE_EVERY_MS = 60_000;
 const RETRY_MS = 600_000;
 /* How long the app gets to read that it is off before the databases change places. */
@@ -38,17 +41,28 @@ export type CopyReport = { state: CopyState; progress: number | null; error: Cop
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
-   its wipe. lastAttempt: the attempt the machine's row names its copy by; null where it never kept one. */
+   its wipe. lastAttempt: the attempt the machine's row names its copy by; null where it never kept one. leader: the
+   network id of the leader whose view this is. join: the slot that leader made for this machine when it took the
+   server in a planned switch, for a copy that held everything the leader before had written; none else. A leader of a
+   build before names neither. */
 export type CopyOrder = {
   slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null;
   lastAttempt: number | null;
+  leader?: string;
+  join?: string | null;
 };
 
 type Closable = Sql & { close(): Promise<void> };
 const Kept = z.object({
   attempt: z.number().int().min(1),
   database: z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/),
-  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'detach', 'drop']),
+  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'detach', 'drop', 'join']),
+  /* The slot of the leader this copy joins, with no copy of the data, while the phase is join. */
+  slot: z.string().regex(/^copy_[0-9a-f]{16}_[0-9]{1,9}$/).nullable().default(null),
+  /* The leader this copy was made on or last joined, by its network id; none in a file of before. */
+  leader: z.string().nullable().default(null),
+  /* Another leader whose views named no slot for this copy, and how many of its views in a row did so. */
+  moved: z.object({ leader: z.string(), views: z.number().int().min(1) }).nullable().default(null),
   /* How many migrations the schema this copy was made with has. */
   migrations: z.number().int().nullable().default(null),
   /* No request for a schema before this moment: an attempt failed, and the next one waits. */
@@ -211,8 +225,32 @@ export class CopyMaker {
   private heard(order: CopyOrder | null): void {
     if (!order || order === this.lastOrder) return;
     this.lastOrder = order;
+    if (order.leader !== undefined) {
+      if (this.kept.leader === null) this.keep({ leader: order.leader });
+      else if (order.leader !== this.kept.leader) {
+        /* The view of another leader than the one this copy follows says nothing of this copy's slot: it counts only
+           toward that leader having no place for it. */
+        if (!this.joinOf(order)) this.keep({ moved: { leader: order.leader, views: this.kept.moved?.leader === order.leader ? this.kept.moved.views + 1 : 1 } });
+        return;
+      } else if (this.kept.moved) this.keep({ moved: null });
+    }
     if (order.slot === 'ok' && (!this.kept.seen || this.kept.missing > 0)) this.keep({ seen: true, missing: 0 });
     else if (order.slot === 'missing' && this.kept.seen) this.keep({ missing: this.kept.missing + 1 });
+  }
+
+  /* The slot a view names for this machine to join, when it is one of its own name above its attempt: a slot of an
+     earlier switch is none. */
+  private joinOf(order: CopyOrder | null): { slot: string; attempt: number } | null {
+    const found = /^(copy_[0-9a-f]{16})_([0-9]{1,9})$/.exec(order?.join ?? '');
+    if (!found || `${found[1]}_1` !== copyName(this.opts.networkId, 1) || Number(found[2]) <= this.kept.attempt) return null;
+    return { slot: found[0], attempt: Number(found[2]) };
+  }
+
+  /* Whether this view is of another leader than the one this copy follows, and whether that leader has now said often
+     enough that it holds no place for this copy. */
+  private elsewhere(order: CopyOrder | null): { moved: boolean } | null {
+    if (order?.leader === undefined || this.kept.leader === null || order.leader === this.kept.leader) return null;
+    return { moved: this.kept.moved?.leader === order.leader && this.kept.moved.views >= MOVED_VIEWS };
   }
 
   /* One connection to a database of the copy, opened anew after it was closed. */
@@ -263,6 +301,7 @@ export class CopyMaker {
       this.said = this.stopped('led');
       return;
     }
+    if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
     if (this.kept.phase === 'subscribe') return this.subscribe(sql);
@@ -270,12 +309,43 @@ export class CopyMaker {
     return this.ready(sql, order);
   }
 
-  /* Whether the database once held a term of the company: such a one is never dropped, swapped or written here. A
-     database with no such table never did. */
+  /* Whether the database once held a term of the company that did not end in a handover: such a one is never dropped,
+     swapped or written here. A database with no such table never did, and one that handed the server over in a
+     planned switch wrote nothing the new leader lacks. */
   private async led(sql: Sql): Promise<boolean> {
     const table = await this.one<{ there: boolean }>(sql, `SELECT to_regclass('net_local.state') IS NOT NULL AS there`);
     if (!table?.there) return false;
-    return (await this.one<{ led: boolean }>(sql, 'SELECT EXISTS (SELECT FROM net_local.state) AS led'))?.led === true;
+    return (await this.one<{ led: boolean }>(sql, `SELECT EXISTS (SELECT FROM net_local.state s WHERE to_jsonb(s) ->> 'handed_lsn' IS NULL) AS led`))?.led === true;
+  }
+
+  /* The copy joins the slot the new leader made for it, taking no row again: it holds everything up to where that
+     slot begins. Every step is looked at first, so a keeper that starts again in the middle goes on: any other
+     subscription goes, parted from its slot; the file the replica role's password is read from is asked of the
+     updater when it is not there; then the subscription is made, and the copy follows. */
+  private async join(sql: Sql, order: CopyOrder | null): Promise<void> {
+    const { slot } = this.kept;
+    if (!slot) return this.keep({ phase: 'ready' });
+    this.said = this.making(null, await this.pulse(sql));
+    for (const sub of await this.subscriptions(sql)) {
+      if (sub.name === slot) continue;
+      if (sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} DISABLE`);
+      if (sub.slot) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} SET (slot_name = NONE)`);
+      await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
+    }
+    const dir = (await this.one<{ data_directory: string }>(sql, 'SHOW data_directory'))?.data_directory;
+    if (!dir) throw new Error('the database does not say where its folder is');
+    const passfile = `${dir}/${PASSFILE}`;
+    if (!(await this.one<{ there: boolean }>(sql, 'SELECT pg_stat_file($1, true) IS NOT NULL AS there', [passfile]))?.there) {
+      const request = join(this.opts.controlDir, SCHEMA_FILE);
+      if (!existsSync(request)) writePrivately(request, JSON.stringify({ attempt: this.kept.attempt, database: this.kept.database, port: this.publisher().port, password: this.opts.password, only: 'passfile' }));
+      return;
+    }
+    await sql.query(`ALTER SYSTEM SET wal_receiver_status_interval = '1s'`);
+    await sql.query('SELECT pg_reload_conf()');
+    const { host, port } = this.publisher();
+    await joinSlot(sql, { name: slot, conninfo: `host=${host} port=${port} dbname=${LEADER_DB} user=${REPLICA_ROLE} passfile=${passfile}` });
+    this.disabledSince = null;
+    this.keep({ phase: 'ready', slot: null, migrations: order?.migrations ?? this.kept.migrations, seen: false, missing: 0, moved: null, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
   }
 
   /* The updater loads the leader's schema; until it has, the request waits in the control folder. A load that failed
@@ -368,7 +438,11 @@ export class CopyMaker {
     const sub = await this.subscription(sql);
     if (!sub) return this.keep({ phase: 'subscribe' });
     const stopped = await this.stoppedFor(sql, sub.enabled);
-    if (order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
+    /* While the server moved and the new leader has not said its word yet, nothing is given up; once it has, the first
+       copy this machine was still making is begun anew, from that leader. */
+    const elsewhere = this.elsewhere(order);
+    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
     const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
     if (tables && tables.total > 0 && tables.ready === tables.total) {
       this.keep({ phase: 'ready' });
@@ -409,10 +483,20 @@ export class CopyMaker {
      did not fit. One that was made again says which old attempt waits for the leader, and changes places with it once
      the leader has read it. */
   private async ready(sql: Sql, order: CopyOrder | null): Promise<void> {
+    /* The server moved in a planned switch, and the new leader made this copy a slot: written down first, then joined. */
+    const joining = this.kept.old ? null : this.joinOf(order);
+    if (joining) {
+      this.disabledSince = null;
+      return this.keep({ attempt: joining.attempt, phase: 'join', slot: joining.slot, moved: null, seen: false, missing: 0, ...(order?.leader === undefined ? {} : { leader: order.leader }) });
+    }
     const sub = await this.subscription(sql);
     const at = await this.pulse(sql);
     const stopped = sub ? await this.stoppedFor(sql, sub.enabled) : 0;
-    const why = this.broken(order, sub ? stopped : ENABLE_FOR_MS);
+    /* A view of another leader than the one this copy follows counts toward none of the reasons to make it again,
+       until that leader named no slot for it twice in a row: then it did not hold everything, and is made again. */
+    const elsewhere = this.elsewhere(order);
+    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    const why = elsewhere ? (elsewhere.moved ? 'the company server moved to a machine that does not hold a place for this copy' : null) : this.broken(order, sub ? stopped : ENABLE_FOR_MS);
     if (why) return this.kept.old ? this.giveUp() : this.remake(why);
     if (!sub || stopped > 0) {
       const free = this.opts.diskFree();

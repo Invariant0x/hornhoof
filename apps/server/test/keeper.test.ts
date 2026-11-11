@@ -354,6 +354,45 @@ describe('the keeper', () => {
     expect(k.keeper.mode()).toBe('lead');
   });
 
+  it('holds while it hands the server over', async () => {
+    const lease = fakeLease();
+    const said = { holds: false };
+    type Parts = Parameters<NonNullable<KeeperOptions['handing']>>[0];
+    const given: Parts[] = [];
+    const handing: KeeperOptions['handing'] = parts => (given.push(parts), { start: async () => undefined, stop: async () => undefined, holds: () => said.holds });
+    const front = await appIsDown();
+    const k = await keeperOn(await echoHeaders(), { lease, handing, everyMs: 20, ports: { front: front.port, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 } });
+    const parts = given[0]!;
+    const count = (method: string) => lease.calls.filter(call => call.method === method).length;
+    await until(() => wordIn(k.dir) === 'lead');
+    expect([(await send(front, { path: '/' })).status, count('take'), parts.leads(), parts.term()?.number]).toEqual([200, 1, true, 1]);
+    /* It stops: the door closes, the lease ends, and it leads no more. */
+    said.holds = true;
+    await parts.front.close();
+    await parts.lease.fence();
+    await expect(send(front, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+    await until(() => wordIn(k.dir) === 'read');
+    expect([k.keeper.mode(), parts.leads(), parts.term(), count('fence')]).toEqual(['read', false, null, 1]);
+    const renewed = count('renew');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect([count('take'), count('renew') - renewed]).toEqual([1, 0]);
+    /* The switch was called off: the door opens, and it leads again under its next term. */
+    said.holds = false;
+    parts.front.open();
+    await until(() => wordIn(k.dir) === 'lead');
+    expect([count('take'), parts.term()?.number]).toEqual([2, 2]);
+    await until(async () => (await send(front, { path: '/' }).catch(() => null))?.status === 200);
+
+    /* A keeper that starts in the middle of handing over opens no front door and takes no lease. */
+    const held = fakeLease();
+    said.holds = true;
+    const other = await appIsDown();
+    const again = await keeperOn(await echoHeaders(), { lease: held, handing, everyMs: 20, ports: { front: other.port, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 } });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect([wordIn(again.dir), held.calls.filter(call => call.method === 'take')]).toEqual(['read', []]);
+    await expect(send(other, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+  });
+
   it('keeps leading and serving when its own folder cannot be written', async () => {
     const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: 'a1b2c3d4'.repeat(4) });
     const notAFolder = join(folder(), 'keeper');

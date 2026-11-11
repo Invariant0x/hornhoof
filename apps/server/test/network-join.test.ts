@@ -468,6 +468,34 @@ describe('joining the company as a machine', () => {
     expect(await copy()).toMatchObject({ slot: 'missing', lastAttempt: 7 });
   });
 
+  it('names the slot to join', async () => {
+    const c = await company();
+    await c.serverCertificate();
+    const w = await c.worker();
+    const copy = async () => (await workerView(c.app.ctx, w.machine)).copy;
+    await c.db.update(machines).set({ role: 'data', copyName: 'copy_0f0f0f0f0f0f0f0f_3' }).where(eq(machines.id, w.machine));
+    const [row] = await c.db.select().from(machines).where(eq(machines.id, w.machine));
+    const [server] = await c.db.select().from(machines).where(eq(machines.networkId, c.app.ctx.config.machineId!));
+    /* With no switch on record the view names this leader, and no slot. */
+    expect(await copy()).toMatchObject({ leader: server!.networkId, join: null });
+    /* This machine took the server in a planned switch, and made the copy a slot above its attempt. */
+    const handover = (slot: string, at: string, to = server!.id) =>
+      c.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots)
+        VALUES (gen_random_uuid(), ${w.machine}, 5, 'a', '0/1', ${to}, ${at}::timestamptz, ${JSON.stringify({ [row!.networkId!]: slot })}::jsonb)`);
+    await handover('copy_0f0f0f0f0f0f0f0f_4', '2026-11-10T10:00:00Z');
+    expect(await copy()).toMatchObject({ join: 'copy_0f0f0f0f0f0f0f0f_4' });
+    /* Once the copy joined, its row names that slot, and there is nothing more to join. */
+    await c.db.update(machines).set({ copyName: 'copy_0f0f0f0f0f0f0f0f_4' }).where(eq(machines.id, w.machine));
+    expect(await copy()).toMatchObject({ join: null });
+    /* Only the newest switch counts, and only one in which this machine took the server. */
+    await handover('copy_0f0f0f0f0f0f0f0f_9', '2026-11-09T10:00:00Z');
+    expect(await copy()).toMatchObject({ join: null });
+    await handover('copy_0f0f0f0f0f0f0f0f_8', '2026-11-11T10:00:00Z', w.machine);
+    expect(await copy()).toMatchObject({ join: null });
+    await c.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots) VALUES (gen_random_uuid(), ${w.machine}, 6, 'a', '0/2', ${server!.id}, '2026-11-12T10:00:00Z', '{}'::jsonb)`);
+    expect(await copy()).toMatchObject({ join: null });
+  });
+
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {
     const c = await company();
     const w = await c.worker();
