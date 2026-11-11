@@ -155,7 +155,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   );
   tool(
     'add_repository',
-    'Adds another git repository to a department that has one or more: it comes as a new product of the department, named after the end of its address unless you give a name, ' +
+    'Adds a git repository to a department beside its own: it comes as a new product of the department, named after the end of its address unless you give a name, ' +
       'and a task names that product to change it. The fields are those of set_repository. To connect a repository to a product the department has, use set_repository with the product\'s id.',
     { department: Id('department'), ...RepositoryBody.shape },
     ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories`, payload: body, department }),

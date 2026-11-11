@@ -408,8 +408,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [dept] = await tx.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
       if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
       if (dept.parentId) throw new ApiError(400, 'validation', `${deptName(dept)} is a product. Add the repository to the department that holds it.`);
-      const products = await tx.select({ name: departments.name }).from(departments).where(eq(departments.parentId, dept.id));
-      if (products.some(p => p.name?.toLowerCase() === name.toLowerCase())) throw new ApiError(409, 'conflict', `${deptName(dept)} has a product named ${name} already. Give the repository another name.`, 'product_taken');
+      const products = await tx.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.parentId, dept.id));
+      const same = products.find(p => p.name?.toLowerCase() === name.toLowerCase());
+      if (same) throw new ApiError(409, 'conflict', `${deptName(dept)} has a product named ${same.name} already. Give the repository another name, or connect it to that product by set_repository with the product's id, ${same.id}.`, 'product_taken');
       await checkFolderFree(tx, dept.id, fields.repoUrl, null);
       const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, me.companyId));
       const [row] = await tx

@@ -70,6 +70,8 @@ describe('another repository of a department', () => {
     const taken = await add(c, c.ceoToken, c.dev.id, { name: 'shop', url: 'https://github.com/acme/shop.git' });
     expect(taken.statusCode).toBe(409);
     expect(taken.json().error.reason).toBe('product_taken');
+    /* A product of that name with no repository yet takes it as it is. */
+    expect(taken.json().error.message).toContain(`set_repository with the product's id, ${c.product.id}`);
     const onProduct = await add(c, c.ceoToken, c.product.id, { url: 'https://github.com/acme/app.git' });
     expect(onProduct.statusCode).toBe(400);
     expect(onProduct.json().error.message).toContain('Shop is a product');
