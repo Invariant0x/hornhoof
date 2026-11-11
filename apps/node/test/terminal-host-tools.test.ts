@@ -8,7 +8,7 @@ import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
    time after they start, and a program that got an error while it connected has no tools for the rest of its session.
    tmux and the program never run: the test makes the program's calls to the node's bridge, and Hornhoof is a stand-in
    that answers each call and keeps the token it came with. The host runs on the fake clock, which moves only as the test
-   moves it. */
+   moves it. A program stays up between turns while someone has its terminal open, and only then connects between them. */
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
@@ -72,7 +72,7 @@ describe("a program's connection to Hornhoof's tools", () => {
 
   it('answers a program that connects again between turns with what Hornhoof said before, and still refuses its tool calls', async () => {
     const up = await hornhoof();
-    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url }, connects: true });
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url }, connects: true, watched: true });
     await connect(c);
     c.finish();
     await c.on(c.running);
@@ -85,7 +85,7 @@ describe("a program's connection to Hornhoof's tools", () => {
 
   it('lets the first program of an agent connect between two turns once the next turn opens, rather than fail its tools for good', async () => {
     const up = await hornhoof();
-    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 1000 }, connects: true });
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 1000 }, connects: true, watched: true });
     c.finish();
     await c.on(c.running);
     /* The program connects only now, as one does whose turn was called off as it started, and the node knows no answer. */
@@ -102,7 +102,7 @@ describe("a program's connection to Hornhoof's tools", () => {
 
   it('starts a program that was turned away as it connected again in its session, and says so, as it has no tools until then', async () => {
     const up = await hornhoof();
-    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 100 }, connects: true });
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 100 }, connects: true, watched: true });
     c.finish();
     await c.on(c.running);
     /* The program connects only now, long after its turn, no turn opens while it waits, and the node knows no answer. */
@@ -124,8 +124,9 @@ describe("a program's connection to Hornhoof's tools", () => {
      later and does not remind, and the next turn starts it anew. */
   it('ends the turn of a program with no session yet that was turned away as it connected as one without tools, and starts it anew once', async () => {
     const up = await hornhoof();
-    /* A turn with nothing to type started the program, which waits for its first message to begin a session. */
-    const c = await liveTerminal('kimi', 'queued', { host: { hornhoof: up.url }, connects: true, sessionId: null, prompt: '' });
+    /* A turn with nothing to type started the program for someone who opened its terminal, and it waits for its first
+       message to begin a session. */
+    const c = await liveTerminal('kimi', 'queued', { host: { hornhoof: up.url }, connects: true, sessionId: null, prompt: '', watched: true });
     expect(await c.on(c.running)).toMatchObject({ ok: true, sessionId: null });
     /* It connects with no turn open, no turn opens while it waits, and the node knows no answer. */
     expect(await call(c, 1, 'initialize')).toMatchObject({ id: 1, error: { code: -32001 } });

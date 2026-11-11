@@ -82,10 +82,10 @@ export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
 }
 
 type Size = { cols: number; rows: number };
-type Frame = { type: string; data?: string; write?: boolean; message?: boolean; running?: boolean; reason?: InputRefusal };
+type Frame = { type: string; data?: string; write?: boolean; message?: boolean; running?: boolean; asleep?: boolean; reason?: InputRefusal };
 type Send = (m: unknown) => void;
 /* What one view of the session learned so far. */
-type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(rights: TerminalRights): void; refused(reason: InputRefusal): void };
+type View = { term: Terminal; send: Send; setUp(up: boolean, asleep?: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(rights: TerminalRights): void; refused(reason: InputRefusal): void };
 
 /* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
    the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
@@ -95,7 +95,8 @@ function confirmSize(term: Terminal, opened: Size | null, send: Send) {
 }
 
 /* The session draws its whole screen for each new view. The server says separately who may control the program and who
-   may write a message. A program starts on its first screen if the view says nothing about whether it is running. */
+   may write a message. A program starts on its first screen if the view says nothing about whether it is running. One that
+   sleeps until its next turn shows what it printed, with no loader over it. */
 function received(view: View, m: Frame) {
   if (m.type === 'ready') {
     const control = Boolean(m.write);
@@ -110,7 +111,7 @@ function received(view: View, m: Frame) {
   if (m.type === 'refused' && m.reason) view.refused(m.reason);
   if (m.type === 'program') {
     view.told = true;
-    view.setUp(Boolean(m.running));
+    view.setUp(Boolean(m.running || m.asleep), Boolean(m.asleep));
   }
   if (m.type === 'data' && m.data) screenCame(view, m.data);
 }
@@ -196,7 +197,7 @@ function sendOrKeep(connection: LiveSocket, m: unknown, kept: KeptKeys, deliverN
 }
 
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
-function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void, overflow: () => void, refused: (reason: InputRefusal) => void, rightsChanged: (rights: TerminalRights) => void) {
+function connectView(term: Terminal, path: string, setUp: (up: boolean, asleep?: boolean) => void, gone: () => void, overflow: () => void, refused: (reason: InputRefusal) => void, rightsChanged: (rights: TerminalRights) => void) {
   const connection: LiveSocket = { socket: null, open: false, rights: { control: true, message: true } };
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
@@ -612,20 +613,23 @@ function insertUploadedPictures(path: string, files: File[], run: number, result
 
 type TerminalNoticesProps = {
   t: Messages;
+  /* The program sleeps until its next turn: its name. */
+  asleep: string | null;
   dropped: boolean;
   denied: InputRefusal | null;
   pictureFailure: unknown;
   pictureState: 'uploading' | 'uploaded' | null;
 };
 
-const noTerminalNotices = ({ dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) =>
-  !dropped && !denied && pictureFailure === null && !pictureState;
+const noTerminalNotices = ({ asleep, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) =>
+  !asleep && !dropped && !denied && pictureFailure === null && !pictureState;
 
 function TerminalNotices(props: TerminalNoticesProps) {
   if (noTerminalNotices(props)) return null;
-  const { t, dropped, denied, pictureFailure, pictureState } = props;
+  const { t, asleep, dropped, denied, pictureFailure, pictureState } = props;
   return (
     <div className="t-menu glass" style={{ left: 12, right: 12, bottom: 8, padding: '2px 0 6px', pointerEvents: 'none' }}>
+      {asleep && <div className="t-why" role="status">{t.window.asleep(asleep)}</div>}
       {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
       {denied && <div className="t-why" role="alert">{refusalText(denied, t.window.controlDenied, t.window.messageDenied)}</div>}
       {pictureFailure !== null && <div className="t-why" role="alert">{errorText(t, pictureFailure)}</div>}
@@ -643,6 +647,11 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
   const pictureRun = useRef(0);
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
   const [up, setUp] = useState(false);
+  const [asleep, setAsleep] = useState(false);
+  const shows = useCallback((running: boolean, sleeps = false) => {
+    setUp(running);
+    setAsleep(sleeps);
+  }, []);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [dropped, setDropped] = useState(false);
   const [denied, setDenied] = useState<InputRefusal | null>(null);
@@ -684,8 +693,8 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     bindCopy(term);
     fitTerminal(term, container);
     const view = testSession
-      ? connectTestView(term, testSession, setUp, reason => gone.current(reason))
-      : connectView(term, path, setUp, () => gone.current(), () => setDropped(true), setDenied, setRights);
+      ? connectTestView(term, testSession, shows, reason => gone.current(reason))
+      : connectView(term, path, shows, () => gone.current(), () => setDropped(true), setDenied, setRights);
     sendPicture.current = testSession ? () => {} : view.send;
     if (!testSession) forward(term, view.send);
     const unfit = keepFitted(term, container);
@@ -698,14 +707,14 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
       unfit();
       disposeLater(term);
     };
-  }, [path, testSession]);
+  }, [path, testSession, shows]);
 
   return (
     <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
       <div className="t-xterm" ref={box} />
       <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
       {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-      <TerminalNotices t={t} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
+      <TerminalNotices t={t} asleep={asleep ? program : null} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

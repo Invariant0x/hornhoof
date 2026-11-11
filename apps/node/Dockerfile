@@ -99,8 +99,9 @@ ARG SHELLCHECK_AMD64_SHA256=b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b4
 ARG SHELLCHECK_ARM64_SHA256=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
+# tini runs first in the container and ends the processes left without a parent, which the node never waits for.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux procps util-linux unzip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux tini procps util-linux unzip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
   && install -d /usr/share/keyrings \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
   && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -184,5 +185,5 @@ VOLUME /data
 # the build itself, so an unchanged image keeps its digest.
 ARG HORNHOOF_NODE_BUILD=
 ENV HORNHOOF_NODE_BUILD=$HORNHOOF_NODE_BUILD
-ENTRYPOINT ["node", "/app/apps/node/dist/main.js"]
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "/app/apps/node/dist/main.js"]
 CMD ["run"]

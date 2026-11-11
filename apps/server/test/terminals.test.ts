@@ -279,6 +279,16 @@ describe("an agent's live terminal", () => {
     expect(screen.frames.slice(1)).toEqual([{ type: 'program', running: false }, { type: 'program', running: true }]);
   });
 
+  it("tells the browser that the agent's program sleeps until its next turn", async () => {
+    const { url, ceo, builtin } = await live();
+    const screen = await watch(url, ceo);
+    const open = await next(builtin, 'term.open');
+    builtin.send({ type: 'term.program', termId: open.termId, running: false, asleep: true });
+    builtin.send({ type: 'term.program', termId: open.termId, running: false });
+    await until(() => screen.frames.length > 2);
+    expect(screen.frames.slice(1)).toEqual([{ type: 'program', running: false, asleep: true }, { type: 'program', running: false }]);
+  });
+
   it('ends the view when the session on the node ends', async () => {
     const { url, ceo, builtin } = await live();
     const screen = await watch(url, ceo);

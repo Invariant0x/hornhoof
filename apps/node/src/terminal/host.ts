@@ -130,6 +130,8 @@ type Agent = {
   contextSize: number | null;
   /* Its program runs and showed its prompt; until then its views show a loader. */
   up: boolean;
+  /* Its program sleeps until the next turn, its pane kept with what it printed; its views show that. */
+  asleep: boolean;
   /* Reads the log and looks at the program while it runs. */
   watch: NodeJS.Timeout | null;
   /* Words Hornhoof types into running turns, one after another. */
@@ -209,6 +211,7 @@ type Agent = {
   /* The agent left this node's plan after this turn: the program goes once it is idle, unless a turn comes here again. */
   leaving: string | null;
   tryingToLeave: boolean;
+  tryingToSleep: boolean;
 };
 
 type Size = { cols: number; rows: number };
@@ -558,7 +561,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -1507,7 +1510,7 @@ export class TerminalHost {
     a.watch = setInterval(() => {
       if (looking) return;
       looking = true;
-      void this.look(a).then(() => this.leaveIfIdle(a)).finally(() => (looking = false));
+      void this.look(a).then(() => this.leaveIfIdle(a)).then(() => this.sleepIfIdle(a)).finally(() => (looking = false));
     }, this.pollMs);
     a.watch.unref();
   }
@@ -1518,7 +1521,8 @@ export class TerminalHost {
   }
 
   private async look(a: Agent): Promise<void> {
-    if (a.restarting) return;
+    /* A program that sleeps did not end: nothing of it is left to tell. */
+    if (a.restarting || a.asleep) return;
     this.drain(a);
     const turn = a.turn;
     if (managedTurn(turn)) return;
@@ -2823,13 +2827,37 @@ export class TerminalHost {
     this.log(`Agent ${a.key}: ${left.status === 'retired' ? 'closed the program of a plan it left' : 'kept its program, which ran a later turn'}.`);
   }
 
-  /* Checks first, so that a program at work answers at once and not after its turn. Then in the line of Hornhoof's turns: one sent
-     meanwhile comes after this has answered. */
-  private async closeIdle(a: Agent, same: () => boolean, last: () => boolean): Promise<RetireResult> {
+  /* A program sleeps once nothing waits for it: no turn runs or comes, its input is empty, and nobody has its terminal open,
+     who would see it go. The next turn starts it again in its session. */
+  private async sleepIfIdle(a: Agent): Promise<void> {
+    if (!a.up || a.turn || a.queuedTurns || a.busy || a.leaving || a.tryingToLeave || a.tryingToSleep || this.viewed(a.key)) return;
+    a.tryingToSleep = true;
     try {
-      const refused = await this.closeRefusal(a, same, last);
+      const instance = a.instance;
+      await this.closeIdle(a, () => a.instance === instance, () => true, () => this.keptAwake(a));
+    } finally {
+      a.tryingToSleep = false;
+    }
+  }
+
+  /* Why a program that is idle stays up all the same, or null. */
+  private keptAwake(a: Agent): string | null {
+    if (this.viewed(a.key)) return 'someone has its terminal open';
+    return this.operator?.recovering(a.key) ? 'a person is asked to look at it' : null;
+  }
+
+  /* Someone has the agent's terminal open, or is opening it. */
+  private viewed(key: string): boolean {
+    return [...this.wanted.values()].some(view => view.key === key);
+  }
+
+  /* Checks first, so that a program at work answers at once and not after its turn. Then in the line of Hornhoof's turns: one sent
+     meanwhile comes after this has answered. A program that sleeps goes as one that is closed, and keeps its pane and session. */
+  private async closeIdle(a: Agent, same: () => boolean, last: () => boolean, sleeps?: () => string | null): Promise<RetireResult> {
+    try {
+      const refused = await this.closeRefusal(a, same, last, sleeps);
       if (refused) return refused;
-      const closing = a.queue.then(() => this.closeInLine(a, same, last));
+      const closing = a.queue.then(() => this.closeInLine(a, same, last, sleeps));
       a.queue = closing.catch(() => {});
       return await closing;
     } catch {
@@ -2837,18 +2865,23 @@ export class TerminalHost {
     }
   }
 
-  private async closeInLine(a: Agent, same: () => boolean, last: () => boolean): Promise<RetireResult> {
-    const refused = await this.closeRefusal(a, same, last);
+  private async closeInLine(a: Agent, same: () => boolean, last: () => boolean, sleeps?: () => string | null): Promise<RetireResult> {
+    const refused = await this.closeRefusal(a, same, last, sleeps);
     if (refused) return refused;
-    if (!(await this.inputGoes(a))) return busy('its input holds words Hornhoof does not have');
-    return this.inputLane(a, async () => (await this.closeRefusal(a, same, last)) ?? this.closeProgram(a));
+    if (!(await (sleeps ? this.inputEmpty(a) : this.inputGoes(a)))) return busy('its input holds words Hornhoof does not have');
+    return this.inputLane(a, async () => (await this.closeRefusal(a, same, last, sleeps)) ?? (sleeps ? this.sleepProgram(a) : this.closeProgram(a)));
   }
 
-  private async closeRefusal(a: Agent, same: () => boolean, last: () => boolean): Promise<RetireResult | null> {
+  private async closeRefusal(a: Agent, same: () => boolean, last: () => boolean, sleeps?: () => string | null): Promise<RetireResult | null> {
     if (!same()) return stale('another program runs now');
-    const why = idleRefusal(await this.idleEvidence(a));
+    const why = idleRefusal(await this.idleEvidence(a)) ?? sleeps?.();
     if (why) return busy(why);
     return last() ? null : stale('a later turn ran');
+  }
+
+  /* A program that sleeps would take what its input holds with it, so it sleeps only with nothing there, nor what it cannot read. */
+  private async inputEmpty(a: Agent): Promise<boolean> {
+    return (await this.readInput(a)) === '';
   }
 
   /* Writers first: what else it reads, it reads as it stands when the answer goes out. */
@@ -2885,6 +2918,20 @@ export class TerminalHost {
     return RETIRED;
   }
 
+  /* The program sleeps: it ends, and its pane stays with what it printed for people to scroll back through. Its session stays
+     the agent's, which Hornhoof gives the next turn to start it again in. */
+  private async sleepProgram(a: Agent): Promise<RetireResult> {
+    this.drain(a);
+    this.intentional(a, 'completed');
+    await this.opts.tmux.stop(a.name);
+    if (await this.opts.tmux.alive(a.name)) return busy('its program still runs');
+    this.operator?.exited(a.key, { code: null, signal: null });
+    this.unwatch(a);
+    this.programAsleep(a);
+    Object.assign(a, { hash: null, instance: null, launch: null, tail: null, fresh: false, started: null });
+    return RETIRED;
+  }
+
   /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
   async cancel(jobId: string): Promise<void> {
     const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
@@ -2899,9 +2946,16 @@ export class TerminalHost {
 
   /* The agent's views hear when its program comes up or goes. */
   private programIs(a: Agent, up: boolean): void {
-    if (a.up === up) return;
+    if (a.up === up && !a.asleep) return;
     a.up = up;
+    a.asleep = false;
     this.showViews(a, up);
+  }
+
+  private programAsleep(a: Agent): void {
+    a.up = false;
+    a.asleep = true;
+    this.showViews(a, false, true);
   }
 
   /* A program that ended keeps its last screen on show, which says why; the loader is for a program that starts. */
@@ -2912,8 +2966,8 @@ export class TerminalHost {
     this.showViews(a);
   }
 
-  private showViews(a: Agent, running = true): void {
-    for (const [termId, view] of this.views) if (view.key === a.key) this.opts.send({ type: 'term.program', termId, running });
+  private showViews(a: Agent, running = true, asleep = false): void {
+    for (const [termId, view] of this.views) if (view.key === a.key) this.opts.send({ type: 'term.program', termId, running, ...(asleep ? { asleep } : {}) });
   }
 
   /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
@@ -2976,8 +3030,10 @@ export class TerminalHost {
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, history: null, out: () => {} };
     this.views.set(m.termId, view);
-    /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
-    if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
+    /* A program that sleeps shows what it printed, and says it sleeps, until a turn starts it; one who may type starts it.
+       A watcher of an agent with no program sees the waiting screen; anyone else, a loader until the program is up. */
+    if (a.asleep && !a.turn) this.opts.send({ type: 'term.program', termId: m.termId, running: false, asleep: true });
+    else if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
     view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), text);
     child.on('exit', () => {
       view.history?.stop();
