@@ -72,8 +72,38 @@ describe('POST /api/departments/build', () => {
     await until(() => stream.messages.filter(m => m.type === 'pulse').length === 5);
     expect(stream.messages.some(m => m.type === 'org')).toBe(true);
     const note = await nextPrompt(builtin);
+    expect(note).toContain('Hornhoof applied the CEO\'s click.');
     expect(note).toContain('Development (products: Mascot, Characters)');
     expect(note).toContain('offer to staff the new departments, one department at a time');
+  });
+
+  /* Development with Dana as its owner, who changes it from her screen. */
+  async function ownedByDana() {
+    const made = await withOrchestrator();
+    const [dev] = await made.db.insert(departments).values({ companyId: made.acme.id, templateKey: 'development', roleCode: 'DEV', position: 1 }).returning();
+    const dana = await invitePerson(made.app, made.ceo, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev!.id] } });
+    const [person] = await made.db.select({ id: people.id }).from(people).where(eq(people.name, 'Dana'));
+    expect((await made.app.inject({ method: 'PUT', url: `/api/departments/${dev!.id}/owner`, payload: { personId: person!.id }, ...as(made.ceo) })).statusCode).toBe(200);
+    return { ...made, dev: dev!, dana };
+  }
+
+  it('tells the orchestrator who clicked when the owner of a department changes it, not the CEO', async () => {
+    const { app, builtin, dev, dana } = await ownedByDana();
+    expect((await build(app, dana, { items: [{ department: dev.id, products: ['App'] }] })).statusCode).toBe(201);
+    const note = await nextPrompt(builtin);
+    expect(note).toContain('Hornhoof applied the click of Dana, responsible for Development.');
+    expect(note).not.toContain('CEO\'s click');
+  });
+
+  it('tells the orchestrator who clicked when the owner of a department hires in it, not the CEO', async () => {
+    const { app, builtin, dev, dana } = await ownedByDana();
+    const skills = app.ctx.templates.roles.get('DEV-BE')!.skills.filter(s => s.on).map(s => s.id);
+    const hired = await app.inject({ method: 'POST', url: `/api/departments/${dev.id}/staff`, payload: { people: [{ role: 'DEV-BE', name: 'Ira', model: '', subscription: null, skills }] }, ...as(dana) });
+    expect(hired.statusCode, hired.body).toBe(201);
+    const note = await nextPrompt(builtin);
+    expect(note).toContain('Hornhoof applied the click of Dana, responsible for Development.');
+    expect(note).toContain('Hired in Development: Ira');
+    expect(note).not.toContain('CEO\'s click');
   });
 
   it('applies a proposal only once', async () => {

@@ -7,8 +7,8 @@ import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import { ownsPlace, viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
-import { requireDecision } from '../../auth/decisions.js';
-import { requireDepartmentChanger } from '../../auth/departments.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
+import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
@@ -72,9 +72,18 @@ const listed = (d: { name: string | null; template: TemplateKey | null; products
   return d.products?.length ? `${name} (products: ${d.products.join(', ')})` : name;
 };
 
+/* Whose click it was, as he reads it: the CEO's, or by name that of a person who runs these departments, or sees the whole
+   company, without being the CEO. */
+async function clickOf(db: Db, me: Person, changed: readonly { id: string; name: string | null; templateKey: TemplateKey | null }[]): Promise<string> {
+  if (actsAsCeo(me)) return 'the CEO\'s click';
+  const runs: string[] = [];
+  for (const dept of changed) if (await runsDepartment(db, me, dept.id)) runs.push(deptName(dept));
+  return `the click of ${me.name}${runs.length ? `, responsible for ${runs.join(', ')}` : ''}`;
+}
+
 /* What he reads after the click, so he goes on from there. */
-function builtNote(created: Created[], removed: Removed[], hired: Hired[], waiting: string[]): string {
-  const lines = ['Hornhoof applied the CEO\'s click.'];
+function builtNote(click: string, created: Created[], removed: Removed[], hired: Hired[], waiting: string[]): string {
+  const lines = [`Hornhoof applied ${click}.`];
   if (created.length) lines.push(`Created: ${created.map(listed).join('; ')}.`);
   if (removed.length) lines.push(`Removed: ${removed.map(listed).join('; ')}.`);
   if (hired.length) lines.push(`Hired with their departments, by the templates: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.`);
@@ -85,10 +94,10 @@ function builtNote(created: Created[], removed: Removed[], hired: Hired[], waiti
   return lines.join('\n');
 }
 
-/* What he reads after the CEO hired people, so he goes on from there. */
-function staffedNote(department: string, hired: Hired[], present: Present[]): string {
+/* What he reads after people were hired from the screen, so he goes on from there. */
+function staffedNote(click: string, department: string, hired: Hired[], present: Present[]): string {
   return [
-    'Hornhoof applied the CEO\'s click.',
+    `Hornhoof applied ${click}.`,
     hired.length ? `Hired in ${department}: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.` : `Nobody new in ${department}.`,
     ...(present.length ? [`Already there, so not hired again: ${present.map(p => p.name).join(', ')}.`] : []),
     'Continue in the CEO\'s language: say who is there now in a line or two. The department takes tasks now, through its head.',
@@ -335,7 +344,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     for (const id of result.fresh) ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id } });
     /* The orchestrator that built it reads the outcome in its tool's answer. */
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      const message = await notificationMessage(ctx, me.companyId, 'structure', builtNote(result.created, result.removed, result.hired, result.waiting), { actor: { personId: me.id } });
+      const changed = subject.source === 'proposal' && subject.departments ? await db.select().from(departments).where(inArray(departments.id, subject.departments)) : [];
+      const note = builtNote(await clickOf(db, me, changed), result.created, result.removed, result.hired, result.waiting);
+      const message = await notificationMessage(ctx, me.companyId, 'structure', note, { actor: { personId: me.id } });
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: message.text, createdBy: null, message });
     }
     reply.code(201);
@@ -463,7 +474,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null } });
     ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      const message = await notificationMessage(ctx, me.companyId, 'staffing', staffedNote(deptName(dept), result.hired, result.present), { actor: { personId: me.id } });
+      const message = await notificationMessage(ctx, me.companyId, 'staffing', staffedNote(await clickOf(db, me, [dept]), deptName(dept), result.hired, result.present), { actor: { personId: me.id } });
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: message.text, createdBy: null, message });
     }
     reply.code(201);
