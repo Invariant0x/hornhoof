@@ -51,6 +51,22 @@ export async function realDatabase(): Promise<RealDatabase> {
   return { url, admin, drop };
 }
 
+/* A copy of a database as it is now, with its connections off, as a restore leaves the database it sets aside. Every
+   other session on the one it is copied from is ended first, which a copy needs: the test closes its own pools on it
+   before, and connects anew after. A test that writes the copy turns its connections on first. */
+export async function forkDatabase(from: string, name: string): Promise<string> {
+  await onServer([
+    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${from}' AND pid <> pg_backend_pid()`,
+    `CREATE DATABASE ${name} TEMPLATE ${from}`,
+    `ALTER DATABASE ${name} WITH ALLOW_CONNECTIONS false`,
+  ]);
+  return urlOf(name);
+}
+
+/* Statements run on the server itself, outside every database of the tests. */
+export const onRealServer = onServer;
+export const realUrlOf = urlOf;
+
 /* How many sessions of a process, told apart by the name it connects with, wait for a lock right now. */
 export const sessionsWaitingOnALock = async (real: RealDatabase, name: string): Promise<number> => {
   const { rows } = await real.admin.query<{ n: number }>(

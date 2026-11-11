@@ -16,9 +16,10 @@ const KEYS = `SELECT c.relname AS "table", a.attname AS name
     JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.att
   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND i.indisprimary
   ORDER BY c.relname, k.ord`;
+/* The columns as JSON: a driver reads an array of names as one text. */
 const FOREIGN_KEYS = `SELECT f.conname AS name, c.relname AS "table", p.relname AS parent,
-    (SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(f.conkey) WITH ORDINALITY k(att, ord) JOIN pg_catalog.pg_attribute a ON a.attrelid = f.conrelid AND a.attnum = k.att) AS columns,
-    (SELECT array_agg(a.attname ORDER BY k.ord) FROM unnest(f.confkey) WITH ORDINALITY k(att, ord) JOIN pg_catalog.pg_attribute a ON a.attrelid = f.confrelid AND a.attnum = k.att) AS "parentColumns"
+    (SELECT jsonb_agg(a.attname ORDER BY k.ord) FROM unnest(f.conkey) WITH ORDINALITY k(att, ord) JOIN pg_catalog.pg_attribute a ON a.attrelid = f.conrelid AND a.attnum = k.att) AS columns,
+    (SELECT jsonb_agg(a.attname ORDER BY k.ord) FROM unnest(f.confkey) WITH ORDINALITY k(att, ord) JOIN pg_catalog.pg_attribute a ON a.attrelid = f.confrelid AND a.attnum = k.att) AS "parentColumns"
   FROM pg_catalog.pg_constraint f JOIN pg_catalog.pg_class c ON c.oid = f.conrelid JOIN pg_catalog.pg_class p ON p.oid = f.confrelid
   WHERE f.contype = 'f' AND c.relnamespace = 'public'::regnamespace AND p.relnamespace = 'public'::regnamespace
   ORDER BY c.relname, f.conname`;

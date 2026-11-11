@@ -50,6 +50,7 @@ export type Unit = {
 };
 
 const CLASS_23 = /^23/;
+const LOCK_NOT_TAKEN = '55P03';
 const TASK_NUMBERS: Record<string, string> = { tasks: 'task_numbers_used', turns: 'turn_numbers_used' };
 const ENDED_TASKS = ['done', 'cancelled'];
 const UNITS = 'merge_units';
@@ -688,6 +689,11 @@ export async function runMerge(
     const began = Date.now();
     try {
       return await db.transaction(tx => new Merge(queryOf(tx as unknown as Db), source.query, merge, opts.onUnit).run(), { isolationLevel: 'repeatable read' });
+    } catch (err) {
+      /* A session outside the gate held a table for longer than the merge waits: nothing was changed, and it is tried
+         again later. */
+      if (codeOf(err) === LOCK_NOT_TAKEN) throw new Error('Another session held a table the merge must lock, for longer than 10 s.');
+      throw err;
     } finally {
       heldMs = Date.now() - began;
     }
