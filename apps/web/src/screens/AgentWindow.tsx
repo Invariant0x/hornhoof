@@ -637,7 +637,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The orchestrator's notebook is the company's, a head's its department's. */
   const sidePanels: WindowPanel[] = [
     ...(orchestrator || headOf ? [framedPanel('notebook', t.window.notebook, NOTEBOOK_ICON, <Notebook departmentId={orchestrator ? null : headOf} />)] : []),
-    { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard me={me} agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
+    { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
   ];
 
   return (

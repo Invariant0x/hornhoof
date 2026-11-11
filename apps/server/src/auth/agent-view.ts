@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
-import { agents, subscriptions } from '../db/schema.js';
+import { agents, departments, subscriptions } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import type { MessageEnvelope, MessageParty } from '../modules/events/parties.js';
 import type { EventView } from '../modules/events/store.js';
@@ -9,8 +9,12 @@ import { actsAsCeo } from './decisions.js';
 import type { Person } from './session.js';
 
 /* Which agents a person sees. The CEO and the CEO's delegate see all of them, and so does a call from inside, whose rights
-   its own tools set. Anyone else, the owner of a department too, sees an agent only on a plan of their own in a place they
-   reach: neither alone is enough. This is the one rule; every route that shows an agent or its work asks it here.
+   its own tools set. The owner of a department sees every agent of it, its products and its sub-units, on whoever's plan:
+   the owner of the company gave them that department to run as their own, and nobody runs people they cannot see. Two
+   things stay with each plan's owner even there: typing into an agent's terminal, which works with that owner's sign-in on
+   their machine, and the plan's secrets (keys, sign-ins, codes), which no view of an agent carries. Anyone else, and the
+   owner outside their department, sees an agent only on a plan of their own in a place they reach: neither alone is
+   enough. This is the one rule; every route that shows an agent or its work asks it here.
    plans: the person's own live plans. agents: the employees that passes for now, empty for a full view. */
 export type AgentViewer = {
   full: boolean;
@@ -23,8 +27,14 @@ export type AgentViewer = {
 /* Where the agent works and the plan it runs on. A terminal passes the plan its program really lives on. */
 export type AgentPlace = { subscriptionId: string | null; spot: Spot };
 
+/* Whether the place is in a department this person owns. */
+export function ownsPlace(viewer: Pick<AgentViewer, 'access'>, spot: Spot): boolean {
+  const department = spot.parentId ?? spot.departmentId;
+  return department !== null && viewer.access.owns?.has(department) === true;
+}
+
 export function seesAgent(viewer: AgentViewer, agent: AgentPlace): boolean {
-  if (viewer.full) return true;
+  if (viewer.full || ownsPlace(viewer, agent.spot)) return true;
   return agent.subscriptionId !== null && viewer.plans.has(agent.subscriptionId) && canReach(viewer.access, agent.spot);
 }
 
@@ -42,7 +52,10 @@ export async function viewerOf(db: Db, me: Person): Promise<AgentViewer> {
   );
   const onPlans = plans.size ? await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.subscriptionId, [...plans]))) : [];
   const seen = await Promise.all(onPlans.map(async a => (canReach(access, await agentSpot(db, a)) ? [a.id] : [])));
-  return { full: false, personId: me.id, access, plans, agents: new Set(seen.flat()) };
+  /* Every agent of an owned department, of its products and of its sub-units, placed there or in a sub-unit itself. */
+  const units = access.owns?.size ? [...access.owns, ...(await db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, [...access.owns]))).map(d => d.id)] : [];
+  const owned = units.length ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.departmentId, units))) : [];
+  return { full: false, personId: me.id, access, plans, agents: new Set([...seen.flat(), ...owned.map(a => a.id)]) };
 }
 
 type AgentRow = Pick<typeof agents.$inferSelect, 'companyId' | 'subscriptionId' | 'departmentId' | 'productId' | 'teamId'>;
@@ -53,7 +66,7 @@ export async function canViewAgent(db: Db, me: Person, agent: AgentRow, planId: 
   return seesAgent(await viewerOf(db, me), { subscriptionId: planId, spot: await agentSpot(db, agent) });
 }
 
-export const agentHidden = () => new ApiError(403, 'forbidden', 'This employee is not on a plan of yours in a department you have.', 'agent_hidden');
+export const agentHidden = () => new ApiError(403, 'forbidden', 'This employee is not on a plan of yours in a department you have, nor in a department you own.', 'agent_hidden');
 
 export async function requireAgentView(db: Db, me: Person, agent: AgentRow, planId: string | null = agent.subscriptionId): Promise<void> {
   if (!(await canViewAgent(db, me, agent, planId))) throw agentHidden();

@@ -24,7 +24,7 @@ import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
-import { subView } from '../subscriptions/views.js';
+import { keyEndFor, subView } from '../subscriptions/views.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }, roleEffort?: string): string | null {
@@ -178,7 +178,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             /* How often it wakes on its timer, in minutes. */
             timer: a.timerMinutes,
             /* Like the department's current task, only for people who reach it. */
-            task: now.task && seesTask(viewer, now.task) ? { id: now.task.id, number: now.task.number, title: now.task.title, echelons: shownEchelons(viewer, snapshots.get(now.task.id)!) } : null,
+            task: now.task && seesTask(viewer, now.task) ? { id: now.task.id, number: now.task.number, title: now.task.title, echelons: shownEchelons(viewer, snapshots.get(now.task.id)!, now.task.departmentId) } : null,
           };
         });
     /* The roles a department's employees hold, with the gate each one keeps, for the department's schema. */
@@ -227,7 +227,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         held: holds.get(orchestrator.id)!,
-        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
+        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
       agents: { total: allAgents.length, working: await workingSeen(db, me.companyId, viewer) },

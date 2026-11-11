@@ -16,8 +16,8 @@ import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { setUrgent } from './urgency.js';
-import { answersCeoOrDelegate } from '../conversation/decision-context.js';
-import { ONLY_CEO } from '../tools/control.js';
+import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
+import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
@@ -99,7 +99,7 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 const Mode = z.enum(TURN_MODES).describe('How the turn runs: echelons, where code work goes through Architecture, Development, Review, Security and Tests, or turnkey, where one member of a turnkey team does the whole turn alone.');
 const TurnWords = z
@@ -269,13 +269,14 @@ class TaskTools {
     return settled && orchestratorId === this.job.agentId ? `${text} ${settled.note}` : text;
   }
 
-  /* Only the CEO or delegate answered in this turn can make work urgent. */
-  private async forCeoAlone(): Promise<void> {
-    if (!(await answersCeoOrDelegate(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+  /* Only the CEO or delegate answered in this turn can make work urgent, or the owner of the department it is in. */
+  private async urgentBy(departmentId: string | null): Promise<void> {
+    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
   }
 
-  private async urgentFromCeo(items: { urgent?: boolean | undefined }[]): Promise<void> {
-    if (items.some(item => item.urgent)) await this.forCeoAlone();
+  private async urgentFromCeo(items: { department: string; urgent?: boolean | undefined }[]): Promise<void> {
+    for (const department of new Set(items.filter(item => item.urgent).map(item => item.department))) await this.urgentBy(department);
   }
 
   private async underQuestionCap(): Promise<void> {
@@ -422,7 +423,7 @@ class TaskTools {
             .enum(DECISION_TOPICS)
             .optional()
             .describe(
-              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; people, access, subscriptions, machines, repositories, public_link, updates or release for what only the CEO decides. Name it on every question; without it the CEO answers.',
+              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; repositories or release for your department\'s repository and releases, which its owner answers, or the CEO when it has none; people, access, subscriptions, machines, public_link or updates for what only the CEO decides. Name it on every question; without it the CEO answers.',
             ),
         },
       },
@@ -536,13 +537,13 @@ class TaskTools {
       'set_urgent',
       {
         description:
-          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO or the CEO delegate says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>
         this.run(async () => {
-          await this.forCeoAlone();
           const { agent, task } = await this.find(ref);
+          await this.urgentBy(task.departmentId);
           const moved = await setUrgent(this.ctx, { agentId: agent.id }, task.id, urgent);
           return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),

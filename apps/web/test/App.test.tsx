@@ -66,6 +66,31 @@ describe('App', () => {
     expect(window.location.pathname).toBe('/');
   });
 
+  /* The invite link is the one link a person who joined has, so it still leads in once it is used. */
+  async function fromUsedInvite(me: [number, unknown]) {
+    window.history.replaceState(null, '', '/invite/old');
+    mockApi({
+      'GET /api/invites/old': [410, { error: { code: 'gone', message: 'This invite has already been used or has expired. Ask for a new one.' } }],
+      'GET /api/setup': [200, { needed: false }],
+      'GET /api/me': me,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Go to the company' }));
+  }
+
+  it('opens the workspace from a used invite link for a signed-in person', async () => {
+    await fromUsedInvite([200, ME]);
+    expect(await screen.findByText('Acme')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('opens log in from a used invite link for a signed-out person', async () => {
+    await fromUsedInvite([401, signedOut]);
+    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+  });
+
   it('opens the workspace for a signed-in person', async () => {
     mockApi({ 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [200, ME] });
     render(<App />);

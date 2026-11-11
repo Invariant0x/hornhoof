@@ -4,14 +4,15 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
-import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
+import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
+import { actorOf, changedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
-import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
+import { keyEndFor, subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -56,8 +57,9 @@ export type AgentCard = FailureState & {
   /* Its latest turns a node restart cut off: why, when, on which node (none for the built-in one) and task, and whether the
      turn was a retry already. */
   interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
-  /* The whole company or the agent's department may change it; only the whole company removes it. */
+  /* The whole company or the agent's department may change it; the whole company or the department's owner removes it. */
   canEdit: boolean;
+  canRemove: boolean;
   /* Off for now: it takes no task turns. */
   on: boolean;
   /* Wakes every so many minutes to do its order, and with forWork only while there is work to look at; lastAt is when the
@@ -228,7 +230,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const online: IsOnline = node => hub.isOnline(node);
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
-  const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, v]));
+  const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
   /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
      counts all the same in what every turn sends. */
@@ -274,6 +276,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
     interrupted: interrupted.map(interruptedView),
     canEdit: await mayEdit(ctx, me, agent),
+    canRemove: me.scopeKind === 'company' || (await runsDepartment(db, me, agent.departmentId)),
     on: !agent.switchedOffAt,
     timer: timerOf(agent),
     telegram: await telegramOf(db, agent.id),
@@ -503,10 +506,11 @@ async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise
   return card(ctx, reset, me);
 }
 
-/* An employee leaves the company: its history stays, its waiting turns end. Never while it works, never the orchestrator. */
+/* An employee leaves the company: its history stays, its waiting turns end. Never while it works, never the orchestrator.
+   The whole company removes any, a department's owner those of their department. */
 async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: FastifyReply) {
   const { db } = ctx;
-  requireCompanyScope(me);
+  await requireDepartmentChanger(db, me, found.departmentId);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {
     const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);

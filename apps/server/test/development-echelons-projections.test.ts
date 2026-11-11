@@ -40,5 +40,24 @@ describe('one public task snapshot', () => {
     expect(route).toMatchObject({ stage: 'review', ownerAgentId: null, candidateId: null, assignment: null });
     expect(JSON.stringify(route)).not.toContain(f.reviewer.id);
   });
+  it('gives the owner of the task\'s department its checker and candidate, as the CEO reads them, in every projection', async () => {
+    const f = await fixture();
+    const token = await invitePerson(f.app, f.ceoToken, { name: 'Owner', email: 'owner@acme.com', access: { departments: [f.author.departmentId!] } });
+    const people = (await f.app.inject({ url: '/api/people', ...as(f.ceoToken) })).json().people as { id: string; name: string }[];
+    const owner = await f.app.inject({ method: 'PUT', url: `/api/departments/${f.author.departmentId}/owner`, payload: { personId: people.find(p => p.name === 'Owner')!.id }, ...as(f.ceoToken) });
+    expect(owner.statusCode).toBe(200);
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Changed source.', review: { baseCommit: BASE } });
+    const read = async (as_: string) => {
+      const request = (url: string) => f.app.inject({ url, ...as(as_) });
+      const detail = (await request(`/api/tasks/${f.task.id}`)).json().task;
+      const line = (await request(`/api/tasks?department=${f.task.departmentId}`)).json().tasks.find((row: { id: string }) => row.id === f.task.id);
+      const org = (await request('/api/org')).json();
+      const reviewer = org.departments.flatMap((d: { employees: { id: string; task: { echelons: unknown } }[] }) => d.employees).find((a: { id: string }) => a.id === f.reviewer.id);
+      return [detail.echelons, line.echelons, reviewer.task.echelons];
+    };
+    const ceo = await read(f.ceoToken);
+    expect(ceo[0]).toMatchObject({ stage: 'review', ownerAgentId: f.reviewer.id, candidateId: expect.any(String) });
+    expect(await read(token)).toEqual(ceo);
+  });
 
 });

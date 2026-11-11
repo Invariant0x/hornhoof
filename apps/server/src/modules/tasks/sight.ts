@@ -2,7 +2,7 @@ import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/e
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canReach } from '../../auth/access.js';
-import { seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
+import { ownsPlace, seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { tasks } from '../../db/schema.js';
 import { taskSpot, type Task } from './engine.js';
 import type { TreeFacts } from './tree.js';
@@ -37,25 +37,34 @@ function shownIndependent(viewer: AgentViewer, part: TaskLine['independentPart']
   return shownRef(viewer, part.executor) ? part : null;
 }
 
-/* Route history is shared, but hidden employees and repository candidates remain private. */
-export function shownEchelons(viewer: AgentViewer, route: EchelonsSnapshot): EchelonsSnapshot {
+/* Whether this person owns the department the task is in (its products' tasks name it too), and so reads its repository
+   side, as the rest of that department. */
+const ownsTaskDepartment = (viewer: AgentViewer, departmentId: string | null | undefined): boolean =>
+  Boolean(departmentId) && ownsPlace(viewer, { departmentId: departmentId! });
+
+/* Route history is shared, but hidden employees and repository candidates remain private: the candidates to the whole
+   company's view and to the owner of the task's department. */
+export function shownEchelons(viewer: AgentViewer, route: EchelonsSnapshot, departmentId: string | null): EchelonsSnapshot {
   if (viewer.full) return route;
   const owner = (id: string | null) => seesAgentId(viewer, id) ? id : null;
-  return { ...route, ownerAgentId: owner(route.ownerAgentId), candidateId: null, assignment: null,
+  const own = ownsTaskDepartment(viewer, departmentId);
+  const candidate = (id: string | null) => (own ? id : null);
+  return { ...route, ownerAgentId: owner(route.ownerAgentId), candidateId: candidate(route.candidateId),
+    assignment: own && route.assignment && seesAgentId(viewer, route.assignment.agentId) ? route.assignment : null,
     security: { ...route.security, addedBy: owner(route.security.addedBy) },
-    stages: route.stages.map(step => ({ ...step, ownerAgentId: owner(step.ownerAgentId), inputCandidateId: null, candidateId: null })),
+    stages: route.stages.map(step => ({ ...step, ownerAgentId: owner(step.ownerAgentId), inputCandidateId: candidate(step.inputCandidateId), candidateId: candidate(step.candidateId) })),
   };
 }
 
 /* A person who sees the task reads how many findings each stage reported and confirmed, never what they say: their paths,
-   lines, harm, commits and candidates are the repository's. */
-function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: string; count: number; findingIds: string[] }[] }>(viewer: AgentViewer, findings: T): T {
-  if (viewer.full) return findings;
+   lines, harm, commits and candidates are the repository's. The owner of the task's department reads them whole. */
+function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: string; count: number; findingIds: string[] }[] }>(viewer: AgentViewer, findings: T, departmentId: string | null): T {
+  if (viewer.full || ownsTaskDepartment(viewer, departmentId)) return findings;
   return { ...findings, issues: [], ...(findings.byVendor ? { byVendor: findings.byVendor.map(vendor => ({ ...vendor, findingIds: [] })) } : {}) };
 }
 
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, echelons: shownEchelons(viewer, line.echelons), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
+  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
 }
 
 /* Task lines as this person reads them. */
@@ -91,7 +100,7 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   const sees = (id: string | undefined) => seesAgentId(viewer, id);
   return {
     ...maskLine(viewer, detail, detail.parent !== null),
-    echelonFindings: shownFindings(viewer, detail.echelonFindings),
+    echelonFindings: shownFindings(viewer, detail.echelonFindings, detail.department?.id ?? null),
     executor: shownRef(viewer, detail.executor),
     createdBy: detail.createdBy?.kind === 'agent' && !sees(detail.createdBy.id) ? null : detail.createdBy,
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
@@ -108,13 +117,14 @@ export async function detailFor(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | '
 }
 
 /* The facts a department's tree is drawn from, of the agents this person sees: a line, a review or a wait with anyone else
-   at its end is not drawn, and a move someone else made says only that it happened. */
-export function factsFor(viewer: AgentViewer, facts: TreeFacts): TreeFacts {
+   at its end is not drawn, and a move someone else made says only that it happened. departmentId: the department its
+   tasks are in. */
+export function factsFor(viewer: AgentViewer, facts: TreeFacts, departmentId: string): TreeFacts {
   if (viewer.full) return facts;
   const sees = (id: string | null | undefined) => seesAgentId(viewer, id);
   return {
     ...facts,
-    tasks: facts.tasks.map(t => ({ ...t, echelons: shownEchelons(viewer, t.echelons), echelonFindings: shownFindings(viewer, t.echelonFindings), waits: t.waits ? maskWaits(viewer, t.waits) : [] })),
+    tasks: facts.tasks.map(t => ({ ...t, echelons: shownEchelons(viewer, t.echelons, departmentId), echelonFindings: shownFindings(viewer, t.echelonFindings, departmentId), waits: t.waits ? maskWaits(viewer, t.waits) : [] })),
     agents: facts.agents.filter(a => sees(a.id)),
     events: facts.events.map(e => (sees(e.agentId) ? e : { ...e, text: '' })),
     requests: facts.requests.filter(r => sees(r.agentId)),

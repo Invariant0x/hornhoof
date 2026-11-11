@@ -5,6 +5,7 @@ import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
+import { keyEndFor, subView } from '../src/modules/subscriptions/views.js';
 import { failureCompany } from './failure-company.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
@@ -90,6 +91,23 @@ describe('GET /api/org', () => {
     expect(org.people.map((p: { name: string }) => p.name)).toEqual(['Ivan']);
     expect(org.departments).toEqual([]);
     expect((await app.inject({ url: '/api/org' })).statusCode).toBe(401);
+  });
+
+  it('gives the end of the orchestrator\'s key only to people who see the whole company or own its plan', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 1 }).returning();
+    const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
+    expect((await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.subscription.last4).toBe('9f3a');
+    expect((await app.inject({ url: '/api/org', ...as(ann) })).body).not.toContain('9f3a');
+    /* Whoever the plan reaches, the same rule as on an employee's card. */
+    const [plan] = await db.select().from(subscriptions);
+    const view = (await subView(db, () => false, plan!.id))!;
+    const [owner] = await db.select().from(people).where(eq(people.id, plan!.ownerPersonId));
+    expect(keyEndFor({ id: 'someone', scopeKind: 'listed' }, view).last4).toBeNull();
+    expect(keyEndFor({ id: 'someone', scopeKind: 'company' }, view).last4).toBe('9f3a');
+    expect(keyEndFor({ id: owner!.id, scopeKind: 'listed' }, view).last4).toBe('9f3a');
   });
 
   it("says until when the orchestrator's plan is at its limit, and nothing once it is not", async () => {

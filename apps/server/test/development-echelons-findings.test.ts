@@ -48,4 +48,19 @@ describe('immutable echelon finding provenance', () => {
     expect(JSON.stringify(findings(shown))).not.toContain(issue.harm);
     expect((shown.echelonFindings as { byVendor?: { findingIds: string[] }[] }).byVendor?.every(vendor => vendor.findingIds.length === 0)).toBe(true);
   });
+  /* The owner of the task's department reads its findings whole, as the rest of the department; the owner of another one does not. */
+  it('shows the owner of the task\'s department its findings with their details', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, code);
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, reviewedCommit: HEAD, comment: 'Fixing the boundary.', issues: [{ ...issue, blocking: true }] });
+    const task = await loadTask(f.db, f.task.id);
+    const owning = (department: string): AgentViewer => ({ full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!, department]), teams: new Set(), owns: new Set([department]) }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]) });
+    const whole = findings(await f.detail());
+    const shown = await detailFor(f.ctx, owning(task.departmentId!), task);
+    expect(findings(shown)).toEqual(whole);
+    expect(JSON.stringify(findings(shown))).toContain(issue.harm);
+    const elsewhere = await detailFor(f.ctx, owning('d0000000-0000-4000-8000-000000000009'), task);
+    expect(findings(elsewhere).issues).toEqual([]);
+    expect(elsewhere.echelons.candidateId).toBeNull();
+  });
 });

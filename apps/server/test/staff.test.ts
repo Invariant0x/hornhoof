@@ -190,7 +190,7 @@ describe('staffing', () => {
     expect(await c.db.select().from(agents).where(eq(agents.kind, 'head'))).toHaveLength(1);
   });
 
-  it('refuses hiring to people without the whole company and a line without its locked skills', async () => {
+  it('refuses hiring to people without the whole company or the department, and a line without its locked skills', async () => {
     const c = await company();
     const [oleg] = await c.db.select().from(people).where(eq(people.name, 'Oleg'));
     const olegToken = await (async () => {
@@ -200,7 +200,7 @@ describe('staffing', () => {
       return accepted.cookies.find(k => k.name === 'hh_session')!.value;
     })();
     const line = { role: 'DEV-BE', name: 'Bruno', model: '', subscription: null, skills: ['dev-implement'] };
-    expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('company_scope_only');
+    expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('department_owner_only');
     const res = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
     expect(res.json().error.reason).toBe('staff_invalid');
     expect(res.json().error.message).toContain('hh-hornhoof');

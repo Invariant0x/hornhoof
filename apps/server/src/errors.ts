@@ -9,6 +9,7 @@ export type ErrorReason =
   | 'signed_out'
   | 'cross_site'
   | 'company_scope_only'
+  | 'department_owner_only'
   | 'decision_not_allowed'
   | 'owner_ceo_only'
   | 'owner_no_access'
@@ -195,5 +196,7 @@ export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback)
     req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');
     return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong.' } });
   });
-  app.setNotFoundHandler(async (req, reply) => (await fallback?.(req, reply)) ?? reply.status(404).send(body('not_found', 'Not found.')));
+  /* A fallback that answers gives back the reply, which waits for the answer to end and then gives nothing. So it is not
+     awaited here, or a 404 would follow the page already sent. */
+  app.setNotFoundHandler((req, reply) => fallback?.(req, reply) ?? reply.status(404).send(body('not_found', 'Not found.')));
 }

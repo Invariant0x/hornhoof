@@ -151,6 +151,7 @@ const BRUNO_CARD: AgentCardView = {
   interrupted: [],
   timer: { minutes: 120, order: 'Check PRs', forWork: false, lastAt: null },
   canEdit: true,
+  canRemove: true,
 };
 
 async function serveSelectScreens(page: Page) {

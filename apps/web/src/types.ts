@@ -169,7 +169,7 @@ export type Department = {
   /* What it works on now, for people who reach it. */
   current?: { id: string; number: number; title: string } | null;
   repository?: Repository | null;
-  /* The person who takes its approvals; none means the CEO. */
+  /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
   ownerPersonId?: string | null;
 };
 
@@ -285,6 +285,8 @@ export type AgentCardView = {
   interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
+  /* The whole company or the owner of its department removes it. */
+  canRemove: boolean;
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
   /* forWork: it skips a round while every open task waits on purpose and nothing failed since the last one. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;

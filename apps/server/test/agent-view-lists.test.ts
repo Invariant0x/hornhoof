@@ -12,10 +12,12 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 describe('what waits for people', () => {
   const question = (c: AclCompany, agent: { id: string }, taskId: string, text: string) => ask(c.app.ctx, agent.id, taskId, { text, kind: 'question', topic: 'task' });
-  /* What Olga's department policy asks her to approve, from an agent she does not see. */
-  async function approval(c: AclCompany) {
+  /* What Olga's department policy asks her to approve, from an agent of her department on Bob's plan. As a question about
+     its work, it is Ann's too, who is of the department and does not see that agent. */
+  async function approval(c: AclCompany, kind: 'approval' | 'question' = 'approval') {
     const task = await c.work('Secret launch', c.crew.other);
-    const { request } = await ask(c.app.ctx, c.crew.other.id, task.id, { text: 'May this go out?', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 12 }, link: 'https://x.test/task-secret' });
+    const asked = kind === 'approval' ? { kind, approval: { channel: 'spend' as const, kind: 'ads', amount: 12 } } : { kind, topic: 'task' as const };
+    const { request } = await ask(c.app.ctx, c.crew.other.id, task.id, { text: 'May this go out?', ...asked, link: 'https://x.test/task-secret' });
     const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
     const [neighbour] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, name: 'neighbour.bin', mediaType: 'application/octet-stream', bytes: PNG, size: PNG.length }).returning();
     return { task, request, picture: picture!, neighbour: neighbour! };
@@ -39,37 +41,49 @@ describe('what waits for people', () => {
     expect((await answer(c, hidden.id, c.tokens.ann, { answer: 'Mine now' })).statusCode).toBe(403);
   });
 
-  it('gives the owner of a department a decision of a hidden agent by a whitelist, with no task and no agent', async () => {
+  it('gives the owner of a department a decision of its employee on another\'s plan with its task and agent, as she sees them all', async () => {
     const c = await aclCompany();
     const { task, request, picture } = await approval(c);
     const res = await c.get('/api/requests', c.tokens.olga);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().addressed).toEqual([]);
+    expect(res.json().requests).toMatchObject([{ id: request.id, kind: 'approval', canAnswer: true, ownerPersonId: c.ids.olga, images: [picture.id], agent: { id: c.crew.other.id, name: 'Otto' }, task: { id: task.id } }]);
+    expect(res.json().counts.total).toBe(1);
+    expect(res.json().counts.byAgent).toEqual({ [c.crew.other.id]: 1 });
+    expect((await c.get(`/api/tasks/${task.id}`, c.tokens.olga)).statusCode).toBe(200);
+    expect((await answer(c, request.id, c.tokens.olga, { approve: true })).json().request).toMatchObject({ id: request.id, status: 'approved' });
+  });
+
+  it('gives a decision of a hidden agent by a whitelist to a person of its department, with no task and no agent', async () => {
+    const c = await aclCompany();
+    const { task, request, picture } = await approval(c, 'question');
+    const res = await c.get('/api/requests', c.tokens.ann);
     expect(res.statusCode).toBe(200);
     expect(res.json().requests).toEqual([]);
     const [line, ...rest] = res.json().addressed;
     expect(rest).toEqual([]);
     expect(Object.keys(line).sort()).toEqual(['approval', 'at', 'canAnswer', 'commit', 'decidedBy', 'id', 'images', 'kind', 'options', 'ownerPersonId', 'text'].sort());
-    expect(line).toMatchObject({ id: request.id, kind: 'approval', text: 'May this go out?', canAnswer: true, ownerPersonId: c.ids.olga, images: [picture.id], approval: { channel: 'spend', kind: 'ads', amount: 12 }, commit: null });
+    expect(line).toMatchObject({ id: request.id, kind: 'question', text: 'May this go out?', canAnswer: true, ownerPersonId: c.ids.olga, images: [picture.id], approval: null, commit: null });
     expect(leaks(res, [c.crew.other, c.crew.head])).toEqual([]);
     for (const word of [...taskWords(task), 'task-secret']) expect(res.body).not.toContain(word);
-    expect(res.json().counts.total).toBe(1);
     expect(res.json().counts.byAgent).toEqual({});
   });
 
-  it('lets that owner answer and read only its own picture, and nothing around it', async () => {
+  it('lets that person answer and read only its own picture, and nothing around it', async () => {
     const c = await aclCompany();
-    const { task, request, picture, neighbour } = await approval(c);
-    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(200);
-    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.olga)).statusCode).toBe(404);
-    expect((await c.get(`/api/tasks/${task.id}`, c.tokens.olga)).statusCode).toBe(403);
-    expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.olga)).statusCode).toBe(403);
-    expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.olga)).statusCode).toBe(403);
-    const list = (await c.get(`/api/tasks?status=all&department=${c.dev.id}`, c.tokens.olga)).body;
+    const { task, request, picture, neighbour } = await approval(c, 'question');
+    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.ann)).statusCode).toBe(200);
+    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.ann)).statusCode).toBe(404);
+    expect((await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).statusCode).toBe(403);
+    expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.ann)).statusCode).toBe(403);
+    expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.ann)).statusCode).toBe(403);
+    const list = (await c.get(`/api/tasks?status=all&department=${c.dev.id}`, c.tokens.ann)).body;
     expect(list).not.toContain(task.title);
     /* The stream listens from the moment it answers: the server takes the bus in the same step it sends the headers. */
-    const stream = await openStream(c.app, c.tokens.olga);
-    const answered = await answer(c, request.id, c.tokens.olga, { approve: true });
+    const stream = await openStream(c.app, c.tokens.ann);
+    const answered = await answer(c, request.id, c.tokens.ann, { answer: 'This way' });
     expect(answered.statusCode).toBe(200);
-    expect(answered.json().request).toMatchObject({ id: request.id, status: 'approved' });
+    expect(answered.json().request).toMatchObject({ id: request.id, status: 'answered' });
     for (const word of taskWords(task)) expect(answered.body).not.toContain(word);
     expect(leaks(answered, [c.crew.other, c.crew.head])).toEqual([]);
     c.app.ctx.bus.publish(c.companyId, { type: 'org' });
@@ -79,21 +93,22 @@ describe('what waits for people', () => {
     expect(heard).not.toMatch(new RegExp(`Otto|${c.crew.other.id}`));
     stream.close();
     /* Answered, it is nobody's to take: gone from the list, no second answer, its picture closed to someone who only answered. */
-    expect((await c.get('/api/requests', c.tokens.olga)).json().addressed).toEqual([]);
-    const again = await answer(c, request.id, c.tokens.olga, { approve: false });
+    expect((await c.get('/api/requests', c.tokens.ann)).json().addressed).toEqual([]);
+    const again = await answer(c, request.id, c.tokens.ann, { answer: 'That way' });
     expect(again.statusCode).toBe(409);
     for (const word of taskWords(task)) expect(again.body).not.toContain(word);
-    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(404);
+    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.ann)).statusCode).toBe(404);
   });
 
   it('takes the decision away from an owner who is one no more', async () => {
     const c = await aclCompany();
     const { request, picture } = await approval(c);
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/owner`, payload: { personId: c.ids.ann }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
-    expect((await c.get('/api/requests', c.tokens.olga)).json().addressed).toEqual([]);
+    expect((await c.get('/api/requests', c.tokens.olga)).json()).toMatchObject({ requests: [], addressed: [] });
     expect((await answer(c, request.id, c.tokens.olga, { approve: true })).statusCode).toBe(403);
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(404);
-    expect((await c.get('/api/requests', c.tokens.ann)).json().addressed.map((r: { id: string }) => r.id)).toEqual([request.id]);
+    /* The new owner sees the department's people, and reads it with its work. */
+    expect((await c.get('/api/requests', c.tokens.ann)).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
   });
 
   it('gives an outsider nothing of it: not to see, not to answer', async () => {
@@ -176,12 +191,13 @@ describe('a long text kept as a file of its task', () => {
     const task = await c.work('Hidden work', c.crew.other);
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, WORDS);
     const url = `/api/attachments/${await fileOf(c, task.id)}`;
-    for (const token of [c.tokens.ann, c.tokens.olga, c.tokens.wes]) {
+    for (const token of [c.tokens.ann, c.tokens.wes]) {
       const res = await c.get(url, token);
       expect(res.statusCode).toBe(404);
       expect(res.body).not.toContain('Private long words');
     }
-    for (const token of [c.tokens.ceo, c.tokens.lisa]) expect((await c.get(url, token)).body).toBe(WORDS);
+    /* The owner of the department sees its every employee, and their work with them. */
+    for (const token of [c.tokens.ceo, c.tokens.lisa, c.tokens.olga]) expect((await c.get(url, token)).body).toBe(WORDS);
   });
 
   it('stays closed on a task the person sees when a hidden agent wrote it', async () => {
@@ -412,7 +428,8 @@ describe('pictures', () => {
     const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, personId: c.ids.bob, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.bob)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.lisa)).statusCode).toBe(200);
-    for (const viewer of ['ann', 'olga', 'wes'] as const) expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens[viewer])).statusCode).toBe(404);
+    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga)).statusCode).toBe(200);
+    for (const viewer of ['ann', 'wes'] as const) expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens[viewer])).statusCode).toBe(404);
     expect((await c.get('/api/attachments/00000000-0000-4000-8000-000000000000', c.tokens.ann)).statusCode).toBe(404);
   });
 

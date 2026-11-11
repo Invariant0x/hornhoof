@@ -7,19 +7,20 @@ import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 type Viewer = keyof AclCompany['tokens'];
 type Crew = keyof AclCompany['crew'];
 
-/* Who gets each agent's own data; everyone else gets 403. Olga owns Development and is no different from Ann. */
+/* Who gets each agent's own data; everyone else gets 403. Olga owns Development and sees every agent of it, on whoever's plan;
+   in Sales she is no different from Ann. */
 const SEEN: Record<Viewer, Crew[]> = {
   ceo: ['mine', 'other', 'away', 'far', 'head', 'owned', 'wide', 'deputy'],
   lisa: ['mine', 'other', 'away', 'far', 'head', 'owned', 'wide', 'deputy'],
   ann: ['mine'],
   bob: ['other', 'head'],
-  olga: ['owned'],
+  olga: ['mine', 'other', 'head', 'owned'],
   wes: ['wide'],
 };
 const VIEWERS = Object.keys(SEEN) as Viewer[];
 
 describe('one agent', () => {
-  it('opens to the owner of its plan who reaches its department, and to the CEO and the delegate', async () => {
+  it('opens to the owner of its plan who reaches its department, to the owner of its department, and to the CEO and the delegate', async () => {
     const c = await aclCompany();
     const got: Record<string, Record<string, number>> = {};
     for (const viewer of VIEWERS) {
@@ -132,7 +133,8 @@ describe('the company map', () => {
     const org = async (viewer: Viewer) => (await c.get('/api/org', c.tokens[viewer])).json();
     expect(namesOf(await org('ann'), c.dev.id)).toEqual(['Mina']);
     expect(namesOf(await org('ann'), c.sales.id)).toEqual([]);
-    expect(namesOf(await org('olga'), c.dev.id)).toEqual(['Oleg']);
+    expect(namesOf(await org('olga'), c.dev.id)).toEqual(['Hana', 'Mina', 'Oleg', 'Otto']);
+    expect(namesOf(await org('olga'), c.sales.id)).toEqual([]);
     expect(namesOf(await org('wes'), c.sales.id)).toEqual(['Wanda']);
     for (const viewer of ['ceo', 'lisa'] as const) {
       expect(namesOf(await org(viewer), c.dev.id)).toEqual(['Hana', 'Mina', 'Oleg', 'Otto']);
@@ -258,12 +260,14 @@ describe('tasks', () => {
     expect(whole.json().task.parent.id).toBe(parent.id);
   });
 
-  it('keeps to the agent it was given by the person who gave it, not by the department alone', async () => {
+  it('keeps to the agent it was given by the person who gave it, not by the department alone, outside a department one owns', async () => {
     const c = await aclCompany();
     const hidden = await c.work('Hidden work', c.crew.other);
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.olga)).statusCode).toBe(403);
+    const far = await c.work('Far work', c.crew.far, c.sales.id);
     expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.wes)).statusCode).toBe(403);
     expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.bob)).statusCode).toBe(200);
+    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.olga)).statusCode).toBe(200);
+    expect((await c.get(`/api/tasks/${far.id}`, c.tokens.olga)).statusCode).toBe(403);
   });
 });
 
@@ -290,11 +294,12 @@ describe('the department tree', () => {
     expect(whole.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
   });
 
-  it('keeps the numbers of a whole department from anyone but the CEO and the delegate', async () => {
+  it('keeps the numbers of a whole department from anyone but the CEO, the delegate and its owner', async () => {
     const c = await aclCompany();
     await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date() });
-    for (const viewer of ['ann', 'olga', 'wes'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(403);
-    for (const viewer of ['ceo', 'lisa'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(200);
+    for (const viewer of ['ann', 'wes'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(403);
+    for (const viewer of ['ceo', 'lisa', 'olga'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(200);
+    expect((await c.get(`/api/departments/${c.sales.id}/pipeline`, c.tokens.olga)).statusCode).toBe(403);
   });
 });
 

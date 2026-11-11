@@ -320,13 +320,13 @@ describe('the employee card', () => {
     expect(org.departments[0].employees[0].effort).toBe('xhigh');
   });
 
-  it('lets someone of the department who owns the plan change an employee, and only the whole company remove them', async () => {
+  it('lets someone of the department who owns the plan change an employee, and only the whole company or the department\'s owner remove them', async () => {
     const { app, db, ceo, oleg, sales, brunoId } = await company();
     await ownPlan(db, 'oleg@acme.com', brunoId);
     expect((await open(app, oleg, brunoId)).json().canEdit).toBe(true);
     expect((await patch(app, oleg, brunoId, { name: 'Bob' })).json().name).toBe('Bob');
     expect((await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(oleg) })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(oleg) })).json().error.reason).toBe('company_scope_only');
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(oleg) })).json().error.reason).toBe('department_owner_only');
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     expect((await open(app, maria, brunoId)).json().error.reason).toBe('agent_hidden');
   });
