@@ -96,7 +96,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
     /* Migrations could part the shapes of the two databases a merge reads. */
     if (await ctx.merger.pending()) {
-      throw new ApiError(409, 'conflict', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Settings.', 'merge_pending');
+      throw new ApiError(409, 'conflict', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Company settings.', 'merge_pending');
     }
     const id = randomUUID();
     claimUpdater(ctx, id);

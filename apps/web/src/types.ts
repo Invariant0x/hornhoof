@@ -503,6 +503,8 @@ export type Decisions = {
   proposals: ProposalDecision[];
   /* The orchestrator's requests for machines. A server from before machines had access of their own sends none. */
   machineAccess?: ComputerAccessDecision[];
+  /* What merges left for the CEO alone. A server from before merges sends none. */
+  merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
@@ -574,14 +576,28 @@ export type BackupBundle = {
   restorable: boolean;
   why: 'newer_build' | 'not_held' | 'needs_recovery_file' | null;
 };
+export type KeptMerge = { id: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; added: number; conflicts: number; error: string | null };
+
+/* A merge that left the CEO something to settle. after: the time of the backup a restore went back to, when the merge
+   is of the database that restore set aside. */
+export type MergeDecision = { id: string; label: string; after: string | null; open: number };
+export type MergeTopic = 'people' | 'access' | 'plans' | 'machines' | 'protected' | 'work';
+/* What a merge could not prove of one row, with both values in plain words; a secret is never among them. */
+export type MergeConflict = {
+  id: string; merge: string; label: string; table: string; topic: MergeTopic; what: string; kind: string; cols: string[];
+  here: Record<string, string> | null; there: Record<string, string> | null; at: string | null;
+  task: { id: string; number: number; title: string } | null; whose: 'orchestrator' | 'ceo'; picked: 'here' | 'there' | 'value' | null;
+};
+export type MergePicked = { settled: number; here: number; there: number; refused: { id: string; why: string }[]; tasks: { id: string; number: number }[] };
+
 export type BackupsView = {
   last: string | null;
   recovery: { madeAt: string; madeBy: string } | null;
   recoveryNeeded: boolean;
   linkChanged: boolean;
   restore: RestoreStatus | null;
-  /* The databases restores replaced and kept on the server. */
-  kept: { name: string; at: string }[];
+  /* The databases restores replaced and kept on the server, each with how far the bringing back of what it holds got. */
+  kept: { name: string; at: string; merge?: KeptMerge | null }[];
   bundles: BackupBundle[];
 };
 /* What a restore to a backup's time undoes. */

@@ -287,8 +287,9 @@ export function accessView(name: string, over: Partial<Omit<ComputerAccessView, 
 
 /* What GET /api/requests answers: the requests, the orchestrator's cards and his requests for machines, counted per
    owner and per asking agent as the server counts them. */
-export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'machineAccess'>> = {}): Decisions {
-  const all = { proposals: [], machineAccess: [], ...more };
+export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'machineAccess' | 'merges'>> = {}): Decisions {
+  const { merges = [], ...given } = more;
+  const all = { proposals: [], machineAccess: [], ...given };
   const items = [...requests, ...all.proposals, ...all.machineAccess];
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
@@ -296,7 +297,7 @@ export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisio
     byPerson[i.ownerPersonId] = (byPerson[i.ownerPersonId] ?? 0) + 1;
     byAgent[i.agent.id] = (byAgent[i.agent.id] ?? 0) + 1;
   }
-  return { requests, ...all, counts: { byPerson, byAgent, total: items.length } };
+  return { requests, ...all, merges, counts: { byPerson, byAgent, total: items.length + merges.length } };
 }
 
 export const TURN: TurnView = {

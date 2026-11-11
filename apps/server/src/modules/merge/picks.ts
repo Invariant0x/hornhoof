@@ -15,7 +15,7 @@ export type Take = 'here' | 'there' | 'value';
 export type Picker = { kind: 'ceo'; personId: string } | { kind: 'orchestrator'; agentId: string };
 export type PickFilter = { ids?: string[]; merge?: string; table?: string; from?: Date; to?: Date };
 export type ConflictView = {
-  id: string; merge: string; label: string; table: string; what: string; kind: string; cols: string[];
+  id: string; merge: string; label: string; table: string; topic: string; what: string; kind: string; cols: string[];
   here: Record<string, string> | null; there: Record<string, string> | null; at: string | null;
   task: { id: string; number: number; title: string } | null; whose: 'orchestrator' | 'ceo'; picked: Take | null;
 };
@@ -78,7 +78,7 @@ export async function conflictsOf(db: Db, who: Picker, f: PickFilter & { settled
     const cols = row.cols.length > 0 ? row.cols : Object.keys(row.here ?? row.there ?? {}).filter(column => !(column in row.key));
     const words = (side: Row | null): Record<string, string> | null => (side ? Object.fromEntries(cols.map(column => [column, valueWords(row.tbl, column, side[column])])) : null);
     return {
-      id: row.id, merge: row.merge, label: row.label, table: row.tbl, what: nameOf(row.tbl, row.here ?? row.there, row.key), kind: row.kind, cols: row.cols,
+      id: row.id, merge: row.merge, label: row.label, table: row.tbl, topic: row.topic, what: nameOf(row.tbl, row.here ?? row.there, row.key), kind: row.kind, cols: row.cols,
       here: words(row.here), there: words(row.there), at: iso(row.at), task: (row.task_id && tasks.get(row.task_id)) || null, whose: ceos(row.tbl) ? ('ceo' as const) : ('orchestrator' as const), picked: row.picked,
     };
   });

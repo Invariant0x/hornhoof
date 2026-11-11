@@ -92,7 +92,14 @@ describe('Backups in Settings', () => {
     shown();
     await user.click(await screen.findByRole('button', { name: /^Restore the backup of / }));
     const ask = await screen.findByRole('group', { name: /^Restore the company as it was at .+\?$/ });
-    expect(screen.getByText(/^Everything after .+ stays in the current database, which is kept on this server\. A later update of Hornhoof merges it back\.$/)).toBeInTheDocument();
+    /* What came after comes back unless the CEO says otherwise. */
+    const bring = within(ask).getByRole('checkbox', { name: /^Bring back what came after / });
+    expect(bring).toBeChecked();
+    expect(within(ask).getByText(/^What the company did after .+ comes back as additions\. Anything that differs goes to the orchestrator as a task, with both values; the restored values stay until he picks\.$/)).toBeInTheDocument();
+    await user.click(bring);
+    expect(within(ask).getByText(/^The database from before is saved as an encrypted backup for 30 days, then removed from this machine\. What came after .+ does not come back\.$/)).toBeInTheDocument();
+    expect(within(ask).queryByText(/comes back as additions/)).not.toBeInTheDocument();
+    await user.click(bring);
     expect(screen.getByText('These machines joined later and must be connected again: new-mac, lab.')).toBeInTheDocument();
     expect(screen.getByText('These people were added later and must be invited again: Sasha.')).toBeInTheDocument();
     expect(screen.getByText('Everyone signs in again afterwards.')).toBeInTheDocument();
@@ -103,7 +110,7 @@ describe('Backups in Settings', () => {
     expect(calls.filter(call => call.method === 'POST')).toEqual([]);
     await user.click(screen.getByRole('button', { name: /^Restore the backup of / }));
     await user.click(within(await screen.findByRole('group', { name: /^Restore the company/ })).getByRole('button', { name: 'Restore' }));
-    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: {} }]));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { bringBack: true } }]));
     /* The steps it went through so far, and no button to start another meanwhile. */
     expect(await screen.findByText('Opening it')).toHaveAttribute('aria-current', 'step');
     expect(screen.getByText('Getting the backup')).toBeInTheDocument();
@@ -155,6 +162,58 @@ describe('Backups in Settings', () => {
     }
   });
 
+  it('restores without bringing back what came after when the CEO unticks it', async () => {
+    const calls = mockApi({
+      'GET /api/backups': [200, viewOf()],
+      [`GET /api/backups/${ID}/warning`]: [200, { machines: [], people: [] }],
+      [`POST /api/backups/${ID}/restore`]: [202, { attempt: 'a1' }],
+    });
+    const user = userEvent.setup();
+    shown();
+    await user.click(await screen.findByRole('button', { name: /^Restore the backup of / }));
+    const ask = await screen.findByRole('group', { name: /^Restore the company/ });
+    await user.click(within(ask).getByRole('checkbox', { name: /^Bring back what came after / }));
+    await user.click(within(ask).getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { bringBack: false } }]));
+  });
+
+  it("shows each kept database's state, and leaves one out after asking", async () => {
+    const kept = (name: string, at: string, merge: object | null) => ({ name, at, merge });
+    const merge = (status: string, over: object = {}) => ({ id: `m-${status}`, status, added: 4, conflicts: 2, error: null, ...over });
+    let left = false;
+    const calls = mockApi({
+      'GET /api/backups': () => [200, viewOf({ kept: [
+        kept('hornhoof_before_20261110_090000', '2026-11-10T09:00:00.000Z', merge(left ? 'removing' : 'pending')),
+        kept('hornhoof_before_20261109_090000', '2026-11-09T09:00:00.000Z', merge('applied', { error: 'Not complete yet: tasks {"id":"x"}' })),
+        kept('hornhoof_before_20261108_090000', '2026-11-08T09:00:00.000Z', merge('merged')),
+        kept('hornhoof_before_20261107_090000', '2026-11-07T09:00:00.000Z', merge('removing')),
+        kept('hornhoof_before_20261106_090000', '2026-11-06T09:00:00.000Z', null),
+      ] as never })],
+      'POST /api/backups/kept/hornhoof_before_20261110_090000/leave': () => {
+        left = true;
+        return [204, undefined];
+      },
+    });
+    const user = userEvent.setup();
+    shown();
+    expect(await screen.findAllByText(/^The database from before the restore of .+ is kept on this server\.$/)).toHaveLength(5);
+    expect(screen.getByText('Bringing back what came after it.')).toBeInTheDocument();
+    expect(screen.getByText('Could not bring it back yet: Not complete yet: tasks {"id":"x"}')).toBeInTheDocument();
+    expect(screen.getByText('Brought back: 4 added, 2 to decide. Removed once its backup is made.')).toBeInTheDocument();
+    expect(screen.getByText('Left out. Removed once its backup is made.')).toBeInTheDocument();
+    /* Only one whose bringing back still waits or runs can be left out. */
+    const buttons = screen.getAllByRole('button', { name: /^Leave out the database from before the restore of / });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[0]!);
+    const question = 'What it held after the backup will not come back. It stays as an encrypted backup for 30 days.';
+    await user.click(within(screen.getByRole('group', { name: question })).getByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.click(screen.getAllByRole('button', { name: /^Leave out the database from before the restore of / })[0]!);
+    await user.click(within(screen.getByRole('group', { name: question })).getByRole('button', { name: 'Leave it out' }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: '/api/backups/kept/hornhoof_before_20261110_090000/leave', body: undefined }]));
+    await waitFor(() => expect(screen.getAllByText('Left out. Removed once its backup is made.')).toHaveLength(2));
+  });
+
   it('asks for the recovery file when it must', async () => {
     const calls = mockApi({
       'GET /api/backups': [200, viewOf({ bundles: [bundle({ why: 'needs_recovery_file' }), bundle({ id: OTHER, dumpedAt: '2026-11-09T08:00:00.000Z', restorable: false, why: 'newer_build' }), bundle({ id: '0f0f0f0f-0000-4000-8000-00000000000c', dumpedAt: '2026-11-08T08:00:00.000Z', restorable: false, why: 'not_held' })] })],
@@ -175,7 +234,7 @@ describe('Backups in Settings', () => {
     await user.upload(screen.getByLabelText('Recovery file'), new File(['# Hornhoof recovery file for Acme.\n{"v":1}\n'], 'hornhoof-recovery.txt', { type: 'text/plain' }));
     await waitFor(() => expect(within(ask).getByRole('button', { name: 'Restore' })).toBeEnabled());
     await user.click(within(ask).getByRole('button', { name: 'Restore' }));
-    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { recoveryFile: '# Hornhoof recovery file for Acme.\n{"v":1}\n' } }]));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: `/api/backups/${ID}/restore`, body: { recoveryFile: '# Hornhoof recovery file for Acme.\n{"v":1}\n', bringBack: true } }]));
   });
 
   it('says why a restore could not start', async () => {

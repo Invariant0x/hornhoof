@@ -333,6 +333,31 @@ describe('the decisions of one person', () => {
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
   });
 
+  it("show the CEO's merge card", async () => {
+    const user = userEvent.setup();
+    let open = 1;
+    const calls = shell({
+      'GET /api/requests': () => [200, decisions([], { merges: open ? [{ id: 'm1', label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open }] : [] })],
+      'GET /api/merges/m1/conflicts': () => [200, { conflicts: open ? [{
+        id: 'c1', merge: 'm1', label: 'x', table: 'people', topic: 'people', what: 'Maria (maria@acme.test)', kind: 'differs', cols: ['name'],
+        here: { name: '"Maria Here"' }, there: { name: '"Maria There"' }, at: null, task: null, whose: 'ceo', picked: null,
+      }] : [] }],
+      'POST /api/merges/pick': () => {
+        open = 0;
+        return [200, { settled: 1, here: 1, there: 0, refused: [], tasks: [] }];
+      },
+    });
+    expect(await screen.findByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    const card = await within(waiting).findByRole('region', { name: /^What came after / });
+    expect(card).toHaveTextContent('1 change about people, access, plans, machines or protected records needs you.');
+    await user.click(await within(card).findByRole('button', { name: 'Keep here' }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/merges/pick', body: { ids: ['c1'], take: 'here' } });
+    /* Settled, the card goes with the count. */
+    await waitFor(() => expect(within(waiting).queryByRole('region', { name: /^What came after / })).not.toBeInTheDocument());
+  });
+
   it('show the rest of what waits from a server that knows no machine requests yet', async () => {
     const user = userEvent.setup();
     /* What a server of before answers: one request for the computer under the old key, and none under the new. */

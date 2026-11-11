@@ -35,7 +35,7 @@ Open Company settings, part "Backups". Each backup shows when it was made, how b
 Hornhoof first says what the restore means:
 
 - The company goes back to how it was at the backup's time.
-- Everything after that time stays in the database that is replaced. That database is kept on the server, and a later update of Hornhoof brings its data back.
+- Everything after that time stays in the database that is replaced, which is kept on the server. A tick, "Bring back what came after", says whether Hornhoof brings it back by itself. See [What came after a restore](#what-came-after-a-restore) below.
 - Machines that joined after that time must be connected again. People who were added after it must be invited again. Hornhoof names them.
 - Everyone signs in again afterwards.
 - Access to machines is closed on every machine. Their owners open it again.
@@ -49,6 +49,24 @@ Some backups show a line instead of a plain "Restore":
 - "Made by a newer Hornhoof. Update first." Update the server, then restore.
 - "No machine that holds it is online." Turn on one of the machines named next to it.
 - "Add the recovery file it was made for to restore it." Press "Restore" and choose the recovery file. The server cannot open this backup by itself.
+
+## What came after a restore
+
+A restore takes the company back in time, and the database it replaces holds everything the company did since. The tick "Bring back what came after" in the restore's question decides what becomes of that.
+
+With the tick on, as it is unless you take it off, Hornhoof brings that work back right after the restore:
+
+- What the company added since comes back as it was: new tasks, messages, departments, employees.
+- What differs is never overwritten. The restored value stays, and both values are listed.
+- The orchestrator gets one task with what differs in the work, and settles each difference: keep what is here, or take what was there. He tells the holders of the tasks that changed and reports to you.
+- What differs about people, access, plans, machines and protected records waits for you alone, as a card under Tasks, "Waiting for you". Each row shows the value here and the value there. Press "Keep here" or "Take there", for one row or for a whole table.
+- Nothing that was running then runs again, and computer access stays closed until each machine's owner opens it.
+
+With the tick off, nothing of what came after comes back.
+
+Either way the replaced database is saved as an encrypted backup, listed as "Set aside before a merge", kept for 30 days and then removed from the server. Company settings, part "Backups", shows how far this has got. While the bringing back still runs, "Leave it out" stops it: what that database held after the backup then does not come back, and it stays as a backup for the 30 days.
+
+An update waits until this is done. If you need to update first, leave the database out.
 
 ## What if the server itself is lost?
 

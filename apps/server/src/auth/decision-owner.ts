@@ -9,7 +9,9 @@ export type Candidate = { id: string; status: 'active' | 'invited' | 'disabled';
    decision of this kind. */
 export type DecisionSubject =
   | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
-  | { source: 'proposal' };
+  | { source: 'proposal' }
+  /* What a merge could not prove about people, access, plans, machines or protected records: the CEO's alone. */
+  | { source: 'merge' };
 
 /* The topics a department's own person decides; every other one, and one not given, is the CEO's. */
 export const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];

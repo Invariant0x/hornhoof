@@ -38,7 +38,7 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     const { conflicts, more } = await listed(s.tools);
     expect(more).toBe(false);
     expect(conflicts).toEqual([{
-      id: expect.stringMatching(/^[0-9a-f-]{36}$/), merge: id, label: 'marat-mac', table: 'tasks', what: 'task #1 "Here"', kind: 'differs', cols: ['title'],
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/), merge: id, label: 'marat-mac', table: 'tasks', topic: 'work', what: 'task #1 "Here"', kind: 'differs', cols: ['title'],
       here: { title: '"Here"' }, there: { title: '"There"' }, at: expect.stringMatching(/^\d{4}-/), task: { id: s.one.id, number: 1, title: 'Here' }, whose: 'orchestrator', picked: null,
     }]);
     expect((await listed(s.tools, { settled: true })).conflicts).toEqual([]);
