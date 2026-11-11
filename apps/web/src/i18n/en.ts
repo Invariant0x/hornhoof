@@ -125,6 +125,7 @@ export const en = {
     choosePassword: 'Choose a password',
     submit: 'Join',
     connectNow: 'You are in. Connect your own plans now, or later under Subscriptions.',
+    toCompany: 'Go to the company',
   },
   shell: {
     sections: 'Sections',
@@ -1330,7 +1331,7 @@ export const en = {
     already_set_up: 'This Hornhoof is already set up.',
     setup_code: 'This setup code is not right. Open the setup link the installer showed, or take the code from the server log.',
     invite_unknown: 'This invite link is not valid. Check that you copied all of it, or ask for a new one.',
-    invite_used: 'This invite link was already used or has expired. Ask for a new one.',
+    invite_used: 'This invite link was already used or has expired. If you joined with it, sign in with your email and password. If not, ask for a new one.',
     email_taken: 'Someone with this email is already in the company.',
     person_unknown: 'This person does not exist.',
     owner_locked: 'This cannot be done to the company owner.',

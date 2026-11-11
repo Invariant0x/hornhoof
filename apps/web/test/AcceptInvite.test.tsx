@@ -37,4 +37,15 @@ describe('AcceptInvite', () => {
     await user.click(await screen.findByRole('button', { name: 'Done' }));
     expect(onDone).toHaveBeenCalledOnce();
   });
+
+  /* Someone who joined comes back by the only link they have: it is used, and it still leads in or to the sign-in. */
+  it('leads from a used invite link into the company', async () => {
+    mockApi({ 'GET /api/invites/old': [410, { error: { code: 'gone', message: 'This invite has already been used or has expired. Ask for a new one.' } }] });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    render(<AcceptInvite token="old" onDone={onDone} />);
+    expect(await screen.findByText('This invite link was already used or has expired. If you joined with it, sign in with your email and password. If not, ask for a new one.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Go to the company' }));
+    expect(onDone).toHaveBeenCalledOnce();
+  });
 });
