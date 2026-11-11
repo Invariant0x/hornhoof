@@ -161,7 +161,7 @@ describe('a message through the bot', () => {
     const run = await nextOf(builtin, 'job.run');
     expect(run.prompt).toContain('From Ivan (CEO) via Telegram to Orchestrator:');
     expect(run.prompt).toContain('Hire a designer.');
-    expect(run.prompt).toContain('Telegram');
+    expect(run.prompt).toContain("Ivan wrote this in Telegram. Ivan is the company's owner (the CEO).");
     await until(async () => (await db.select().from(people).where(eq(people.id, owner.id)))[0]!.telegramUserId === IVAN.id);
     builtin.send({ type: 'job.started', jobId: run.jobId });
     builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it: *one* designer_ <b>.' } });
@@ -249,6 +249,20 @@ describe('a message through the bot', () => {
     await until(() => c.tg.sent.length === 2);
     expect(c.tg.sent.every(s => s.token === SECOND && s.chat_id === IVAN.id && s.text.length <= 4096)).toBe(true);
     expect(c.tg.sent.map(s => s.text).join('')).toBe(long);
+  });
+
+  it('tells a head who wrote: the CEO\'s delegate who is responsible for its department', async () => {
+    const c = await company();
+    const { sales, head } = await salesHead(c);
+    await invitePerson(c.app, c.ceo, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
+    const [wes] = await c.db.select().from(people).where(eq(people.email, 'wes@acme.com'));
+    await c.app.inject({ method: 'PUT', url: `/api/people/${wes!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(c.ceo) });
+    await c.db.update(departments).set({ ownerPersonId: wes!.id }).where(eq(departments.id, sales.id));
+    await setTelegram(c.app, c.ceo, wes!.id, '6660006');
+    await connectBot(c.app, c.ceo, head.id, SECOND);
+    c.tg.write(SECOND, { id: 6660006, first_name: 'Wes', language_code: 'en' }, 'Drop the cold calls.');
+    const run = await nextOf(c.builtin, 'job.run');
+    expect(run.prompt).toContain("Wes wrote this in Telegram. Wes is the CEO's delegate and responsible for your department.");
   });
 
   it('tells the person when the agent could not answer', async () => {

@@ -13,7 +13,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
+import { answerBy, answerInTelegram, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt, type Standing } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -28,16 +28,25 @@ const MessageBody = z
    back to and the update it was. */
 export type TelegramOrigin = { bot: string; chat: number; update: number };
 
-function writtenBy(me: Person, text: string, pictures: MessagePicture[], telegram?: TelegramOrigin) {
+function writtenBy(me: Person, text: string, pictures: MessagePicture[], telegram?: TelegramOrigin & { standing: Standing }) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
-  if (telegram) return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
+  if (telegram) {
+    const { standing, ...origin } = telegram;
+    return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram: origin } } };
+  }
   return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin };
+
+/* What the person is to this agent, said with words that came through Telegram, where no window shows who wrote. */
+async function standingOf(ctx: Ctx, me: Person, agent: AgentRow): Promise<Standing> {
+  const [department] = agent.departmentId ? await ctx.db.select({ owner: departments.ownerPersonId }).from(departments).where(eq(departments.id, agent.departmentId)) : [];
+  return { owner: me.isOwner, delegate: me.isCeoDelegate, department: department ? department.owner === me.id : null };
+}
 
 /* A person's words to an agent, from its window or through its Telegram bot, under that person's own rights: whoever calls
    this has checked that they see the agent. Returns the turn the words went into. */
@@ -51,7 +60,7 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   }
   /* Pictures alone read as their names wherever the words of a message show. */
   const words = input.text || pictures.map(p => p.name).join(', ');
-  const { actor, turn } = writtenBy(me, words, pictures, input.telegram);
+  const { actor, turn } = writtenBy(me, words, pictures, input.telegram && { ...input.telegram, standing: await standingOf(ctx, me, agent) });
   const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
   ctx.bus.publish(me.companyId, {
     type: 'pulse',

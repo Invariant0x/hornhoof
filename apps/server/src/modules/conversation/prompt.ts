@@ -59,9 +59,17 @@ export function addressed(text: string, message: MessageEnvelope): string {
   return text.startsWith(`${heading}\n`) ? text : `${heading}\n\n${text}`;
 }
 
-/* Below a person's message that came through the agent's Telegram bot: where the answer goes. */
-export function answerInTelegram(author: { name: string }): string {
-  return `${author.name} wrote this in Telegram. Your answer in this window goes back to them there as plain text, so write it without formatting.`;
+/* What a person is in the company, as far as it weighs their words: its owner, the CEO's delegate, the person responsible
+   for the agent's department. department is null for an agent outside any department. */
+export type Standing = { owner: boolean; delegate: boolean; department: boolean | null };
+
+/* Below a person's message that came through the agent's Telegram bot: who they are, and where the answer goes. */
+export function answerInTelegram(author: { name: string }, standing: Standing): string {
+  const is = [standing.owner && "the company's owner (the CEO)", standing.delegate && "the CEO's delegate", standing.department && 'responsible for your department'].filter(Boolean);
+  const who = is.length
+    ? `${author.name} is ${is.join(' and ')}.`
+    : `${author.name} is neither the company's owner nor the CEO's delegate${standing.department === false ? ', nor responsible for your department' : ''}.`;
+  return `${author.name} wrote this in Telegram. ${who} Your answer in this window goes back to them there as plain text, so write it without formatting.`;
 }
 
 /* An employee's message to another agent, which reads it as the employee's words, not as orders. */
