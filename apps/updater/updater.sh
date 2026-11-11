@@ -281,7 +281,10 @@ same_node() {
   return 1
 }
 
-worker() { [ "$ROLE" = worker ]; }
+# A machine that joined the company: a worker, or one that keeps a copy of its data, which its keeper marks with
+# replica.json. Either follows the company server's build as a worker does: it saves no database and runs no migration
+# of its own, since a copy's schema is the company server's, and it installs when the server gives it its turn.
+worker() { [ "$ROLE" = worker ] || [ -f "$CONTROL/replica.json" ]; }
 
 # The service whose container is the build that runs here: the app on a server, the keeper on a worker, which has no app.
 main_service() { if worker; then printf keeper; else printf app; fi; }
@@ -620,11 +623,20 @@ healthy() {
   return 1
 }
 
-# The new updater takes over from a helper container that outlives this one. Both are the updater image of the
-# update, which .env names for compose too.
-swap_updater() {
+# The image of the container this updater runs in, which Docker names after the container's host name; else the one
+# the settings name for it; nothing when neither is known.
+own_image() {
   local image
-  image=$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")
+  image=$(docker inspect --format '{{.Config.Image}}' "$(hostname)" 2> /dev/null || true)
+  [ -n "$image" ] || image=$(env_value HORNHOOF_UPDATER_REF)
+  printf '%s' "$image"
+}
+
+# swap_updater <image>: a new updater takes over from a helper container that outlives this one. Both run that image:
+# the updater image of an update, which .env names for compose too, or this updater's own when only its settings changed.
+swap_updater() {
+  local image=$1
+  [ -n "$image" ] || return 0
   docker image inspect "$image" > /dev/null 2>&1 || docker pull "$image" > /dev/null 2>&1 || return 0
   docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -w "$SERVER_DIR" \
     --entrypoint docker "$image" compose up -d --no-build updater > /dev/null 2>&1 || true
@@ -747,7 +759,7 @@ check_new() {
   step health "Waiting for the new server to answer."
   if healthy "$TARGET"; then
     stop_with "done" "Hornhoof runs $VERSION now." finished
-    swap_updater
+    swap_updater "$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")"
     return 0
   fi
   say "$VERSION did not answer within $HEALTH_WAIT seconds."
@@ -988,6 +1000,98 @@ write_env() {
       if (new["NODE_KEY"] != "" && !("NODE_KEY" in put)) print "NODE_KEY=" new["NODE_KEY"]
       if (new["RELAY_URL"] != "" && !("RELAY_URL" in put)) print "RELAY_URL=" new["RELAY_URL"]
     }' "$file" > "$file.new") && as_env "$file.new"
+}
+
+# put_env <name>: .env with the line of that name saying PUT_VALUE, or with the line added, and every other line as it
+# was. The value comes by the environment, so it stands on no command line.
+put_env() {
+  local file="$SERVER_DIR/.env"
+  (umask 077 && PUT_NAME="$1" awk '
+    BEGIN { name = ENVIRON["PUT_NAME"]; value = ENVIRON["PUT_VALUE"] }
+    index($0, name "=") == 1 { if (!put) print name "=" value; put = 1; next }
+    { print }
+    END { if (!put) print name "=" value }' "$file" > "$file.new") && as_env "$file.new"
+}
+
+# A password for this machine's own database: 24 letters and digits.
+new_password() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24; }
+
+# Everything of a machine that keeps a copy starts but the updater itself: the database, its app and the two a worker
+# runs. The role is set for compose here, since this updater's own environment holds the one it was started with, which
+# would win over the settings.
+data_up() {
+  local services
+  services=$(compose config --services 2> /dev/null | grep -v '^updater$' | tr '\n' ' ') || return 1
+  [ -n "${services// /}" ] || return 1
+  # shellcheck disable=SC2086 # services is a space-separated list of compose service names.
+  HORNHOOF_ROLE=data compose up -d --no-build $services > /dev/null 2>&1
+}
+
+# stay_worker <what failed>: the machine could not become one that keeps a copy, so everything is as before: the
+# settings of before, nothing of a database, and the two a worker runs. The keeper reads role.failed, tells the company,
+# and tries again an hour later.
+stay_worker() {
+  if [ -f "$SERVER_DIR/.env.before-data" ]; then as_env "$SERVER_DIR/.env.before-data" || true; fi
+  rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json" "$CONTROL/replica.json"
+  COMPOSE_PROFILES=data compose rm -sf db migrate app > /dev/null 2>&1 || true
+  HORNHOOF_ROLE=worker compose up -d --no-build front keeper > /dev/null 2>&1 || true
+  (umask 077 && printf "The company's settings cannot be written here, so this machine stays a worker.\n" > "$CONTROL/role.failed.new") &&
+    owned "$CONTROL/role.failed.new" 600 && mv "$CONTROL/role.failed.new" "$CONTROL/role.failed" || true
+  say "This machine stays a worker: could not $1."
+}
+
+# The settings a copy needs go into .env: the company's three, each checked as a backup's are, a password for its own
+# database when it has none, and the role and profile that start the database and the app. No value is said.
+data_settings() {
+  local from="$CONTROL/role-secrets.json" secret node_key relay
+  (umask 077 && jq '.secrets // {}' "$CONTROL/role.json" > "$from" 2> /dev/null) || return 1
+  secret=$(setting HORNHOOF_SECRET "$from") && node_key=$(setting NODE_KEY "$from") && relay=$(setting RELAY_URL "$from") || return 1
+  [ -n "$secret" ] && [ -n "$relay" ] || return 1
+  write_env "$secret" "$node_key" "$relay" || return 1
+  if [ -z "$(env_value POSTGRES_PASSWORD)" ]; then PUT_VALUE=$(new_password) put_env POSTGRES_PASSWORD || return 1; fi
+  PUT_VALUE=data put_env HORNHOOF_ROLE && PUT_VALUE=data put_env COMPOSE_PROFILES
+}
+
+# The keeper of a worker that the company server gave the data left role.json {id, secrets}: this machine becomes one
+# that keeps a copy. The settings of before stay beside the new ones until everything runs, so an updater that stopped
+# in the middle finishes or undoes it.
+become_data() {
+  [ -f "$CONTROL/role.json" ] || return 0
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
+  (umask 077 && cp "$SERVER_DIR/.env" "$SERVER_DIR/.env.before-data") || { stay_worker 'keep its settings of before'; return 0; }
+  data_settings || { rm -f "$CONTROL/role-secrets.json"; stay_worker "write the company's settings"; return 0; }
+  rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json"
+  data_up || { stay_worker 'start its database'; return 0; }
+  swap_updater "$(own_image)"
+  rm -f "$SERVER_DIR/.env.before-data"
+}
+
+# The settings of before are still there: an updater stopped while this machine became one that keeps a copy. With the
+# new settings whole, it starts what they name and replaces itself; else it stays a worker.
+finish_become() {
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env.before-data" ] || return 0
+  if [ "$(env_value HORNHOOF_ROLE)" != data ] || [ "$(env_value COMPOSE_PROFILES)" != data ]; then
+    stay_worker 'finish what a restart cut short'
+    return 0
+  fi
+  rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json"
+  data_up || { stay_worker 'start its database'; return 0; }
+  swap_updater "$(own_image)"
+  rm -f "$SERVER_DIR/.env.before-data"
+}
+
+# An updater whose own role is not the one the settings name replaces itself, so the next one is started with it. One
+# try a minute, so a swap that did not take is tried again. A server's settings name no role, and nothing happens there.
+ROLE_SWAP_AT=0
+match_role() {
+  local want now
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] && [ ! -f "$SERVER_DIR/.env.before-data" ] || return 0
+  want=$(env_value HORNHOOF_ROLE)
+  [ -n "$want" ] && [ "$want" != "${ROLE:-data}" ] || return 0
+  now=$(date +%s)
+  [ "$now" -ge "$ROLE_SWAP_AT" ] || return 0
+  ROLE_SWAP_AT=$((now + 60))
+  swap_updater "$(own_image)"
 }
 
 # A stamp no copy goes by yet, so two restores never meet in one name.
@@ -1655,10 +1759,13 @@ fi
 mkdir -p "$CONTROL"
 touch "$CONTROL/alive"
 interrupted
+finish_become
 if [ "${1:-}" = --once ]; then
   ONCE=1
   write_addresses
   handle_request
+  become_data
+  match_role
   sweep_dumps
   dump_request
   restore_request
@@ -1685,6 +1792,8 @@ ADDRS=$!
 trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
 while true; do
   handle_request
+  become_data
+  match_role
   sweep_dumps
   dump_request
   restore_request

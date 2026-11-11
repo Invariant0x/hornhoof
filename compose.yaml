@@ -80,6 +80,11 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
+      # Where the keeper marks a machine that keeps a copy: its schema comes from the company server, and no migration
+      # of its own runs there.
+      HORNHOOF_CONTROL_DIR: /control
+    volumes:
+      - control:/control:ro
     depends_on:
       db:
         condition: service_healthy

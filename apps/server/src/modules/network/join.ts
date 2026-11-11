@@ -10,6 +10,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { certificates, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, publicLinks, type MachineRole } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
 import { dropAccess } from '../computer/access.js';
+import { holdsData } from '../copies/holds.js';
 import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { CERT_DAYS, RENEW_AFTER_DAYS, type Issued } from './authority.js';
@@ -105,7 +106,8 @@ export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date)
 
 /* number: its place in taking the server, 1 for the one that leads. copyName: the name its copy's subscription goes by. */
 export type DataMachine = { machine: string; networkId: string; hostname: string | null; addresses: string[]; peerPort: number | null; webPort: number | null; number: number | null; copyName: string | null };
-export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string };
+/* dataSecret: the secret of the data machines' other service, the way to the data, for a machine that holds it too. */
+export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string; dataSecret: string | null };
 /* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
    keeps the link it has. */
 export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link?: WorkerLink | null; build: LeaderBuild | null; go: Go | null };
@@ -165,7 +167,7 @@ export function visitorKeyOf(ctx: Ctx, opts: { force?: boolean } = {}): Promise<
 /* The public link as a worker uses it, with neither the link's key nor the way to the data. Null: the company has no
    link. Undefined: it has one, but this app cannot tell it now, since it does not lead and so makes no secret, or the
    relay has given no visitor key yet. */
-export async function workerLink(ctx: Ctx): Promise<WorkerLink | null | undefined> {
+export async function workerLink(ctx: Ctx, withData = false): Promise<WorkerLink | null | undefined> {
   const settings = await tunnelSettings(ctx.db, ctx.config);
   if (!settings) return null;
   if (ctx.mode.current() !== 'lead') return undefined;
@@ -173,7 +175,8 @@ export async function workerLink(ctx: Ctx): Promise<WorkerLink | null | undefine
   const appSecret = await peerSecret(ctx.db, ctx.config, 'app', true);
   const visitorKey = await visitorKeyOf(ctx);
   if (!server.success || !appSecret || !visitorKey) return undefined;
-  return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey };
+  const dataSecret = withData ? await peerSecret(ctx.db, ctx.config, 'data', true) : null;
+  return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey, dataSecret };
 }
 
 /* What a worker knows of the network: who it is, whom to trust and whom not, where the data machines are, and the link.
@@ -183,7 +186,7 @@ export async function workerView(ctx: Ctx, machineId: string): Promise<WorkerVie
   const row = await networkMachine(ctx.db, machineId);
   if (!row) throw notAMachine();
   const authority = await authorityOf(ctx.db, ctx.config);
-  const link = await workerLink(ctx);
+  const link = await workerLink(ctx, row.role === 'data' && (await holdsData(ctx.db, row.personId)));
   return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }), build: null, go: null };
 }
 

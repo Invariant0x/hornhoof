@@ -156,6 +156,8 @@ export type ErrorReason =
   | 'leader_scope'
   | 'link_needed'
   | 'try_again'
+  | 'not_data'
+  | 'no_age_key'
   | 'not_pending'
   | 'restore_running'
   | 'newer_build'

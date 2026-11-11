@@ -16,6 +16,7 @@ import { renewedMessage, renewMessage } from '../network/renewal.js';
 import { ownAddresses } from './addresses.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp, type AppAnswer } from './app-call.js';
+import { Becoming } from './become.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
@@ -100,7 +101,8 @@ const TICKET_SPENT = 'its join ticket was used or has expired; get a new command
 const MACHINE_TAKEN = "this computer is in the company under another person's row; it joins once that one is disconnected";
 
 const Data = z.object({ machine: z.string(), networkId: z.string(), hostname: z.string().nullable(), addresses: z.array(z.string()), peerPort: z.number().nullable(), webPort: z.number().nullable() });
-const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string() });
+/* dataSecret: a server of the build before says none, which reads as none. */
+const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
 /* A view as an answer gives it, each field by itself: one the answer lacks, or gives as a server of another version
    does, is left out, and what the keeper has of it stays. */
 const Answer = z.object({
@@ -175,6 +177,9 @@ export class WorkerKeeper {
   private readonly holder: HolderKeeper;
   /* The public half of this machine's key for backups, once its folder keeps one. */
   private ageRecipient: string | null = null;
+  /* What makes this machine a data machine once the server gives it the data; one step at a time. */
+  private becoming: Becoming | null = null;
+  private stepping = false;
   private ageTimer: NodeJS.Timeout | null = null;
   private ageSaid = false;
   /* The ticket that let this machine in and whose owner's key is not kept yet. */
@@ -583,6 +588,32 @@ export class WorkerKeeper {
     this.mergeView(answer);
     const follow = Follow.safeParse(answer);
     if (follow.success) this.following.heard(follow.data.build, follow.data.go);
+    void this.become();
+  }
+
+  /* With each view of the leader's: when it says this machine holds the data now, the next step toward that. */
+  private async become(): Promise<void> {
+    if (this.stepping || this.stopped || this.disconnected || !this.view) return;
+    this.stepping = true;
+    try {
+      const { controlDir, dir } = this.opts.config;
+      this.becoming ??= new Becoming({
+        controlDir,
+        ask: async (method, path) => {
+          const res = await this.askLeader(method, path);
+          if (!res) throw new Error('no leader of the company is in reach');
+          return answerOf(res);
+        },
+        heldRole: () => this.certificates.current()?.role ?? null,
+        renew: () => this.certificates.renewNow(),
+        age: () => ageKey(dir),
+        log: this.opts.log,
+        now: this.opts.now,
+      });
+      await this.becoming.step({ role: this.view.role });
+    } finally {
+      this.stepping = false;
+    }
   }
 
   /* One report at a time: a leader that is slow to answer never collects a pile of them, and none overtakes another. */

@@ -1,4 +1,5 @@
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrateDb } from './db/client.js';
 import { loggable } from './errors.js';
@@ -14,6 +15,21 @@ function reasonOf(err: unknown): string {
   return [messages[0], messages.length > 1 ? messages[messages.length - 1] : undefined].filter(Boolean).join(': ');
 }
 
+/* The marker a keeper leaves in the control folder of a machine that keeps a copy; its name is the keeper's to change. */
+const REPLICA_FILE = 'replica.json';
+const FOLLOWS = 'This machine keeps a copy; its schema comes from the company server.';
+
+/* A copy's schema is the company server's, brought over when the copy is made, and its own migrations would part the
+   two. So where the marker is, nothing is run, and that counts as done: the app that waits for this service starts. */
+export async function migrateOrFollow(env: NodeJS.ProcessEnv, run: () => Promise<void>, print: (line: string) => void): Promise<'migrated' | 'follows'> {
+  if (existsSync(join(env.HORNHOOF_CONTROL_DIR || '/control', REPLICA_FILE))) {
+    print(FOLLOWS);
+    return 'follows';
+  }
+  await run();
+  return 'migrated';
+}
+
 /* Brings the database up to this build and says so in one line. Nothing else starts the migrations, so the app and the
    keeper open the database knowing the schema is already there. */
 export async function runMigrate(env: NodeJS.ProcessEnv, print: (line: string) => void): Promise<number> {
@@ -21,8 +37,9 @@ export async function runMigrate(env: NodeJS.ProcessEnv, print: (line: string) =
     print('DATABASE_URL is not set.');
     return 1;
   }
+  const url = env.DATABASE_URL;
   try {
-    print(`The database is up to this build: ${await migrateDb(env.DATABASE_URL)} migrations.`);
+    await migrateOrFollow(env, async () => print(`The database is up to this build: ${await migrateDb(url)} migrations.`), print);
     return 0;
   } catch (err) {
     print(`Could not bring the database up to this build: ${reasonOf(err)}`);

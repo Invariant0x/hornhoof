@@ -294,7 +294,7 @@ describe('joining the company as a machine', () => {
     expect(plain).not.toHaveProperty('link');
     expect(plain.machine).toBe(w.machine);
     const secure = viewOf(await c.renew(w, {}, OVER_HTTPS));
-    expect(secure.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: expect.stringMatching(TICKET), visitorKey: c.relay.visitorKeys.get('acme') });
+    expect(secure.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: expect.stringMatching(TICKET), visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null });
     /* The header from any other address is somebody's own words. */
     expect(viewOf(await c.renew(w, {}, { remoteAddress: '203.0.113.9', headers: { 'x-forwarded-proto': 'https' } }))).not.toHaveProperty('link');
 
@@ -343,7 +343,7 @@ describe('joining the company as a machine', () => {
     expect(said).toMatchObject({ machine: w.machine, authorityPem: w.authorityPem, revoked: [] });
     expect(said.crlPem).toContain('BEGIN X509 CRL');
     expect(said.data).toEqual([{ machine: own.machine, networkId: HOST_ID, hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080, number: null, copyName: null }]);
-    expect(said.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: own.link.appSecret, visitorKey: c.relay.visitorKeys.get('acme') });
+    expect(said.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: own.link.appSecret, visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null });
     /* The data machine's own view keeps what it had, and lists the data machines too. */
     expect(Object.keys(own.link).sort()).toEqual(['appSecret', 'dataSecret', 'name']);
     expect(own.data).toEqual(said.data);
@@ -379,6 +379,29 @@ describe('joining the company as a machine', () => {
     await c.db.update(machines).set({ role: 'data', serverOrder: 2, copyName: 'copy_0f0f0f0f0f0f0f0f_1' }).where(eq(machines.id, w.machine));
     const own = (await c.peers()).json() as typeof view;
     expect(own.data.map(row => [row.number, row.copyName])).toEqual([[1, null], [2, 'copy_0f0f0f0f0f0f0f0f_1']]);
+  });
+
+  it('tells a machine its role, and the way to the data only to one that holds it', async () => {
+    const c = await company({ HORNHOOF_KEEPER: 'on' });
+    await c.link('acme');
+    await c.serverCertificate();
+    const w = await c.worker();
+    type Said = { role: string; link: { dataSecret: string | null; appSecret: string; visitorKey: string } };
+    const asWorker = (await c.peers(keeperOf(w.machine))).json() as Said;
+    expect(asWorker.role).toBe('worker');
+    expect(asWorker.link.dataSecret).toBeNull();
+    /* The same machine once the server gave it the data: its keeper is told so, and gets the secret of the data service. */
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    const own = (await c.peers()).json() as { link: { dataSecret: string } };
+    const asCopy = (await c.peers(keeperOf(w.machine))).json() as Said;
+    expect(asCopy.role).toBe('data');
+    expect(asCopy.link).toMatchObject({ dataSecret: own.link.dataSecret, appSecret: asWorker.link.appSecret, visitorKey: asWorker.link.visitorKey });
+    /* A row that says data while its person does not see the whole company gets no way to the data. */
+    const [row] = await c.db.select().from(machines).where(eq(machines.id, w.machine));
+    await c.db.execute(sql`UPDATE people SET is_owner = false, scope_kind = 'listed', status = 'active' WHERE id = ${row!.personId}`);
+    expect(((await c.peers(keeperOf(w.machine))).json() as Said).link.dataSecret).toBeNull();
+    /* The server's own keeper is told no role: it is the one that leads. */
+    expect((await c.peers()).json()).not.toHaveProperty('role');
   });
 
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {

@@ -213,7 +213,8 @@ case "$1 $2" in
           *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;;
           *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
         esac ;;
-      *.Config.Image*) printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}" ;;
+      # STUB_OWN_IMAGE: the image of the container the updater itself runs in, which goes by the name of its host.
+      *.Config.Image*) if [ -n "${STUB_OWN_IMAGE:-}" ] && [ "${!#}" = "$(hostname)" ]; then printf '%s\n' "$STUB_OWN_IMAGE"; else printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}"; fi ;;
       *) case "${!#}" in appcid | keepercid) printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;; esac ;;
     esac ;;
   *)
@@ -227,6 +228,11 @@ case "$1 $2" in
           *' config --services '*) services_in "$(compose_file "$@")" ;;
           # Whether what a restore carried over is there for the app that starts now.
           *' up -d --no-build app '*) [ ! -f "$HORNHOOF_CONTROL_DIR/restore-carry.json" ] || printf 'up with the carry\n' >> "$STUB_LOG" ;;
+          # The services of a machine that joined, started under the role compose is told. STUB_UP=fail: its database
+          # does not start.
+          *' up -d --no-build front keeper '*)
+            [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG"
+            case " $* " in *' db '*) [ "${STUB_UP:-ok}" != fail ] || exit 1 ;; esac ;;
           # STUB_UPDATER_UP=fail: this build's updater does not start, the one named by HORNHOOF_UPDATER_REF does;
           # never: no updater starts.
           *' up '*' updater '*)

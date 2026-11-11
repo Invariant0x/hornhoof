@@ -322,6 +322,31 @@ describe('install.sh on a machine that has the core', () => {
     expect(same.calls.some(call => call.startsWith('docker run -d') || call.startsWith('docker stop'))).toBe(false);
   });
 
+  it('updates a machine that keeps a copy as a joined machine, with its database and its app', () => {
+    const { first, shared } = withCore();
+    const core = join(home(first.dir), 'hornhoof-qwerty');
+    const brought = join(first.dir, 'brought');
+    mkdirSync(brought);
+    for (const file of ['compose.yaml', 'compose.worker.yaml']) writeFileSync(join(brought, file), `# the build's ${file}\nservices: {}\n`);
+    /* Its updater made it a data machine since it joined. */
+    const env = readFileSync(join(core, '.env'), 'utf8');
+    writeFileSync(join(core, '.env'), `${env.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\n`);
+    const fromUpdater = { ...shared, HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2', HORNHOOF_SERVER_DIR: core, HORNHOOF_VERSION: '0.19.0', HORNHOOF_COMPOSE_FILE: join(brought, 'compose.yaml'), HORNHOOF_PULLED: '1', STUB_SERVICES: 'front keeper db migrate app updater' };
+    const r = install({ args: ['worker'], env: fromUpdater, tty: '' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).not.toContain("is a server's folder");
+    expect(up(r.calls)).toEqual(['docker compose up -d --no-build front keeper db migrate app']);
+    const after = readFileSync(join(core, '.env'), 'utf8');
+    expect(valueOf(after, 'HORNHOOF_ROLE')).toEqual(['data']);
+    expect(valueOf(after, 'COMPOSE_PROFILES')).toEqual(['data']);
+    expect(valueOf(after, 'HORNHOOF_VERSION')).toEqual(['0.19.0']);
+    /* A server's own folder is still refused. */
+    writeFileSync(join(core, '.env'), after.split('\n').filter(line => !line.startsWith('COMPOSE_FILE=')).join('\n'));
+    const server = install({ args: ['worker'], env: fromUpdater, tty: '' });
+    expect(server.code).toBe(1);
+    expect(server.out).toContain("is a server's folder: run install.sh server there.");
+  });
+
   it("knows the company by every address it was joined through", () => {
     const { first, shared } = withCore();
     const core = join(home(first.dir), 'hornhoof-qwerty');

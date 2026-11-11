@@ -248,6 +248,23 @@ describe("a worker's keeper", () => {
     expect((await c.app.inject({ url: '/api/keeper' })).statusCode).toBe(404);
   });
 
+  it('becomes a data machine when its row says so', async () => {
+    const c = await company();
+    const w = await worker(c);
+    await until(async () => (await c.rowOf(w.machine)).ageKey !== null);
+    const file = (name: string) => join(w.config.controlDir, name);
+    expect(existsSync(file('replica.json')) || existsSync(file('role.json'))).toBe(false);
+    /* The server's ranking gives it the data. */
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    await until(() => existsSync(file('role.json')));
+    expect(existsSync(file('replica.json'))).toBe(true);
+    expect(heldIn(w.config.dir).role).toBe('data');
+    const request = JSON.parse(readFileSync(file('role.json'), 'utf8')) as { secrets: Record<string, string> };
+    expect(request.secrets).toEqual({ HORNHOOF_SECRET: TEST_SECRET, NODE_KEY: '', RELAY_URL: c.config.relayUrl });
+    expect(statSync(file('role.json')).mode & 0o777).toBe(0o600);
+    for (const line of w.lines) expect(line).not.toContain(TEST_SECRET);
+  });
+
   /* The test in the updater's place on the server: it answers every request for a dump, until the test ends. */
   function updaterOf(c: Company): void {
     const request = join(c.control, 'dump.json');

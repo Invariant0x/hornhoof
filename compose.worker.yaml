@@ -1,6 +1,7 @@
-# A machine that joined the company and keeps none of its data names this file after compose.yaml in COMPOSE_FILE of its
-# .env. The services that keep the data or reach it are in a profile nobody turns on there, so they never start: front,
-# the keeper and the updater are that machine's whole core. A server's .env never names this file.
+# A machine that joined the company names this file after compose.yaml in COMPOSE_FILE of its .env. The services that
+# keep the data or reach it are in a profile nobody turns on on a worker, so they never start there: front, the keeper
+# and the updater are that machine's whole core. A machine that keeps a copy of the company's data turns the profile
+# data on, in COMPOSE_PROFILES of its .env. A server's .env never names this file.
 services:
   db:
     profiles: ["data"]
@@ -8,5 +9,6 @@ services:
     profiles: ["data"]
   app:
     profiles: ["data"]
+  # A copy runs no built-in node until each machine has a node identity of its own: no .env names this profile.
   node:
-    profiles: ["data"]
+    profiles: ["builtin"]

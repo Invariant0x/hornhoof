@@ -1720,7 +1720,12 @@ worker_mode() {
   WORKER=1
   env_file="$SERVER_DIR/.env"
   [ -n "${HORNHOOF_SERVER_DIR:-}" ] && [ -f "$env_file" ] || fail "There is no core of a company to update here. $USAGE"
-  [ "$(env_value HORNHOOF_ROLE)" = worker ] || fail "$SERVER_DIR is a server's folder: run install.sh server there."
+  # A machine that joined names the worker's compose file in its settings, also once it keeps a copy of the company's
+  # data and its role says so.
+  case "$(env_value HORNHOOF_ROLE):$(env_value COMPOSE_FILE)" in
+    worker:* | data:*compose.worker.yaml*) ;;
+    *) fail "$SERVER_DIR is a server's folder: run install.sh server there." ;;
+  esac
   [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
   [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
   [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
@@ -1745,7 +1750,20 @@ worker_core_update() {
     (cd "$SERVER_DIR" && "${COMPOSE[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
   say "Starting the company's core${PIN:+ $PIN}."
-  compose_step "${COMPOSE[@]}" up -d --no-build keeper front || start_failed
+  # shellcheck disable=SC2046 # the services are compose service names, one word each.
+  compose_step "${COMPOSE[@]}" up -d --no-build $(core_services) || start_failed
+}
+
+# What the updater of a machine that joined starts on the new build: the keeper and front, and on a machine that keeps
+# a copy of the company's data everything its settings turn on but the updater, which is replaced after them.
+core_services() {
+  local names
+  if [ "$(env_value HORNHOOF_ROLE)" != data ]; then
+    printf 'keeper front'
+    return 0
+  fi
+  names=$( (cd "$SERVER_DIR" && "${COMPOSE[@]}" config --services 2> /dev/null) | grep -v '^updater$' | tr '\n' ' ') || true
+  if [ -n "${names// /}" ]; then printf '%s' "${names% }"; else printf 'keeper front'; fi
 }
 
 # The company's nodes on this machine, whichever of its addresses each joined through, go to the node image of the core's

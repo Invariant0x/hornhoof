@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { migrateWhenAlone, runMigrate } from '../src/migrate.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { migrateOrFollow, migrateWhenAlone, runMigrate } from '../src/migrate.js';
 
 async function migrateWith(env: NodeJS.ProcessEnv) {
   const lines: string[] = [];
@@ -27,6 +30,35 @@ describe('the migrate entry point', () => {
     const { code, lines } = await migrateWith({ DATABASE_URL: 'postgres://hornhoof@localhost:1/hornhoof' });
     expect(code).toBe(1);
     expect(lines[0]).toContain('ECONNREFUSED');
+  });
+});
+
+describe('the migrate service on a machine that keeps a copy', () => {
+  function control(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-migrate-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    return dir;
+  }
+
+  it("leaves a copy's schema alone", async () => {
+    const dir = control();
+    const lines: string[] = [];
+    let ran = 0;
+    const run = async () => void (ran += 1);
+    expect(await migrateOrFollow({ HORNHOOF_CONTROL_DIR: dir }, run, line => lines.push(line))).toBe('migrated');
+    expect([ran, lines]).toEqual([1, []]);
+    writeFileSync(join(dir, 'replica.json'), JSON.stringify({ since: new Date().toISOString() }));
+    expect(await migrateOrFollow({ HORNHOOF_CONTROL_DIR: dir }, run, line => lines.push(line))).toBe('follows');
+    expect([ran, lines]).toEqual([1, ['This machine keeps a copy; its schema comes from the company server.']]);
+  });
+
+  it('ends well without touching the database of a copy', async () => {
+    const dir = control();
+    writeFileSync(join(dir, 'replica.json'), '{}');
+    /* An address nothing answers at: a migration tried there would fail. */
+    const { code, lines } = await migrateWith({ DATABASE_URL: 'postgres://hornhoof:s3cret@127.0.0.1:1/hornhoof', HORNHOOF_CONTROL_DIR: dir });
+    expect(code).toBe(0);
+    expect(lines).toEqual(['This machine keeps a copy; its schema comes from the company server.']);
   });
 });
 

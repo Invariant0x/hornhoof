@@ -115,6 +115,8 @@ case "$1" in
     case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; migrate_runs "$@" ;; esac
     case "$*" in
       *' pull') case "${STUB_PULL:-ok}" in fail) echo "pull access denied" >&2; exit 1 ;; esac ;;
+      # STUB_SERVICES: the services the folder's compose files name, with the profiles its settings turn on.
+      *' config --services') for s in ${STUB_SERVICES:-}; do echo "$s"; done ;;
       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.

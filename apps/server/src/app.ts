@@ -43,6 +43,7 @@ import { Restores } from './modules/backups/restore.js';
 import { TotalLoss, totalLossRoutes } from './modules/backups/total-loss.js';
 import { keptDatabases } from './modules/merge/kept.js';
 import { Ranking } from './modules/copies/order.js';
+import { copiesRoutes } from './modules/copies/routes.js';
 import { replicationOf, type Replication } from './modules/copies/slots.js';
 import { Merger } from './modules/merge/merger.js';
 import { mergeRoutes } from './modules/merge/routes.js';
@@ -327,6 +328,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   networkRoutes(app, ctx);
+  copiesRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);
   totalLossRoutes(app, ctx);

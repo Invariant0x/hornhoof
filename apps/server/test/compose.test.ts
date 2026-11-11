@@ -168,7 +168,12 @@ describe('the compose file', () => {
     const overlayText = readFileSync(fileURLToPath(new URL('../../../compose.worker.yaml', import.meta.url)), 'utf8');
     const overlay = parse(overlayText) as { services: Record<string, unknown> };
     expect(composeText).not.toMatch(/^\s*profiles:/m);
-    expect(overlay.services).toEqual({ db: { profiles: ['data'] }, migrate: { profiles: ['data'] }, app: { profiles: ['data'] }, node: { profiles: ['data'] } });
+    /* A machine that keeps a copy turns the data services on, and still runs no built-in node: no setting names the
+       profile that one is in. */
+    expect(overlay.services).toEqual({ db: { profiles: ['data'] }, migrate: { profiles: ['data'] }, app: { profiles: ['data'] }, node: { profiles: ['builtin'] } });
+    /* The migrate service sees whether the machine keeps a copy, and can write nothing there. */
+    expect(migrate!.volumes).toEqual(['control:/control:ro']);
+    expect(migrate!.environment).toMatchObject({ HORNHOOF_CONTROL_DIR: '/control' });
     /* What is left on a worker depends on nothing that is out: front on the keeper, and the keeper on the database only
        where there is one. */
     expect(front!.depends_on).toEqual(['keeper']);
@@ -201,6 +206,10 @@ describe('the compose file', () => {
     writeFileSync(join(dir, '.env'), '');
     const services = (...files: string[]) => execFileSync('docker', ['compose', ...files.flatMap(file => ['-f', file]), 'config', '--services'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').sort();
     expect(services('compose.yaml', 'compose.worker.yaml')).toEqual(['front', 'keeper', 'updater']);
+    /* A machine that keeps a copy: the database and the app with it, and no built-in node. */
+    writeFileSync(join(dir, '.env'), 'COMPOSE_PROFILES=data\n');
+    expect(services('compose.yaml', 'compose.worker.yaml')).toEqual(['app', 'db', 'front', 'keeper', 'migrate', 'updater']);
+    writeFileSync(join(dir, '.env'), '');
     expect(services('compose.yaml')).toEqual(['app', 'db', 'front', 'keeper', 'migrate', 'node', 'updater']);
   });
 });

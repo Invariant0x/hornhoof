@@ -7,6 +7,7 @@ import { agents, companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, ty
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
+import { holdsData } from '../copies/holds.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
@@ -77,7 +78,7 @@ const ComputerAnswer = z.object({ exit: z.number().int().min(0).max(255), output
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
-type Holder = { id: string; role: MachineRole };
+type Holder = { id: string; role: MachineRole; personId: string | null };
 
 /* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
    machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
@@ -109,7 +110,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const authority = await makeAuthorityOnce(db, config, company);
     const { role, issued } = await db.transaction(async tx => {
       const row = await lockLiveMachine(tx, id);
-      const role = who.own ? 'data' : row?.role;
+      /* A certificate that opens the data goes only to a row whose person sees the whole company, whatever the row
+         still says: one a restore brought back gets a worker's until the ranking takes its data away. */
+      const role = who.own ? 'data' : row?.role === 'data' && !(await holdsData(tx, row.personId)) ? 'worker' : row?.role;
       if (!row || !role) throw notAMachine();
       if (who.own) await tx.update(machines).set({ signKey }).where(eq(machines.id, id));
       else if (row.signKey !== signKey) throw keyChanged();
@@ -122,11 +125,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function machineOf(who: Asker): Promise<Holder | null> {
     if (who.own) {
       const mine = await findThisMachine(db, config);
-      return mine ? { id: mine.id, role: 'data' } : null;
+      return mine ? { id: mine.id, role: 'data', personId: null } : null;
     }
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
-    return { id: row.id, role: row.role! };
+    return { id: row.id, role: row.role!, personId: row.personId };
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
@@ -153,14 +156,17 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* Only the leader signs, so only it uses the authority's key. */
     const crlPem = authority && leading() ? await makeCrl(authority, revoked) : null;
     const data = await dataMachines(db);
-    /* A link that cannot be told now is left out, and a worker keeps the one it has. */
-    const worker = machine?.role === 'worker' ? machine : null;
-    const link = worker ? await workerLink(ctx) : await linkOf(machine, data.length > 1);
+    /* A machine that joined gets the link as it uses it, and its role, which changes when the server gives it the data
+       or takes it away; one that holds the data gets the way to it too. A link that cannot be told now is left out, and
+       the machine keeps the one it has. */
+    const peer = !who.own && machine ? machine : null;
+    const copy = peer?.role === 'data' && peer.personId !== null && (await holdsData(db, peer.personId));
+    const link = peer ? await workerLink(ctx, copy) : await linkOf(machine, data.length > 1);
     /* A worker also hears of the server's build, and when it may install it. */
-    const follow = worker ? await followOf(ctx, worker.id) : {};
+    const follow = peer?.role === 'worker' ? await followOf(ctx, peer.id) : {};
     /* The machine's own keeper also hears which copies' databases a merge is to read, and opens a door to each. */
     const doors = who.own ? { doors: await ctx.doorsWanted() } : {};
-    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
+    return { machine: machine?.id ?? null, ...(peer ? { role: peer.role } : {}), authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
