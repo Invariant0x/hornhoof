@@ -76,6 +76,9 @@ KEEP_BACKUPS=3
 NODES_CHECK=30
 # How long it leaves the nodes alone after an installer failed or a server said it cannot wait, in seconds.
 NODES_RETRY=300
+# The look at a worker's nodes that runs now, and whether this run looks once and ends.
+NODES_LOOK=''
+ONCE=''
 # The installer of this updater's own build, which it runs for the nodes of a server on another computer.
 INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"
 # The image commands on the computer run in: the updater's own, which compose names.
@@ -425,6 +428,7 @@ install_mode() { if worker; then printf worker; else printf server; fi; }
 install() {
   unpack "$1" "$2" || return 1
   remove_unnamed "$WORK/$1/compose.yaml"
+  if worker; then after_nodes_look; fi
   run_installer "$@" || return 1
   drop_orphans
 }
@@ -794,16 +798,34 @@ act_on_nodes() {
 # On a worker the installer moves the company's nodes with the core. One whose work would not end then stays on its
 # image, so now and again the installer of this updater's own build looks at the nodes alone: each on another image than
 # the one .env names goes to it once it is free, and the others are left as they are.
+# The installer waits for each such node's work to end, however long that takes, so it runs beside this loop, one look
+# at a time, and says what it did in nodes.log of the control folder. A run that looks once waits for it: its
+# container goes when it ends, and an installer cut off between removing a node and starting it would lose the node.
 worker_nodes() {
   local now
   now=$(date +%s)
   [ "$now" -ge "$NODES_AT" ] || return 0
   NODES_AT=$((now + NODES_RETRY))
+  if nodes_look_runs; then return 0; fi
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] && [ -f "$INSTALLER" ] || return 0
   own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" || return 0
-  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_WORKER_NODES=1 \
+  (HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_WORKER_NODES=1 \
     HORNHOOF_VERSION="$(env_value HORNHOOF_VERSION)" HORNHOOF_APP_REF="$(env_value HORNHOOF_APP_REF)" HORNHOOF_NODE_REF="$(env_value HORNHOOF_NODE_REF)" \
-    HORNHOOF_UPDATER_REF="$(env_value HORNHOOF_UPDATER_REF)" bash "$INSTALLER" worker > /dev/null 2>&1 || printf 'Could not move the nodes of this machine to its build.\n'
+    HORNHOOF_UPDATER_REF="$(env_value HORNHOOF_UPDATER_REF)" bash "$INSTALLER" worker > "$CONTROL/nodes.log" 2>&1 ||
+    printf 'Could not move the nodes of this machine to its build: see nodes.log in the control folder.\n') &
+  NODES_LOOK=$!
+  if [ -n "$ONCE" ]; then wait "$NODES_LOOK" || true; fi
+}
+
+# Whether the look at a worker's nodes still runs.
+nodes_look_runs() { [ -n "$NODES_LOOK" ] && kill -0 "$NODES_LOOK" 2> /dev/null; }
+
+# Two installers never move one node at once: a worker's install waits for the look at its nodes to end. The machine
+# has its turn by then, so no new work comes to its nodes and the look ends soon.
+after_nodes_look() {
+  nodes_look_runs || return 0
+  step install "Waiting for the look at this machine's nodes to end."
+  while nodes_look_runs; do sleep 1; done
 }
 
 catch_up_nodes() {
@@ -1130,6 +1152,7 @@ mkdir -p "$CONTROL"
 touch "$CONTROL/alive"
 interrupted
 if [ "${1:-}" = --once ]; then
+  ONCE=1
   write_addresses
   handle_request
   catch_up_nodes
@@ -1152,7 +1175,7 @@ RUNS=$!
   sleep 5
 done) &
 ADDRS=$!
-trap 'kill $ALIVE $RUNS $ADDRS 2> /dev/null || true' EXIT
+trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
 while true; do
   handle_request
   catch_up_nodes || printf 'Could not look at the nodes.\n'

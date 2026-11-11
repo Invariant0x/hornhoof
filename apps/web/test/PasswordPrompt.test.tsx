@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { CommandBox } from '../src/ui/CommandBox';
+import { keyDefaults } from '../src/owner-key-store';
 import { mockApi, TEST_KEY } from './api-mock';
 
 const JOIN = 'curl -fsSL https://corp.hornhoof.test/install.sh | bash -s -- --join abc';
@@ -57,6 +58,30 @@ describe('a join command and the key of who looks at it', () => {
     await user.click(screen.getByRole('button', { name: 'Enter password' }));
     expect(await screen.findByLabelText('Password')).toBeInTheDocument();
     expect(commandShown()).toBeNull();
+  });
+
+  /* A browser makes keys only on https and on localhost. A company opened by its address on the local network still
+     connects its machines. */
+  it('shows the command without a key, and says so, where the browser can make none', async () => {
+    const { subtle } = keyDefaults;
+    onTestFinished(() => void (keyDefaults.subtle = subtle));
+    keyDefaults.subtle = undefined as unknown as SubtleCrypto;
+    const calls = mockApi(NO_KEY);
+    show(JOIN, 'typed at setup');
+    expect(await screen.findByText(/This page is open at an address without https/)).toBeInTheDocument();
+    expect(commandShown()).toBe(JOIN);
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(calls.some(call => call.method === 'PUT')).toBe(false);
+  });
+
+  it('carries the key the person has already, also where the browser can make none', async () => {
+    const { subtle } = keyDefaults;
+    onTestFinished(() => void (keyDefaults.subtle = subtle));
+    keyDefaults.subtle = undefined as unknown as SubtleCrypto;
+    mockApi({});
+    show();
+    expect(await screen.findByText(`${JOIN} --owner-key ${TEST_KEY.publicKey}`)).toBeInTheDocument();
+    expect(screen.queryByText(/This page is open at an address without https/)).not.toBeInTheDocument();
   });
 
   it('makes the key with the password the screen holds, and asks nothing', async () => {

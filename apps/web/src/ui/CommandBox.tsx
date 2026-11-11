@@ -5,7 +5,7 @@ import { withOwnerKey } from '../owner-key';
 import type { ShownCommand } from '../types';
 import { CopyButton } from './CopyButton';
 import { Edge } from './Edge';
-import { useOwnerKey } from './PasswordPrompt';
+import { NO_KEY_HERE, useOwnerKey } from './PasswordPrompt';
 import { useNow } from './reset';
 
 export type ActiveCommand = { id: string; command: string; expiresAt: string | null };
@@ -49,9 +49,10 @@ export async function loadMachineCommands(
 }
 
 /* The install command with Copy, and what running it means for the person's subscription, or for their machine. A
-   command that joins a machine shows only with the viewer's own key on it, so no machine joins without knowing its
-   owner: with no key yet it is made first, with the password the screen holds or else asked for, and never shown
-   without it. Any other command shows as it is. */
+   command that joins a machine shows with the viewer's own key on it, so the machine knows its owner: with no key yet
+   it is made first, with the password the screen holds or else asked for. Only where the browser can make no key does
+   the command show without one, with a line that says so: such a machine joins and opens to nobody. Any other command
+   shows as it is. */
 export function CommandBox({ command, trust, password }: { command: string; trust?: string; password?: string }) {
   const t = useT();
   const joins = command.includes(' --join ');
@@ -78,7 +79,8 @@ export function CommandBox({ command, trust, password }: { command: string; trus
     };
   }, [joins, tries, password, publicKey]);
 
-  const shown = joins ? (key ? withOwnerKey(command, key) : null) : command;
+  const keyless = joins && key === NO_KEY_HERE;
+  const shown = joins && !keyless ? (key ? withOwnerKey(command, key) : null) : command;
   return (
     <div className="command-box">
       {shown ? (
@@ -96,6 +98,7 @@ export function CommandBox({ command, trust, password }: { command: string; trus
       ) : (
         prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
       )}
+      {keyless && <p className="muted">{t.subs.ownerKeyNotHere}</p>}
       <p className="trust">{trust ?? t.subs.trust}</p>
     </div>
   );

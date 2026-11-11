@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
+import { ON_NODE } from '../jobs/dispatch.js';
 import { FULL_SHA } from '../updates/registry.js';
 import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, type Go, type LeaderBuild } from './build.js';
 
@@ -45,8 +46,8 @@ export function refreshBuild(ctx: Ctx): Promise<void> {
 }
 
 /* The build this server runs, when the registry has its commit's images: what was last learned of it. It never waits
-   for the registry, which may take long to answer: a view or a join that asks while nothing is known yet hears of no
-   build, and the next one does. A server built by hand names no commit, and its workers stay where they are. */
+   for the registry, which may take long to answer: a view that asks while nothing is known yet hears of no build, and
+   the next one does. A server built by hand names no commit, and its workers stay where they are. */
 export function leaderBuild(ctx: Ctx): LeaderBuild | null {
   if (!FULL_SHA.test(ctx.config.commit)) return null;
   const known = kept.get(ctx);
@@ -88,9 +89,7 @@ export async function tryGrant(tx: Db, machineId: string, build: LeaderBuild, no
   if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
   const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'worker'), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   if (others.some(other => installs(other, now))) return false;
-  /* A check of a plan is on its machine from the moment it is made; a turn that waits is on none yet. */
-  const onIt = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
-  const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), onIt)).limit(1);
+  const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
   const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
   if (turn || part) return false;
   await tx.update(machines).set({ goCommit: build.commit, goAt: now }).where(eq(machines.id, machineId));

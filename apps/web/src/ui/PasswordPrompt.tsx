@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ApiFailure } from '../api';
 import { useT } from '../i18n';
-import { deviceKey, makeKey, serverKey } from '../owner-key';
+import { canMakeKey, deviceKey, makeKey, serverKey } from '../owner-key';
 import { Field } from './Field';
 
 /* Asks for the person's password to make their own key with it. onPassword answers false for a wrong password, which
@@ -64,8 +64,12 @@ function ask(): Asked {
   return asked;
 }
 
+/* What publicKey answers where the person has no key and this page can make none. */
+export const NO_KEY_HERE = '';
+
 /* The public half of the viewer's key, for the commands that carry it. With none on the server yet it is made first:
-   with the password given, or else asked for; null when the person leaves the question. The caller renders prompt. */
+   with the password given, or else asked for; null when the person leaves the question, and NO_KEY_HERE where the
+   browser can make none. The caller renders prompt. */
 export function useOwnerKey(): { publicKey(password?: string): Promise<string | null>; prompt: ReactNode } {
   const [mine, setMine] = useState<Asked | null>(null);
 
@@ -74,6 +78,7 @@ export function useOwnerKey(): { publicKey(password?: string): Promise<string | 
     /* A key this device keeps for another one is dropped here. */
     await deviceKey(server);
     if (server) return server.publicKey;
+    if (!canMakeKey()) return NO_KEY_HERE;
     if (password !== undefined) return (await makeKey(password)).publicKey;
     if (open) return open.answer;
     const asked = ask();

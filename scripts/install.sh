@@ -691,17 +691,27 @@ move_node() {
     say "Could not point $name at this machine's own address, so it goes on through $own."
 }
 
+# The settings of the core this computer has for the company the join named; nothing when it has none.
+core_env() {
+  local env
+  for env in "$(dirname "$BASE_DIR")"/hornhoof-*/.env; do
+    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_COMPANY)" = "$CORE_COMPANY" ]; then
+      printf '%s' "$env"
+      return 0
+    fi
+  done
+}
+
 # The folder of the company's core on this computer: the one that names the company already, else the one the server
 # named, and with that name taken by another company's the next of -2 to -9.
 core_dir() {
   local parent env dir n=1
   parent=$(dirname "$BASE_DIR")
-  for env in "$parent"/hornhoof-*/.env; do
-    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_COMPANY)" = "$CORE_COMPANY" ]; then
-      dirname "$env"
-      return 0
-    fi
-  done
+  env=$(core_env)
+  if [ -n "$env" ]; then
+    dirname "$env"
+    return 0
+  fi
   dir="$parent/$CORE_FOLDER"
   while [ -e "$dir" ]; do
     n=$((n + 1))
@@ -715,7 +725,7 @@ core_dir() {
 # no database and no secret of the company. A folder that is there keeps its settings; the ticket is new each time, and
 # the keeper redeems it once, with its own key, for its place in the company. The nodes then go to this machine's front.
 worker_core() {
-  local env_file waited=0 web
+  local env_file waited=0 web servers=''
   WORKER=1
   SERVER_DIR=$(core_dir) || exit 1
   env_file="$SERVER_DIR/.env"
@@ -728,7 +738,8 @@ worker_core() {
     if ! grep -q '^HORNHOOF_PORT=$' "$env_file"; then ENV_BEFORE=1; fi
     say "Keeping the settings in $env_file."
     # The keeper redeems the ticket where this command came from, which may be another address of the company than the
-    # one it joined through before.
+    # one it joined through before. That one stays the company's too.
+    servers=$(core_servers "$env_file")
     set_env HORNHOOF_JOIN_SERVER "$SERVER"
   else
     mkdir -p "$SERVER_DIR"
@@ -751,7 +762,7 @@ worker_core() {
     set_env HORNHOOF_NODE_REF "$NODE_REF"
     set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
   fi
-  set_env HORNHOOF_SERVERS "$(core_servers "$env_file" | tr '\n' ',' | sed 's/,$//')"
+  set_env HORNHOOF_SERVERS "$(printf '%s\n%s\n' "$servers" "$SERVER" | awk 'NF && !seen[$0]++' | tr '\n' ',' | sed 's/,$//')"
   set_env HORNHOOF_JOIN_TICKET "$CORE_TICKET"
   # A command without the key leaves the one the last command brought.
   if [ -n "$OWNER_KEY" ]; then set_env HORNHOOF_OWNER_KEY "$OWNER_KEY"; fi
@@ -801,7 +812,7 @@ core_and_front() {
 }
 
 node_mode() {
-  local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late
+  local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late held=''
   detect_system
   check_server
   ensure_docker
@@ -823,9 +834,13 @@ node_mode() {
   if [ -n "$code" ]; then
     join_machine "$code"
     RETRY='This command is used up: disconnect this machine in Hornhoof under Subscriptions, then get a new command.'
-    # The node image of the build the server runs, which the join named exactly.
-    if [ -n "$BUILD_TAG" ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
-      IMAGE=$NODE_REF
+    # The node image of the build the server runs, which the join named exactly. On a machine that has the company's
+    # core already, the image that core's settings name: its updater keeps every node of the company on the core's own
+    # build, which follows the server's by itself, so a node on another would be made anew within minutes.
+    if [ -n "$CORE" ]; then held=$(core_env); fi
+    if [ -n "$held" ]; then held=$(value_in "$held" HORNHOOF_NODE_REF); fi
+    if [ -z "${HORNHOOF_NODE_IMAGE:-}" ] && [ -n "$held$BUILD_TAG" ]; then
+      IMAGE=${held:-$NODE_REF}
       pull_image
     fi
     if [ -n "$CORE_HERE" ]; then

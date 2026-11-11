@@ -32,7 +32,7 @@ describe("a person's own key", () => {
     expect(wrong.statusCode).toBe(401);
     expect(wrong.json().error).toMatchObject({ reason: 'wrong_password' });
     /* A key the browser made with too few rounds, of another curve or that is no key at all is not taken. */
-    for (const bad of [{ ...key, iterations: 1000 }, await browserKey(SETUP.password, KEY_ITERATIONS, 'P-384'), { ...key, publicKey: 'not a key' }, { ...key, wrapped: 'x'.repeat(5000) }, { ...key, salt: undefined }]) {
+    for (const bad of [{ ...key, iterations: 1000 }, { ...key, iterations: 3_000_000_000 }, await browserKey(SETUP.password, KEY_ITERATIONS, 'P-384'), { ...key, publicKey: 'not a key' }, { ...key, wrapped: 'x'.repeat(5000) }, { ...key, salt: undefined }]) {
       expect((await put({ password: SETUP.password, ...bad })).statusCode).toBe(400);
     }
     expect(await db.select().from(personKeys)).toEqual([]);

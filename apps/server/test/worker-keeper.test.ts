@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -378,6 +378,24 @@ describe("a worker's keeper", () => {
     await until(() => readPin(config.dir) === next);
     await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(next));
     await renewed.stop();
+  });
+
+  it("sends its ticket again when its owner's key could not be kept", async () => {
+    const c = await company();
+    const ownerKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+    const { machine, ticket } = await c.joined();
+    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey };
+    /* A folder stands where the pin goes, so the key cannot be written there. */
+    mkdirSync(join(config.dir, PIN_FILE, 'taken'), { recursive: true });
+    const w = await workerOn(c, config);
+    await until(() => w.lines.some(line => line.includes("Could not keep the owner's key")));
+    await until(() => hasLeader(w.status()));
+    expect(readPin(config.dir)).toBeNull();
+    /* The ticket was not noted as used, so the next ask sends it again, and the key is kept once it can be. */
+    rmSync(join(config.dir, PIN_FILE), { recursive: true });
+    await until(() => readPin(config.dir) === ownerKey);
+    await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(ownerKey));
+    await w.stop();
   });
 
   it("has a data machine's keeper report its addresses and its host's name", async () => {

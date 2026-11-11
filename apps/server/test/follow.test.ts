@@ -260,6 +260,20 @@ describe("following the server's build", () => {
     expect(asJson.build).toEqual(B);
   });
 
+  it('asks the registry again when a join comes while the server knows no build of its own', async () => {
+    /* The registry failed when the server first asked, and answers since. */
+    const c = await company({}, registry => void registry.find.mockRejectedValueOnce(new Error('The registry answered 503.')));
+    expect(leaderBuild(c.ctx)).toBeNull();
+    const code = ((await c.app.inject({ method: 'POST', url: '/api/machines/command', ...as(c.ceo) })).json() as { command: string }).command.split('--join ')[1];
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
+    /* A join command works once, so its answer names the build: the core comes up on the server's build, not on the newest. */
+    expect(joined.body.split('\n')[0]).toMatch(new RegExp(`^build ${COMMIT} `));
+    /* A view still never waits for the registry. */
+    const asked = c.find.mock.calls.length;
+    await c.view(await c.worker('tower'));
+    expect(c.find).toHaveBeenCalledTimes(asked);
+  });
+
   it('keeps the build and the word to install out of a view that did not come through the peer link', async () => {
     const c = await company();
     const w = await c.worker('mac');

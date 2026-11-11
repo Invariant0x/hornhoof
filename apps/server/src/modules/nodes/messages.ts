@@ -1,9 +1,10 @@
 import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
+import { ON_NODE } from '../jobs/dispatch.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
 import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
@@ -37,10 +38,6 @@ export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
   return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
 }
-
-/* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
-   A queued conversation turn still waits in Hornhoof and goes out later. */
-const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
 

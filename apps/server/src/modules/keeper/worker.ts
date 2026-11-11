@@ -159,6 +159,8 @@ export class WorkerKeeper {
   private renewing = false;
   private lastMoment = 0;
   private readonly hourly = new Hourly();
+  /* The ticket that let this machine in and whose owner's key is not kept yet. */
+  private owed: string | null = null;
   /* Ends what the keeper has asked the server for when it stops. */
   private readonly stopping = new AbortController();
 
@@ -305,15 +307,25 @@ export class WorkerKeeper {
   }
 
   /* The owner's key is pinned from the command they ran here, and only once that command's ticket let this machine in:
-     a join that was refused pins nothing, and no answer of a server ever does. */
-  private pinOwner(): void {
+     a join that was refused pins nothing, and no answer of a server ever does. Whether nothing is left to pin. */
+  private pinOwner(): boolean {
     const { ownerKey, dir } = this.opts.config;
-    if (!ownerKey) return;
+    if (!ownerKey) return true;
     try {
       pinKey(dir, ownerKey);
+      return true;
     } catch (err) {
-      this.opts.log(`Could not keep the owner's key in the keeper's folder: ${reasonOf(err)}`);
+      this.sayHourly('pin', `Could not keep the owner's key in the keeper's folder: ${reasonOf(err)}`);
+      return false;
     }
+  }
+
+  /* What follows a ticket that let this machine in. The key first: a ticket noted as used is never sent again, so one
+     whose key could not be kept stays owed and is tried at every look; and when the keeper stops before that, the
+     ticket is sent again at its next start, which the server answers alike within its day. */
+  private settle(ticket: string): void {
+    this.owed = this.pinOwner() ? null : ticket;
+    if (!this.owed) this.spend(ticket);
   }
 
   private pinPrint(): string | null {
@@ -343,8 +355,7 @@ export class WorkerKeeper {
     const { joinServer, machineId } = this.opts.config;
     const res = await this.post(`${joinServer}/api/network/join`, { ticket, networkId: machineId, signKey });
     if (res.status === 200) {
-      this.spend(ticket);
-      this.pinOwner();
+      this.settle(ticket);
       this.mergeView((res.body as { view?: unknown } | null)?.view);
       return res.body as HeldCertificate;
     }
@@ -373,6 +384,7 @@ export class WorkerKeeper {
     if (has && !this.hadLeader) void this.doorWork.then(() => this.readView()).then(() => this.report());
     this.hadLeader = has;
     if (this.renewDue(now)) void this.renew();
+    if (this.owed) this.settle(this.owed);
   }
 
   /* One change of the door after another. A door that could not open is tried again at the next look. */

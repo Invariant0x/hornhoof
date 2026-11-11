@@ -56,6 +56,10 @@ export const browserKeyStore: KeyStore = {
 export type KeyDeps = { store: KeyStore; subtle: SubtleCrypto; iterations: number };
 export const keyDefaults: KeyDeps = { store: browserKeyStore, subtle: globalThis.crypto?.subtle, iterations: KEY_ITERATIONS };
 
+/* A browser gives pages its cryptography only on https and on localhost: a page open at any other address, as the
+   company's on the local network, can make no key. */
+export const canMakeKey = (): boolean => Boolean(keyDefaults.subtle);
+
 /* The device lets go of the key: at sign-out, and when the server says the session is over. */
 export function forgetOwnerKey(deps: Partial<KeyDeps> = {}): Promise<void> {
   return (deps.store ?? keyDefaults.store).clear();

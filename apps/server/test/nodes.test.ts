@@ -621,7 +621,10 @@ describe("each machine's place in the company's network", () => {
     const byId = (list: Listed, id: string) => list.machines.find(machine => machine.id === id)!;
     expect(byId(mine, mac)).toMatchObject({ core: { webPort: 8081, path: 'relay' }, needsCore: false });
     expect(byId(mine, laptop)).toMatchObject({ core: null, needsCore: true });
-    expect(mine.builtin).toMatchObject({ webPort: 8080, refusedBy: ['ivan-mac'] });
+    /* What a machine said days ago of the way to the server is no news of today. */
+    expect(mine.builtin).toMatchObject({ webPort: 8080, refusedBy: [] });
+    await db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, mac));
+    expect((await listed(app, ceo)).builtin).toMatchObject({ webPort: 8080, refusedBy: ['ivan-mac'] });
     /* Only the machine's owner is offered the core for it. */
     expect(byId(await listed(app, maria), laptop)).toMatchObject({ core: null, needsCore: false });
     /* A machine whose nodes were last seen days ago is not asked to do anything. */

@@ -43,26 +43,49 @@ export function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stan
 
 /* One run of an updater script, with stub docker and curl first on PATH, and its own temporary files in the stand. It
    takes as long as it takes: only the runner's limit for the test ends one that never ends. */
+const standEnv = (s: Stand, env: Record<string, string>) => ({
+  TMPDIR: s.dir,
+  PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`,
+  HOME: s.dir,
+  STUB_LOG: s.log,
+  STUB_STATE: s.dir,
+  STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
+  STUB_MIGRATIONS: '0.4.0=20 0.4.1=20',
+  STUB_DIGESTS: Object.entries(DIGESTS).map(([tag, digest]) => `${tag}=${digest}`).join(' '),
+  STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} node=${APP}-node@${NODE_DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`,
+  HORNHOOF_CONTROL_DIR: s.control,
+  HORNHOOF_SERVER_DIR: s.server,
+  HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
+  HORNHOOF_HEALTH_WAIT: '1',
+  ...env,
+});
+
+const callsOf = (s: Stand) => readFileSync(s.log, 'utf8').trim().split('\n').filter(Boolean);
+const statusOf = (s: Stand) => {
+  try {
+    return JSON.parse(readFileSync(join(s.control, 'status.json'), 'utf8')) as { id: string; state: string; step: string; log: string };
+  } catch {
+    /* Not written yet, or read while it was being moved into place. */
+    return null;
+  }
+};
+
+/* The updater as it runs in its container, looking again and again until the test stops it with everything it started.
+   A wait of the updater takes a moment here, so its loops do not spin. */
+export function startLoop(s: Stand, env: Record<string, string> = {}) {
+  const child = spawn('bash', [SCRIPT], { stdio: 'ignore', detached: true, env: standEnv(s, { STUB_DURING_SLEEP: '/bin/sleep 0.05', ...env }) });
+  const stop = () => {
+    try {
+      process.kill(-child.pid!, 'SIGKILL');
+    } catch {
+      /* Gone already. */
+    }
+  };
+  return { stop, calls: () => callsOf(s), status: () => statusOf(s) };
+}
+
 async function run(script: string, flag: string, s: Stand, env: Record<string, string>) {
-  const child = spawn('bash', [script, flag], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      TMPDIR: s.dir,
-      PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`,
-      HOME: s.dir,
-      STUB_LOG: s.log,
-      STUB_STATE: s.dir,
-      STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
-      STUB_MIGRATIONS: '0.4.0=20 0.4.1=20',
-      STUB_DIGESTS: Object.entries(DIGESTS).map(([tag, digest]) => `${tag}=${digest}`).join(' '),
-      STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} node=${APP}-node@${NODE_DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`,
-      HORNHOOF_CONTROL_DIR: s.control,
-      HORNHOOF_SERVER_DIR: s.server,
-      HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
-      HORNHOOF_HEALTH_WAIT: '1',
-      ...env,
-    },
-  });
+  const child = spawn('bash', [script, flag], { stdio: ['ignore', 'pipe', 'pipe'], env: standEnv(s, env) });
   let stdout = '';
   let stderr = '';
   child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));

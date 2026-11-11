@@ -218,6 +218,7 @@ export const en = {
     ownerKeyMaking: 'Making your key',
     ownerKeyNeeded: 'This command carries your key, so it shows once you enter your password.',
     ownerKeyEnter: 'Enter password',
+    ownerKeyNotHere: 'This page is open at an address without https, where a browser cannot make your key, so this command carries none. The machine joins all the same. To let the orchestrator work on that machine later, open Hornhoof at its https link, or on the machine the server runs on, and run a new command from there.',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
     commandHours: (hours: number) => `Valid for ${hours} more ${hours === 1 ? 'hour' : 'hours'}.`,
     commandMinutes: (minutes: number) => `Valid for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`,

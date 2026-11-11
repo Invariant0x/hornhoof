@@ -1,7 +1,7 @@
 import { api } from './api';
 import { keyDefaults, type DeviceKey, type KeyDeps } from './owner-key-store';
 
-export { KEY_ITERATIONS, browserKeyStore, forgetOwnerKey, keyDefaults, type DeviceKey, type KeyDeps, type KeyStore } from './owner-key-store';
+export { KEY_ITERATIONS, browserKeyStore, canMakeKey, forgetOwnerKey, keyDefaults, type DeviceKey, type KeyDeps, type KeyStore } from './owner-key-store';
 
 /* The key as the server holds it: the public half, and the private half wrapped with a key made from the password. */
 export type StoredKey = { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };

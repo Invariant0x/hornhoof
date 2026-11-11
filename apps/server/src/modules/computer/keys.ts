@@ -19,7 +19,8 @@ const KeyBody = z.object({
   wrapped: Part,
   salt: Part,
   iv: Part,
-  iterations: z.number().int().min(KEY_ITERATIONS),
+  /* No more than its column holds. */
+  iterations: z.number().int().min(KEY_ITERATIONS).max(2_147_483_647),
 });
 
 const wrongPassword = () => new ApiError(401, 'unauthorized', 'Wrong email or password.', 'wrong_password');

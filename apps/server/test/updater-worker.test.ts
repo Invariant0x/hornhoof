@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, ask, at, DIGESTS, JQ, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { APP, ask, at, DIGESTS, JQ, NODE_DIGESTS, refs, runOnce, stand, startLoop, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { until } from './helpers-basic.js';
 
 /* A machine that keeps none of the company's data: its compose file with the overlay names the core alone, and the
    build that runs is the keeper's. */
@@ -121,6 +122,30 @@ describe('the updater of a worker', () => {
     /* A core whose settings name no image of Hornhoof's own is left alone. */
     const odd = stand('HORNHOOF_ROLE=worker\nHORNHOOF_NODE_REF=ghcr.io/acme/other:latest\n');
     expect((await runOnce(odd, null, { ...WORKER, HORNHOOF_INSTALLER: installer })).calls.some(call => call.startsWith('own installer'))).toBe(false);
+  });
+
+  /* The installer waits there for a node's work to end, which may take hours. */
+  it("reads a request while its look at the nodes waits for a node's work, and installs after that look", async () => {
+    const s = stand(`HORNHOOF_ROLE=worker\nHORNHOOF_VERSION=0.4.0\n${refs('0.4.0').replaceAll(' ', '\n')}\n`);
+    const installer = join(s.dir, 'own-install.sh');
+    const release = join(s.dir, 'release');
+    writeFileSync(installer, `printf 'own installer start\\n' >> "$STUB_LOG"\nuntil [ -e ${release} ] || [ ! -d ${s.dir} ]; do /bin/sleep 0.05; done\nprintf 'own installer end\\n' >> "$STUB_LOG"\n`);
+    const loop = startLoop(s, { ...WORKER, HORNHOOF_INSTALLER: installer });
+    onTestFinished(loop.stop);
+    await until(() => loop.calls().includes('own installer start'));
+    writeFileSync(join(s.control, 'request.json'), JSON.stringify(ask('w1')));
+    await until(() => loop.status()?.step === 'wait');
+    /* Its turn comes while the look still waits: the install waits for the look, so no two installers move one node. */
+    writeFileSync(join(s.control, 'go.json'), word());
+    await until(() => loop.status()?.log.includes("Waiting for the look at this machine's nodes to end.") ?? false);
+    expect(loop.calls()).not.toContain('own installer end');
+    expect(loop.calls().some(call => call.startsWith('installer worker'))).toBe(false);
+    writeFileSync(release, '');
+    await until(() => loop.status()?.state === 'done');
+    const calls = loop.calls();
+    expect(calls.indexOf('own installer end')).toBeLessThan(calls.findIndex(call => call.startsWith('installer worker')));
+    /* One look at a time: none began while the first waited. */
+    expect(calls.slice(0, calls.indexOf('own installer end')).filter(call => call === 'own installer start')).toHaveLength(1);
   });
 
   it("writes the machine's own addresses on Linux, and leaves them when it cannot read them", async () => {

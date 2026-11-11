@@ -13,7 +13,7 @@ import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testP
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
-import { leaderBuild, type LeaderBuild } from '../network/follow.js';
+import { leaderBuild, refreshBuild, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
@@ -169,8 +169,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
-    /* The server's own build, when it knows it, so the core comes up on the build the server runs. */
-    const build = core ? leaderBuild(ctx) : null;
+    /* The server's own build, so the core comes up on the build the server runs. A join command works once, so this
+       answer is the one to name it: when the server knows none, it asks the registry first. */
+    const build = core ? (leaderBuild(ctx) ?? (await refreshBuild(ctx).then(() => leaderBuild(ctx)))) : null;
 
     /* The build's line and the core's first, then one line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
@@ -247,10 +248,16 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await runningAgents(ctx, me);
     const programHost = await builtinMachine(db, config.hostId, me.companyId, config.machineId);
-    /* The server's own place in the network, as its keeper reported it, and the workers on its own network that could
-       not reach it there. */
-    const [ownRow] = me.scopeKind === 'company' ? await db.select({ id: machines.id, webPort: machines.webPort }).from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), eq(machines.role, 'data'), sql`not (${shownMachine})`)).limit(1) : [];
-    const refusedBy = me.scopeKind === 'company' ? (await db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true))).orderBy(machines.createdAt)).map(row => row.hostname) : [];
+    /* The server's own place in the network, as its keeper reported it, and the workers on its own network that said
+       within the last day that they could not reach it there. */
+    const refusing = () =>
+      db
+        .select({ hostname: machines.hostname })
+        .from(machines)
+        .where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true), gt(machines.reportAt, new Date(Date.now() - CORE_OFFER_MS))))
+        .orderBy(machines.createdAt);
+    const [ownRow, refused] = me.scopeKind === 'company' ? await Promise.all([findThisMachine(db, config), refusing()]) : [null, []];
+    const refusedBy = refused.map(row => row.hostname);
     /* A computer joined before machines had the company's core is offered one by its owner, while its nodes are about. */
     const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
     const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);

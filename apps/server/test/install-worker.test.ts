@@ -129,6 +129,23 @@ describe('install.sh on a machine that joins', () => {
     expect(valueOf(dotEnv(other.dir), 'HORNHOOF_PORT')).toEqual(['9090']);
   });
 
+  /* The core's updater keeps every node of the company on the core's own build, so a node on the server's newer one would
+     be made anew on the older within minutes, under a sign-in that is going on. */
+  it("starts a node that joins later on the build its machine's core runs", () => {
+    const first = install({ env: { STUB_JOIN_BODY: body(BUILD, CORE) } });
+    expect(first.code, first.out).toBe(0);
+    const before = dotEnv(first.dir);
+    const NEWER = `build ${'c'.repeat(40)} ${APP}@sha256:${'7'.repeat(64)} ${APP}-node@sha256:${'8'.repeat(64)} ${APP}-updater@sha256:${'9'.repeat(64)}`;
+    const second = install({
+      env: { STUB_JOIN_BODY: body(NEWER, `core hornhoof-qwerty ${'U'.repeat(43)} 8080 ${COMPANY}`, MACHINE), HOME: home(first.dir), HORNHOOF_HOME: join(home(first.dir), '.hornhoof'), HORNHOOF_DIR: join(home(first.dir), 'hornhoof'), STUB_PORTS_DIR: first.dir },
+    });
+    expect(second.code, second.out).toBe(0);
+    expect(second.calls.find(call => call.startsWith('docker run -d'))).toContain(`${APP}-node@sha256:${'2'.repeat(64)}`);
+    expect(second.calls.some(call => call.includes(`${APP}-node@sha256:${'8'.repeat(64)}`))).toBe(false);
+    const kept = (text: string) => text.split('\n').filter(line => line && !line.startsWith('HORNHOOF_JOIN_TICKET=')).sort();
+    expect(kept(dotEnv(first.dir))).toEqual(kept(before));
+  });
+
   it("finds this company's folder again, and leaves another company's alone", () => {
     const first = install({ env: { STUB_JOIN_BODY: body(CORE) } });
     const again = (lines: string[], env: Record<string, string> = {}) =>
@@ -317,6 +334,12 @@ describe('install.sh on a machine that has the core', () => {
     /* The keeper redeems the new ticket where this command came from, and both addresses are the company's. */
     expect(valueOf(env, 'HORNHOOF_JOIN_SERVER')).toEqual([LINK]);
     expect(valueOf(env, 'HORNHOOF_SERVERS')).toEqual([`${SERVER},${LINK}`]);
+    /* A core from before it kept the list knows the address it first joined through all the same. */
+    writeFileSync(join(core, '.env'), env.split('\n').filter(line => !line.startsWith('HORNHOOF_SERVERS=')).join('\n').replace(`HORNHOOF_JOIN_SERVER=${LINK}`, `HORNHOOF_JOIN_SERVER=${SERVER}`));
+    const third = install({ env: { ...shared, HORNHOOF_SERVER: LINK, STUB_JOIN_BODY: body(`core hornhoof-acme ${'V'.repeat(43)} 8080 ${COMPANY}`), STUB_CONTAINERS: '' } });
+    expect(third.code, third.out).toBe(0);
+    expect(valueOf(readFileSync(join(core, '.env'), 'utf8'), 'HORNHOOF_SERVERS')).toEqual([`${SERVER},${LINK}`]);
+    writeFileSync(join(core, '.env'), env);
     /* The updater moves the nodes of both, and the nodes of no other company. */
     const refs = { HORNHOOF_APP_REF: `${APP}@sha256:${'4'.repeat(64)}`, HORNHOOF_NODE_REF: `${APP}-node@sha256:${'5'.repeat(64)}`, HORNHOOF_UPDATER_REF: `${APP}-updater@sha256:${'6'.repeat(64)}` };
     const containers = `${NODE}=${SERVER} ${LINKED}=${LINK} hornhoof-kimi-aaaaaaaa=https://other.example.test`;
