@@ -21,18 +21,21 @@ export type CopyLine =
   | { line: 'asleep'; since: string | null }
   | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
 
-/* A machine's part in holding the company's data. number, why: its place in the order and the key of the words for it.
-   unfit: why it holds no copy. copy: how its copy does; none for the leader. leftAt: when it stopped holding the data. */
-export type DataView = { number: number | null; why: 'server' | 'next' | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
+/* A machine's part in holding the company's data. number, why: its place in the order and the key of the words for it,
+   as the ranking stored it. pin: the place the CEO gave it by hand, or 'none' when he keeps it from the server. unfit:
+   why it cannot take the server. copy: how its copy does; none for the leader. leftAt: when it stopped holding the
+   data. */
+export type DataView = { number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
 
-/* Who holds the company: the leader's name, the machines that keep a copy, the one commits wait for marked, and since
-   when only the leader holds the changes, when copies there were and none is up to date now. */
+/* Who holds the company: the leader's name, the machines that keep a copy, three while one is handed over, the one
+   commits wait for marked, and since when only the leader holds the changes, when copies there were and none is up to
+   date now. */
 export type CopiesView = { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null };
 
 type Row = typeof machines.$inferSelect;
 type Read = { rows: Row[]; leader: Row | null; lines: Map<string, CopyLine>; sync: string | null };
 
-const whyOf = (why: string | null): DataView['why'] => (why === 'server' || why === 'next' ? why : null);
+const pinOf = (pin: string | null): DataView['pin'] => (pin === 'none' ? 'none' : pin && /^[1-9][0-9]{0,2}$/.test(pin) ? Number(pin) : null);
 
 /* Every live machine with the line of its copy. A copy is up to date only on the word of the keeper that leads, which
    reads its own Postgres: a word that is old or missing makes none so. */
@@ -90,7 +93,7 @@ async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<
       /* A machine with a place, or one that holds the data, needs no reason; any other says the first thing that keeps
          it from holding a copy. */
       const reason = row.serverOrder === null && row.role !== 'data' && candidate ? unfit(candidate, fit) : null;
-      return [row.id, { number: row.serverOrder, why: whyOf(row.serverWhy), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null }];
+      return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null }];
     }),
   );
 }

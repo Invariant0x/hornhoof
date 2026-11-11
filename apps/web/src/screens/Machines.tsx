@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
-import { api } from '../api';
+import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, SubView, TlsView, Unfit } from '../types';
@@ -149,9 +149,11 @@ function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => <MachinePlan key={plan.id} plan={plan} sub={subs.find(s => s.id === plan.id)} online={row.online} now={now} />)}</ul>;
 }
 
-function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
+function machineColumns(t: Messages, language: Language, priority: boolean): TableColumn<MachineRow>[] {
   const load = (m: MachineRow) => m.online && m.load ? busyShare(m.load.load, m.load.cpus) : null;
+  const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
+    ...place,
     { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
@@ -174,6 +176,19 @@ function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
 function machineSearch(t: Messages, language: Language, subs: SubView[], row: MachineRow): string {
   const plans = row.plans.map(p => { const s = subs.find(s => s.id === p.id); return s ? subName(t, s) : PROVIDER_NAMES[p.provider]; });
   return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, a.title?.[language], a.department?.name])].join(' ');
+}
+
+/* A machine's place in the order the server passes on in: 1 where the server runs, whatever that machine's own row
+   says, and none for a machine that takes no part. */
+const placeOf = (row: MachineRow): number | null => (row.server ? 1 : row.data?.number ?? null);
+
+/* The number in its box, the server's filled; or a dash that says why there is none. */
+function PriorityCell({ row }: { row: MachineRow }) {
+  const p = useT().machines.priority;
+  const number = placeOf(row);
+  if (number !== null) return <span className={number === 1 ? 'pn one' : 'pn'} title={!row.server && typeof row.data?.pin === 'number' ? p.why.pinned : undefined}>{number}</span>;
+  const why = row.data?.pin === 'none' ? p.out : p.cannot;
+  return <><span className="pdash" title={why} aria-hidden="true" /><span className="sr">{why}</span></>;
 }
 
 /* The machine the company's server runs on now. */
@@ -311,20 +326,34 @@ function NetworkPlace({ row }: { row: MachineRow }) {
 
 const tenths = (language: Language, n: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round(n * 10) / 10);
 
-/* Why a machine holds no copy, in the words of its card. */
-function unfitText(t: Messages, language: Language, unfit: Unfit): string {
-  const c = t.machines.copy;
+/* Why a machine cannot take the server, in the words of its card. */
+function unfitText(t: Messages, language: Language, unfit: Unfit, host: string): string {
+  const u = t.machines.priority.unfit;
   switch (unfit.why) {
-    case 'phone': return c.phone;
-    case 'no_core': return c.noCore;
-    case 'scope': return c.scope(unfit.person);
-    case 'no_link': return c.noLink;
-    case 'measuring': return c.measuring;
-    case 'leaving': return c.leaving;
-    case 'memory': return c.memory(gigabytes(language, unfit.memory));
-    case 'disk': return c.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
-    case 'fsync': return c.fsync(tenths(language, unfit.p99));
+    case 'phone': return u.phone;
+    case 'no_core': return u.noCore(host);
+    case 'scope': return u.scope(unfit.person, unfit.departments);
+    case 'no_link': return u.noLink;
+    case 'measuring': return u.measuring;
+    case 'leaving': return u.leaving;
+    case 'memory': return u.memory;
+    case 'disk': return u.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
+    case 'fsync': return u.fsync(tenths(language, unfit.p99));
   }
+}
+
+/* The words for why a machine stands where it does, from the key the ranking stored: a line of its own, or how often
+   the machine is online with its strongest or weakest part. A key of a newer server says nothing. */
+function whyText(t: Messages, why: string | null): string | null {
+  const p = t.machines.priority;
+  if (why === null) return null;
+  if (why === 'server') return t.cards.serverHere;
+  const lines: Record<string, string> = p.why;
+  if (lines[why]) return lines[why];
+  const [online, part] = why.split('.');
+  const often = (p.online as Record<string, string>)[online ?? ''];
+  const what = (p.part as Record<string, string>)[part ?? ''];
+  return often && what ? p.both(often, what) : often ?? null;
 }
 
 function copyText(t: Messages, language: Language, copy: NonNullable<DataView['copy']>): string {
@@ -340,29 +369,79 @@ function copyText(t: Messages, language: Language, copy: NonNullable<DataView['c
   }
 }
 
-/* What the card says of the machine's part in holding the company's data, a line each: why it has its place, then how
-   its copy does or why it holds none, then when it stopped holding the data. */
-function dataLines(t: Messages, language: Language, data: DataView): string[] {
-  const c = t.machines.copy;
-  return [
-    data.why === 'server' ? c.server : data.why === 'next' ? c.next : null,
-    data.copy ? copyText(t, language, data.copy) : data.unfit ? c.none(unfitText(t, language, data.unfit)) : null,
-    data.leftAt ? c.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
-  ].filter((line): line is string => line !== null);
+type Mode = 'auto' | 'manual' | 'out';
+
+/* The CEO's choice for one machine: left to Hornhoof, a place by hand, or kept from the server. By hand keeps the
+   machine at its number, or after the last one when it comes back from out; the list under it gives the places there
+   are. While a choice is sent nothing else can be pressed, and a refusal is said under the choices. */
+function PriorityChoice({ row, data, last, refresh }: { row: MachineRow; data: DataView; last: number; refresh: () => Promise<void> }) {
+  const t = useT();
+  const p = t.machines.priority;
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const mode: Mode = data.pin === 'none' ? 'out' : data.pin !== null ? 'manual' : 'auto';
+  const send = async (pin: DataView['pin']) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.put(`/api/machines/${row.id}/priority`, { pin });
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pins: Record<Mode, DataView['pin']> = { auto: null, manual: data.number ?? last + 1, out: 'none' };
+  const modes: [Mode, string][] = [['auto', p.auto], ['manual', p.manual], ['out', p.out]];
+  const places = Array.from({ length: Math.max(last, data.number ?? 0) - 1 }, (_, at) => at + 2);
+  return <>
+    <span className="pmode" role="radiogroup" aria-label={t.cards.priority}>
+      {modes.map(([value, text]) => (
+        <label key={value} className="pm-opt">
+          <input type="radio" name={`pmode-${row.id}`} checked={mode === value} disabled={busy} onChange={() => void send(pins[value])} />
+          <span>{text}</span>
+        </label>
+      ))}
+      {mode === 'manual' && data.number !== null && (
+        <select className="sel" aria-label={p.pinLabel(row.hostname)} value={data.number} disabled={busy} onChange={e => void send(Number(e.target.value))}>
+          {places.map(place => <option key={place} value={place}>{place}</option>)}
+        </select>
+      )}
+    </span>
+    {failure !== null && <p className="alert" role="alert">{failure instanceof ApiFailure && failure.reason === 'only_copy' ? p.onlyCopy(row.hostname) : errorText(t, failure)}</p>}
+  </>;
 }
 
-/* The machine's place in the order, with the first line beside it and the others below. A machine with no place and
-   nothing to say has no such part. */
-function DataPlace({ data }: { data: DataView }) {
+/* The Priority part of a card: the machine's number and why it has it, or a dash and why it has none; for the CEO, on
+   every machine that may take the server but the one it runs on, the choice of its place; then how its copy does and
+   when it stopped holding the data. last: the highest number there is. */
+function PriorityPart({ row, me, last, refresh }: { row: MachineRow; me: Me; last: number; refresh: () => Promise<void> }) {
   const t = useT();
   const { language } = useLanguage();
-  const lines = dataLines(t, language, data);
-  if (data.number === null && lines.length === 0) return null;
-  const [first, ...rest] = data.number === null ? [null, ...lines] : lines;
+  const p = t.machines.priority;
+  const c = t.machines.copy;
+  const data = row.data ?? null;
+  const notes = [
+    data?.copy && placeOf(row) !== 1 ? copyText(t, language, data.copy) : null,
+    data?.leftAt ? c.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
+  ].filter((line): line is string => line !== null);
+  const below = notes.map(line => <p key={line} className="machine-note">{line}</p>);
+  /* Number 1 is wherever the server runs, and moves only with the server: nothing to choose there. */
+  if (placeOf(row) === 1) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span><small>{p.line}</small></div>{below}</Part>;
+  if (!data) return null;
+  if (data.unfit) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit, row.hostname))}</span></span></div>{below}</Part>;
+  const out = data.pin === 'none';
+  if (data.number === null && !out) return notes.length ? <Part title={t.cards.priority}>{below}</Part> : null;
+  const why = out ? p.why.out : whyText(t, data.why);
   return (
     <Part title={t.cards.priority}>
-      {data.number !== null && <p className="server-priority"><b>{data.number}</b><span>{first ?? ''}</span></p>}
-      {rest.map(line => <p key={line} className="machine-note">{line}</p>)}
+      <div className="prio">
+        <span className="prio-n">{out ? <span className="pdash" aria-hidden="true" /> : <span className="pn">{data.number}</span>}<span>{why}</span></span>
+        {me.person.isOwner && <PriorityChoice row={row} data={data} last={last} refresh={refresh} />}
+        <small>{p.line}</small>
+      </div>
+      {below}
     </Part>
   );
 }
@@ -409,7 +488,7 @@ function MachineAccess({ view, controls }: { view: ComputerAccessView; controls:
   );
 }
 
-function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; controls: MachineControls }) {
+function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: { shown: boolean; last: number }; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
   const m = row.source;
@@ -435,7 +514,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
         {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
-        {m?.data ? <DataPlace data={m.data} /> : m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
+        {order.shown ? <PriorityPart row={row} me={me} last={order.last} refresh={controls.refresh} /> : m && row.server && <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span></div></Part>}
         {row.access && <MachineAccess view={row.access} controls={controls} />}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
@@ -458,6 +537,8 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [copies, setCopies] = useState<CopiesView | null>(null);
+  /* Whether this person sees the order the server passes on in. */
+  const [priority, setPriority] = useState(false);
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
@@ -477,7 +558,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const load = useCallback(async () => {
     try {
       const [hosts, list] = await Promise.all([
-        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null }>('/api/machines'),
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
         loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
       ]);
@@ -485,6 +566,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
       setCopies(hosts.copies ?? null);
+      setPriority(hosts.priority === true);
       setSubs(list.subscriptions);
     } catch (err) {
       setFailure(err);
@@ -613,13 +695,13 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           rows={rows}
           selectedId={selected}
           onSelect={onSelect}
-          columns={machineColumns(t, language)}
+          columns={machineColumns(t, language, priority)}
           name={row => row.hostname}
           openIds={openIds}
-          initialSort={{ key: 'status', direction: 1 }}
+          initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
-          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
+          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)) }} controls={{
             picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />

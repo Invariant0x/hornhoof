@@ -662,11 +662,11 @@ describe("each machine's place in the company's network", () => {
     await db.update(machines).set({ networkId: hashToken('mac'), role: 'data', serverOrder: 2, copyState: 'making', copyProgress: 40, copyName: 'copy_0f0f0f0f0f0f0f0f_1' }).where(eq(machines.id, mac));
     await db.update(machines).set({ networkId: hashToken('anna-pc'), role: 'worker' }).where(eq(machines.id, hers));
     type Data = { number: number | null; why: string | null; unfit: { why: string; person?: string } | null; copy: { line: string; progress?: number } | null; leftAt: string | null };
-    type Held = { machines: { id: string; data?: Data | null }[]; copies?: { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null } | null };
+    type Held = { priority: boolean; machines: { id: string; data?: Data | null }[]; copies?: { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null } | null };
     const held = async (token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json() as Held;
     const mine = await held(ceo);
     const of = (list: Held, id: string) => list.machines.find(machine => machine.id === id)!;
-    expect(of(mine, mac).data).toEqual({ number: 2, why: null, unfit: null, copy: { line: 'making', progress: 40 }, leftAt: null });
+    expect(of(mine, mac).data).toEqual({ number: 2, why: null, pin: null, unfit: null, copy: { line: 'making', progress: 40 }, leftAt: null });
     /* The card of the computer the server itself runs on says what the server's own row says. */
     expect(of(mine, host).data).toMatchObject({ number: 1, why: 'server', unfit: null, copy: null });
     /* A machine of someone who does not see the whole company holds no copy, and its card says why. */
@@ -677,6 +677,9 @@ describe("each machine's place in the company's network", () => {
     expect(theirs.machines.map(machine => machine.id)).toEqual([hers]);
     expect(theirs.machines[0]).not.toHaveProperty('data');
     expect(theirs).not.toHaveProperty('copies');
+    /* Who sees the order: the CEO and those who see the whole company. */
+    const zed = await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    expect([mine.priority, (await held(zed)).priority, theirs.priority]).toEqual([true, true, false]);
     /* With no copy there is no line about copies. */
     await db.update(machines).set({ role: 'worker', serverOrder: null, copyState: null, copyName: null }).where(eq(machines.id, mac));
     expect((await held(ceo)).copies).toBeNull();

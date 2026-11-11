@@ -337,6 +337,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),
       ...(held ? { copies: held.copies } : {}),
+      /* Whether this person sees the order the server passes on in. */
+      priority: held !== null,
     };
   });
 

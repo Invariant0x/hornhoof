@@ -647,7 +647,7 @@ export type MachineView = {
 /* Why a machine holds no copy of the company's data. */
 export type Unfit =
   | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' | 'leaving' }
-  | { why: 'scope'; person: string }
+  | { why: 'scope'; person: string; departments?: number }
   | { why: 'memory'; memory: number }
   | { why: 'disk'; free: number; need: number }
   | { why: 'fsync'; p99: number };
@@ -662,7 +662,7 @@ export type CopyLine =
 
 /* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, and when it
    stopped holding the data. */
-export type DataView = { number: number | null; why: 'server' | 'next' | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
+export type DataView = { number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
 
 /* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
    when only the leader holds the changes. */

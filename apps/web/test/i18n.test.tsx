@@ -276,4 +276,27 @@ describe('the words of copies', () => {
     }
     for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
   });
+
+  /* Every string of the server order, with the groups inside it, each function called with words of its own. */
+  const flat = (part: object, under = ''): [string, string][] =>
+    Object.entries(part).flatMap(([key, value]): [string, string][] =>
+      typeof value === 'function' ? [[under + key, (value as (...words: unknown[]) => string)('a', 2, 'c')]] : typeof value === 'string' ? [[under + key, value]] : flat(value as object, `${under}${key}.`));
+
+  it('words the server order in both languages', () => {
+    const order = (dict: typeof en) => Object.fromEntries([...flat(dict.machines.priority), ['errors.leader_pin', dict.errors.leader_pin], ['errors.unfit', dict.errors.unfit]]);
+    const [english, russian] = [order(en), order(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['why.pinned', 'online.often_off', 'part.few_cores', 'unfit.scope', 'onlyCopy', 'errors.unfit']));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      /* Two parts joined by a comma read the same in both. */
+      if (key !== 'both') expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    /* How many departments a person sees, in the Russian forms. */
+    expect([0, 1, 2, 5, 21].map(n => ru.machines.priority.unfit.scope('Анна', n).split(', а ')[1])).toEqual([
+      'Анна не видит ни одного отдела.', 'Анна видит один отдел.', 'Анна видит 2 отдела.', 'Анна видит 5 отделов.', 'Анна видит 21 отдел.',
+    ]);
+  });
 });

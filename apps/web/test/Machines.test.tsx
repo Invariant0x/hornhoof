@@ -565,19 +565,19 @@ describe('Machines', () => {
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
   });
 
-  const shown = (language: string, machines: unknown[], more: object = {}) => {
+  const shown = (language: string, machines: unknown[], routes: Parameters<typeof mockApi>[0] = {}) => {
     localStorage.setItem('hh-lang', language);
-    lists({ 'GET /api/machines': [200, { machines, builtin: null, ...more }] });
-    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const calls = lists({ 'GET /api/machines': [200, { machines, builtin: null, priority: true }], ...routes });
+    return { calls, view: render(<LanguageProvider><Machines me={ME} /></LanguageProvider>) };
   };
-  const held = (over: object) => ({ number: null, why: null, unfit: null, copy: null, leftAt: null, ...over });
+  const held = (over: object) => ({ number: null, why: null, pin: null, unfit: null, copy: null, leftAt: null, ...over });
 
   it.each([['en', 'Copy: being made, 40%'], ['ru', 'Копия: создается, 40%']])("writes a copy's line in %s", async (language, line) => {
     shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
     const mac = await openCard('ivan-mbp');
     expect(within(mac).getByText(line)).toBeInTheDocument();
-    /* Its place stands before the line. */
-    expect(within(mac).getByText(line).closest('p')).toHaveTextContent(`2${line}`);
+    /* Its place stands in the same part, above the line. */
+    expect(within(within(mac).getByText(line).closest('section')!).getByText('2')).toBeInTheDocument();
   });
 
   it("writes every state of a copy, and a machine's place without one", async () => {
@@ -591,36 +591,179 @@ describe('Machines', () => {
       [{ number: 2, copy: { line: 'stopped', why: null } }, 'Copy: stopped'],
       [{ number: 2, copy: { line: 'stopped', why: 'disk_full' } }, 'Copy: stopped: disk full'],
       [{ number: 2, copy: { line: 'stopped', why: 'setup' } }, "Copy: stopped: the company's settings cannot be written here"],
-      [{ number: 4, why: 'next' }, 'Gets a copy if one of the first three leaves.'],
-      [{ number: 1, why: 'server' }, 'The company server runs here.'],
+      [{ number: 4, why: 'next' }, 'Gets a copy if one of the first three leaves'],
+      [{ number: 1, why: 'server' }, 'The company server runs here'],
     ];
     shown('en', lines.map(([data], n) => ({ ...MACHINES[0]!, id: `c${n}`, hostname: `host-${n}`, data: held(data) })));
     await screen.findByRole('table');
     for (const [n, [, line]] of lines.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
   });
 
-  it.each([
-    ['en', 'Holds no copy: Docker has 3.2 GB of memory here; a copy needs 4 GB.'],
-    ['ru', 'Не хранит копию: Docker получает здесь 3,2 ГБ памяти; копии нужно 4 ГБ.'],
-  ])('says why a machine holds no copy in %s', async (language, line) => {
-    shown(language, [{ ...MACHINES[0]!, data: held({ unfit: { why: 'memory', memory: 3.2 * GIB } }) }]);
-    expect(within(await openCard('ivan-mbp')).getByText(line)).toBeInTheDocument();
+  const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
+  const four = (over: object[] = []) => [
+    { number: 1, why: 'server' }, { number: 2, why: 'always.best_link' }, { number: 3, why: 'mostly.good_link' }, { number: 4, why: 'next' },
+  ].map((data, n) => ({ ...MACHINES[0]!, id: `p${n}`, hostname: `host-${n + 1}`, data: held({ ...data, ...over[n] }) }));
+  const radios = (node: HTMLElement) => within(node).queryAllByRole('radio').map(radio => [radio.closest('label')!.textContent, (radio as HTMLInputElement).checked]);
+
+  it('sorts by priority', async () => {
+    const rows = [[3, 'c'], [1, 'a'], [null, 'd'], [2, 'b']] as const;
+    const { view } = shown('en', rows.map(([number, hostname]) => ({ ...MACHINES[0]!, id: hostname, hostname, data: held({ number, why: number === 1 ? 'server' : null }) })));
+    await screen.findByRole('table');
+    expect(names()).toEqual(['a', 'b', 'c', 'd']);
+    expect(screen.getByRole('columnheader', { name: /Priority/ })).toHaveAttribute('aria-sort', 'ascending');
+    /* The number in its cell; a machine with none has a dash that says why. */
+    const cell = (hostname: string) => screen.getByRole('button', { name: `Open the card of ${hostname}` }).closest('tr')!.querySelector('.k-prio')!;
+    expect([cell('a').textContent, cell('c').textContent, cell('d').textContent]).toEqual(['1', '3', 'Cannot take the server']);
+    view.unmount();
+    /* Someone who does not see the whole company is told nothing of the order. */
+    lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null, priority: false }] });
+    render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false, scopeKind: 'listed' } }} />);
+    await screen.findByRole('table');
+    expect(screen.queryByRole('columnheader', { name: /Priority/ })).not.toBeInTheDocument();
+    expect(within(card('ivan-mbp')).queryByRole('heading', { name: 'Priority' })).not.toBeInTheDocument();
   });
 
-  it('words every reason a machine holds no copy', async () => {
-    const reasons: [object, string][] = [
-      [{ why: 'phone' }, 'Holds no copy: it is a phone.'],
-      [{ why: 'no_core' }, 'Holds no copy: Hornhoof runs here without Docker.'],
-      [{ why: 'scope', person: 'Anna' }, 'Holds no copy: Anna does not see the whole company.'],
-      [{ why: 'no_link' }, 'Holds no copy: the company has no link at hornhoof.org; turn it on in Settings.'],
-      [{ why: 'measuring' }, 'Holds no copy: measuring this machine.'],
-      [{ why: 'leaving' }, 'Holds no copy: it still gives up the copy it held.'],
-      [{ why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, 'Holds no copy: 12 GB free; a copy needs 40.5 GB.'],
-      [{ why: 'fsync', p99: 72.4 }, 'Holds no copy: the disk saves slowly (72.4 ms); a copy needs under 50 ms.'],
-    ];
-    shown('en', reasons.map(([unfit], n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
+  it.each([
+    ['en', ['Always online, best connection to machine 1', 'Always online, but has the least memory', 'Gets a copy if one of the first three leaves', 'Keeps its copy until the new one is up to date', 'New: connected less than 3 days ago', 'Often offline, but a slow disk'], 'If machine 1 goes away, machine 2 takes the server, then 3.'],
+    ['ru', ['Всегда в сети, лучшая связь с машиной 1', 'Всегда в сети, но памяти у нее меньше всех', 'Получит копию, если одна из первых трех уйдет', 'Хранит копию, пока новая не станет актуальной', 'Новая: подключена меньше 3 дней назад', 'Часто не в сети, но диск медленный'], 'Если машина 1 пропадет, сервер возьмет машина 2, за ней 3.'],
+  ])('says why in %s', async (language, lines, under) => {
+    const whys = ['always.best_link', 'always.small', 'next', 'handing', 'new', 'often_off.slow_disk'];
+    shown(language, whys.map((why, n) => ({ ...MACHINES[0]!, id: `w${n}`, hostname: `host-${n}`, data: held({ number: n + 2, why }) })));
     await screen.findByRole('table');
-    for (const [n, [, line]] of reasons.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+    for (const [n, line] of lines.entries()) {
+      expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+      expect(within(card(`host-${n}`)).getByText(under)).toBeInTheDocument();
+    }
+  });
+
+  it('lets the CEO choose', async () => {
+    const { calls } = shown('en', four(), { 'PUT /api/machines/p1/priority': [204] });
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    expect(within(second).getByRole('radiogroup', { name: 'Priority' })).toBeInTheDocument();
+    expect(radios(second)).toEqual([['Automatically', true], ['By hand', false], ['Does not take the server', false]]);
+    expect(within(second).queryByRole('combobox', { name: 'Priority of host-2' })).not.toBeInTheDocument();
+    /* By hand keeps the machine at its number. */
+    await user.click(within(second).getByRole('radio', { name: 'By hand' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 2 } }]));
+    await user.click(within(second).getByRole('radio', { name: 'Does not take the server' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1)).toEqual({ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 'none' } }));
+    /* The server's machine and a machine set by hand elsewhere offer nothing to press here. */
+    expect(within(card('host-1')).queryByRole('radio')).not.toBeInTheDocument();
+  });
+
+  it('offers the places there are to a machine set by hand', async () => {
+    const calls = lists({ 'GET /api/machines': [200, { machines: four([{}, { why: 'pinned', pin: 2 }]), builtin: null, priority: true }], 'PUT /api/machines/p1/priority': [204] });
+    render(<Machines me={ME} />);
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    expect(within(second).getByText('Number set by hand')).toBeInTheDocument();
+    expect(radios(second)).toEqual([['Automatically', false], ['By hand', true], ['Does not take the server', false]]);
+    const select = within(second).getByRole('combobox', { name: 'Priority of host-2' }) as HTMLSelectElement;
+    expect([[...select.options].map(option => option.value), select.value]).toEqual([['2', '3', '4'], '2']);
+    await user.selectOptions(select, '3');
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 3 } }]));
+    /* The cell of a number set by hand says so. */
+    expect(screen.getByRole('button', { name: 'Open the card of host-2' }).closest('tr')!.querySelector('.k-prio [title]')).toHaveAttribute('title', 'Number set by hand');
+  });
+
+  it('shows the choice to the CEO alone', async () => {
+    lists({ 'GET /api/machines': [200, { machines: four(), builtin: null, priority: true }] });
+    render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false } }} />);
+    const second = await openCard('host-2');
+    expect(within(second).getByText('Always online, best connection to machine 1')).toBeInTheDocument();
+    expect(within(within(second).getByRole('heading', { name: 'Priority' }).closest('section')!).getByText('2')).toBeInTheDocument();
+    expect(within(second).queryByRole('radio')).not.toBeInTheDocument();
+    expect(within(second).queryByRole('combobox', { name: 'Priority of host-2' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a machine set out changeable', async () => {
+    const { calls } = shown('en', four([{}, {}, {}, { number: null, why: 'out', pin: 'none' }]), { 'PUT /api/machines/p3/priority': [204] });
+    const user = userEvent.setup();
+    const out = await openCard('host-4');
+    expect(within(out).getByText('Never takes the server: set by hand')).toBeInTheDocument();
+    expect(radios(out)).toEqual([['Automatically', false], ['By hand', false], ['Does not take the server', true]]);
+    expect(screen.getByRole('button', { name: 'Open the card of host-4' }).closest('tr')!.querySelector('.k-prio')).toHaveTextContent('Does not take the server');
+    await user.click(within(out).getByRole('radio', { name: 'Automatically' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p3/priority', body: { pin: null } }]));
+    /* By hand, from out: the place after the last one there is. */
+    await user.click(within(out).getByRole('radio', { name: 'By hand' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1)).toEqual({ method: 'PUT', path: '/api/machines/p3/priority', body: { pin: 4 } }));
+  });
+
+  it.each([
+    ['en', [
+      'Cannot take the server: it is a phone.',
+      'Cannot take the server: Hornhoof runs here without Docker; make host-1 a full machine.',
+      'Cannot take the server: Docker here gets less than 4 GB of memory.',
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees one department.",
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees 2 departments.",
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.",
+      'Cannot take the server: the company has no link at hornhoof.org; turn it on in Settings.',
+      'Cannot take the server: measuring this machine.',
+      'Cannot take the server: it still gives up the copy it held.',
+      'Cannot take the server: 12 GB free; it needs 40.5 GB.',
+      'Cannot take the server: the disk saves slowly (72.4 ms); it needs under 50 ms.',
+    ]],
+    ['ru', [
+      'Не может взять сервер: это телефон.',
+      'Не может взять сервер: здесь Hornhoof работает без Docker; сделайте host-1 полной машиной.',
+      'Не может взять сервер: Docker здесь получает меньше 4 ГБ памяти.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит один отдел.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит 2 отдела.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.',
+      'Не может взять сервер: у компании нет ссылки на hornhoof.org; включите ее в Настройках.',
+      'Не может взять сервер: машина еще измеряется.',
+      'Не может взять сервер: она еще отдает копию, которую хранила.',
+      'Не может взять сервер: свободно 12 ГБ; нужно 40,5 ГБ.',
+      'Не может взять сервер: диск сохраняет медленно (72,4 мс); нужно меньше 50 мс.',
+    ]],
+  ])('says why a machine cannot take the server in %s', async (language, lines) => {
+    const reasons: object[] = [
+      { why: 'phone' }, { why: 'no_core' }, { why: 'memory', memory: 3.2 * GIB },
+      { why: 'scope', person: 'Anna', departments: 1 }, { why: 'scope', person: 'Anna', departments: 2 }, { why: 'scope', person: 'Anna', departments: 0 },
+      { why: 'no_link' }, { why: 'measuring' }, { why: 'leaving' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
+    ];
+    shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
+    await screen.findByRole('table');
+    for (const [n, line] of lines.entries()) {
+      const one = card(`host-${n}`);
+      expect(within(one).getByText(line), line).toBeInTheDocument();
+      expect(within(one).queryByRole('radio')).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the server's machine as 1", async () => {
+    /* The card of the computer the server runs on says 1, whatever its own row says. */
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, data: held({ number: null }) }], builtin: { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } }, priority: true }] });
+    const view = render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    const part = within(mac).getByRole('heading', { name: 'Priority' }).closest('section')!;
+    expect(part.textContent).toBe('Priority1The company server runs hereIf machine 1 goes away, machine 2 takes the server, then 3.');
+    expect(within(mac).queryByRole('radio')).not.toBeInTheDocument();
+    view.unmount();
+    /* A company whose only machine is the server's. */
+    lists({ 'GET /api/machines': [200, { machines: [], builtin: BUILTIN, priority: true }] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    expect(screen.getByRole('columnheader', { name: /Priority/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open the card of Built-in node' }).closest('tr')!.querySelector('.k-prio')).toHaveTextContent('1');
+  });
+
+  it.each([
+    ['en', ['Move the server to another machine first.', 'host-2 holds the only up-to-date copy; give another machine a place first.', 'This machine cannot take the server.']],
+    ['ru', ['Сначала перенесите сервер на другую машину.', 'host-2 хранит единственную актуальную копию; сначала дайте место другой машине.', 'Эта машина не может взять сервер.']],
+  ])('words the refusals in %s', async (language, lines) => {
+    const refusals: [number, string, string][] = [[409, 'leader_pin', 'conflict'], [409, 'only_copy', 'conflict'], [400, 'unfit', 'validation']];
+    let at = 0;
+    shown(language, four(), { 'PUT /api/machines/p1/priority': () => [refusals[at]![0], { error: { code: refusals[at]![2], reason: refusals[at]![1], message: 'The words of the server.' } }] });
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    for (const line of lines) {
+      await user.click(within(second).getAllByRole('radio')[2]!);
+      expect(await within(second).findByText(line)).toHaveAttribute('role', 'alert');
+      at += 1;
+    }
   });
 
   it.each([

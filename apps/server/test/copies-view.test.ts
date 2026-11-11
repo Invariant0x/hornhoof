@@ -105,11 +105,32 @@ describe("what the Machines tab says of the company's data", () => {
       .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'left', hostname: 'm-left', kind: 'computer', role: 'worker', networkId: 'd'.repeat(64), reportAt: NOW, dataLeftAt: ago(86_400_000), uploadState: 'waiting' })
       .returning();
     const views = await dataViews(s.app.ctx, NOW);
-    expect(views.get(s.leader.id)).toEqual({ number: 1, why: 'server', unfit: null, copy: null, leftAt: null });
+    expect(views.get(s.leader.id)).toEqual({ number: 1, why: 'server', pin: null, unfit: null, copy: null, leftAt: null });
     expect(views.get(held.id)).toMatchObject({ number: 2, why: null, unfit: null, copy: { line: 'catching_up' }, leftAt: null });
-    expect(views.get(next!.id)).toEqual({ number: 4, why: 'next', unfit: null, copy: null, leftAt: null });
-    expect(views.get(small!.id)).toEqual({ number: null, why: null, unfit: { why: 'memory', memory: 2 * 2 ** 30 }, copy: null, leftAt: null });
+    expect(views.get(next!.id)).toEqual({ number: 4, why: 'next', pin: null, unfit: null, copy: null, leftAt: null });
+    expect(views.get(small!.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'memory', memory: 2 * 2 ** 30 }, copy: null, leftAt: null });
     expect(views.get(left!.id)).toMatchObject({ number: null, copy: null, leftAt: ago(86_400_000).toISOString() });
+  });
+
+  it('shows the place and the pin', async () => {
+    const s = await stand();
+    const fit = { memory: 8 * 2 ** 30, diskFree: 500 * 2 ** 30, fsyncP99Ms: 3 };
+    const pinned = await s.copy('m-pinned', { copyState: 'ready', copyAt: NOW, serverOrder: 3, serverWhy: 'always.best_link', serverPin: '3', ...fit });
+    const [out] = await s.db
+      .insert(machines)
+      .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'out', hostname: 'm-out', kind: 'computer', role: 'worker', networkId: 'e'.repeat(64), serverWhy: 'out', serverPin: 'none', reportAt: NOW, ...fit })
+      .returning();
+    const views = await dataViews(s.app.ctx, NOW);
+    /* The key of the words is the one the ranking stored, whatever it is. */
+    expect(views.get(pinned.id)).toMatchObject({ number: 3, why: 'always.best_link', pin: 3 });
+    expect(views.get(out!.id)).toEqual({ number: null, why: 'out', pin: 'none', unfit: null, copy: null, leftAt: null });
+  });
+
+  it('names every copy', async () => {
+    const s = await stand();
+    /* Three while one is handed over. */
+    for (const hostname of ['mac', 'deb', 'nuc']) await s.copy(hostname, { copyState: 'ready', copyAt: ago(500) });
+    expect((await copiesView(s.app.ctx, NOW))?.copies.map(copy => copy.hostname)).toEqual(['mac', 'deb', 'nuc']);
   });
 
   it('says who holds the company, and since when only the leader does', async () => {
