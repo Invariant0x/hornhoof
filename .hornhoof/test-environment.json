@@ -675,6 +675,7 @@
         "globs": [
           ".github/workflows/**",
           "scripts/install.sh",
+          "scripts/install.ps1",
           "apps/updater/**",
           "Dockerfile",
           "compose.yaml",

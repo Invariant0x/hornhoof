@@ -292,7 +292,8 @@ describe('Machines', () => {
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
     expect(screen.getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(screen.getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    /* Copy for the command on a Mac or Linux, and for the one on Windows. */
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
     expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
@@ -318,7 +319,7 @@ describe('Machines', () => {
     expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
     expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
-    expect(within(mac).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(within(mac).getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
     expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
@@ -352,7 +353,7 @@ describe('Machines', () => {
     expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
     expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
     expect(screen.getAllByText(/^Действует еще (59 мин|1 ч)\.$/)).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(4);
     const cancels = screen.getAllByRole('button', { name: 'Отменить' });
     expect(cancels).toHaveLength(2);
     await user.click(cancels[0]!);

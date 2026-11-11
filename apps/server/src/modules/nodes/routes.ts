@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { MACHINE_KINDS } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -285,5 +286,15 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .header('cache-control', 'no-cache')
       .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image).replaceAll('__HORNHOOF_UPDATER_IMAGE__', updater)
         .replaceAll('__HORNHOOF_HOST_ID__', config.hostId ?? ''));
+  });
+
+  /* The command on Windows runs this one, which runs the same install.sh in a container of the updater image of this build. */
+  app.get('/install.ps1', async (_req, reply) => {
+    const script = await readFile(join(dirname(config.installScript), 'install.ps1'), 'utf8');
+    const [server, updater] = await Promise.all([publicUrl(db, config), updaterImage()]);
+    return reply
+      .type('text/plain; charset=utf-8')
+      .header('cache-control', 'no-cache')
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_UPDATER_IMAGE__', updater));
   });
 }

@@ -7,13 +7,15 @@
 Agents run on machines that hold the subscriptions.
 
 - Company API keys run on the built-in node that comes with the server.
-- A personal plan runs on its owner's machines, and only on Linux or macOS.
+- A personal plan runs on its owner's machines: Linux, macOS, or Windows with Docker Desktop.
 
 ## Connect your plans
 
 1. Open Subscriptions and click "Connect a subscription".
 2. Tick the plans this machine will carry, click "Get the command" and copy it.
 3. Run it in a terminal on that machine. The command works once, for 24 hours.
+
+On Windows, copy the command shown for Windows and run it in PowerShell. Nodes on Windows run in Docker Desktop: when it is missing, the command says how to get it (`winget install -e --id Docker.DockerDesktop`, or the download page) and stops, and when it is not running, the command starts it and waits for it. The command then does the same as on a Mac or Linux, in a container of Hornhoof's own image, and a sign-in link appears in PowerShell for you to open. A Windows computer that runs the Hornhoof server itself, in WSL, adds its plans with the Mac and Linux command in the Ubuntu terminal of WSL.
 
 The command installs Docker if needed and starts one small locked-down container per subscription. A plan you already signed in once in Hornhoof reaches the new machine by itself within seconds. The command signs the others in there:
 
@@ -62,6 +64,7 @@ Agents that share one subscription still share that user and its sign-in. So the
 - The nodes on a machine move to the node image of your server's own build by themselves, each once its work ends (see [Updates](updates.md)), so update the server to get newer nodes. A machine set up before 0.8.4 does so only after you run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it once.
 - The same command updates them now. It waits for what each node runs to finish, and tells you what it waits for; if you stop it, nothing changes. For a security update, end the command with `bash -s -- --urgent` instead of `bash` to replace them now, which stops what they run.
 - To remove them and their updater, end the same command with `bash -s -- --uninstall`.
+- On Windows, the same in PowerShell is `powershell -ExecutionPolicy Bypass -c "irm <your Hornhoof address>/install.ps1 | iex"`. To replace them now or to remove them, run `powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm <your Hornhoof address>/install.ps1))) --urgent"`, or the same with `--uninstall`.
 
 ## Update agent programs
 

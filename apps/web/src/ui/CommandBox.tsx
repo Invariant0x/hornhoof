@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
 import type { ShownCommand } from '../types';
@@ -41,15 +42,44 @@ export async function loadMachineCommands(
   setAddCommands(adds);
 }
 
-/* The install command with Copy, and what running it means for the person's subscription, or for their machine. */
+/* The install command the server gave, for Windows PowerShell: it runs install.ps1 of the same server with the same words,
+   which runs the same install.sh in Docker Desktop. It is made here from the command, so the code in it reaches exactly the
+   screens the command reaches. None for a command of another kind. */
+export function windowsCommand(command: string): string | null {
+  const m = /^curl -fsSL (https?:\/\/[^\s"'`$;|&]+)\/install\.sh \| bash(?: -s -- (--join [A-Za-z0-9_-]+))?$/.exec(command);
+  if (!m) return null;
+  const script = `${m[1]}/install.ps1`;
+  return m[2]
+    ? `powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm ${script}))) ${m[2]}"`
+    : `powershell -ExecutionPolicy Bypass -c "irm ${script} | iex"`;
+}
+
+function CommandLine({ command, label }: { command: string; label?: string }) {
+  const id = useId();
+  const line = (
+    <div className="command">
+      <code>{command}</code>
+      <CopyButton text={command} />
+    </div>
+  );
+  if (!label) return line;
+  return (
+    <div className="command-box" role="group" aria-labelledby={id}>
+      <p className="muted" id={id}>{label}</p>
+      {line}
+    </div>
+  );
+}
+
+/* The install command with Copy, the same one for Windows beside it when there is one, and what running it means for the
+   person's subscription, or for their machine. */
 export function CommandBox({ command, trust }: { command: string; trust?: string }) {
   const t = useT();
+  const windows = windowsCommand(command);
   return (
     <div className="command-box">
-      <div className="command">
-        <code>{command}</code>
-        <CopyButton text={command} />
-      </div>
+      <CommandLine command={command} label={windows ? t.subs.onMacLinux : undefined} />
+      {windows && <CommandLine command={windows} label={t.subs.onWindows} />}
       <p className="trust">{trust ?? t.subs.trust}</p>
     </div>
   );

@@ -36,7 +36,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
 ## How it starts
 
-1. Install Hornhoof with one line in the terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL. Docker installs itself if it is missing.
+1. Install Hornhoof with one line in the terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, the server runs in WSL: open its Ubuntu terminal. Docker installs itself if it is missing.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
@@ -48,7 +48,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
    ![Setting up a company](.github/assets/setup.gif)
 
-3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs.
+3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs. On a Windows computer, run the command Hornhoof shows for Windows in PowerShell: it needs Docker Desktop and says how to get it.
 
    ![Connecting AI plans](.github/assets/subscriptions.gif)
 

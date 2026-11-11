@@ -54,7 +54,7 @@ describe('subscription install commands', () => {
     expect(within(row).getByText('Waiting for the machine')).toBeInTheDocument();
     const card = await open();
     expect(within(card).getByText(COMMAND)).toBeVisible();
-    expect(within(card).getByRole('button', { name: 'Copy' })).toBeVisible();
+    for (const copy of within(card).getAllByRole('button', { name: 'Copy' })) expect(copy).toBeVisible();
     expect(within(card).queryByRole('button', { name: /New command|Cancel/ })).not.toBeInTheDocument();
     first.unmount();
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: rows }], 'GET /api/nodes/commands': [200, { commands }] });

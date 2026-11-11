@@ -207,6 +207,8 @@ export const en = {
     getCommand: 'Get the command',
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',
+    onMacLinux: 'On a Mac or Linux, run this in Terminal:',
+    onWindows: 'On Windows, run this in PowerShell:',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
     commandHours: (hours: number) => `Valid for ${hours} more ${hours === 1 ? 'hour' : 'hours'}.`,
     commandMinutes: (minutes: number) => `Valid for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`,
