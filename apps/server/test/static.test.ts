@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { testApp } from './helpers.js';
 
@@ -53,6 +54,24 @@ describe('web app serving', () => {
       expect(res.headers['content-security-policy']).toContain("img-src 'self' data: blob:;");
       expect(res.headers['x-content-type-options']).toBe('nosniff');
     }
+  });
+
+  /* The page answered, then a 404 tried to follow it, and the warning wrote the whole address, an invite's token with it. */
+  it('opens a screen link with nothing in the log, so an invite link stays out of it', async () => {
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const { app } = await testApp({ WEB_DIST: fakeDist() }, { level: 'warn', stream });
+    for (const url of ['/invite/tok-marker', '/people', '/setup?code=code-marker']) {
+      const res = await app.inject({ url, headers: { accept: 'text/html' } });
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body, url).toContain('<div id="root">');
+    }
+    expect(lines.join('')).toBe('');
   });
 
   it('works without a built web app', async () => {
