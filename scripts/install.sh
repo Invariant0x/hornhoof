@@ -63,6 +63,8 @@ FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
 SIGNIN_WAIT="${HORNHOOF_SIGNIN_WAIT:-20}"
 # How long a machine's new core may take to get its place in the company from the server, in seconds.
 CORE_WAIT="${HORNHOOF_CORE_WAIT:-120}"
+# How long a server that was just started may take to answer and to take changes, in seconds.
+ANSWER_WAIT="${HORNHOOF_ANSWER_WAIT:-120}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 PULLED="${HORNHOOF_PULLED:-}"
 APP_REF="${HORNHOOF_APP_REF:-}"
@@ -1597,7 +1599,7 @@ hand_over_update() {
 }
 
 server_mode() {
-  local env_file public local_url project taken link fact id i=0
+  local env_file public local_url project taken link fact id i=0 health=''
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -1683,9 +1685,14 @@ server_mode() {
   public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url
   say "Waiting for Hornhoof to answer."
-  until curl -fsS --max-time 5 "$local_url/api/health" > /dev/null 2>&1; do
-    i=$((i + 1))
-    [ "$i" -lt 60 ] || fail "Hornhoof did not answer within 2 minutes. Run docker compose logs app in $SERVER_DIR to see why."
+  # A server that answers may still only read: it changes nothing until its keeper has confirmed that it leads, and
+  # whoever opened it then could not set it up. A build from before servers said so names no mode.
+  until health=$(curl -fsS --max-time 5 "$local_url/api/health" 2> /dev/null) && takes_changes "$health"; do
+    i=$((i + 2))
+    if [ "$i" -ge "$ANSWER_WAIT" ]; then
+      [ -n "$health" ] || fail "Hornhoof did not answer within $ANSWER_WAIT seconds. Run docker compose logs app in $SERVER_DIR to see why."
+      fail "Hornhoof answers and takes no changes yet: its keeper has not confirmed that this server leads. Run docker compose logs keeper in $SERVER_DIR to see why."
+    fi
     sleep 2
   done
   # Whoever opens a new server first would become its owner, so it sets up only through the link with its setup code,
@@ -1696,6 +1703,11 @@ server_mode() {
     http://*/setup\?code=* | https://*/setup\?code=*) say "Hornhoof is running. Open this link to set it up: $link" ;;
     *) say "Hornhoof is running at $public." ;;
   esac
+}
+
+# takes_changes <health>: what the server said of itself names no mode in which it only reads, or is off.
+takes_changes() {
+  case "$1" in *'"mode":"read"'* | *'"mode":"off"'*) return 1 ;; esac
 }
 
 # The updater of a machine that joined runs this, from the build it moves to: the core's compose files and settings name

@@ -352,6 +352,21 @@ describe('install.sh', () => {
     expect(r.out).toContain('Hornhoof is running at http://localhost:8080.');
   });
 
+  /* A server that just started answers before its keeper has confirmed that it leads, and changes nothing until then. */
+  it('says the server runs only once it takes changes', () => {
+    const r = install({ args: ['server'], tty: '\n', env: { STUB_HEALTH_MODES: 'read lead' } });
+    expect(r.code, r.out).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('curl') && c.includes('/api/health')).length).toBeGreaterThanOrEqual(2);
+    expect(r.out).toContain('Hornhoof is running at http://localhost:8080.');
+  });
+
+  it('says so when the server answers and still takes no changes', () => {
+    const r = install({ args: ['server'], tty: '\n', env: { STUB_HEALTH_MODES: 'read', HORNHOOF_ANSWER_WAIT: '2' } });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('Hornhoof answers and takes no changes yet: its keeper has not confirmed that this server leads.');
+    expect(r.out).not.toContain('Hornhoof is running');
+  });
+
   /* Whoever opens a new server first would become its owner, so only the link with its setup code sets it up. */
   it('shows the setup link the new server gives, once it answers', () => {
     const link = 'https://hornhoof.my.test/setup?code=Ab3_d-Ef0123456789abcdef';
