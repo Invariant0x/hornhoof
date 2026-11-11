@@ -369,7 +369,8 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
         )}
 
         {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
-        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={company} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
+        {/* Whoever may remove this agent keeps its bot too: the whole company, or the person responsible for its department. */}
+        {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={card.canRemove} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>

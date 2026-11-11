@@ -562,8 +562,7 @@ describe('the Telegram bot on a head\'s card', () => {
   });
 
   it('shows the orchestrator\'s bot to someone who cannot change it, with nothing to change', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({ 'GET /api/agents/b1': [200, { ...HEAD, kind: 'orchestrator', telegram: { username: 'acme_ceo_bot' } }] }, listed);
+    open({ 'GET /api/agents/b1': [200, { ...HEAD, kind: 'orchestrator', canRemove: false, telegram: { username: 'acme_ceo_bot' } }] });
     const bot = await screen.findByRole('region', { name: 'Telegram bot' });
     expect(within(bot).getByRole('link', { name: '@acme_ceo_bot' })).toBeInTheDocument();
     expect(within(bot).queryByRole('button')).not.toBeInTheDocument();
