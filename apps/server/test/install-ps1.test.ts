@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,16 +85,95 @@ printf 'machine %s\\n' "$(cat "$HORNHOOF_HOME/machine")"
 exit "\${STUB_INSTALL_EXIT:-0}"
 `;
 
-type Run = { args?: string[]; env?: Record<string, string>; docker?: boolean; app?: boolean; home?: string };
+/* Docker Desktop as its installer puts it in Program Files: docker.exe, which Windows finds as docker and a Mac only by that
+   name too, and the app, which starts Docker. */
+const PUT_DOCKER = `#!/bin/sh
+d="$ProgramFiles/Docker/Docker"
+mkdir -p "$d/resources/bin"
+cp "$STUB_STATE/docker-stub" "$d/resources/bin/docker.exe"
+cp "$STUB_STATE/docker-stub" "$d/resources/bin/docker"
+printf '#!/bin/sh\\ntouch "%s/started"\\n' "$STUB_STATE" > "$d/Docker Desktop.exe"
+chmod +x "$d/Docker Desktop.exe"
+`;
 
-function windows(script: string, { args = ['--join', CODE], env = {}, docker = true, app = false, home }: Run = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-ps1-'));
+/* The Windows programs install.ps1 runs, each writing its call as a line of windows.log. winget and the downloaded installer
+   install Docker Desktop, or fail with STUB_INSTALL_FAIL "1". reg knows a restart Windows waits for with STUB_RESTART "1",
+   and keeps the RunOnce value in the file runonce. */
+const WINDOWS_STUBS: Record<string, string> = {
+  winget: `#!/bin/sh
+echo "winget $*" >> "$STUB_STATE/windows.log"
+[ "$STUB_INSTALL_FAIL" = 1 ] && exit 1
+exec "$STUB_STATE/put-docker"
+`,
+  installer: `#!/bin/sh
+echo "installer $*" >> "$STUB_STATE/windows.log"
+[ "$STUB_INSTALL_FAIL" = 1 ] && exit 1
+exec "$STUB_STATE/put-docker"
+`,
+  reg: `#!/bin/sh
+echo "reg $*" >> "$STUB_STATE/windows.log"
+case "$1" in
+  query) case "$2" in *'Component Based Servicing\\RebootPending') [ "$STUB_RESTART" = 1 ] && exit 0;; esac; exit 1;;
+  add) while [ $# -gt 1 ]; do [ "$1" = /d ] && printf %s "$2" > "$STUB_STATE/runonce"; shift; done;;
+  delete) rm -f "$STUB_STATE/runonce";;
+esac
+`,
+};
+
+/* What PowerShell itself does on Windows only, in front of the script. The one PowerShell Windows asks about runs here as
+   pwsh, and STUB_UAC "no" is the person saying no to it. The download is the installer above, signed by STUB_SIGNER, or
+   with STUB_DOWNLOAD "cut" a part of it and a lost connection. irm
+   reads the script from a file, once failing as without a network when the file offline is there. */
+/* wsl answers --version as STUB_WSL says: "none" has no WSL of its own yet, "old" one before 2.1.5. It ends its other calls
+   with STUB_WSL_EXIT. It is a PowerShell script, as no program here ends with 3010, which Windows installers say. */
+const WSL_STUB = `Add-Content -LiteralPath "$env:STUB_STATE/windows.log" -Value "wsl $($args -join ' ')"
+if ($args[0] -eq '--version') {
+  if ($env:STUB_WSL -eq 'none') { 'The Windows Subsystem for Linux is not installed.'; exit 1 }
+  if ($env:STUB_WSL -eq 'old') { 'WSL version: 2.0.9.0', 'Kernel version: 5.15.133.1-1' } else { 'WSL version: 2.3.26.0', 'Kernel version: 5.15.167.4-1' }
+  exit 0
+}
+exit [int]$env:STUB_WSL_EXIT
+`;
+
+const WINDOWS_CMDLETS = `
+function Start-Process { param($FilePath, $ArgumentList, $Verb, [switch]$Wait, [switch]$PassThru)
+  if (-not $Verb) { return Microsoft.PowerShell.Management\\Start-Process @PSBoundParameters }
+  Add-Content -LiteralPath "$env:STUB_STATE/windows.log" -Value "elevate $FilePath $Verb $Wait $PassThru"
+  if ($env:STUB_UAC -eq 'no') { throw 'This command cannot be run due to the error: The operation was canceled by the user.' }
+  & $env:STUB_PWSH @ArgumentList | Out-Host
+  [pscustomobject]@{ ExitCode = $LASTEXITCODE }
+}
+function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
+  Add-Content -LiteralPath "$env:STUB_STATE/windows.log" -Value "download $Uri"
+  if ($env:STUB_DOWNLOAD -eq 'cut') { Set-Content -LiteralPath $OutFile -Value 'MZ'; throw 'The connection was closed unexpectedly.' }
+  /bin/cp "$env:STUB_STATE/installer" $OutFile
+}
+function Get-AuthenticodeSignature { param($FilePath)
+  $signer = if ($env:STUB_SIGNER) { $env:STUB_SIGNER } else { 'CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US' }
+  [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = $signer } }
+}
+function Invoke-RestMethod { param($Uri)
+  Add-Content -LiteralPath "$env:STUB_STATE/windows.log" -Value "irm $Uri"
+  if (Test-Path "$env:STUB_STATE/offline") { Remove-Item "$env:STUB_STATE/offline"; throw 'No such host is known.' }
+  [IO.File]::ReadAllText("$env:STUB_STATE/install.ps1")
+}
+`;
+
+type Run = { args?: string[]; env?: Record<string, string>; docker?: boolean; app?: boolean; winget?: boolean; home?: string; dir?: string; command?: string };
+
+function windows(script: string, { args = ['--join', CODE], env = {}, docker = true, app = false, winget = false, home, dir = mkdtempSync(join(tmpdir(), 'hh-ps1-')), command }: Run = {}) {
   const bin = join(dir, 'bin');
-  mkdirSync(bin);
+  mkdirSync(bin, { recursive: true });
   const file = join(dir, 'install.ps1');
   writeFileSync(file, script);
+  writeFileSync(join(dir, 'docker-stub'), DOCKER_STUB, { mode: 0o755 });
   if (docker) writeFileSync(join(bin, 'docker'), DOCKER_STUB, { mode: 0o755 });
   writeFileSync(join(bin, 'curl'), CURL_STUB, { mode: 0o755 });
+  writeFileSync(join(bin, 'wsl.ps1'), WSL_STUB);
+  writeFileSync(join(bin, 'reg'), WINDOWS_STUBS.reg!, { mode: 0o755 });
+  if (winget) writeFileSync(join(bin, 'winget'), WINDOWS_STUBS.winget!, { mode: 0o755 });
+  writeFileSync(join(dir, 'installer'), WINDOWS_STUBS.installer!, { mode: 0o755 });
+  writeFileSync(join(dir, 'put-docker'), PUT_DOCKER, { mode: 0o755 });
   writeFileSync(join(dir, 'install.sh'), INSTALL_SH);
   const programs = join(dir, 'programs');
   if (app) {
@@ -105,9 +184,10 @@ function windows(script: string, { args = ['--join', CODE], env = {}, docker = t
   }
   const log = join(dir, 'calls.jsonl');
   writeFileSync(log, '');
+  writeFileSync(join(dir, 'windows.log'), '');
   /* As the command Hornhoof shows runs it, with the script read from the file in place of irm. */
-  const command = `& ([scriptblock]::Create([IO.File]::ReadAllText('${file}'))) ${args.join(' ')}`;
-  const res = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-c', command], {
+  command ??= `& ([scriptblock]::Create([IO.File]::ReadAllText('${file}'))) ${args.join(' ')}`;
+  const res = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-c', WINDOWS_CMDLETS + command], {
     encoding: 'utf8',
     timeout: 60_000,
     env: {
@@ -118,12 +198,27 @@ function windows(script: string, { args = ['--join', CODE], env = {}, docker = t
       STUB_LOG: log,
       STUB_STATE: dir,
       STUB_INSTALL_SH: join(dir, 'install.sh'),
+      STUB_PWSH: PWSH,
       ...env,
     },
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l) as { args: string[]; env: Record<string, string> });
-  return { code: res.status, out: res.stdout + res.stderr, calls, dir, run: calls.find(c => c.args[0] === 'run') };
+  const done = readFileSync(join(dir, 'windows.log'), 'utf8').trim().split('\n').filter(Boolean);
+  return { code: res.status, out: res.stdout + res.stderr, calls, done, dir, run: calls.find(c => c.args[0] === 'run') };
 }
+
+const NOTICE = 'Installing Docker Desktop, where Hornhoof runs its nodes. Docker Desktop has its own terms: free for personal use and small companies, see https://docs.docker.com/subscription/desktop-license/';
+const DOCKER_OPTIONS = 'install --quiet --accept-license --backend=wsl-2';
+const WINGET = `winget install -e --id Docker.DockerDesktop --source winget --accept-package-agreements --accept-source-agreements --silent --override ${DOCKER_OPTIONS}`;
+const ELEVATE = 'elevate powershell.exe RunAs True True';
+const RUN_ONCE = 'powershell -NoExit -ExecutionPolicy Bypass -c ';
+const elevated = (done: string[]) => done.filter(line => line.startsWith('elevate '));
+/* What installed something, in order. */
+const installs = (done: string[]) => done.filter(line => /^(winget|installer|download|wsl --(install|update))/.test(line));
+
+/* The installer this server serves, fetched once for the scenarios that need no other. */
+let servedScript: Promise<string> | undefined;
+const script = () => (servedScript ??= served().then(res => res.body));
 
 describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
   it("runs the server's install.sh in the updater image of its build with this computer's Docker, the words of the command and the computer's key", async () => {
@@ -163,13 +258,131 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(r.run!.args).toContain('ghcr.io/invariant0x/hornhoof-updater:latest');
   });
 
-  it('says how to get Docker Desktop when it is missing, and starts nothing', async () => {
-    const r = windows((await served()).body, { docker: false });
+  it('installs missing Docker Desktop with winget after one line on what and under which terms, asks Windows once, then goes on', async () => {
+    const r = windows(await script(), { docker: false, winget: true, env: { STUB_DOCKER: 'stopped' } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(NOTICE);
+    expect(r.out).toContain('Windows asks once to allow the changes: choose Yes.');
+    expect(elevated(r.done)).toEqual([ELEVATE]);
+    expect(installs(r.done)).toEqual([WINGET]);
+    expect(r.out).toContain('Starting Docker Desktop.');
+    expect(r.run!.args.slice(-3)).toEqual(['install', '--join', CODE]);
+  });
+
+  it.each([
+    ['an Intel or AMD', '', 'amd64'],
+    ['an Arm', 'ARM64', 'arm64'],
+  ])("downloads Docker Desktop's own installer for %s processor when there is no winget, runs it as Docker documents and removes it", async (_, processor, kind) => {
+    const r = windows(await script(), { docker: false, env: { STUB_DOCKER: 'stopped', PROCESSOR_ARCHITECTURE: processor } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(NOTICE);
+    expect(installs(r.done)).toEqual([`download https://desktop.docker.com/win/main/${kind}/Docker%20Desktop%20Installer.exe`, `installer ${DOCKER_OPTIONS}`]);
+    expect(elevated(r.done)).toEqual([ELEVATE]);
+    expect(existsSync(join(r.dir, 'Docker Desktop Installer.exe'))).toBe(false);
+    expect(r.run).toBeDefined();
+  });
+
+  it('says so when the download breaks off, and leaves no part of it behind', async () => {
+    const r = windows(await script(), { docker: false, env: { STUB_DOWNLOAD: 'cut' } });
     expect(r.code).toBe(1);
-    expect(r.out).toContain('winget install -e --id Docker.DockerDesktop');
-    expect(r.out).toContain('https://www.docker.com/products/docker-desktop/');
-    expect(r.out).toContain('run this command again');
-    expect(r.calls).toEqual([]);
+    expect(r.out).toContain('Could not download Docker Desktop from https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe. Check the internet connection, then run this command again.');
+    expect(elevated(r.done)).toEqual([]);
+    expect(existsSync(join(r.dir, 'Docker Desktop Installer.exe'))).toBe(false);
+  });
+
+  it('runs no downloaded installer Docker did not sign, and removes it', async () => {
+    const r = windows(await script(), { docker: false, env: { STUB_SIGNER: 'CN=Someone Else, O=Someone Else' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('is not signed by Docker');
+    expect(elevated(r.done)).toEqual([]);
+    expect(existsSync(join(r.dir, 'Docker Desktop Installer.exe'))).toBe(false);
+  });
+
+  it.each([
+    ['no WSL of its own', 'none', 'wsl --install --no-distribution'],
+    ['a WSL older than Docker Desktop needs', 'old', 'wsl --update'],
+  ])('turns on WSL 2 first, under the same one Windows prompt, when Windows has %s', async (_, wsl, step) => {
+    const r = windows(await script(), { docker: false, winget: true, env: { STUB_DOCKER: 'stopped', STUB_WSL: wsl } });
+    expect(r.code).toBe(0);
+    expect(installs(r.done)).toEqual([step, WINGET]);
+    expect(elevated(r.done)).toEqual([ELEVATE]);
+  });
+
+  it('gets Docker Desktop that is there but cannot run without WSL 2 only that', async () => {
+    const r = windows(await script(), { app: true, env: { STUB_DOCKER: 'stopped', STUB_WSL: 'none' } });
+    expect(r.code).toBe(0);
+    expect(installs(r.done)).toEqual(['wsl --install --no-distribution']);
+    expect(r.out).not.toContain(NOTICE);
+    expect(r.run).toBeDefined();
+  });
+
+  it.each([
+    ['the person says no to Windows', { STUB_UAC: 'no' }, 'Run this command again and choose Yes', []],
+    ['WSL 2 does not turn on', { STUB_WSL: 'none', STUB_WSL_EXIT: '1' }, 'Windows could not turn on WSL 2', ['wsl --install --no-distribution']],
+    ['Docker Desktop does not install', { STUB_INSTALL_FAIL: '1' }, 'Docker Desktop did not install.', [WINGET]],
+  ])('stops with what to do when %s', async (_, env, says, ran) => {
+    const r = windows(await script(), { docker: false, winget: true, env });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(says);
+    expect(installs(r.done)).toEqual(ran);
+    expect(r.run).toBeUndefined();
+  });
+
+  it('says plainly when Windows needs a restart, and has Windows run the same command once the person signs in again', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-ps1-home-'));
+    const r = windows(await script(), { docker: false, winget: true, home, env: { STUB_WSL: 'none', STUB_RESTART: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Windows needs a restart to finish installing. Restart the computer; when you sign in again, Hornhoof goes on by itself in a PowerShell window.');
+    expect(r.run).toBeUndefined();
+    const line = readFileSync(join(r.dir, 'runonce'), 'utf8');
+    expect(line).toBe(`${RUN_ONCE}for(;;){try{$s=irm ${SERVER}/install.ps1;break}catch{'Waiting for the network.';sleep 2}};&([scriptblock]::Create($s)) --join ${CODE}`);
+    expect(line.length).toBeLessThanOrEqual(260);
+    expect(r.done.filter(l => l.startsWith('reg add'))).toEqual([`reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce /v Hornhoof /t REG_SZ /d ${line} /f`]);
+    /* The code is kept nowhere else this script writes. */
+    const kept = readdirSync(home, { recursive: true, withFileTypes: true }).filter(f => f.isFile());
+    expect(kept.filter(f => readFileSync(join(f.parentPath, f.name), 'utf8').includes(CODE))).toEqual([]);
+  });
+
+  it('takes the end 3010 of a step, with which Windows installers say a restart finishes their work, for a restart too', async () => {
+    const r = windows(await script(), { docker: false, winget: true, env: { STUB_WSL: 'none', STUB_WSL_EXIT: '3010' } });
+    expect(r.code).toBe(0);
+    expect(installs(r.done)).toEqual(['wsl --install --no-distribution', WINGET]);
+    expect(r.out).toContain('Restart the computer');
+    expect(existsSync(join(r.dir, 'runonce'))).toBe(true);
+  });
+
+  it('asks the person to run the command again after the restart when its words would not fit in RunOnce', async () => {
+    const r = windows(await script(), { docker: false, winget: true, args: ['--join', 'x'.repeat(120)], env: { STUB_RESTART: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Restart the computer, then run this command again.');
+    expect(existsSync(join(r.dir, 'runonce'))).toBe(false);
+  });
+
+  it('goes on after the restart from RunOnce, waiting for the network first', async () => {
+    const before = windows(await script(), { docker: false, winget: true, env: { STUB_WSL: 'none', STUB_RESTART: '1' } });
+    const line = readFileSync(join(before.dir, 'runonce'), 'utf8');
+    /* Windows deletes the value before it runs the command, which goes to powershell as it stands after -c. */
+    expect(line.startsWith(RUN_ONCE)).toBe(true);
+    rmSync(join(before.dir, 'runonce'));
+    writeFileSync(join(before.dir, 'offline'), '');
+    const after = windows(await script(), { dir: before.dir, docker: false, command: line.slice(RUN_ONCE.length), env: { STUB_DOCKER: 'stopped' } });
+    expect(after.code).toBe(0);
+    expect(after.out).toContain('Waiting for the network.');
+    expect(after.done.filter(l => l.startsWith('irm '))).toEqual([`irm ${SERVER}/install.ps1`, `irm ${SERVER}/install.ps1`]);
+    expect(elevated(after.done)).toEqual([]);
+    expect(after.out).toContain('Starting Docker Desktop.');
+    expect(after.run!.args.slice(-3)).toEqual(['install', '--join', CODE]);
+    expect(after.out).toContain(`install.sh --join ${CODE}`);
+  });
+
+  it('removes a command waiting in RunOnce for a restart once the person ran it again by hand, which uses its code up', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-ps1-'));
+    writeFileSync(join(dir, 'runonce'), `${RUN_ONCE}--join ${CODE}`);
+    const r = windows(await script(), { dir });
+    expect(r.code).toBe(0);
+    expect(r.done).toContain('reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce /v Hornhoof /f');
+    expect(existsSync(join(dir, 'runonce'))).toBe(false);
+    expect(r.run).toBeDefined();
   });
 
   it('starts Docker Desktop that does not run, waits for it and says so, then goes on', async () => {

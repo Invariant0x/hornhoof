@@ -48,7 +48,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
    ![Setting up a company](.github/assets/setup.gif)
 
-3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs. On a Windows computer, run the command Hornhoof shows for Windows in PowerShell: it needs Docker Desktop and says how to get it.
+3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs. On a Windows computer, run the command Hornhoof shows for Windows in PowerShell: it installs Docker Desktop if it is missing, after Windows asks once to allow it.
 
    ![Connecting AI plans](.github/assets/subscriptions.gif)
 
