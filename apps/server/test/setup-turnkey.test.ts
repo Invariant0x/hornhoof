@@ -1,8 +1,8 @@
-import { COMPANY_TEMPLATE_KEYS, COMPANY_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agentChanges, agents, departments, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agents, departments, subscriptions, teams } from '../src/db/schema.js';
 import { modelOnPlan } from '../src/modules/agents/role-model.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
@@ -10,8 +10,11 @@ const LATER = { ...SETUP, orchestrator: { mode: 'later' } };
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
-/* The project template: Operations with its four, Development with a head, two developers and a reviewer. */
-const PROJECT = ['DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+/* The project template: Operations with its four, Development with a head, two developers and a reviewer, and the turnkey
+   team of each: two developers in Development, an incident fixer in Operations. */
+const PROJECT = ['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+/* A member of a turnkey team runs the strongest model, as nobody checks after it. */
+const tierOf = (app: FastifyInstance, employee: typeof agents.$inferSelect) => (employee.teamId ? 'top' : app.ctx.templates.roles.get(employee.roleKey!)!.tier);
 
 async function setUp(app: FastifyInstance, payload: object) {
   const res = await app.inject({ method: 'POST', url: '/api/setup', payload });
@@ -33,12 +36,12 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     expect(staff.map(a => a.roleKey).sort()).toEqual(PROJECT);
     const dev = (await db.select().from(departments).where(eq(departments.templateKey, 'development')))[0]!;
-    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Code reviewer', 'Developer 1', 'Developer 2', 'Head of development']);
+    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Code reviewer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development']);
     for (const employee of staff) {
       const role = app.ctx.templates.roles.get(employee.roleKey!)!;
       expect(employee.subscriptionId, employee.name).toBe(key!.id);
-      expect(employee.skills, employee.name).toEqual(role.skills.filter(s => s.on).map(s => s.id));
-      expect(employee.model, employee.name).toBe(modelOnPlan(role.tier, key!));
+      expect(employee.skills, employee.name).toEqual(expect.arrayContaining(role.skills.filter(s => s.on).map(s => s.id)));
+      expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee), key!));
     }
   });
 
@@ -47,9 +50,9 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'corporation' });
     const staff = await staffOf(app);
     const ops = (await db.select().from(departments).where(eq(departments.templateKey, 'operations')))[0]!;
-    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PROGRAM', 'OPS-WATCH']);
-    /* The card says 30 employees for the full company. */
-    expect(staff).toHaveLength(30);
+    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PROGRAM', 'OPS-WATCH']);
+    /* The card says 39 employees for the full company: 30 in its departments and 9 in their turnkey teams. */
+    expect(staff).toHaveLength(39);
     /* Each employee works in its department itself, not in one of its products. */
     expect(staff.every(a => a.productId === null)).toBe(true);
   });
@@ -75,8 +78,8 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'project', orchestrator: { mode: 'personal', provider: 'kimi' } });
     const [plan] = await plans(app);
     const staff = await staffOf(app);
-    /* Kimi runs no deep model, which the head of development and the reviewer need. */
-    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-HEAD', 'DEV-REV']);
+    /* Kimi runs no deep model, which the head of development and the reviewer need, nor the strongest one of a turnkey team. */
+    expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-FIX']);
     expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(6);
   });
 });
@@ -89,13 +92,23 @@ describe('every ready-made company', () => {
     const top = await db.select().from(departments).where(isNull(departments.parentId));
     expect(top.map(d => d.templateKey).sort()).toEqual(listed.map(d => d.template).sort());
     const staff = await staffOf(app);
+    const made = await db.select().from(teams);
     for (const dept of top) {
       const people = staff.filter(a => a.departmentId === dept.id);
       expect(people.filter(a => a.kind === 'head'), dept.templateKey!).toHaveLength(1);
       expect(people.filter(a => a.kind === 'worker').length, dept.templateKey!).toBeGreaterThan(0);
       const roles = listed.find(d => d.template === dept.templateKey)!.staff.flatMap(line => Array<string>(line.count).fill(line.role));
-      expect(people.map(a => a.roleKey).sort(), dept.templateKey!).toEqual(roles.sort());
+      expect(people.filter(a => !a.teamId).map(a => a.roleKey).sort(), dept.templateKey!).toEqual(roles.sort());
+      /* Each turnkey team of the department's template comes as a sub-unit with its members, as the orchestrator builds it. */
+      const kept = app.ctx.templates.teamsOf(dept.templateKey!);
+      const own = made.filter(t => t.departmentId === dept.id);
+      expect(own.map(t => [t.name, t.turnkey]), dept.templateKey!).toEqual(kept.map(t => [t.title.en, t.turnkey]));
+      const members = kept.flatMap(t => t.members.flatMap(line => Array<string>(line.count).fill(line.role)));
+      expect(people.filter(a => own.some(t => t.id === a.teamId)).map(a => a.roleKey).sort(), dept.templateKey!).toEqual(members.sort());
     }
+    /* As many as the template's card says. */
+    const counted = listed.reduce((n, d) => n + d.staff.reduce((m, line) => m + line.count, 0) + DEPARTMENT_TEMPLATES.find(t => t.key === d.template)!.teamMembers, 0);
+    expect(staff).toHaveLength(counted);
     /* Grey on the map: no one has a subscription until one is connected. */
     for (const employee of staff) {
       expect(employee.skills.length, employee.name).toBeGreaterThan(0);
@@ -115,6 +128,38 @@ describe('every ready-made company', () => {
   });
 });
 
+describe('a product added later', () => {
+  async function design(app: FastifyInstance, ceo: string) {
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'design', staff: true }] }, ...as(ceo) });
+    expect(built.statusCode).toBe(201);
+    return (await app.ctx.db.select().from(departments).where(eq(departments.templateKey, 'design')))[0]!;
+  }
+  const skillsOf = (app: FastifyInstance, role: string) => app.ctx.templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id);
+
+  it('hires the people its department keeps one of for each product, as the structure card or the orchestrator adds it', async () => {
+    const { app, db } = await testApp();
+    const { ceo } = await setUp(app, LATER);
+    const dept = await design(app, ceo);
+    const added = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ department: dept.id, products: ['Shop'] }] }, ...as(ceo) });
+    expect(added.statusCode).toBe(201);
+    const [shop] = await db.select().from(departments).where(eq(departments.name, 'Shop'));
+    const people = (await staffOf(app)).filter(a => a.productId === shop!.id);
+    expect(people.map(a => [a.roleKey, a.name, a.departmentId, a.subscriptionId])).toEqual([['DSN-UI', 'Product UI designer (Shop)', dept.id, null]]);
+    expect(people[0]!.skills).toEqual(skillsOf(app, 'DSN-UI'));
+  });
+
+  it('hires them for a product that comes with another repository', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, LATER);
+    const dept = await design(app, ceo);
+    const added = await app.inject({ method: 'POST', url: `/api/departments/${dept.id}/repositories`, payload: { url: 'https://github.com/acme/brand.git' }, ...as(ceo) });
+    expect(added.statusCode).toBe(201);
+    const people = (await staffOf(app)).filter(a => a.productId === added.json().product.id);
+    expect(people.map(a => [a.roleKey, a.name, a.departmentId])).toEqual([['DSN-UI', 'Product UI designer (brand)', dept.id]]);
+    expect(people[0]!.skills).toEqual(skillsOf(app, 'DSN-UI'));
+  });
+});
+
 describe('a subscription that comes later', () => {
   it('takes every employee that waits for one, and the orchestrator, with the model each tier asks for', async () => {
     const { app, db } = await testApp();
@@ -123,7 +168,7 @@ describe('a subscription that comes later', () => {
     const [key] = await plans(app);
     const staff = await staffOf(app);
     expect(staff.every(a => a.subscriptionId === key!.id)).toBe(true);
-    for (const employee of staff) expect(employee.model, employee.name).toBe(modelOnPlan(app.ctx.templates.roles.get(employee.roleKey!)!.tier, key!));
+    for (const employee of staff) expect(employee.model, employee.name).toBe(modelOnPlan(tierOf(app, employee), key!));
     expect((await orchestrator(app)).subscriptionId).toBe(key!.id);
     /* Hornhoof did it, so the card says no person did. */
     const [developer] = staff.filter(a => a.roleKey === 'DEV-ENG');
@@ -138,7 +183,7 @@ describe('a subscription that comes later', () => {
     expect((await addKey(app, ceo, { kind: 'department', id: dev.id })).statusCode).toBe(201);
     const [key] = await plans(app);
     const staff = await staffOf(app);
-    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV']);
+    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV']);
     expect(staff.filter(a => a.departmentId !== dev.id).every(a => a.subscriptionId === null)).toBe(true);
     expect((await orchestrator(app)).subscriptionId).toBeNull();
   });

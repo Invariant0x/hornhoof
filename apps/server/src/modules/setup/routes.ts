@@ -9,7 +9,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
 import { hireEmployee } from '../departments/hire.js';
-import { companyRoster } from '../departments/roster.js';
+import { companyRoster, templateTeams } from '../departments/roster.js';
 import { saveLink } from '../link/link.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
@@ -149,8 +149,11 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
             for (const product of dept.products ?? []) {
               await tx.insert(departments).values({ companyId: company!.id, name: product, parentId: row!.id, roleCode, position: position++ });
             }
+            /* Its people by the company template, and the turnkey teams of its department template, as the orchestrator
+               builds a department with its people. */
             const serving = await placeableSubscriptions({ db: tx }, company!.id, spotIn(row!));
-            for (const line of companyRoster(ctx, dept.staff, serving)) await hireEmployee(ctx, tx, { companyId: company!.id, departmentId: row!.id }, line, by);
+            const lines = [...companyRoster(ctx, dept.staff, serving), ...(await templateTeams(ctx, tx, row!, serving))];
+            for (const line of lines) await hireEmployee(ctx, tx, { companyId: company!.id, departmentId: row!.id }, line, by);
           }
         }
         if (bound) await saveLink(tx, config, company!.id, bound);

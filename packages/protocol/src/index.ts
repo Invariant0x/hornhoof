@@ -213,18 +213,20 @@ export function cut(text: string, max: number): string {
 export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
-/* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt. */
-export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: DepartmentWorkMode }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous' },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns' },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns' },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns' },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns' },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns' },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns' },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns' },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns' },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns' },
+/* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt.
+   teamMembers: how many people the turnkey teams of its template bring, for the headcount on a company template's card;
+   a test keeps it equal to the team templates. */
+export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: DepartmentWorkMode; teamMembers: number }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous', teamMembers: 1 },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns', teamMembers: 2 },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products

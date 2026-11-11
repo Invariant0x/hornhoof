@@ -32,10 +32,12 @@ describe('the program operator role', () => {
 
 describe('a new company', () => {
   it.each([...COMPANY_TEMPLATE_KEYS])('from the %s template starts with its Operations, the four roles among them', async template => {
-    const { db } = await company({ template });
+    const { app, db } = await company({ template });
     expect(await opsDepartments(db)).toHaveLength(1);
+    /* Its staff by the template, and the members of the turnkey team of Operations. */
     const listed = COMPANY_TEMPLATES.find(t => t.key === template)!.departments.find(d => d.template === 'operations')!.staff;
-    expect(await roles(db)).toEqual(listed.flatMap(line => Array<string>(line.count).fill(line.role)).sort());
+    const team = app.ctx.templates.teamsOf('operations').flatMap(t => t.members);
+    expect(await roles(db)).toEqual([...listed, ...team].flatMap(line => Array<string>(line.count).fill(line.role)).sort());
   });
 
   it('with no template gets an Operations with the four roles, and nothing else', async () => {

@@ -1,8 +1,9 @@
 import type { CompanyTemplateStaff } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { departments } from '../../db/schema.js';
+import { departments, teams } from '../../db/schema.js';
 import { modelOnPlan } from '../agents/role-model.js';
+import type { Tx } from '../tasks/engine.js';
 import type { Role, TeamTemplate } from '../templates/load.js';
 import { runsTier, servingSubscriptions, spotIn, type HireLine } from '../tools/staff.js';
 import { deptName } from './templates.js';
@@ -39,6 +40,25 @@ export function teamRoster(ctx: Pick<Ctx, 'templates'>, team: TeamTemplate, team
     const skills = [...new Set([...role.skills.filter(s => s.on).map(s => s.id), ...team.skills])];
     const line = { role: role.id, team: teamId, product: null, model: plan ? modelOnPlan(tier, plan) : '', subscription: plan?.id ?? null, skills };
     return Array.from({ length: count }, (_, i) => ({ ...line, name: `${role.title.en}${count > 1 ? ` ${i + 1}` : ''} (${team.title.en})` }));
+  });
+}
+
+/* The teams of a department's template, made as its sub-units, and the members each starts with. */
+export async function templateTeams(ctx: Pick<Ctx, 'templates'>, tx: Tx, dept: Dept, serving: readonly Plan[]): Promise<HireLine[]> {
+  const lines: HireLine[] = [];
+  for (const team of dept.templateKey ? ctx.templates.teamsOf(dept.templateKey) : []) {
+    const [made] = await tx.insert(teams).values({ companyId: dept.companyId, departmentId: dept.id, name: team.title.en, about: team.description.en, turnkey: team.turnkey, urgentOnly: team.urgentOnly }).returning({ id: teams.id });
+    lines.push(...teamRoster(ctx, team, made!.id, serving));
+  }
+  return lines;
+}
+
+/* The people a product added to a department starts with: one of each default role its template keeps per product, as a
+   department made with its people has for each of its products. */
+export function productRoster(ctx: Pick<Ctx, 'templates'>, dept: Dept, product: Dept, serving: readonly Plan[]): HireLine[] {
+  return (dept.templateKey ? ctx.templates.roster(dept.templateKey).filter(r => r.inDefault && r.perProduct) : []).map(role => {
+    const plan = planFor(serving, role);
+    return { role: role.id, name: `${role.title.en} (${deptName(product)})`, product: product.id, model: plan ? modelOnPlan(role.tier, plan) : '', subscription: plan?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
   });
 }
 
