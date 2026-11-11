@@ -51,8 +51,11 @@ const END_SESSIONS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))::
   WHERE datname = current_database() AND pid <> pg_backend_pid() AND (application_name = $1 OR usename = ANY($2::text[]))`;
 
 /* One statement, so that all three go or none: journal rows, the steps of sources, and the kept answers of tool calls whose
-   job no longer runs, each older than a week and a batch at most, and only while nobody else reads them. */
-const ALONE = `(SELECT sync FROM net_local.lease) = 'alone'`;
+   job no longer runs, each older than a week and a batch at most. Only while nobody else reads them: this machine keeps
+   the data alone, its lease has not lapsed, and no merge waits to be applied or checked, as a merge reads the journal
+   from where the two sides parted. A prune that took a journal row says how far back the journal now goes, and lets
+   go of what merges noted of rows older than that. */
+const ALONE = `EXISTS (SELECT FROM net_local.lease WHERE sync = 'alone' AND until > clock_timestamp()) AND NOT EXISTS (SELECT FROM net.merges WHERE status IN ('pending', 'applied'))`;
 const OLD = `at < now() - interval '7 days'`;
 const PRUNE = `WITH journal_gone AS (
     DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE ${OLD} ORDER BY at LIMIT $1) AND ${ALONE} RETURNING 1
@@ -62,7 +65,15 @@ const PRUNE = `WITH journal_gone AS (
     DELETE FROM public.tool_calls WHERE id IN (
       SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE c.${OLD} AND j.status <> 'running' ORDER BY c.at LIMIT $1
     ) AND ${ALONE} RETURNING 1
+  ), horizon AS (
+    INSERT INTO net.horizon (below) SELECT now() - interval '7 days' WHERE EXISTS (SELECT FROM journal_gone)
+    ON CONFLICT (id) DO UPDATE SET below = EXCLUDED.below RETURNING below
+  ), noted_gone AS (
+    DELETE FROM net.merge_consumed WHERE ${OLD} AND EXISTS (SELECT FROM horizon) RETURNING 1
   ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned`;
+/* The keeper of a new build runs a while on the schema of the build before, which has no record of merges: it prunes
+   nothing until the app has migrated. */
+const HAS_MERGES = `SELECT to_regclass('net.merges') IS NOT NULL AND to_regclass('net.horizon') IS NOT NULL AND to_regclass('net.merge_consumed') IS NOT NULL AS there`;
 
 /* The keeper of a new build runs a while on the schema of the build before, which has no roles yet: it asks first. */
 const HAS_ROLES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'role') AS there`;
@@ -128,7 +139,10 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     fence,
     endSessions,
     problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(), SOURCE_TABLES])).rows.map(row => row.line),
-    prune: async (batch = PRUNE_BATCH) => (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned,
+    prune: async (batch = PRUNE_BATCH) => {
+      if (!(await sql.query<{ there: boolean }>(HAS_MERGES)).rows[0]!.there) return 0;
+      return (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned;
+    },
     /* The lease says this machine keeps the data alone. With another data machine listed that would be untrue, and the
        two could both lead: this machine then holds no such lease. */
     async othersHoldData() {

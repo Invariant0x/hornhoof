@@ -647,8 +647,8 @@ class Merge {
      restore from the restored bundle's time to the kept database's last change. */
   private async span(source: string): Promise<[Date | null, Date | null]> {
     if (this.path === 'journal') return [this.proving[0]?.at ?? null, this.proving.at(-1)?.at ?? null];
-    const [restore] = source.startsWith('kept:') ? await this.q<{ at: Date }>('SELECT dumped_at AS at FROM net.restores WHERE kept = $1 ORDER BY at DESC LIMIT 1', [source.slice(5)]) : [];
-    return [restore?.at ?? null, await lastChange(this.src)];
+    const [restore] = source.startsWith('kept:') ? await this.q<{ at: string | Date }>('SELECT dumped_at AS at FROM net.restores WHERE kept = $1 ORDER BY at DESC LIMIT 1', [source.slice(5)]) : [];
+    return [restore ? new Date(restore.at) : null, await lastChange(this.src)];
   }
 }
 

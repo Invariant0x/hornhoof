@@ -17,6 +17,8 @@ export function keyText(key: Record<string, unknown>): string {
 }
 
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`;
+/* A time as a side answers it: a driver gives a Date, and drizzle the text Postgres wrote. */
+const dateOf = (value: unknown): Date => (value instanceof Date ? value : new Date(String(value)));
 const batches = <T>(all: T[], size: number): T[][] => Array.from({ length: Math.ceil(all.length / size) }, (_unused, n) => all.slice(n * size, (n + 1) * size));
 
 /* The tables of net a side has, asked once per side: a database kept before a release lacks what that release added,
@@ -35,13 +37,14 @@ const has = async (q: Query, table: string): Promise<boolean> => (await netTable
 /* Below this time the side pruned its journal; null when it never did. */
 export async function horizonOf(q: Query): Promise<Date | null> {
   if (!(await has(q, 'horizon'))) return null;
-  return (await q<{ below: Date }>('SELECT below FROM net.horizon'))[0]?.below ?? null;
+  const [row] = await q<{ below: unknown }>('SELECT below FROM net.horizon');
+  return row ? dateOf(row.below) : null;
 }
 
 /* Every journal row of the side from that time on, by its id with its time. */
 export async function journalIds(q: Query, from: Date | null): Promise<Map<string, Date>> {
-  const rows = await q<{ id: string; at: Date }>('SELECT id, at FROM net.journal WHERE $1::timestamptz IS NULL OR at >= $1::timestamptz', [from]);
-  return new Map(rows.map(row => [row.id, row.at]));
+  const rows = await q<{ id: string; at: unknown }>('SELECT id, at FROM net.journal WHERE $1::timestamptz IS NULL OR at >= $1::timestamptz', [from]);
+  return new Map(rows.map(row => [row.id, dateOf(row.at)]));
 }
 
 /* These journal rows, oldest first: by their time to the microsecond, then by id. */
@@ -57,7 +60,7 @@ export async function journalRows(q: Query, ids: string[]): Promise<JournalRow[]
     );
   }
   found.sort((a, b) => (a.stamp < b.stamp ? -1 : a.stamp > b.stamp ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return found.map(({ id, xact, at, tbl, op, key, cols, old }) => ({ id, xact, at, tbl, op, key, cols, old }));
+  return found.map(({ id, xact, at, tbl, op, key, cols, old }) => ({ id, xact, at: dateOf(at), tbl, op, key, cols, old }));
 }
 
 /* The restores the side went through, oldest first, by their attempts. */
@@ -67,7 +70,8 @@ export async function restoresOf(q: Query): Promise<string[]> {
 }
 
 export async function lastChange(q: Query): Promise<Date | null> {
-  return (await q<{ at: Date | null }>('SELECT max(at) AS at FROM net.journal'))[0]?.at ?? null;
+  const [row] = await q<{ at: unknown }>('SELECT max(at) AS at FROM net.journal');
+  return row?.at ? dateOf(row.at) : null;
 }
 
 /* The columns of a key as jsonb_to_recordset reads them back, each with its own type. */

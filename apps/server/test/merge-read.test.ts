@@ -102,9 +102,10 @@ describe('reading both sides of a merge', () => {
     const c = await company(sides.leader.db);
     const { db } = sides.leader;
     const q = queryOf(sides.leader);
-    expect(await horizonOf(q)).toBeNull();
+    /* A week back from when the database was migrated, until a prune moves it. */
+    expect((await horizonOf(q))!.getTime()).toBeLessThan(Date.now() - 6 * 86_400_000);
     const below = new Date('2026-11-01T00:00:00Z');
-    await db.execute(sql`INSERT INTO net.horizon (below) VALUES (${below.toISOString()})`);
+    await db.execute(sql`UPDATE net.horizon SET below = ${below.toISOString()}`);
     expect((await horizonOf(q))!.getTime()).toBe(below.getTime());
     const [early, late] = [randomUUID(), randomUUID()];
     await db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, at) VALUES (${late}, ${randomUUID()}, now(), now()), (${early}, ${randomUUID()}, now(), now() - interval '1 day')`);

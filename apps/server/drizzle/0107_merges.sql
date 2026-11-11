@@ -98,6 +98,9 @@ CREATE TABLE net.horizon (
   below timestamptz NOT NULL
 );
 --> statement-breakpoint
+-- Whatever a build before this one pruned was older than a week, so a week back is true of every database.
+INSERT INTO net.horizon (below) VALUES (now() - interval '7 days');
+--> statement-breakpoint
 CREATE CONSTRAINT TRIGGER net_fence AFTER INSERT OR UPDATE OR DELETE ON net.merges
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION net.fence_check();
 --> statement-breakpoint

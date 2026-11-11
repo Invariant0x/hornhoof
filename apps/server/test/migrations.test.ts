@@ -744,7 +744,8 @@ describe('migration 0107, the merge records', () => {
     const row = (how: string) => db.execute(sql`insert into net.merge_rows (merge, tbl, key, how) values (${id}, 'tasks', '{"id": "1"}'::jsonb, ${how})`);
     await row('rewritten');
     expect(await codeOf(row('other'))).toBe('23514');
-    await db.execute(sql`insert into net.horizon (below) values (now())`);
+    /* The horizon is there from the start, a week back: whatever a build before pruned is older than that. */
+    expect((await db.execute(sql`select below < now() - interval '6 days' and below > now() - interval '8 days' as a_week_back from net.horizon`)).rows).toEqual([{ a_week_back: true }]);
     expect(await codeOf(db.execute(sql`insert into net.horizon (id, below) values (false, now())`))).toBe('23514');
     expect(await codeOf(db.execute(sql`insert into net.horizon (below) values (now())`))).toBe('23505');
   });

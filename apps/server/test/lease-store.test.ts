@@ -116,6 +116,60 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.prune()).toBe(0);
   });
 
+  it('prunes nothing while a merge waits', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    /* A merge that has not run, or whose check has not passed, still reads the journal from where the two parted. */
+    await s.db.execute(sql`INSERT INTO net.merges (source, label) VALUES ('kept:hornhoof_before_t1', 'a database')`);
+    expect(await s.lease.prune()).toBe(0);
+    await s.db.execute(sql`UPDATE net.merges SET status = 'applied'`);
+    expect(await s.lease.prune()).toBe(0);
+    await s.db.execute(sql`UPDATE net.merges SET status = 'merged'`);
+    expect(await s.lease.prune()).toBe(1);
+  });
+
+  it('prunes nothing on a lapsed lease', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await s.run.query(`UPDATE net_local.lease SET until = now() - interval '1 minute'`);
+    expect(await s.lease.prune()).toBe(0);
+    await s.run.query(`UPDATE net_local.lease SET until = 'infinity'`);
+    expect(await s.lease.prune()).toBe(1);
+  });
+
+  it('records the horizon', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    const horizon = async () => (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM now() - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
+    /* A database is given one as it is migrated: whatever was pruned before is older than that. */
+    expect(Math.abs((await horizon()) - 7 * 86_400)).toBeLessThan(3600);
+    await s.run.query(`UPDATE net.horizon SET below = '2000-01-01'`);
+    await s.db.execute(sql`INSERT INTO net.merges (id, source, label, status) VALUES ('00000000-0000-4000-8000-00000000000a', 'kept:hornhoof_before_t1', 'a database', 'done')`);
+    await s.db.execute(sql`INSERT INTO net.merge_consumed (journal, merge, at, how) VALUES
+      (gen_random_uuid(), '00000000-0000-4000-8000-00000000000a', now() - interval '8 days', 'applied'), (gen_random_uuid(), '00000000-0000-4000-8000-00000000000a', now(), 'applied')`);
+    /* A prune that deletes nothing moves nothing. */
+    expect(await s.lease.prune()).toBe(0);
+    expect(await horizon()).toBeGreaterThan(365 * 86_400);
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    expect(await s.lease.prune()).toBe(1);
+    expect(Math.abs((await horizon()) - 7 * 86_400)).toBeLessThan(2);
+    expect((await s.run.query<{ n: number }>(`SELECT count(*)::int AS n FROM net.merge_consumed`)).rows).toEqual([{ n: 1 }]);
+  });
+
+  it('prunes nothing in a database of the build before, which has no record of merges', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await s.run.query('DROP TABLE net.merge_rows, net.merge_conflicts, net.merge_consumed, net.merges, net.restores, net.horizon');
+    expect(await s.lease.prune()).toBe(0);
+  });
+
   it('prunes old sources and the old calls of jobs that ended, while this machine keeps the data alone', async () => {
     const s = await store();
     await s.lease.take('normal', FAR);
