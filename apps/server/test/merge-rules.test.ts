@@ -40,7 +40,7 @@ describe('the rule of each table in a merge', () => {
 
   it('never compares what the leader recomputes', async () => {
     const { tables } = await facts();
-    const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state'];
+    const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state', 'link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
     expect(BOOKKEEPING.machines).toEqual(expect.arrayContaining(own));
     /* A place the CEO pinned is his word, so two that differ are his to settle. */
     expect(BOOKKEEPING.machines).not.toContain('server_pin');

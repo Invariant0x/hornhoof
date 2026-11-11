@@ -811,3 +811,36 @@ describe('migration 0108, the server order and the copies', () => {
     expect(await codeOf(merge('other:x'))).toBe('23514');
   });
 });
+
+describe('migration 0109, the measures of the server order', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds the measures and the ranking's row", async () => {
+    const db = await fullyMigrated();
+    const MEASURES = ['link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
+    const machine = (column: string, value: number | null) =>
+      db.execute(sql`insert into machines (company_id, person_id, machine_key, ${sql.raw(column)}) values (gen_random_uuid(), gen_random_uuid(), ${`m-${column}-${String(value)}`}, ${value})`);
+    for (const column of MEASURES) {
+      /* A machine that has measured nothing yet has none, and nothing is less than nothing. */
+      await machine(column, null);
+      await machine(column, 0);
+      expect(await codeOf(machine(column, -1)), column).toBe('23514');
+    }
+    const fenced = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'ranking'`);
+    expect(fenced.rows).toEqual([{ deferrable: true, deferred: true }]);
+    await db.execute(sql`insert into net.ranking (rescored_at) values (now())`);
+    expect(await codeOf(db.execute(sql`insert into net.ranking (rescored_at) values (now())`))).toBe('23505');
+    expect(await codeOf(db.execute(sql`insert into net.ranking (id) values (false)`))).toBe('23514');
+  });
+});

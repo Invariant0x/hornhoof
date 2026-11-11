@@ -312,6 +312,13 @@ export const machines = pgTable(
     /* When it stopped holding the company's data, and how far the upload of what it held has come. */
     dataLeftAt: timestamp('data_left_at', { withTimezone: true }),
     uploadState: text('upload_state', { enum: UPLOAD_STATES }),
+    /* What the server order is scored on besides: the median round trip of its hellos to the leader over a day, the
+       best rate of the leader's sending to it over a day, which stays when a day brings none, the median round trip
+       to github.com over a day, and the rate of its last daily download from there. */
+    linkRttMs: integer('link_rtt_ms'),
+    linkMbps: integer('link_mbps'),
+    internetRttMs: integer('internet_rtt_ms'),
+    internetMbps: integer('internet_mbps'),
   },
   t => [
     unique('machines_person_key').on(t.personId, t.machineKey),
@@ -327,6 +334,7 @@ export const machines = pgTable(
     check('machines_copy_state', sql`copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped')`),
     check('machines_copy_error', sql`copy_error IS NULL OR copy_error IN ('disk_full', 'apply', 'led', 'setup')`),
     check('machines_upload_state', sql`upload_state IS NULL OR upload_state IN ('waiting', 'received', 'kept')`),
+    check('machines_measures_range', sql`link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0`),
   ],
 );
 

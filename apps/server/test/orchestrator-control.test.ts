@@ -449,6 +449,14 @@ describe('the orchestrator reads and changes the database itself', () => {
     }
   });
 
+  it('stays out of the ranking', async () => {
+    const { app } = await company();
+    const client = await mcp(app, TOKEN);
+    const res = await call(client, 'database', { sql: 'SELECT * FROM net.ranking' });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/permission denied/);
+  });
+
   it('stays out of the pulse', async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
