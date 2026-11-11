@@ -14,6 +14,8 @@ const KeeperStateShape = z.object({
   link: z.object({ host: z.string().nullable(), fingerprint256: z.string().nullable() }).nullable(),
   /* The doors the keeper holds open to other machines' databases: the port of each, by the machine's network id. */
   doors: z.record(z.string(), z.number().int().min(1).max(65535)).optional(),
+  /* How each copy does, as the keeper that leads reads it from its own Postgres, by the copy's name. */
+  copies: z.array(z.object({ name: z.string(), state: z.enum(['sync', 'pace', 'behind', 'silent']) })).optional(),
 });
 export type KeeperState = z.infer<typeof KeeperStateShape>;
 

@@ -20,6 +20,9 @@ import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, type MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
 import { saveLink } from '../src/modules/link/link.js';
+import { Relay } from '../src/modules/link/relay.js';
+import type { SyncCatalog } from '../src/modules/keeper/sync.js';
+import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { authorityOf } from '../src/modules/network/store.js';
@@ -368,6 +371,97 @@ describe('the peer link in the keeper', () => {
     c.app.ctx.doorsWanted = async () => [];
     await until(() => Object.keys(doorsSaid()).length === 0);
     expect(await said(port)).toBe('closed');
+  });
+
+  /* The leader's Postgres as far as the sync controller asks it, with one copy listed or none. */
+  function syncCatalog(copy: { machine: string; networkId: string } | null) {
+    const state = { setting: null as string | null, pulses: 0, listed: copy !== null };
+    const name = copy ? `copy_${copy.networkId.slice(0, 16)}_1` : '';
+    const catalog: SyncCatalog = {
+      machines: async () => (copy && state.listed ? [{ machine: copy.machine, networkId: copy.networkId, number: 2, copyName: name, ready: false }] : []),
+      replication: async () => [],
+      setting: async () => state.setting,
+      position: async () => '0/3000000',
+      oldestWaitMs: async () => null,
+      set: async chosen => void (state.setting = chosen),
+      clear: async () => void (state.setting = null),
+      checkpoint: async () => undefined,
+      pulse: async () => void (state.pulses += 1),
+    };
+    return { state, catalog };
+  }
+
+  it('leads under the flag its sync controller gives, and says how its copies do', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    const { catalog, state } = syncCatalog(null);
+    const lease = fakeLease();
+    const { keeper, controlDir } = await keeperBeside(c, target, folder(), { lease, sync: { catalog, relay: new Relay(relay.url), everyMs: 20 } });
+    await until(() => keeper.mode() === 'lead');
+    /* Alone, as the controller found it: no copy, nothing to tell the relay, no pulse. */
+    expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
+    await until(() => readKeeperState(controlDir)?.copies !== undefined);
+    expect(readKeeperState(controlDir)).toMatchObject({ mode: 'lead', copies: [] });
+    expect(state.pulses).toBe(0);
+    expect(relay.calls.some(call => call.includes('/sync'))).toBe(false);
+  });
+
+  it('stops its link when its lease ends with a copy listed, and starts it again to tell the relay', async () => {
+    const c = await company(true);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    relay.bindings.set('acme', { key: 'k'.repeat(32) });
+    relay.register('acme', `acme-${MACHINE_ID.slice(0, 8)}-link`);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    const { catalog, state } = syncCatalog(copy);
+    /* Clocks the test moves, so a lease runs out when the test says so. */
+    const clock = { wall: Date.now(), mono: 1_000_000 };
+    const renews = { hold: true };
+    const lease = fakeLease({ othersHoldData: true, renew: async () => renews.hold });
+    let started = 0;
+    const { keeper, lines } = await keeperBeside(c, target, folder(), {
+      lease, now: () => ({ ...clock }),
+      clientFor: () => (started++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0, linkPauseMs: 400 },
+    });
+    /* Another machine holds the data: it leads only once the relay stored that this one alone has the latest changes. */
+    await until(() => keeper.mode() === 'lead');
+    expect(relay.syncs.get('acme')).toMatchObject({ state: 'off' });
+    expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('relay_off');
+    await until(() => started === 1);
+    await until(() => state.pulses > 0);
+
+    /* Its renewals stop holding, and ten seconds pass: the lease ends. */
+    renews.hold = false;
+    clock.wall += 11_000;
+    clock.mono += 11_000;
+    await until(() => lines.some(line => line.startsWith('The lease ended')));
+    expect(keeper.mode()).toBe('read');
+    /* The link's frpc is stopped, so the company's name is free, and comes back by itself a moment later. */
+    await until(() => lines.includes('No public link: the tunnel waits.'));
+    renews.hold = true;
+    await until(() => started === 2);
+    await until(() => keeper.mode() === 'lead');
+  });
+
+  it('never leads alone while its controller says a copy is listed and the relay cannot be told', async () => {
+    const c = await company(true);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    /* The relay knows no such link: nothing can be stored there. */
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    const { catalog, state } = syncCatalog(copy);
+    const lease = fakeLease({ othersHoldData: true });
+    const { keeper, lines } = await keeperBeside(c, target, folder(), { lease, guardEveryMs: 50, sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0 } });
+    await until(() => lines.some(line => line.startsWith('Could not tell hornhoof.org which machine holds the latest changes')));
+    expect(keeper.mode()).toBe('read');
+    expect(lease.calls.some(call => call.method === 'take')).toBe(false);
+    /* The copy is gone again: this machine is alone, and leads. */
+    state.listed = false;
+    lease.othersHold(false);
+    await until(() => keeper.mode() === 'lead');
+    expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
   });
 
   it('keeps the list of revoked certificates where only the keeper reads it', async () => {

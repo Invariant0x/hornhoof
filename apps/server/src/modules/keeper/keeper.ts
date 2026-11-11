@@ -25,8 +25,10 @@ import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { DataLinks, type DataLinksOptions } from './data-links.js';
+import { keepSize, KEEP_SIZE_EVERY_MS, SLOTS_EVERY_MS, sweepSlots } from './slots.js';
+import { SyncController, type SyncControllerOptions } from './sync.js';
 import { KEEPER_DIR, reasonOf } from './machine-keys.js';
-import type { LeaseStore } from './lease-store.js';
+import type { LeaseStore, Sql } from './lease-store.js';
 import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
 import { updaterBusy } from './updater-status.js';
@@ -84,6 +86,11 @@ export type KeeperOptions = {
   /* What the keeper keeps toward the machines that hold copies: where its doors to their databases listen and who may
      use them, its paces, and the way into its own database for the role copies read with. */
   copies?: Pick<DataLinksOptions, 'dial' | 'sessions' | 'doorHost' | 'allowed' | 'everyMs' | 'replicaEveryMs' | 'visitClientFor' | 'visitPort'> & { replica?: DataLinksOptions['replica'] };
+  /* What decides whether a commit waits for a copy, and tells the relay which machine holds the latest changes: the
+     leader's own Postgres as the controller asks it, and the relay. Without it this machine keeps the data alone. slots:
+     a session for the chores of the copies' slots, with the free room of the database's disk. linkPauseMs: for how long
+     the link's frpc stays stopped after a lease ended while another machine holds the data. */
+  sync?: Pick<SyncControllerOptions, 'catalog' | 'relay' | 'everyMs' | 'routeEveryMs'> & { slots?: { sql: Sql; diskFree: () => number | null; everyMs?: number }; linkPauseMs?: number };
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -94,6 +101,9 @@ const LINK_EVERY_MS = 3000;
 const GUARD_EVERY_MS = 10_000;
 const BACKUP_KEYS_RETRY_MS = 60_000;
 const FRPC_RESTART_MS = 2000;
+/* After a lease ended with another data machine listed, the link's frpc stays stopped this long, so the name is free
+   for a machine that takes over; then it starts again, so this keeper holds its route and the relay can be told. */
+const LINK_PAUSE_MS = 30_000;
 const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
 const SETTINGS_KEPT = "The keeper cannot read the link's settings from the database: frpc stays as it is.";
 const CERTIFICATE_KEPT = "The keeper cannot read or serve the link's certificate: it keeps the one it serves.";
@@ -183,6 +193,14 @@ export class Keeper {
   private stopped = false;
   private peers: PeerLink | null = null;
   private links: DataLinks | null = null;
+  private readonly sync: SyncController | null;
+  /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
+  private settingsNow: TunnelSettings | null | undefined = undefined;
+  private linkPausedUntil = 0;
+  private slotsTimer: NodeJS.Timeout | null = null;
+  private keptSizeAt: number | null = null;
+  private readonly syncSlotsIdle = new Map<string, number>();
+  private slotsFail = false;
   private guardTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
   private fencesTimer: NodeJS.Timeout | null = null;
@@ -198,7 +216,24 @@ export class Keeper {
   constructor(private readonly opts: KeeperOptions) {
     const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
     this.listener = new LinkListener({ server: this.door(visitorFromTls, { link: true }), log });
-    this.holder = new LeaseHolder({ lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log });
+    this.sync =
+      opts.sync && opts.config.machineId
+        ? new SyncController({
+            catalog: opts.sync.catalog,
+            relay: opts.sync.relay,
+            everyMs: opts.sync.everyMs,
+            routeEveryMs: opts.sync.routeEveryMs,
+            link: async () => this.ownLink(),
+            dbBytes: machine => this.peers?.dbBytes(machine) ?? 0,
+            leads: () => this.mode() === 'lead',
+            log: opts.log,
+          })
+        : null;
+    this.holder = new LeaseHolder({
+      lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log,
+      sync: this.sync ?? undefined,
+      onEnd: () => this.leaseEnded(),
+    });
     /* A machine without an id is none of the company's network, as it carries no public link. */
     this.identity = opts.config.machineId
       ? new MachineIdentity({
@@ -256,6 +291,23 @@ export class Keeper {
   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
     const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, linkEveryMs = LINK_EVERY_MS, db } = this.opts;
     const at = { ...DOOR_PORTS, ...ports };
+    /* One reader of the link's settings for both frpc children and the sync controller, so an outage of the database
+       is said once. */
+    const settings = db ? keepingOnFailure(() => this.linkSettings(db), () => this.opts.log(SETTINGS_KEPT)) : null;
+    const read = settings
+      ? async () => {
+          const now = await settings();
+          this.settingsNow = now;
+          return now;
+        }
+      : null;
+    /* Whether another machine holds the data, and the controller's first look, come before the first lease: a machine
+       with copies leads only under the flag the controller gives. */
+    if (this.sync) {
+      await read?.();
+      await this.holder.guard();
+      await this.sync.start();
+    }
     /* The lease and the fences come before the first word, so a healthy machine leads from it. */
     const tick = oneAtATime(() => this.holder.tick().then(() => this.giveWord()));
     await this.holder.tick();
@@ -266,16 +318,19 @@ export class Keeper {
     const linkTls = await this.listener.listen(at.linkTls);
     this.timer = setInterval(() => void tick(), everyMs);
     this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
-    /* One reader of the link's settings for both frpc children, so an outage of the database is said once. */
-    const settings = db ? keepingOnFailure(() => this.linkSettings(db), () => this.opts.log(SETTINGS_KEPT)) : null;
-    if (db && settings) this.carryLink(db, settings, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
+    if (db && read) this.carryLink(db, () => this.linkUnlessPaused(read), { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
     this.carrier?.start();
     if (this.identity) void this.takeBackups();
     this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
     this.guardTimer.unref();
-    if (settings) await this.servePeers(settings, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
+    if (read) await this.servePeers(read, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
+    if (this.opts.sync?.slots) {
+      this.slotsTimer = setInterval(() => void this.keepSlots(), this.opts.sync.slots.everyMs ?? SLOTS_EVERY_MS);
+      this.slotsTimer.unref();
+      void this.keepSlots();
+    }
     return { front, linkHttp, linkTls };
   }
 
@@ -284,8 +339,10 @@ export class Keeper {
     if (this.certificateTimer) clearInterval(this.certificateTimer);
     if (this.fencesTimer) clearInterval(this.fencesTimer);
     if (this.guardTimer) clearInterval(this.guardTimer);
-    this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = null;
+    if (this.slotsTimer) clearInterval(this.slotsTimer);
+    this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = null;
     this.stopped = true;
+    await this.sync?.stop();
     if (this.backupsTimer) clearTimeout(this.backupsTimer);
     await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.links?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
@@ -386,11 +443,54 @@ export class Keeper {
     };
   }
 
+  /* The company's link as this keeper's own frpc logs in at the relay, for the sync controller: null without a link,
+     undefined before the settings were read. */
+  private ownLink(): { name: string; key: string; client: string } | null | undefined {
+    const settings = this.settingsNow;
+    if (!settings) return settings;
+    return { name: settings.name, key: settings.key, client: linkClientId(settings.name, this.opts.config.machineId!) };
+  }
+
+  /* A lease of this machine ended. With another machine holding the data, the link's frpc stops for a while: the
+     machine that holds the latest changes may take the company's name over meanwhile. */
+  private leaseEnded(): void {
+    if ((this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
+  }
+
+  /* The link's settings for its frpc: none while the frpc is to stay stopped, so the tunnel keeper ends it, and the
+     settings again after that, so it starts anew, holds its route, and the relay can be told what is true now. */
+  private async linkUnlessPaused(read: () => Promise<TunnelSettings | null | undefined>): Promise<TunnelSettings | null | undefined> {
+    const settings = await read();
+    return settings && performance.now() < this.linkPausedUntil ? null : settings;
+  }
+
+  /* The chores of the copies' slots, while this machine leads: how much of the log a copy that fell behind is kept,
+     set at the first lead and then each hour, and the slots nobody will read again dropped. A chore that fails is one
+     line, and the next round tries again. */
+  private async keepSlots(): Promise<void> {
+    const slots = this.opts.sync?.slots;
+    if (!slots || this.stopped || this.mode() !== 'lead') return;
+    try {
+      const now = performance.now();
+      const free = slots.diskFree();
+      if (free !== null && (this.keptSizeAt === null || now - this.keptSizeAt >= KEEP_SIZE_EVERY_MS)) {
+        await slots.sql.query(`ALTER SYSTEM SET max_slot_wal_keep_size = '${keepSize(free)}MB'`);
+        await slots.sql.query('SELECT pg_reload_conf()');
+        this.keptSizeAt = now;
+      }
+      await sweepSlots(slots.sql, this.opts.log, this.syncSlotsIdle, now);
+      this.slotsFail = false;
+    } catch (err) {
+      if (!this.slotsFail) this.opts.log(`Could not look after the copies' slots: ${reasonOf(err)}`);
+      this.slotsFail = true;
+    }
+  }
+
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */
   private giveWord(): void {
     const dir = this.opts.config.controlDir;
     try {
-      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {} });
+      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [] });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);

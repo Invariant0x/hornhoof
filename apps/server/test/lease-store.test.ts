@@ -106,7 +106,7 @@ describe('the lease the keeper holds in the database', () => {
     ]);
   });
 
-  it('prunes journal rows older than a week, a batch at a time, and only while this machine keeps the data alone', async () => {
+  it('prunes journal rows older than a week, a batch at a time, and only while its lease stands under a flag', async () => {
     const s = await store();
     await s.lease.take('normal', FAR);
     /* A company is made and renamed twice: three rows of the journal, then a fourth that is new. */
@@ -119,7 +119,10 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.prune()).toBe(1);
     expect(await s.lease.prune()).toBe(0);
     await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
-    await s.run.query(`UPDATE net_local.lease SET sync = 'copy'`);
+    /* With no flag nothing may be confirmed here, and a lease that ended is nobody's to prune under. */
+    await s.run.query(`UPDATE net_local.lease SET sync = NULL`);
+    expect(await s.lease.prune()).toBe(0);
+    await s.run.query(`UPDATE net_local.lease SET sync = 'alone', until = '-infinity'`);
     expect(await s.lease.prune()).toBe(0);
   });
 
@@ -192,7 +195,8 @@ describe('the lease the keeper holds in the database', () => {
       COMMIT`);
     const left = async () => (await s.run.query<{ sources: number; calls: number }>(`SELECT (SELECT count(*)::int FROM applied) AS sources, (SELECT count(*)::int FROM tool_calls) AS calls`)).rows[0];
 
-    await s.run.query(`UPDATE net_local.lease SET sync = 'copy'`);
+    /* With no flag on the lease nothing may be confirmed, and nothing is pruned either. */
+    await s.run.query(`UPDATE net_local.lease SET sync = NULL`);
     expect(await s.lease.prune()).toBe(0);
     expect(await left()).toEqual({ sources: 3, calls: 3 });
 
@@ -202,6 +206,47 @@ describe('the lease the keeper holds in the database', () => {
     expect(await s.lease.prune()).toBe(1);
     expect(await left()).toEqual({ sources: 1, calls: 2 });
     expect((await s.run.query(`SELECT 1 FROM tool_calls WHERE job_id = '${RUNNING}'`)).rows).toHaveLength(1);
+  });
+
+  it('takes and renews a lease with the flag it is given', async () => {
+    const s = await store();
+    const term = await s.lease.take('normal', FAR, 'relay_off');
+    expect((await s.leaseRow()).sync).toBe('relay_off');
+    expect(await s.lease.renew(term, 'normal', FAR, false, 'copy')).toBe(true);
+    expect((await s.leaseRow()).sync).toBe('copy');
+    /* A renewal that names none keeps the lease's, as a keeper of the build before renews. */
+    expect(await s.lease.renew(term, 'normal', FAR, false)).toBe(true);
+    expect((await s.leaseRow()).sync).toBe('copy');
+    expect((await s.lease.take('normal', FAR)).number).toBe(term.number + 1);
+    expect((await s.leaseRow()).sync).toBe('alone');
+  });
+
+  it('prunes only what every copy holds', async () => {
+    const s = await store('a1b2c3d4'.repeat(4));
+    await s.lease.take('normal', FAR, 'copy');
+    await s.db.insert(companies).values({ name: 'One' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    /* A machine that keeps a copy, written past the checks that a company and a person stand behind it. */
+    const copy = (key: string, more: string) =>
+      s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
+        INSERT INTO machines (company_id, person_id, machine_key, role, network_id, copy_state, copy_name, copy_at)
+          VALUES (gen_random_uuid(), gen_random_uuid(), '${key}', 'data', '${key}', ${more}); COMMIT`);
+    await copy('c1', `'ready', 'copy_c1_1', now() - interval '9 days'`);
+    const journal = async () => (await s.run.query<{ n: number }>('SELECT count(*)::int AS n FROM net.journal')).rows[0]!.n;
+    const before = await journal();
+    /* The copy holds the leader only as far as nine days ago: what is newer stays for it. */
+    expect(await s.lease.prune()).toBe(0);
+    expect(await journal()).toBe(before);
+    /* It holds the leader as of now: the old rows go. */
+    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE machines SET copy_at = now() WHERE machine_key = 'c1'; COMMIT`);
+    expect(await s.lease.prune()).toBeGreaterThan(0);
+    expect(await journal()).toBeLessThan(before);
+    /* A copy that is still being made, or stopped, holds nothing back: it has no pulse of its own to go by. */
+    await s.db.update(companies).set({ name: 'Two' });
+    await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
+    await copy('c2', `'making', 'copy_c2_1', NULL`);
+    await copy('c3', `'stopped', 'copy_c3_1', now() - interval '30 days'`);
+    expect(await s.lease.prune()).toBeGreaterThan(0);
   });
 
   it('knows when another machine holds the data', async () => {

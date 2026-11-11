@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { LeaseHolder } from '../src/modules/keeper/lease-holder.js';
+import { LeaseHolder, type LeaseHolderOptions } from '../src/modules/keeper/lease-holder.js';
+import type { Flag } from '../src/modules/keeper/sync-step.js';
 import { LEASE_MS, type Clocks } from '../src/modules/keeper/lease.js';
 import { fakeLease } from './fake-lease.js';
 
 const T0: Clocks = { wall: 1e12, mono: 5e3 };
 
 /* A holder on clocks only the test moves, with what the updater says given by the test too. */
-function holder(lease: ReturnType<typeof fakeLease> | null = fakeLease(), pruneEveryMs = 60_000) {
+function holder(lease: ReturnType<typeof fakeLease> | null = fakeLease(), pruneEveryMs = 60_000, sync?: LeaseHolderOptions['sync']) {
   let now = T0;
   let busy: boolean | null = false;
   const lines: string[] = [];
-  const h = new LeaseHolder({ lease, updaterBusy: () => busy, now: () => now, pruneEveryMs, log: line => lines.push(line) });
+  const ended: number[] = [];
+  const h = new LeaseHolder({ lease, updaterBusy: () => busy, now: () => now, pruneEveryMs, log: line => lines.push(line), sync, onEnd: () => void ended.push(now.wall) });
   return {
-    h, lines, lease,
+    h, lines, lease, ended,
     /* Both clocks go on by the same time, as on a machine that neither sleeps nor has its clock set. */
     after: (ms: number) => { now = { wall: now.wall + ms, mono: now.mono + ms }; },
     clocks: (wall: number, mono: number) => { now = { wall: now.wall + wall, mono: now.mono + mono }; },
@@ -26,7 +28,7 @@ describe('the lease the keeper holds', () => {
     const k = holder();
     expect(k.h.mode()).toBe('read');
     await k.h.tick();
-    expect(k.lease!.calls[0]).toEqual({ method: 'take', args: ['normal', new Date(T0.wall + LEASE_MS)] });
+    expect(k.lease!.calls[0]).toEqual({ method: 'take', args: ['normal', new Date(T0.wall + LEASE_MS), 'alone'] });
     expect(k.h.mode()).toBe('read');
     await k.h.look();
     expect(k.h.mode()).toBe('lead');
@@ -40,7 +42,7 @@ describe('the lease the keeper holds', () => {
     await k.h.look();
     k.after(1000);
     await k.h.tick();
-    expect(k.lease!.calls.at(-1)).toEqual({ method: 'renew', args: [{ number: 1, machine: 'machine-a', split: false }, 'normal', new Date(T0.wall + 1000 + LEASE_MS), false] });
+    expect(k.lease!.calls.at(-1)).toEqual({ method: 'renew', args: [{ number: 1, machine: 'machine-a', split: false }, 'normal', new Date(T0.wall + 1000 + LEASE_MS), false, 'alone'] });
     expect(k.h.mode()).toBe('lead');
   });
 
@@ -105,7 +107,7 @@ describe('the lease the keeper holds', () => {
     k.updater(true);
     k.after(1000);
     await k.h.tick();
-    expect(k.lease!.calls.at(-1)!.args.slice(1)).toEqual(['maintenance', new Date(T0.wall + 1000 + LEASE_MS), true]);
+    expect(k.lease!.calls.at(-1)!.args.slice(1)).toEqual(['maintenance', new Date(T0.wall + 1000 + LEASE_MS), true, 'alone']);
     expect(k.h.mode()).toBe('maintenance');
     k.after(1000);
     await k.h.tick();
@@ -118,7 +120,7 @@ describe('the lease the keeper holds', () => {
     k.updater(false);
     k.after(1000);
     await k.h.tick();
-    expect(k.lease!.calls.at(-1)!.args.slice(1)).toEqual(['normal', new Date(T0.wall + 4000 + LEASE_MS), false]);
+    expect(k.lease!.calls.at(-1)!.args.slice(1)).toEqual(['normal', new Date(T0.wall + 4000 + LEASE_MS), false, 'alone']);
     expect(k.h.mode()).toBe('lead');
   });
 
@@ -136,7 +138,9 @@ describe('the lease the keeper holds', () => {
       await k.h.tick();
       await k.h.guard();
     }
-    expect(k.methods().slice(before)).toEqual([]);
+    /* Nothing is taken or renewed: the lease runs out, and is ended as any lease that lapsed. */
+    expect(k.methods().slice(before)).toEqual(['fence']);
+    expect(k.ended).toHaveLength(1);
     expect(k.h.mode()).toBe('read');
     expect(k.h.term()).toBeNull();
     expect(k.lines.filter(line => line === "Another machine holds the company's data, so this machine does not lead alone.")).toHaveLength(1);
@@ -198,5 +202,62 @@ describe('the lease the keeper holds', () => {
       await k.h.tick();
     }
     expect(k.methods().filter(method => method === 'prune')).toHaveLength(1);
+  });
+
+  it('takes and renews its lease under the flag the sync controller gives', async () => {
+    const said = { flag: 'relay_off' as Flag, renew: true };
+    const k = holder(fakeLease({ othersHoldData: true }), 60_000, { flag: () => said.flag, renew: () => said.renew });
+    await k.h.guard();
+    await k.h.tick();
+    await k.h.look();
+    /* Another machine holds the data too, and the relay knows this one alone holds the latest changes: it leads. */
+    expect(k.lease!.calls.find(call => call.method === 'take')!.args[2]).toBe('relay_off');
+    expect(k.h.mode()).toBe('lead');
+    said.flag = 'copy';
+    k.after(1000);
+    await k.h.tick();
+    expect(k.lease!.calls.at(-1)).toMatchObject({ method: 'renew' });
+    expect(k.lease!.calls.at(-1)!.args[4]).toBe('copy');
+    expect(k.h.mode()).toBe('lead');
+    /* The controller says the machine is alone while another one is listed: that is no flag. */
+    said.flag = 'alone';
+    const before = k.lease!.calls.length;
+    k.after(1000);
+    await k.h.tick();
+    expect(k.lease!.calls.slice(before).some(call => call.method === 'renew')).toBe(false);
+    expect(k.h.mode()).toBe('read');
+  });
+
+  it('takes no lease without a flag, lets it lapse while renewing is stopped, and says when it ended', async () => {
+    const said = { flag: null as Flag, renew: true };
+    const k = holder(fakeLease(), 60_000, { flag: () => said.flag, renew: () => said.renew });
+    await k.h.tick();
+    await k.h.look();
+    expect(k.methods()).not.toContain('take');
+    expect(k.h.mode()).toBe('read');
+    said.flag = 'copy';
+    k.after(1000);
+    await k.h.tick();
+    expect(k.h.mode()).toBe('lead');
+    /* A commit has waited long on a copy that cannot be dropped: no renewal, and the lease ends by itself. */
+    said.renew = false;
+    for (let seconds = 0; seconds < 12; seconds++) {
+      k.after(1000);
+      await k.h.tick();
+    }
+    expect(k.methods().filter(method => method === 'renew')).toEqual([]);
+    expect(k.methods()).toContain('fence');
+    expect(k.h.mode()).toBe('read');
+    expect(k.ended).toHaveLength(1);
+    /* Nothing is taken while it stays stopped, and a term is taken again once it lifts. */
+    const takes = () => k.methods().filter(method => method === 'take').length;
+    const before = takes();
+    k.after(1000);
+    await k.h.tick();
+    expect(takes()).toBe(before);
+    said.renew = true;
+    k.after(1000);
+    await k.h.tick();
+    expect(takes()).toBe(before + 1);
   });
 });

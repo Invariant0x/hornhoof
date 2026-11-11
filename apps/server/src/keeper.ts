@@ -20,6 +20,10 @@ async function dataKeeper(): Promise<Running> {
   const { Keeper } = await import('./modules/keeper/keeper.js');
   const { keeperSql, leaseOfMachine } = await import('./modules/keeper/lease-store.js');
   const { replicaPassword } = await import('./modules/keeper/replica.js');
+  const { pgCatalog } = await import('./modules/keeper/sync.js');
+  const { Relay } = await import('./modules/link/relay.js');
+  const { statfsSync } = await import('node:fs');
+  const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -28,11 +32,28 @@ async function dataKeeper(): Promise<Running> {
     const { hostname, port } = new URL(config.databaseUrl);
     return { host: hostname, port: Number(port) || 5432 };
   };
+  /* What the keeper keeps its copies in step with: its own Postgres, on a session whose commits wait for no copy and
+     on one with patience for a checkpoint, and the relay. The free room of the keeper's own folder stands for the
+     database's, which lies on the same disk. */
+  const slow = config.databaseUrl ? keeperSql(config.databaseUrl, { timeoutMs: 120_000 }) : null;
+  const diskFree = (): number | null => {
+    try {
+      const { bavail, bsize } = statfsSync(KEEPER_DIR);
+      return bavail * bsize;
+    } catch {
+      return null;
+    }
+  };
+  const sync =
+    config.databaseUrl && config.machineId && slow
+      ? { catalog: pgCatalog(keeperSql(config.databaseUrl), slow, config.machineId), relay: new Relay(config.relayUrl), slots: { sql: slow, diskFree } }
+      : undefined;
   return new Keeper({
     config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log),
     published: publishedFrom(process.env), dbTarget: dbTarget(), addresses: addressesIn(process.env), hostname: process.env.HORNHOOF_HOSTNAME || null,
     /* The role copies read this machine's database with, made on a connection of its own each time. */
     copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
+    sync,
   });
 }
 

@@ -2,7 +2,7 @@ import pg from 'pg';
 import { agentRole, readerRole, REFUSED_NAME_PATTERN } from '../../db/agent-sql.js';
 import { APP_NAME, KEEPER_NAME, stripSettings } from '../../db/client.js';
 import { keepErrors } from '../../db/confirm.js';
-import { FENCE_TRIGGER, JOURNAL_TRIGGER, type LeaseKind, type Term } from '../../db/net.js';
+import { FENCE_TRIGGER, JOURNAL_TRIGGER, type LeaseKind, type LeaseSync, type Term } from '../../db/net.js';
 
 /* The keeper's own way to the database: plain statements, one after another. */
 export type Sql = { query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }> };
@@ -11,9 +11,9 @@ export type Sql = { query<R = Record<string, unknown>>(text: string, params?: un
    net.assert_lease, and have no right to these tables. */
 export type LeaseStore = {
   /* Ends what was held, then a new term above every one this database has seen, in this machine's name. */
-  take(kind: LeaseKind, until: Date): Promise<Term>;
+  take(kind: LeaseKind, until: Date, sync?: LeaseSync): Promise<Term>;
   /* False when the lease is no longer that term's or has ended: a lease that lapsed is never brought back, only taken anew. */
-  renew(term: Term, kind: LeaseKind, until: Date, endSessions: boolean): Promise<boolean>;
+  renew(term: Term, kind: LeaseKind, until: Date, endSessions: boolean, sync?: LeaseSync): Promise<boolean>;
   fence(): Promise<void>;
   /* How many sessions of the app and the agents it ended. */
   endSessions(): Promise<number>;
@@ -38,11 +38,13 @@ const TAKE = `WITH next AS (
     RETURNING term_number
   )
   INSERT INTO net_local.lease (term_number, term_machine, term_split, kind, until, sync)
-  SELECT st.term_number, $1, false, $2, $3, 'alone' FROM st
-  ON CONFLICT (id) DO UPDATE SET term_number = EXCLUDED.term_number, term_machine = EXCLUDED.term_machine, term_split = false, kind = EXCLUDED.kind, until = EXCLUDED.until, sync = 'alone'
+  SELECT st.term_number, $1, false, $2, $3, $4 FROM st
+  ON CONFLICT (id) DO UPDATE SET term_number = EXCLUDED.term_number, term_machine = EXCLUDED.term_machine, term_split = false, kind = EXCLUDED.kind, until = EXCLUDED.until, sync = EXCLUDED.sync
   RETURNING term_number::int AS number`;
 
-const RENEW = `UPDATE net_local.lease SET kind = $4, until = $5
+/* The flag in the same statement as the new end, so no lease ever stands longer under a flag that holds no more. A
+   renewal that names no flag keeps the one the lease has. */
+const RENEW = `UPDATE net_local.lease SET kind = $4, until = $5, sync = COALESCE($6, sync)
   WHERE (term_number, term_machine, term_split) = ($1, $2, $3) AND until > clock_timestamp() RETURNING 1`;
 
 const FENCE = `UPDATE net_local.lease SET until = '-infinity'`;
@@ -51,26 +53,41 @@ const END_SESSIONS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))::
   WHERE datname = current_database() AND pid <> pg_backend_pid() AND (application_name = $1 OR usename = ANY($2::text[]))`;
 
 /* One statement, so that all three go or none: journal rows, the steps of sources, and the kept answers of tool calls whose
-   job no longer runs, each older than a week and a batch at most. Only while nobody else reads them: this machine keeps
-   the data alone, its lease has not lapsed, and no merge waits to be applied or checked, as a merge reads the journal
-   from where the two sides parted. A prune that took a journal row says how far back the journal now goes, and lets
-   go of what merges noted of rows older than that. */
-const ALONE = `EXISTS (SELECT FROM net_local.lease WHERE sync = 'alone' AND until > clock_timestamp()) AND NOT EXISTS (SELECT FROM net.merges WHERE status IN ('pending', 'applied'))`;
-const OLD = `at < now() - interval '7 days'`;
-const PRUNE = `WITH journal_gone AS (
-    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE ${OLD} ORDER BY at LIMIT $1) AND ${ALONE} RETURNING 1
+   job no longer runs, each older than a week and a batch at most. Only while this machine's lease stands under a flag,
+   and no merge waits to be applied or checked, as a merge reads the journal from where the two sides parted. Where
+   other machines keep copies, only what every copy that follows already holds: a copy knows by the leader's pulse how
+   far it reaches, and whatever is newer than the oldest of those stays for it. A copy still being made, one that
+   stopped, and one whose slot is lost make themselves again from what the leader holds then, and hold nothing back. A
+   prune that took a journal row says how far back the journal now goes, and lets go of what merges noted of rows older
+   than that. */
+const HELD = `EXISTS (SELECT FROM net_local.lease WHERE sync IS NOT NULL AND until > clock_timestamp()) AND NOT EXISTS (SELECT FROM net.merges WHERE status IN ('pending', 'applied'))`;
+const WEEK_OLD = `at < now() - interval '7 days'`;
+const COPIES_HOLD = `at < COALESCE((
+    SELECT min(m.copy_at) FROM public.machines m
+    WHERE m.role = 'data' AND m.revoked_at IS NULL AND m.network_id IS DISTINCT FROM $2 AND m.copy_state = 'ready' AND m.copy_at IS NOT NULL
+      AND NOT EXISTS (SELECT FROM pg_replication_slots slot WHERE slot.slot_name = m.copy_name AND slot.wal_status = 'lost')
+  ), 'infinity')`;
+/* old: the rows of a table that may go; c.old for a table that goes by another name in its statement. */
+const pruneWith = (copies: boolean): string => {
+  const old = (prefix = ''): string => `${prefix}${WEEK_OLD}${copies ? ` AND ${prefix}${COPIES_HOLD}` : ''}`;
+  return `WITH journal_gone AS (
+    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE ${old()} ORDER BY at LIMIT $1) AND ${HELD} RETURNING 1
   ), sources_gone AS (
-    DELETE FROM public.applied WHERE source IN (SELECT source FROM public.applied WHERE ${OLD} ORDER BY at LIMIT $1) AND ${ALONE} RETURNING 1
+    DELETE FROM public.applied WHERE source IN (SELECT source FROM public.applied WHERE ${old()} ORDER BY at LIMIT $1) AND ${HELD} RETURNING 1
   ), calls_gone AS (
     DELETE FROM public.tool_calls WHERE id IN (
-      SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE c.${OLD} AND j.status <> 'running' ORDER BY c.at LIMIT $1
-    ) AND ${ALONE} RETURNING 1
+      SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE ${old('c.')} AND j.status <> 'running' ORDER BY c.at LIMIT $1
+    ) AND ${HELD} RETURNING 1
   ), horizon AS (
     INSERT INTO net.horizon (below) SELECT now() - interval '7 days' WHERE EXISTS (SELECT FROM journal_gone)
     ON CONFLICT (id) DO UPDATE SET below = EXCLUDED.below RETURNING below
   ), noted_gone AS (
-    DELETE FROM net.merge_consumed WHERE ${OLD} AND EXISTS (SELECT FROM horizon) RETURNING 1
-  ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned`;
+    DELETE FROM net.merge_consumed WHERE ${WEEK_OLD} AND EXISTS (SELECT FROM horizon) RETURNING 1
+  ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned, $2::text IS NOT NULL AS named`;
+};
+/* The keeper of a new build runs a while on the schema of the build before, which knows no copies: it prunes as one
+   machine does until the app has migrated. */
+const HAS_COPIES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'copy_at') AS there`;
 /* The keeper of a new build runs a while on the schema of the build before, which has no record of merges: it prunes
    nothing until the app has migrated. */
 const HAS_MERGES = `SELECT to_regclass('net.merges') IS NOT NULL AND to_regclass('net.horizon') IS NOT NULL AND to_regclass('net.merge_consumed') IS NOT NULL AS there`;
@@ -125,13 +142,13 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     await endSessions();
   };
   return {
-    async take(kind, until) {
+    async take(kind, until, sync = 'alone') {
       await fence();
-      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until]);
+      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until, sync]);
       return { number: rows[0]!.number, machine: opts.machineId, split: false };
     },
-    async renew(term, kind, until, ending) {
-      const { rows } = await sql.query(RENEW, [term.number, term.machine, term.split, kind, until]);
+    async renew(term, kind, until, ending, sync) {
+      const { rows } = await sql.query(RENEW, [term.number, term.machine, term.split, kind, until, sync ?? null]);
       if (rows.length === 0) return false;
       if (ending) await endSessions();
       return true;
@@ -141,7 +158,8 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(), SOURCE_TABLES])).rows.map(row => row.line),
     prune: async (batch = PRUNE_BATCH) => {
       if (!(await sql.query<{ there: boolean }>(HAS_MERGES)).rows[0]!.there) return 0;
-      return (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned;
+      const copies = (await sql.query<{ there: boolean }>(HAS_COPIES)).rows[0]!.there;
+      return (await sql.query<{ pruned: number }>(pruneWith(copies), [batch, opts.machineId])).rows[0]!.pruned;
     },
     /* The lease says this machine keeps the data alone. With another data machine listed that would be untrue, and the
        two could both lead: this machine then holds no such lease. */

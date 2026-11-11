@@ -1,4 +1,4 @@
-import type { Term } from '../../db/net.js';
+import type { LeaseSync, Term } from '../../db/net.js';
 import type { LeaseStore } from './lease-store.js';
 import { LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
 import type { Mode } from './state.js';
@@ -12,6 +12,11 @@ export type LeaseHolderOptions = {
   now?: () => Clocks;
   pruneEveryMs?: number;
   log: (line: string) => void;
+  /* What the sync controller says: the flag a lease is taken and renewed under, none while nothing may be confirmed,
+     and whether to renew at all. Without it the machine keeps the data alone, as one that has no copies does. */
+  sync?: { flag(): LeaseSync | null; renew(): boolean };
+  /* Called when a lease this machine held has ended. */
+  onEnd?: () => void;
 };
 
 const PRUNE_EVERY_MS = 60_000;
@@ -39,7 +44,14 @@ export class LeaseHolder {
 
   mode(): Mode {
     if (this.maintenance) return 'maintenance';
-    return this.held?.kind === 'normal' && leaseValid(this.held, this.now()) && this.problems?.length === 0 ? 'lead' : 'read';
+    return this.held?.kind === 'normal' && leaseValid(this.held, this.now()) && this.problems?.length === 0 && this.flag() !== null ? 'lead' : 'read';
+  }
+
+  /* The flag a lease stands under now. Alone is untrue while another machine is listed as holding the data, and then
+     counts as none: the two could else both lead. */
+  private flag(): LeaseSync | null {
+    const flag = this.opts.sync ? this.opts.sync.flag() : 'alone';
+    return flag === 'alone' && this.othersHold ? null : flag;
   }
 
   /* The term this machine leads or migrates under, while its lease stands. */
@@ -51,9 +63,7 @@ export class LeaseHolder {
     const busy = this.opts.updaterBusy();
     if (busy !== null) this.maintenance = busy;
     const { lease } = this.opts;
-    /* A lease says this machine keeps the data alone: with another data machine listed it takes and renews none, so the
-       one it holds lapses and the app reads. */
-    if (!lease || this.othersHold) return;
+    if (!lease) return;
     const now = this.now();
     const step = nextLeaseStep({ now, last: this.last, held: this.held, maintenance: this.maintenance });
     this.last = now;
@@ -77,15 +87,19 @@ export class LeaseHolder {
     this.sayOnce('fences', found.length ? `Hornhoof does not lead here until this is fixed: ${found.join('; ')}.` : '');
   }
 
+  /* A lease is taken and renewed only under a flag, and renewed only while the sync controller lets it: without either
+     it takes none, and the one it holds lapses, so the app reads. */
   private async take(lease: LeaseStore, step: LeaseStep): Promise<void> {
-    if (step.do === 'take') return this.takeTerm(lease, step);
-    if (step.do === 'renew') return this.renew(lease, step);
+    const flag = this.flag();
+    const stopped = flag === null || this.opts.sync?.renew() === false;
+    if (step.do === 'take') return stopped ? undefined : this.takeTerm(lease, step, flag);
+    if (step.do === 'renew') return stopped ? undefined : this.renew(lease, step, flag);
     if (step.do === 'fence') return this.fence(lease, step.why);
   }
 
-  private async takeTerm(lease: LeaseStore, step: Extract<LeaseStep, { do: 'take' }>): Promise<void> {
+  private async takeTerm(lease: LeaseStore, step: Extract<LeaseStep, { do: 'take' }>, flag: LeaseSync): Promise<void> {
     try {
-      const term = await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS));
+      const term = await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS), flag);
       this.held = { term, kind: step.kind, sent: step.sent };
       this.sayOnce('take', '');
       this.opts.log(`This machine leads under term ${term.number}.`);
@@ -94,15 +108,16 @@ export class LeaseHolder {
     }
   }
 
-  private async renew(lease: LeaseStore, step: Extract<LeaseStep, { do: 'renew' }>): Promise<void> {
+  private async renew(lease: LeaseStore, step: Extract<LeaseStep, { do: 'renew' }>, flag: LeaseSync): Promise<void> {
     const held = this.held!;
-    const renewed = await lease.renew(held.term, step.kind, new Date(step.sent.wall + LEASE_MS), step.endSessions).catch(() => false);
+    const renewed = await lease.renew(held.term, step.kind, new Date(step.sent.wall + LEASE_MS), step.endSessions, flag).catch(() => false);
     if (renewed) this.held = { term: held.term, kind: step.kind, sent: step.sent };
   }
 
   private async fence(lease: LeaseStore, why: string): Promise<void> {
     this.held = null;
     this.opts.log(`The lease ended (${why}): ${ENDED}.`);
+    this.opts.onEnd?.();
     /* A fence that cannot be written ends nothing early, and nothing late either: the lease it would end has lapsed. */
     await lease.fence().catch(() => undefined);
   }
