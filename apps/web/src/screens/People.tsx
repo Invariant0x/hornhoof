@@ -288,11 +288,12 @@ function PersonEditPanel(props: EditPanel) {
 function NameCell({ p, routed, openPerson }: { p: PersonView; routed: boolean; openPerson: (person: PersonView) => void }) {
   const t = useT();
   const inner = <>{p.assistant ? <AgentIcon /> : <PersonIcon />}{p.name}{p.isCeoDelegate && <DeputyMark />}</>;
-  return <>
+  /* One box, so the narrow layout keeps the note under the name and not under the column's label. */
+  return <div className="pwho">
     {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}>{inner}</button> : <span className="pname">{inner}</span>}
     {/* The space keeps the name and the note apart for screen readers, and takes no room on the screen. */}
     {p.assistant && <>{' '}<span className="pnote">{t.people.assistantOf(p.assistant.owner.name)}</span></>}
-  </>;
+  </div>;
 }
 
 type Row = { p: PersonView; me: Me; org: Org | null; people: PersonView[]; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> };
