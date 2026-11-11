@@ -5,10 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
-import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
+import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
-import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, openStream, sessionFrom, SETUP, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -154,7 +154,7 @@ describe('the orchestrator\'s conversation', () => {
     expect(await quiet(builtin)).toBe(0);
   });
 
-  it('greets a company started from a template, so he offers to staff its departments', async () => {
+  it('greets a company started from a template before templates brought people, so he offers to staff its departments', async () => {
     const { app, db, ceo, builtin } = await live();
     const [acme] = await db.select().from(companies);
     await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
@@ -162,6 +162,19 @@ describe('the orchestrator\'s conversation', () => {
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
+  });
+
+  it('greets a company its template staffed, so he says what is left is a subscription, not hiring', async () => {
+    const { app } = await testApp({ NODE_KEY });
+    const url = await listen(app);
+    const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'project' } }));
+    const builtin = await connectNode(url, NODE_KEY);
+    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    await until(async () => (await state(app, ceo)).ready);
+    expect((await start(app, ceo)).json()).toEqual({ started: true });
+    const prompt = (await nextRun(builtin)).prompt;
+    expect(prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_STAFFED}`);
+    expect(prompt).not.toContain('offer to staff');
   });
 
   it('keeps what the agent does, in order, and streams it to the CEO', async () => {

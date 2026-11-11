@@ -1054,7 +1054,7 @@ export const en = {
   },
   companyTemplates: {
     heading: 'Start from a template',
-    hint: 'A template creates its departments right away; the orchestrator then offers to fill them. You can change everything later. Pick one, or start empty.',
+    hint: 'A template creates its departments and their employees right away. They start working as soon as you connect a subscription. You can change everything later. Pick one, or start empty.',
     employees: (n: number) => `${n} ${n === 1 ? 'employee' : 'employees'}`,
     departments: (list: string) => `Departments: ${list}.`,
     empty: { name: 'Start empty', description: 'No departments yet. The orchestrator asks about your company and builds them with you.' },

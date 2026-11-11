@@ -76,7 +76,7 @@ export const companies = pgTable('companies', {
   name: text('name').notNull(),
   /* What the orchestrator learned about the company, saved when the CEO creates the structure. */
   brief: text('brief').notNull().default(''),
-  /* The ready-made template the CEO started from, so the orchestrator's greeting can offer to staff it. Null when the CEO started empty. */
+  /* The ready-made template the CEO started from, so the orchestrator's greeting knows it. Null when the CEO started empty. */
   template: text('template', { enum: COMPANY_TEMPLATE_KEYS }),
   singleton: boolean('singleton').notNull().default(true).unique(),
   /* Task and turn numbers the company gave before their rows were removed by hand: new ones go on after them, so a branch

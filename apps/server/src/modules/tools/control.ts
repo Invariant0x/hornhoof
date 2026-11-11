@@ -124,11 +124,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'build_structure',
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
-      'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; staff true brings the people of its template with it, each on the plan and model its role asks for, or waiting for a plan) or a change { department, note?, products?, teams?, remove? }: ' +
+      'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; it comes with the people of its template, each on the plan and model its role asks for, or waiting for a plan; staff false only when the CEO asked for one without people) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
       'Only in a turn that answers the CEO or the CEO delegate, as their decision, or the owner of a department, for products and sub-units of their own department.',
     BuildBody.shape,
-    body => ({ method: 'POST', url: '/api/departments/build', payload: body }),
+    /* A department he creates comes with its people unless he says otherwise, as the card's box is ticked at first. */
+    body => ({ method: 'POST', url: '/api/departments/build', payload: { ...body, items: body.items.map(item => ('template' in item ? { ...item, staff: item.staff ?? true } : item)) } }),
   );
 
   tool(

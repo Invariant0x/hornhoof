@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -378,6 +378,12 @@ describe('templates', () => {
           expect(role!.department, `${template.key}: ${line.role} in ${dept.template}`).toBe(dept.template);
         }
       }
+    }
+  });
+
+  it('counts the members of the turnkey teams of each department as its templates have them, for the card of a company template', () => {
+    for (const dept of DEPARTMENT_TEMPLATES) {
+      expect(dept.teamMembers, dept.key).toBe(templates.teamsOf(dept.key).reduce((n, t) => n + t.members.reduce((m, line) => m + line.count, 0), 0));
     }
   });
 

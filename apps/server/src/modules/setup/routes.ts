@@ -8,11 +8,14 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
+import { hireEmployee } from '../departments/hire.js';
+import { companyRoster, templateTeams } from '../departments/roster.js';
 import { saveLink } from '../link/link.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 import { ensureOperations } from '../operations/ensure.js';
+import { placeableSubscriptions, spotIn } from '../tools/staff.js';
 import { isSetupCode, setupNeeded } from './code.js';
 
 const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
@@ -36,7 +39,8 @@ const SetupBody = z.object({
   ]),
   /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
   link: LinkBody.optional(),
-  /* A ready-made company to start from, which creates its departments right away; left out, the company starts empty. */
+  /* A ready-made company to start from, whose departments come right away with their people; left out, the company starts
+     empty. */
   template: z.enum(COMPANY_TEMPLATE_KEYS).optional(),
 });
 const CodeQuery = z.object({ code: z.string().max(200).default('') });
@@ -130,20 +134,26 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
           subscriptionId,
         });
 
-        /* A ready-made company starts with its departments and their products, so the CEO sees the scheme at once; the
-           orchestrator offers to staff them in its greeting. It brings no people, so no subscription is needed. */
+        /* A ready-made company starts with its template's departments, their products and their people, so it works once a
+           subscription is on. Each employee takes the first plan here that may serve it, as a hire does, or waits for one. */
         const chosen = COMPANY_TEMPLATES.find(t => t.key === body.template);
         if (chosen) {
+          const by = { personId: person!.id, byOrchestrator: false };
           let position = 0;
           for (const dept of chosen.departments) {
             const roleCode = roleCodeOf(dept.template);
             const [row] = await tx
               .insert(departments)
               .values({ companyId: company!.id, templateKey: dept.template, workMode: defaultDepartmentWorkMode(dept.template), name: dept.name ?? null, roleCode, position: position++ })
-              .returning({ id: departments.id });
+              .returning();
             for (const product of dept.products ?? []) {
               await tx.insert(departments).values({ companyId: company!.id, name: product, parentId: row!.id, roleCode, position: position++ });
             }
+            /* Its people by the company template, and the turnkey teams of its department template, as the orchestrator
+               builds a department with its people. */
+            const serving = await placeableSubscriptions({ db: tx }, company!.id, spotIn(row!));
+            const lines = [...companyRoster(ctx, dept.staff, serving), ...(await templateTeams(ctx, tx, row!, serving))];
+            for (const line of lines) await hireEmployee(ctx, tx, { companyId: company!.id, departmentId: row!.id }, line, by);
           }
         }
         if (bound) await saveLink(tx, config, company!.id, bound);
