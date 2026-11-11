@@ -117,7 +117,7 @@ export async function atWork(kind: Kind, mode: Mode) {
     drain(); drain();
   };
   const unheard = () => sent.filter(m => m.type === 'agent.unheard');
-  return { host, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input,
+  return { host, tmux, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input,
     until: (check: () => boolean | Promise<boolean>) => untilOnClock(check, clocked),
     on: <T>(promise: Promise<T>) => onClock(promise, clocked),
     pass: (ms: number) => passOnClock(ms, clocked) };

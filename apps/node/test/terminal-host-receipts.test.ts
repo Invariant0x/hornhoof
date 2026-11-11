@@ -143,6 +143,15 @@ describe('program receipts for live words', () => {
     expect(c.host['agents'].get('receipt')?.up).toBe(false);
   });
 
+  /* Started again in its pane, a program has what its last run printed above its screen. */
+  it.each(['claude', 'codex'] as const)('ends %s that exits during a turn as crashed, not signed out by what its last run said above its screen', async kind => {
+    const c = await atWork(kind, 'queued');
+    const shows = vi.mocked(c.tmux.screen).getMockImplementation()!;
+    vi.mocked(c.tmux.screen).mockImplementation(async (name, history = 200, styled) => `${history ? '  ⎿  Not logged in · Please run /login\n' : ''}${await shows(name, history, styled)}`);
+    c.alive.mockResolvedValue(false);
+    expect(await c.on(c.running)).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'crash', text: 'The program exited during the turn.' } });
+  });
+
   it.each(['queued'] as const)('takes a Claude %s receipt and waits for absorption', async mode => {
     const c = await atWork('claude', mode);
     expect(await c.on(c.host.say('receipt', TEXT))).toBe(true);
