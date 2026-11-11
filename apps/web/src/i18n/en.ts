@@ -120,7 +120,7 @@ export const en = {
   /* The GitHub key Hornhoof creates repositories with: the whole company's in its settings, a department's own on its screen. */
   repoHost: {
     title: 'Creating repositories',
-    about: 'Every department keeps its work in a repository, so that each earlier version of a letter, a text or a table can be brought back. With a GitHub key saved here, the orchestrator creates a private repository for a department when you ask him to.',
+    about: 'Every department keeps its work in a repository, so that each earlier version of a letter, a text or a table can be brought back. With a GitHub key saved here, the orchestrator itself creates a private repository for each department that has none yet, and tells you about it.',
     none: 'No GitHub key is saved, so the orchestrator cannot create repositories.',
     saved: (owner: string, last4: string) => `The orchestrator creates repositories on GitHub for ${owner}, with the key ending in ${last4}.`,
     deptNone: 'No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Company settings.',

@@ -29,8 +29,8 @@ import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffL
 type ToolJob = { id: string; companyId: string; agentId: string };
 /* asCeo: only the CEO may ask for this one call of a tool anyone may ask for. permission: the CEO's answer in a task's card
    that lets a machine change go when no CEO's words are in the turn. department: the department the change stays in, whose
-   owner asks for it as the CEO does. */
-type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true; permission?: string; department?: string };
+   owner asks for it as the CEO does. first: without them it still goes, as a department's first repository only. */
+type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true; permission?: string; department?: string; first?: true };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
 
@@ -45,7 +45,8 @@ const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company o
 
 /* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
    uses them only in a turn that answers the CEO or the CEO delegate now, as that person, never because an employee, a
-   timer, a task or another person asked. Those that change one department go for its owner too. */
+   timer, a task or another person asked. Those that change one department go for its owner too. create_repository also
+   creates a department's first repository in a turn of his own. */
 export const CEO_ONLY = new Set([
   'invite_person',
   'change_person',
@@ -166,9 +167,10 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'create_repository',
     'Creates a private repository on GitHub for a department, with a first commit holding its README, and connects it with the same key: the key the department saved, else the company\'s. ' +
       'It becomes the repository of a department or product that has none, else a new product of the department named after it. name: its name on GitHub; author { name, email } as in set_repository. ' +
-      'Without a key it answers what is missing: tell the person that, and offer to connect a repository they have with set_repository instead.',
+      "In any turn it creates a department's first one, when neither the department nor its products keep one; any other only for the CEO or the department's owner, in a turn that answers them. " +
+      "Without a key it answers what is missing: tell the CEO or the department's owner that, and offer to connect a repository they have with set_repository instead.",
     { department: Id('department'), ...NewRepositoryBody.shape },
-    ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories/new`, payload: body, department }),
+    ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories/new`, payload: body, department, first: true }),
   );
   tool('remove_repository', 'Disconnects a department\'s git repository.', { department: Id('department') }, ({ department }) => ({ method: 'DELETE', url: `/api/departments/${department}/repository`, department }));
 
@@ -399,7 +401,10 @@ function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
   return withInputLock(ctx, job.agentId, async () => {
     if (made.department) {
       const runs = await departmentPrincipal(ctx.db, job.id, made.department);
-      return runs ? send(ctx, app, job, made, runs) : say(ONLY_DEPARTMENT_OWNER, true);
+      if (runs) return send(ctx, app, job, made, runs);
+      /* A department's first repository, which the route creates as no other. */
+      if (made.first) return send(ctx, app, job, { ...made, payload: { ...(made.payload as object), first: true } });
+      return say(ONLY_DEPARTMENT_OWNER, true);
     }
     const personId = await ceoPrincipal(ctx.db, job.id);
     if (personId) return send(ctx, app, job, made, personId);

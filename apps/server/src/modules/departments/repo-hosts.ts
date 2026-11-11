@@ -1,5 +1,5 @@
 import { Repo } from '@hornhoof/protocol';
-import { and, eq, isNull, max, or, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, max, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -33,6 +33,8 @@ export const NewRepositoryBody = z.object({
   name: z.string().max(200).describe('The repository\'s name on GitHub: letters, digits, ".", "-" and "_", 100 at most.'),
   author: z.unknown().optional().describe('{ name, email } the agents commit under, as in set_repository.'),
 });
+/* With first, only a department's first repository, as the orchestrator creates it in a turn of its own. */
+const CreateBody = NewRepositoryBody.extend({ first: z.literal(true).optional() });
 
 /* A key as people who set it read it: never the key, only its last characters. */
 export const hostView = (h: Row) => ({ provider: h.provider, owner: h.owner, tokenLast4: h.tokenLast4 });
@@ -140,20 +142,22 @@ export function repoHostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     await requireDepartmentChanger(db, me, id);
-    const body = NewRepositoryBody.parse(req.body);
+    const body = CreateBody.parse(req.body);
     const name = body.name.trim();
     if (!NAME.test(name) || name === '.' || name === '..') throw new ApiError(400, 'validation', 'Name the repository with letters, digits, ".", "-" and "_", 100 at most.', 'repo_name_invalid');
     const author = Repo.pick({ author: true }).safeParse({ author: body.author });
     if (!author.success) throw new ApiError(400, 'validation', 'Give the author a name on one line and a full email.', 'repo_invalid');
     const place = await departmentOf(me, id);
     const top = place.parentId ? await departmentOf(me, place.parentId) : place;
+    const first = Boolean(body.first);
+    if (first) await keepsNone(db, top);
     if (place.repoUrl && place.parentId) throw new ApiError(409, 'conflict', `${deptName(place)} keeps ${place.repoUrl} already, and a product keeps one repository. Create it on ${deptName(top)}, where it comes as a new product.`, 'repo_exists');
     const asProduct = Boolean(place.repoUrl);
     const productName = name.slice(0, 60);
     const host = await keyFor(db, me.companyId, top.id);
     if (!host) throw new ApiError(409, 'conflict', MISSING(deptName(top)), 'repo_host_missing');
     const expected = `https://github.com/${host.owner}/${name}.git`;
-    await checks(db, top, place, asProduct, productName, expected);
+    await checks(db, top, place, asProduct, productName, expected, first);
 
     const key: HostKey = { provider: host.provider, owner: host.owner, token: decryptSecret(host.tokenEnc, ctx.config.secret) };
     const made = await ctx.createRepository(key, { name, description: aboutOf(place, top) });
@@ -164,7 +168,7 @@ export function repoHostRoutes(app: FastifyInstance, ctx: Ctx): void {
     try {
       if (!Repo.pick({ url: true, branch: true }).safeParse({ url: made.url, branch: made.branch }).success) throw new ApiError(502, 'unavailable', `GitHub gave it an address or branch Hornhoof does not take: ${made.url}, ${made.branch}.`, 'repo_host_refused');
       const row = await db.transaction(async tx => {
-        await checks(tx, top, place, asProduct, productName, made.url);
+        await checks(tx, top, place, asProduct, productName, made.url, first);
         if (asProduct) {
           const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, me.companyId));
           const [product] = await tx.insert(departments).values({ companyId: me.companyId, name: productName, parentId: top.id, roleCode: top.roleCode, position: (last?.n ?? -1) + 1, ...fields }).returning();
@@ -184,12 +188,29 @@ export function repoHostRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 }
 
-/* What would stop a new repository being connected: a product name the department has, or a folder its agents fill. */
-async function checks(db: Pick<Db, 'select'>, top: Dept, place: Dept, asProduct: boolean, productName: string, url: string): Promise<void> {
+/* What would stop a new repository being connected: a product name the department has, a folder its agents fill, or, for
+   a department's first, a repository it keeps already. */
+async function checks(db: Pick<Db, 'select'>, top: Dept, place: Dept, asProduct: boolean, productName: string, url: string, first: boolean): Promise<void> {
+  if (first) await keepsNone(db, top);
   if (asProduct) {
     const products = await db.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.parentId, top.id));
     const same = products.find(p => p.name?.toLowerCase() === productName.toLowerCase());
     if (same) throw new ApiError(409, 'conflict', `${deptName(top)} has a product named ${same.name} already. Give the repository another name.`, 'product_taken');
   }
   await checkFolderFree(db, top.id, url, asProduct ? null : place.id);
+}
+
+/* A department keeps no repository: neither its own nor one of a product. */
+async function keepsNone(db: Pick<Db, 'select'>, top: Dept): Promise<void> {
+  const [kept] = await db
+    .select({ url: departments.repoUrl })
+    .from(departments)
+    .where(and(or(eq(departments.id, top.id), eq(departments.parentId, top.id)), isNotNull(departments.repoUrl)));
+  if (kept)
+    throw new ApiError(
+      409,
+      'conflict',
+      `${deptName(top)} keeps a repository already, ${kept.url}. Without the word of the CEO, the CEO delegate or its owner only a department's first one is created. Nothing was created: ask one of them.`,
+      'repo_exists',
+    );
 }

@@ -4,7 +4,6 @@ import { decryptSecret } from '../src/crypto/secrets.js';
 import { HIDDEN } from '../src/db/agent-sql.js';
 import { departments, repoHosts } from '../src/db/schema.js';
 import type { HostKey, NewRepository } from '../src/modules/departments/repo-hosts.js';
-import { ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
 
@@ -215,32 +214,68 @@ describe('a repository Hornhoof creates', () => {
 describe('create_repository', () => {
   const call = async (c: Awaited<ReturnType<C['tools']>>, args: Record<string, unknown>) => (await c.callTool({ name: 'create_repository', arguments: args })) as Res;
 
-  it("creates and connects one for the CEO or the department's owner, in a turn that answers them, and for nobody else", async () => {
+  it("creates a department's first repository in a turn of its own, with no person's word, when a key is saved, and answers where it is", async () => {
+    const c = await company();
+    expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
+    const asked = github(c);
+
+    const own = await call(await c.tools(c.orchestrator), { department: c.sales.id, name: 'sales' });
+    expect(own.isError, own.content[0]!.text).toBeFalsy();
+    expect(own.content[0]!.text).toContain('https://github.com/acme/sales.git');
+    expect(own.content[0]!.text).not.toContain(COMPANY_KEY);
+    expect((await deptOf(c, c.sales.id)).repoUrl).toBe('https://github.com/acme/sales.git');
+    expect(asked).toHaveLength(1);
+
+    /* Then the department keeps one, and another waits for a person's word. */
+    const again = await call(await c.tools(c.orchestrator), { department: c.sales.id, name: 'sales-docs' });
+    expect(again.isError).toBe(true);
+    expect(again.content[0]!.text).toMatch(/keeps a repository already/);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("creates nothing in a turn of its own for a department that keeps a repository, its own or a product's", async () => {
+    const c = await company();
+    expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
+    await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, c.product.id));
+    const asked = github(c);
+
+    for (const department of [c.dev.id, c.product.id]) {
+      const refused = await call(await c.tools(c.orchestrator), { department, name: 'dev' });
+      expect(refused.isError, department).toBe(true);
+      expect(refused.content[0]!.text).toMatch(/keeps a repository already/);
+    }
+    /* Nor in a turn that answers a person who does not set its repositories. */
+    const forSam = await call(await c.tools(c.orchestrator, c.ids.sam), { department: c.dev.id, name: 'dev' });
+    expect(forSam.content[0]!.text).toMatch(/keeps a repository already/);
+    expect(asked).toEqual([]);
+    expect((await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).map(d => d.name)).toEqual(['Shop']);
+    expect((await deptOf(c, c.dev.id)).repoUrl).toBeNull();
+  });
+
+  it("creates any other one for the CEO or the department's owner, in a turn that answers them", async () => {
     const c = await company();
     expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
     expect((await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana)).statusCode).toBe(200);
+    await c.db.update(departments).set({ repoUrl: 'https://github.com/other/web.git' }).where(eq(departments.id, c.dev.id));
     const asked = github(c);
 
-    const forSam = await call(await c.tools(c.orchestrator, c.ids.sam), { department: c.dev.id, name: 'dev' });
-    expect(forSam.content[0]!.text).toBe(ONLY_DEPARTMENT_OWNER);
-    const unasked = await call(await c.tools(c.orchestrator), { department: c.sales.id, name: 'sales' });
-    expect(unasked.isError).toBe(true);
-    expect(asked).toEqual([]);
-
-    const forCeo = await call(await c.tools(c.orchestrator, c.ids.ceo), { department: c.sales.id, name: 'sales' });
-    expect(forCeo.isError, forCeo.content[0]!.text).toBeFalsy();
-    expect(forCeo.content[0]!.text).not.toContain(COMPANY_KEY);
-    expect(forCeo.content[0]!.text).toContain('https://github.com/acme/sales.git');
-    const forDana = await call(await c.tools(c.orchestrator, c.ids.dana), { department: c.dev.id, name: 'dev' });
+    const forDana = await call(await c.tools(c.orchestrator, c.ids.dana), { department: c.dev.id, name: 'docs' });
     expect(forDana.isError, forDana.content[0]!.text).toBeFalsy();
-    expect((await deptOf(c, c.dev.id)).repoUrl).toBe('https://github.com/acme/dev.git');
+    expect(forDana.content[0]!.text).toContain('https://github.com/acme/docs.git');
+    expect(forDana.content[0]!.text).not.toContain(COMPANY_KEY);
+    const forCeo = await call(await c.tools(c.orchestrator, c.ids.ceo), { department: c.dev.id, name: 'notes' });
+    expect(forCeo.isError, forCeo.content[0]!.text).toBeFalsy();
+    expect((await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).map(d => d.name).sort()).toEqual(['Shop', 'docs', 'notes']);
+    expect(asked).toHaveLength(2);
   });
 
   it('says what it takes when there is no key, so the orchestrator can offer it', async () => {
     const c = await company();
-    const answer = await call(await c.tools(c.orchestrator, c.ids.ceo), { department: c.sales.id, name: 'sales' });
-    expect(answer.isError).toBe(true);
-    expect(answer.content[0]!.text).toMatch(/no GitHub key/);
-    expect(answer.content[0]!.text).toMatch(/Company settings/);
+    for (const person of [c.ids.ceo, null]) {
+      const answer = await call(await c.tools(c.orchestrator, person), { department: c.sales.id, name: 'sales' });
+      expect(answer.isError).toBe(true);
+      expect(answer.content[0]!.text).toMatch(/no GitHub key/);
+      expect(answer.content[0]!.text).toMatch(/Company settings/);
+    }
   });
 });

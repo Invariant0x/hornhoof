@@ -12,18 +12,18 @@ A product's repository goes to the agents of that product, instead of the depart
 
 A repository keeps every version of what is in it. So each department, not only Development, keeps its work there as files: letters, texts, layouts and tables as well as code. When a letter changes, its earlier wording is still there and can be brought back.
 
-A department with no repository hands its work in as a document attached to the task, with no history. The orchestrator offers the CEO or the department's owner a repository for such a department, and says what it takes.
+A department with no repository hands its work in as a document attached to the task, with no history. When a GitHub key is saved, the orchestrator creates a repository for such a department himself and tells the CEO or the department's owner where it is. Without a key he offers them one and says what it takes.
 
 ## Let Hornhoof create the repository
 
-Save a GitHub key, and the orchestrator creates a department's repository when you ask him to:
+Save a GitHub key, and the orchestrator himself creates a private repository for every department that has none yet, and tells you where it is. Any further one he creates when you ask him to:
 
 - For the whole company, in **Company settings** in the account menu, under **Creating repositories**. People who see the whole company save it.
 - For one department, on its screen under **Repositories**. Its owner saves it as well, and it goes first for that department.
 
 Give the GitHub user or organization the repositories go to, and a token that may create repositories there and push to them: a fine-grained token for all repositories of that owner with **Administration** and **Contents** set to **Read and write**, or a classic token with `repo`.
 
-He creates a private repository with a first commit holding a README, and connects it to the department with the same key. A department that has a repository already gets the new one as a new product. Without a key he says what is missing.
+He creates a private repository with a first commit holding a README, and connects it to the department with the same key. A department that has a repository already gets one more only when you ask, as a new product. Without a key he says what is missing.
 
 That key then goes to the machines of the department's agents, as any repository token does, and it reaches every repository of its owner. Save a key for one department when its repositories belong to an owner of their own.
 

@@ -39,6 +39,7 @@ describe("the company's key in Settings", () => {
       'PUT /api/repo-host': [200, { host: KEY }],
     });
     expect(part).toHaveTextContent('No GitHub key is saved, so the orchestrator cannot create repositories.');
+    expect(part).toHaveTextContent('With a GitHub key saved here, the orchestrator itself creates a private repository for each department that has none yet, and tells you about it.');
     await user.click(within(part).getByRole('button', { name: 'Save a key' }));
     expect(within(part).getByLabelText('GitHub owner')).toHaveAccessibleDescription('The user or organization the repositories go to, as in github.com/acme.');
     expect(within(part).getByLabelText('Key')).toHaveAccessibleDescription(expect.stringContaining('Administration and Contents'));
@@ -123,5 +124,6 @@ describe('the words of the keys', () => {
     }
     expect(Object.keys(ru.repoHost).sort()).toEqual(Object.keys(en.repoHost).sort());
     expect(ru.settings.title).toBe('Настройки компании');
+    expect(ru.repoHost.about).toMatch(/оркестратор сам создает закрытый репозиторий каждому отделу, у которого его еще нет, и сообщает об этом/);
   });
 });
