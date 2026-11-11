@@ -85,6 +85,12 @@ describe('the swap of a restore, on real Postgres', () => {
     /* A database cannot close itself: that is why the updater closes it from another session. */
     await expect(old.admin.query(`ALTER DATABASE ${name} WITH ALLOW_CONNECTIONS false`)).rejects.toThrow('cannot disallow connections for current database');
 
+    /* Two copies followed the old database, and one follows another database of the server. */
+    await old.admin.query(`SELECT pg_create_logical_replication_slot('copy_aaaaaaaaaaaaaaaa_1', 'pgoutput'), pg_create_logical_replication_slot('copy_bbbbbbbbbbbbbbbb_3', 'pgoutput')`);
+    await restored.admin.query(`SELECT pg_create_logical_replication_slot('copy_cccccccccccccccc_1', 'pgoutput')`);
+    const slots = async () => (await server.query<{ name: string }>(`SELECT slot_name::text AS name FROM pg_replication_slots WHERE slot_name LIKE 'copy\_%' ORDER BY 1`)).rows.map(row => row.name);
+    expect(await slots()).toEqual(['copy_aaaaaaaaaaaaaaaa_1', 'copy_bbbbbbbbbbbbbbbb_3', 'copy_cccccccccccccccc_1']);
+
     /* As the updater does: the session that reads is on the database first, then the connections go off. */
     const reader = await session(urlOf(name, CUTOVER));
     const answered = reader.query(`${sqlOf('cutover')}\n${sqlOf('carry')}`) as unknown as Promise<pg.QueryResult[]>;
@@ -93,6 +99,9 @@ describe('the swap of a restore, on real Postgres', () => {
     const results = await answered;
     const [kept, carry] = results.slice(-2).map(result => Object.values(result.rows[0] as Record<string, unknown>)[0]);
     expect(kept).toEqual({ term: 42, machine: 'm-old', cluster: 'c-old' });
+    /* The slots of the database that closed went with it, so no copy reads on from it; another database's stays. */
+    expect(await slots()).toEqual(['copy_cccccccccccccccc_1']);
+    await restored.admin.query(`SELECT pg_drop_replication_slot('copy_cccccccccccccccc_1')`);
     expect(carry).toMatchObject({ people: [], invites: [], machines: [], serials: [], recoveryKeys: [] });
     /* Nobody else is on it, and nobody gets in. */
     expect((await server.query(`SELECT application_name FROM pg_stat_activity WHERE datname = $1`, [name])).rows).toEqual([{ application_name: CUTOVER }]);

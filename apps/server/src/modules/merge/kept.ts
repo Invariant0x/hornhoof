@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { queryOf } from './leader.js';
-import { KEPT_NAME, keptSource, type MergeSource } from './source.js';
+import { keptSource, setAside, type MergeSource } from './source.js';
 
 /* What the CEO chose for the database a restore sets aside, written before the order goes: the app's memory does not
    outlive the swap. It is in the control folder, for this container's user alone. */
@@ -30,8 +30,9 @@ export function dropChoice(controlDir: string): void {
   rmSync(join(controlDir, CHOICE_FILE), { force: true });
 }
 
-/* The databases restores set aside on this machine's own Postgres. list: their names. open: one of them as a merge's
-   source, with its connections turned on first, as a restore leaves them off. drop: removes one for good. */
+/* The databases restores set aside on this machine's own Postgres, and those made of what machines uploaded. list:
+   their names. open: one of them as a merge's source, with its connections turned on first, as a restore leaves them
+   off. drop: removes one for good. */
 export type KeptDatabases = {
   list(): Promise<string[]>;
   open(name: string, label: string): Promise<MergeSource>;
@@ -40,14 +41,15 @@ export type KeptDatabases = {
 
 export function keptDatabases(db: Db, config: Config): KeptDatabases {
   const q = queryOf(db);
-  /* The statement with the name quoted by the database itself; a name that is no kept database's gets none. */
+  /* The statement with the name quoted by the database itself; a name that is no such database's gets none. */
   const named = async (statement: string, name: string): Promise<string> => {
-    if (!KEPT_NAME.test(name)) throw new Error('This is not a database a restore kept.');
+    if (!setAside(name)) throw new Error('This is not a database a restore kept.');
     const [made] = await q<{ text: string }>('SELECT format($1, $2::text) AS text', [statement, name]);
     return made!.text;
   };
   return {
-    list: async () => (await q<{ name: string }>("SELECT datname AS name FROM pg_database WHERE datname LIKE 'hornhoof_before_%' ORDER BY datname")).map(row => row.name).filter(name => KEPT_NAME.test(name)),
+    list: async () =>
+      (await q<{ name: string }>("SELECT datname AS name FROM pg_database WHERE datname LIKE 'hornhoof_before_%' OR datname LIKE 'hornhoof_upload_%' ORDER BY datname")).map(row => row.name).filter(setAside),
     open: async (name, label) => {
       await q(await named('ALTER DATABASE %I WITH ALLOW_CONNECTIONS true', name));
       return keptSource(config, name, label);

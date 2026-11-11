@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
@@ -18,6 +18,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { headLine, sealBundle } from '../src/modules/backups/bundle.js';
 import type { MakerView } from '../src/modules/backups/types.js';
 import { BackupKeeper, type PeerBackups } from '../src/modules/keeper/backups.js';
+import { LOAD_FILE, UPLOADS_DIR, UploadTaker } from '../src/modules/keeper/uploads.js';
 import type { HeldCertificate } from '../src/modules/keeper/certificate.js';
 import type { MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -610,6 +611,140 @@ describe('PeerServer', () => {
     const misnamed = put(long.id);
     misnamed.end(wanted.travels());
     expect(await within(3000, statusOf(misnamed))).toBe(400);
+  });
+
+  /* A stand whose keeper takes uploads from the worker's machine, into a control folder of the test's. */
+  async function standWithUploads(max = 1024 * 1024) {
+    const controlDir = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    const lines: string[] = [];
+    const networkId = `99bb2233aabbccdd${'2'.repeat(48)}`;
+    const allowed = [{ machine: WORKER_ID, networkId, max, unpackMax: 4 * max }];
+    const taker = new UploadTaker({ controlDir, allowed: () => allowed, log: line => lines.push(line), now: () => new Date('2026-11-11T12:00:05Z') });
+    const stand = await standUp({ uploads: taker.peer() });
+    const door = await stand.open('peer');
+    const put = (id: string, length: number | null, machine = stand.worker) =>
+      clientOf(stand, door.port, machine).request({ ':method': 'PUT', ':path': `${PEER_PATHS.upload}${id}`, ...(length === null ? {} : { 'content-length': length }) });
+    const files = () => (existsSync(join(controlDir, UPLOADS_DIR)) ? readdirSync(join(controlDir, UPLOADS_DIR)).sort() : []);
+    return { stand, taker, controlDir, networkId, allowed, put, files, lines };
+  }
+
+  it('takes an upload from a machine that must give one', async () => {
+    const u = await standWithUploads();
+    const id = randomUUID();
+    const bytes = randomBytes(300 * 1024);
+    const sent = u.put(id, bytes.length);
+    sent.end(bytes);
+    expect(await within(5000, statusOf(sent))).toBe(201);
+    const name = `${u.networkId}-${id}.tar.gz`;
+    expect(u.files()).toEqual([name]);
+    const file = join(u.controlDir, UPLOADS_DIR, name);
+    expect(readFileSync(file).equals(bytes)).toBe(true);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(join(u.controlDir, UPLOADS_DIR)).mode & 0o777).toBe(0o700);
+    /* The updater is asked to load it, into a database named after the machine and the moment. */
+    const load = JSON.parse(readFileSync(join(u.controlDir, LOAD_FILE), 'utf8')) as Record<string, unknown>;
+    expect(load).toEqual({ id, machine: WORKER_ID, file, database: 'hornhoof_upload_99bb2233aabbccdd_20261111t120005', unpackMax: 4 * 1024 * 1024 });
+    expect(statSync(join(u.controlDir, LOAD_FILE)).mode & 0o777).toBe(0o600);
+  });
+
+  it('refuses an upload from anyone else, and takes none where the keeper takes none', async () => {
+    const u = await standWithUploads();
+    const stranger = u.put(randomUUID(), 1024, u.stand.data);
+    stranger.end(Buffer.alloc(1024));
+    expect(await within(5000, statusOf(stranger))).toBe(403);
+    expect(u.files()).toEqual([]);
+    expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
+    /* The machine owes nothing any more. */
+    u.allowed.length = 0;
+    const late = u.put(randomUUID(), 1024);
+    late.end(Buffer.alloc(1024));
+    expect(await within(5000, statusOf(late))).toBe(403);
+    /* A keeper with nothing that takes uploads knows no such path. */
+    const plain = await standUp();
+    const door = await plain.open('peer');
+    const none = clientOf(plain, door.port, plain.worker).request({ ':method': 'PUT', ':path': `${PEER_PATHS.upload}${randomUUID()}` });
+    none.end(Buffer.alloc(16));
+    expect(await within(5000, statusOf(none))).toBe(404);
+  });
+
+  it('keeps no part of an upload that is too large or was cut', async () => {
+    const u = await standWithUploads(64 * 1024);
+    /* Larger than it may be, or of no length it says first: refused before a byte is kept. */
+    for (const [length, status] of [[512 * 1024, 413], [null, 400]] as const) {
+      const refused = u.put(randomUUID(), length);
+      const answered = statusOf(refused);
+      refused.on('error', ignore);
+      refused.resume();
+      refused.end(randomBytes(512 * 1024));
+      expect(await within(5000, answered)).toBe(status);
+      expect(u.files()).toEqual([]);
+      expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
+    }
+    /* Cut in the middle: nothing of it stays, no load is asked for, and the next one is taken. */
+    const cut = u.put(randomUUID(), 48 * 1024);
+    cut.on('error', ignore);
+    cut.write(randomBytes(16 * 1024));
+    await vi.waitFor(() => expect(u.files().some(name => name.endsWith('.part'))).toBe(true), { timeout: 5000 });
+    cut.close(http2.constants.NGHTTP2_CANCEL);
+    await vi.waitFor(() => expect(u.files()).toEqual([]), { timeout: 5000 });
+    expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
+    const id = randomUUID();
+    const next = u.put(id, 1024);
+    next.end(randomBytes(1024));
+    expect(await within(5000, statusOf(next))).toBe(201);
+    /* A part an earlier keeper left is no upload, and goes when the keeper starts; an upload whose load is asked stays. */
+    writeFileSync(join(u.controlDir, UPLOADS_DIR, 'left-over.tar.gz.part'), 'half');
+    u.taker.start();
+    expect(u.files()).toEqual([`${u.networkId}-${id}.tar.gz`]);
+    /* One a keeper took and asked no load of is none either. */
+    rmSync(join(u.controlDir, LOAD_FILE));
+    u.taker.start();
+    expect(u.files()).toEqual([]);
+  });
+
+  it('takes one upload at a time', async () => {
+    const u = await standWithUploads();
+    const first = randomUUID();
+    const one = u.put(first, 2048);
+    one.on('error', ignore);
+    one.write(randomBytes(1024));
+    await vi.waitFor(() => expect(u.files().some(name => name.endsWith('.part'))).toBe(true), { timeout: 5000 });
+    /* A second one while the first still comes. */
+    const two = u.put(randomUUID(), 1024);
+    two.end(randomBytes(1024));
+    expect(await within(5000, statusOf(two))).toBe(409);
+    one.end(randomBytes(1024));
+    expect(await within(5000, statusOf(one))).toBe(201);
+    /* And while the updater still loads the first, also for the first itself. */
+    for (const id of [randomUUID(), first]) {
+      const three = u.put(id, 1024);
+      three.end(randomBytes(1024));
+      expect(await within(5000, statusOf(three))).toBe(409);
+    }
+    /* The load failed: the same upload is taken again. */
+    const place = join(u.controlDir, UPLOADS_DIR, `${u.networkId}-${first}`);
+    rmSync(join(u.controlDir, LOAD_FILE));
+    rmSync(`${place}.tar.gz`);
+    writeFileSync(`${place}.failed`, 'The upload could not be loaded.\n');
+    const four = u.put(first, 1024);
+    four.end(randomBytes(1024));
+    expect(await within(5000, statusOf(four))).toBe(201);
+    expect(u.files()).toEqual([`${u.networkId}-${first}.tar.gz`]);
+    /* The load went through: offered again, it is answered as taken, and nothing is taken or loaded twice. */
+    rmSync(join(u.controlDir, LOAD_FILE));
+    rmSync(`${place}.tar.gz`);
+    writeFileSync(`${place}.done`, '');
+    const five = u.put(first, 1024);
+    five.on('error', ignore);
+    five.end(randomBytes(1024));
+    expect(await within(5000, statusOf(five))).toBe(201);
+    expect([u.files(), existsSync(join(u.controlDir, LOAD_FILE))]).toEqual([[`${u.networkId}-${first}.done`], false]);
+    /* What was said of a machine that owes nothing any more goes when the next one comes. */
+    u.allowed[0] = { ...u.allowed[0]!, machine: DATA_ID, networkId: 'ab'.repeat(32) };
+    const six = u.put(randomUUID(), 1024, u.stand.data);
+    six.end(randomBytes(1024));
+    expect(await within(5000, statusOf(six))).toBe(201);
+    expect(u.files().filter(name => name.endsWith('.done'))).toEqual([]);
   });
 
   it('answers anything else with 404, and a door that cannot connect with 502', async () => {

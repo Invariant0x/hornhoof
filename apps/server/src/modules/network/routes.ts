@@ -1,9 +1,9 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
-import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
+import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole, type UploadState } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
@@ -11,6 +11,8 @@ import { holdsData } from '../copies/holds.js';
 import { copyOrder } from '../copies/slots.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
+import { UPLOAD_SPARE, type UploadAllowed } from '../keeper/uploads.js';
+import { queryOf } from '../merge/leader.js';
 import { makeCrl } from './authority.js';
 import { followOf, installs, releaseHeld } from './follow.js';
 import { NETWORK_ID } from './ids.js';
@@ -62,6 +64,8 @@ const ReportBody = z.object({
       old: z.object({ attempt: z.number().int().min(1) }).nullable(),
     })
     .optional(),
+  /* A machine that stopped holding the data holds nothing of it any more. */
+  wiped: z.literal(true).optional(),
 });
 
 /* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */
@@ -90,7 +94,7 @@ const ComputerAnswer = z.object({ exit: z.number().int().min(0).max(255), output
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
-type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null };
+type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; uploadState: UploadState | null };
 
 /* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
    machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
@@ -137,11 +141,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function machineOf(who: Asker): Promise<Holder | null> {
     if (who.own) {
       const mine = await findThisMachine(db, config);
-      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null } : null;
+      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null, copyOld: null, uploadState: null } : null;
     }
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
-    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName };
+    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName, copyOld: row.copyOld, uploadState: row.uploadState };
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
@@ -156,6 +160,21 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!appSecret || !dataSecret) return null;
     const visitorKey = visit ? await visitorKeyOf(ctx) : null;
     return { name: link.name, appSecret, dataSecret, ...(visitorKey ? { visitorKey } : {}) };
+  }
+
+  /* The machines that stopped holding the data and still owe what they held. An upload may be three times the leader's
+     own database and a spare, and four times unpacked: a copy holds no more than the leader did, and CSV is larger than
+     the rows it came from. */
+  async function uploadsOwed(): Promise<UploadAllowed[]> {
+    const owing = await db
+      .select({ machine: machines.id, networkId: machines.networkId })
+      .from(machines)
+      .where(and(eq(machines.uploadState, 'waiting'), isNull(machines.revokedAt), isNotNull(machines.networkId)))
+      .orderBy(machines.dataLeftAt, machines.id);
+    if (owing.length === 0) return [];
+    const [sized] = await queryOf(db)<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
+    const size = Number(sized?.size ?? 0);
+    return owing.map(row => ({ machine: row.machine, networkId: row.networkId!, max: 3 * size + UPLOAD_SPARE, unpackMax: 4 * size + UPLOAD_SPARE }));
   }
 
   /* A worker gets the link as it uses it, with the visitor key and never the way to the data; either kind also learns
@@ -178,16 +197,19 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const follow = peer ? await followOf(ctx, peer.id) : {};
     /* The machine's own keeper also hears which copies' databases a merge is to read, and opens a door to each. */
     const doors = who.own ? { doors: await ctx.doorsWanted() } : {};
-    /* A machine that keeps a copy hears of its slot here, and how far the leader's database has grown. */
-    const told = peer ? { role: peer.role, copy: peer.role === 'data' ? await copyOrder(ctx, peer) : null } : {};
-    return { machine: machine?.id ?? null, ...told, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors };
+    /* And which machines owe it what they held, and how large that may be. */
+    const uploads = who.own ? { uploads: await uploadsOwed() } : {};
+    /* A machine that keeps a copy hears of its slot here, and how far the leader's database has grown; one that stopped
+       keeping one, what it still owes. */
+    const told = peer ? { role: peer.role, copy: peer.role === 'data' || peer.uploadState ? await copyOrder(ctx, peer) : null } : {};
+    return { machine: machine?.id ?? null, ...told, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data, ...follow, ...doors, ...uploads };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, update, pin, copy, ...said } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, pin, copy, wiped, ...said } = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
     if (!machine) return reply.code(204).send();
     const installed = await db.transaction(async tx => {
@@ -208,7 +230,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
         copy === undefined || who.own || row?.role !== 'data'
           ? {}
           : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name, copyOld: copy.old?.attempt ?? null };
-      const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy. */
+      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: null, copyOld: null } : {};
+      const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* The server's own keeper names another build than its row held: a new build leads, and the other machines close. */
       const newBuild = who.own && said.commit !== undefined && Boolean(row?.commit) && row?.commit !== said.commit;
       if (newBuild) await ctx.computer.newBuild(tx, machine.id);

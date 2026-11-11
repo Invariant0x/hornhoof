@@ -5,10 +5,12 @@ import { loggable } from '../../errors.js';
 import { readRestoreStatus } from '../backups/restore.js';
 import { ANOTHER_COMPANY, MergeRefused, runMerge } from './apply.js';
 import { DIFFERENT } from './facts.js';
-import { complete } from './check.js';
+import { readKeeperState } from '../keeper/state.js';
+import { replicaPassword } from '../keeper/replica.js';
+import { complete, fastWay } from './check.js';
 import { dropChoice, readChoice, type KeptDatabases } from './kept.js';
 import { queryOf } from './leader.js';
-import { KEPT_NAME, type MergeSource } from './source.js';
+import { KEPT_NAME, MACHINE_SOURCE, peerSource, setAside, UPLOAD_NAME, type MergeSource } from './source.js';
 import { taskFor } from './task.js';
 import { timeWords } from './words.js';
 
@@ -16,20 +18,34 @@ import { timeWords } from './words.js';
 export const MERGE_EVERY_MS = 60_000;
 export const RETRY_MAX_MS = 3_600_000;
 const KEPT = 'kept:';
+const UPLOAD = 'upload:';
+/* The database a merge of the leader's own Postgres reads, by its source; null for any other source. */
+const databaseOf = (source: string): string | null => {
+  const name = source.startsWith(KEPT) ? source.slice(KEPT.length) : source.startsWith(UPLOAD) ? source.slice(UPLOAD.length) : '';
+  return (source.startsWith(KEPT) ? KEPT_NAME : UPLOAD_NAME).test(name) ? name : null;
+};
+/* The moment an upload's name carries, YYYYMMDDtHHMMSS in UTC. */
+const stampTime = (stamp: string): Date => new Date(`${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}Z`);
 const GONE = 'The database is not on this server any more, so nothing of it was brought back.';
+const LEFT_OUT = (at: string): string => `Left out with the database from before the restore of ${at}.`;
 
-/* The database set aside before a merge that is not saved as a bundle yet, for the data keeper to dump and seal: the
-   oldest first. The bundle is asked for at once and the merge does not wait for it, as the database stays until both
-   are done. */
+/* How the old database of a copy on another machine is opened: through the door the keeper holds to it, by its port. */
+export type PeerDatabases = { open(port: number, label: string): Promise<MergeSource> };
+
+/* The database set aside before a merge, or made of an upload, that is not saved as a bundle yet, for the data keeper
+   to dump and seal: the oldest first. The bundle is asked for at once and the merge does not wait for it, as the
+   database stays until both are done. */
 export async function forkWanted(db: Ctx['db']): Promise<{ id: string; database: string } | null> {
-  const [row] = await queryOf(db)<{ fork: string; source: string }>(
-    `SELECT m.fork, m.source FROM net.merges m WHERE m.status IN ('pending', 'applied', 'merged', 'removing') AND m.fork IS NOT NULL AND m.source LIKE 'kept:%'
-       AND NOT EXISTS (SELECT 1 FROM net.backups b WHERE b.id = m.fork) ORDER BY m.created_at, m.source LIMIT 1`,
+  const rows = await queryOf(db)<{ fork: string; source: string }>(
+    `SELECT m.fork, m.source FROM net.merges m WHERE m.status IN ('pending', 'applied', 'merged', 'removing') AND m.fork IS NOT NULL AND (m.source LIKE 'kept:%' OR m.source LIKE 'upload:%')
+       AND NOT EXISTS (SELECT 1 FROM net.backups b WHERE b.id = m.fork) ORDER BY m.created_at, m.source`,
   );
-  return row ? { id: row.fork, database: row.source.slice(KEPT.length) } : null;
+  const row = rows.find(found => databaseOf(found.source));
+  return row ? { id: row.fork, database: databaseOf(row.source)! } : null;
 }
 
-type MergeRow = { id: string; source: string; label: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; fork: string | null; tries: number; tried_at: string | Date | null };
+type MergeRow = { id: string; source: string; label: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; fork: string | null; tries: number; tried_at: string | Date | null; machine: string | null };
+type CopyMachine = { id: string; hostname: string; network_id: string | null; revoked_at: unknown; copy_old: number | null };
 
 /* Runs the merges of the databases that came back, one at a time, while the app leads: it finds the databases restores
    set aside, applies each merge and then checks it, and drops a database once it is merged or left out and saved as a
@@ -41,8 +57,22 @@ export class Merger {
   constructor(
     private readonly ctx: Ctx,
     private readonly kept: KeptDatabases,
-    private readonly opts: { everyMs?: number; now?: () => Date } = {},
+    private readonly opts: { everyMs?: number; now?: () => Date; peers?: PeerDatabases } = {},
   ) {}
+
+  /* A copy's old database is read as the role that only reads, whose password every data machine can tell. */
+  private peers(): PeerDatabases {
+    return this.opts.peers ?? { open: (port, label) => peerSource(port, replicaPassword(this.ctx.config.secret), label) };
+  }
+
+  /* The network ids of the machines whose old copy a merge still has to read: the keeper opens a door to each. */
+  async doors(): Promise<string[]> {
+    const rows = await queryOf(this.ctx.db)<{ id: string }>(
+      `SELECT DISTINCT m.network_id AS id FROM net.merges g JOIN public.machines m ON m.id = g.machine
+        WHERE g.source LIKE 'machine:%' AND g.status IN ('pending', 'applied') AND m.revoked_at IS NULL AND m.network_id IS NOT NULL ORDER BY 1`,
+    );
+    return rows.map(row => row.id);
+  }
 
   start(): void {
     this.stop();
@@ -63,7 +93,12 @@ export class Merger {
      shapes of the two databases. One that can never run, as its database is of another shape or another company
      already, holds no update: it waits for the CEO to leave it out. */
   async pending(): Promise<boolean> {
-    const [row] = await queryOf(this.ctx.db)("SELECT 1 AS found FROM net.merges WHERE status IN ('pending', 'applied') AND error IS DISTINCT FROM $1 AND error IS DISTINCT FROM $2 LIMIT 1", [DIFFERENT, ANOTHER_COMPANY]);
+    /* The old database of a copy on another machine holds no update up: it is read by its ids whatever the two
+       schemas are, and its machine may be away for long. */
+    const [row] = await queryOf(this.ctx.db)(
+      "SELECT 1 AS found FROM net.merges WHERE status IN ('pending', 'applied') AND source NOT LIKE 'machine:%' AND error IS DISTINCT FROM $1 AND error IS DISTINCT FROM $2 LIMIT 1",
+      [DIFFERENT, ANOTHER_COMPANY],
+    );
     return Boolean(row);
   }
 
@@ -85,19 +120,62 @@ export class Merger {
     const there = await this.kept.list();
     /* A merge whose database is gone has nothing to bring back or to save, as when a backup restored later brings the
        record of a merge that still waited when it was made. */
-    const waiting = await q<{ id: string; source: string }>("SELECT id, source FROM net.merges WHERE status IN ('pending', 'applied', 'merged', 'removing') AND source LIKE 'kept:%'");
-    for (const row of waiting.filter(found => !there.includes(found.source.slice(KEPT.length)))) {
-      await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [row.id, GONE]);
-    }
+    const waiting = await q<{ id: string; source: string; status: string; machine: string | null }>(
+      "SELECT id, source, status, machine FROM net.merges WHERE status IN ('pending', 'applied', 'merged', 'removing') AND (source LIKE 'kept:%' OR source LIKE 'upload:%')",
+    );
+    for (const row of waiting.filter(found => !there.includes(found.source.slice(found.source.indexOf(':') + 1)))) await this.gone(row);
     for (const name of there) {
-      /* Only ever a database a restore kept, whatever the list says. */
-      if (!KEPT_NAME.test(name) || known.has(`${KEPT}${name}`)) continue;
+      /* Only ever a database a restore kept, or one made of an upload, whatever the list says. */
+      if (!setAside(name) || known.has(`${KEPT_NAME.test(name) ? KEPT : UPLOAD}${name}`)) continue;
       try {
-        await this.found(name);
+        if (KEPT_NAME.test(name)) await this.found(name);
+        else await this.uploaded(name);
       } catch (err) {
-        this.ctx.log.warn({ error: loggable(err) }, 'Could not look at a database a restore kept. Its merge waits.');
+        this.ctx.log.warn({ error: loggable(err) }, 'Could not look at a database a restore kept or a machine uploaded. Its merge waits.');
       }
     }
+    await this.copies();
+  }
+
+  /* A merge whose database went. What a machine uploaded and the leader had not read yet is asked of it again; one that
+     was read is as good as saved, and its machine may wipe. */
+  private async gone(row: { id: string; source: string; status: string; machine: string | null }): Promise<void> {
+    await this.ctx.db.transaction(async tx => {
+      const q = queryOf(tx);
+      await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [row.id, GONE]);
+      if (!row.source.startsWith(UPLOAD) || !row.machine) return;
+      await q("UPDATE public.machines SET upload_state = $2 WHERE id = $1::uuid AND upload_state = 'received'", [row.machine, row.status === 'pending' || row.status === 'applied' ? 'waiting' : 'kept']);
+    });
+  }
+
+  /* What a machine held when it stopped holding the data, loaded as a database of its own: its merge, with a bundle
+     asked for as of a database a restore kept, and its machine told that the leader has it. */
+  private async uploaded(name: string): Promise<void> {
+    const [, prefix, stamp] = UPLOAD_NAME.exec(name)!;
+    await this.ctx.db.transaction(async tx => {
+      const q = queryOf(tx);
+      const [machine] = await q<{ id: string; hostname: string }>('SELECT id, hostname FROM public.machines WHERE left(lower(network_id), 16) = $1 ORDER BY revoked_at NULLS FIRST, created_at DESC LIMIT 1', [prefix]);
+      const label = `${machine?.hostname ? `${machine.hostname}'s copy` : 'A copy'}, uploaded ${timeWords(stampTime(stamp!), this.now())}`;
+      await q('INSERT INTO net.merges (source, label, status, fork, machine) VALUES ($1, $2, $3, $4::uuid, $5::uuid) ON CONFLICT (source) DO NOTHING', [`${UPLOAD}${name}`, label, 'pending', randomUUID(), machine?.id ?? null]);
+      if (machine) await q("UPDATE public.machines SET upload_state = 'received' WHERE id = $1::uuid AND upload_state = 'waiting'", [machine.id]);
+    });
+  }
+
+  /* A copy that was made again says which attempt's old database waits on its machine: a merge for each that has none
+     yet. One that was merged is done once its machine named another attempt, or none, or left: the machine itself
+     drops the database, and the leader drops nothing. */
+  private async copies(): Promise<void> {
+    const q = queryOf(this.ctx.db);
+    await q(
+      `INSERT INTO net.merges (source, label, status, machine)
+       SELECT 'machine:' || m.id::text || ':' || m.copy_old::text, m.hostname || '''s copy from before it was made again', 'pending', m.id FROM public.machines m
+        WHERE m.revoked_at IS NULL AND m.copy_old IS NOT NULL AND (m.role = 'data' OR m.upload_state IS NOT NULL)
+       ON CONFLICT (source) DO NOTHING`,
+    );
+    await q(
+      `UPDATE net.merges g SET status = 'done', done_at = now() WHERE g.source LIKE 'machine:%' AND g.status = 'merged'
+         AND NOT EXISTS (SELECT 1 FROM public.machines m WHERE m.id = g.machine AND m.revoked_at IS NULL AND g.source = 'machine:' || m.id::text || ':' || m.copy_old::text)`,
+    );
   }
 
   private async found(name: string): Promise<void> {
@@ -140,23 +218,55 @@ export class Merger {
     }
   }
 
-  private async open(row: MergeRow): Promise<MergeSource> {
-    const name = row.source.slice(KEPT.length);
-    if (!row.source.startsWith(KEPT) || !KEPT_NAME.test(name)) throw new MergeRefused('This Hornhoof cannot read this source yet.');
+  private async open(row: MergeRow, port?: number): Promise<MergeSource> {
+    if (MACHINE_SOURCE.test(row.source)) {
+      if (port === undefined) throw new MergeRefused("The keeper holds no door to that machine's database now.");
+      return this.peers().open(port, row.label);
+    }
+    const name = databaseOf(row.source);
+    if (!name) throw new MergeRefused('This Hornhoof cannot read this source yet.');
     return this.kept.open(name, row.label);
   }
 
-  /* The oldest merge that waits and is due: applied when it is pending, then checked. */
+  /* The machine a merge of a copy's old database reads, and the port of the keeper's door to it; no port while the
+     keeper holds none. */
+  private async machineOf(row: MergeRow): Promise<{ machine: CopyMachine | undefined; port: number | undefined }> {
+    const [machine] = await queryOf(this.ctx.db)<CopyMachine>('SELECT id, hostname, network_id, revoked_at, copy_old FROM public.machines WHERE id = $1::uuid', [row.machine]);
+    const doors = readKeeperState(this.ctx.config.controlDir)?.doors ?? {};
+    return { machine, port: machine?.network_id ? doors[machine.network_id] : undefined };
+  }
+
+  /* The oldest merge that waits and is due: applied when it is pending, then checked. A copy's old database waits for
+     its door without a try being counted, and ends unread when its machine left. */
   private async next(): Promise<void> {
     const q = queryOf(this.ctx.db);
-    const waiting = await q<MergeRow>("SELECT id, source, label, status, fork, tries, tried_at FROM net.merges WHERE status IN ('pending', 'applied') ORDER BY created_at, source");
+    const waiting = await q<MergeRow>("SELECT id, source, label, status, fork, tries, tried_at, machine FROM net.merges WHERE status IN ('pending', 'applied') ORDER BY created_at, source");
     const now = this.now();
-    const row = waiting.find(found => !found.tried_at || now.getTime() - new Date(found.tried_at).getTime() >= Math.min(MERGE_EVERY_MS * 2 ** Math.min(found.tries - 1, 20), RETRY_MAX_MS));
+    const due = waiting.filter(found => !found.tried_at || now.getTime() - new Date(found.tried_at).getTime() >= Math.min(MERGE_EVERY_MS * 2 ** Math.min(found.tries - 1, 20), RETRY_MAX_MS));
+    let row: MergeRow | undefined;
+    let port: number | undefined;
+    for (const found of due) {
+      if (!MACHINE_SOURCE.test(found.source)) {
+        row = found;
+        break;
+      }
+      const at = await this.machineOf(found);
+      if (!at.machine || at.machine.revoked_at) {
+        await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [found.id, `${at.machine?.hostname || 'The machine'} left before its old copy was read.`]);
+        continue;
+      }
+      if (at.port === undefined) continue;
+      row = found;
+      port = at.port;
+      break;
+    }
     if (!row) return;
     await q('UPDATE net.merges SET tried_at = $2::timestamptz, tries = tries + 1 WHERE id = $1::uuid', [row.id, now]);
     try {
-      if (row.status === 'pending') await this.apply(row);
-      await this.check(row);
+      /* What a machine uploaded is a copy as much as one read on its machine. */
+      if ((port !== undefined || row.source.startsWith(UPLOAD)) && (await this.byIds(row, port))) return;
+      if (row.status === 'pending') await this.apply(row, port);
+      await this.check(row, port);
     } catch (err) {
       const said = err instanceof Error ? err.message : String(err);
       const error = err instanceof MergeRefused || err instanceof GateBusy ? said : `The merge stopped: ${said}`;
@@ -166,10 +276,26 @@ export class Merger {
     }
   }
 
-  private async apply(row: MergeRow): Promise<void> {
+  /* A copy that never wrote is merged by its ids alone, and one that holds only what the CEO left out is left out
+     with it: whether either was so. Anything else goes the whole way. */
+  private async byIds(row: MergeRow, port?: number): Promise<boolean> {
+    const q = queryOf(this.ctx.db);
+    const source = await this.open(row, port);
+    let found: Awaited<ReturnType<typeof fastWay>>;
+    try {
+      found = await fastWay(this.ctx.db, source);
+    } finally {
+      await source.close();
+    }
+    if (found.way === 'fast') await q("UPDATE net.merges SET status = 'merged', merged_at = now(), error = NULL WHERE id = $1::uuid", [row.id]);
+    else if (found.way === 'left_out') await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [row.id, LEFT_OUT(timeWords(found.restoreAt!, this.now()))]);
+    return found.way !== 'whole';
+  }
+
+  private async apply(row: MergeRow, port?: number): Promise<void> {
     const [company] = await queryOf(this.ctx.db)<{ id: string }>('SELECT id FROM public.companies LIMIT 1');
     if (!company) throw new MergeRefused('This Hornhoof has no company to bring anything back into.');
-    const source = await this.open(row);
+    const source = await this.open(row, port);
     try {
       await runMerge(this.ctx.db, { id: row.id, label: row.label, kept: row.source.startsWith(KEPT), companyId: company.id }, source, { log: line => this.ctx.log.info(line) });
     } finally {
@@ -179,9 +305,9 @@ export class Merger {
     this.ctx.bus.publish(company.id, { type: 'org' });
   }
 
-  private async check(row: MergeRow): Promise<void> {
+  private async check(row: MergeRow, port?: number): Promise<void> {
     const q = queryOf(this.ctx.db);
-    const source = await this.open(row);
+    const source = await this.open(row, port);
     let checked: Awaited<ReturnType<typeof complete>>;
     try {
       checked = await complete(this.ctx.db, row.id, source);
@@ -209,20 +335,23 @@ export class Merger {
     }
   }
 
-  /* A database that was merged, or is left out, goes once it is saved as a bundle, or holds nothing to save. */
+  /* A database that was merged, or is left out, goes once it is saved as a bundle, or holds nothing to save. The
+     machine whose upload it was is told to wipe first: what it held is on the leader and in a bundle now. */
   private async drops(): Promise<void> {
     const q = queryOf(this.ctx.db);
-    const ready = await q<{ id: string; source: string }>(
-      `SELECT m.id, m.source FROM net.merges m WHERE m.status IN ('merged', 'removing') AND m.source LIKE 'kept:%'
+    const ready = await q<{ id: string; source: string; machine: string | null }>(
+      `SELECT m.id, m.source, m.machine FROM net.merges m WHERE m.status IN ('merged', 'removing') AND (m.source LIKE 'kept:%' OR m.source LIKE 'upload:%')
          AND (m.fork IS NULL OR EXISTS (SELECT 1 FROM net.backups b WHERE b.id = m.fork)) ORDER BY m.created_at`,
     );
     for (const row of ready) {
-      if (!KEPT_NAME.test(row.source.slice(KEPT.length))) continue;
+      const name = databaseOf(row.source);
+      if (!name) continue;
       try {
-        await this.kept.drop(row.source.slice(KEPT.length));
+        if (row.source.startsWith(UPLOAD) && row.machine) await q("UPDATE public.machines SET upload_state = 'kept' WHERE id = $1::uuid AND upload_state = 'received'", [row.machine]);
+        await this.kept.drop(name);
         await q("UPDATE net.merges SET status = 'done', done_at = now() WHERE id = $1::uuid", [row.id]);
       } catch (err) {
-        this.ctx.log.warn({ error: loggable(err) }, 'Could not remove a database a restore kept. Trying again in a minute.');
+        this.ctx.log.warn({ error: loggable(err) }, 'Could not remove a database a restore kept or a machine uploaded. Trying again in a minute.');
       }
     }
   }

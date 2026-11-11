@@ -39,6 +39,17 @@ describe('updater, backups', () => {
     expect(existsSync(join(s.control, 'dump.json'))).toBe(false);
   });
 
+  it('dumps a database made of an upload for its fork bundle', async () => {
+    const s = stand();
+    const upload = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
+    writeFileSync(join(s.dir, `db-${upload}`), '20');
+    writeFileSync(join(s.control, 'dump.json'), JSON.stringify({ id: ID, database: upload, reason: 'fork' }));
+    const r = await runOnce(s, null);
+    expect(r.calls.some(call => call.includes(`pg_dump -U hornhoof -d ${upload}`))).toBe(true);
+    expect(said(join(dumps(s), `${ID}.json`))).toMatchObject({ id: ID, reason: 'fork', migrations: 20 });
+    expect(gunzipSync(readFileSync(join(dumps(s), `${ID}.sql.gz`))).toString()).toContain(`-- a dump of the ${upload} database`);
+  });
+
   it('dumps a kept database for its fork bundle', async () => {
     const s = stand();
     const kept = 'hornhoof_before_20261103_210000';
@@ -61,6 +72,7 @@ describe('updater, backups', () => {
     const refused: object[] = [
       { database: 'hornhoof', reason: 'fork' }, { database: 'x;rm -rf /', reason: 'fork' }, { database: 'hornhoof_before_', reason: 'fork' }, { database: `hornhoof_before_${'a'.repeat(48)}`, reason: 'fork' },
       { reason: 'fork' }, { database: kept, reason: 'timer' }, { database: kept },
+      { database: 'hornhoof_uploading_99bb2233aabbccdd_20261111t120005', reason: 'fork' }, { database: 'hornhoof_upload_99bb2233aabbccdd_x', reason: 'fork' },
     ];
     for (const [index, wrong] of refused.entries()) {
       const id = `0f0f0f0f-0000-4000-8000-0000000000${String(index + 10)}`;

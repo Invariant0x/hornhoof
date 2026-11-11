@@ -180,13 +180,14 @@ export class PeerSessions {
   /* A stream of its own on the session to the leader's keeper, for what is too long to go as a request to the app: a
      bundle, asked for or sent. It is answered with the status as soon as the keeper gives one, also before a body that is
      being sent has ended; whoever asked reads the answer's body to its end or destroys it. A stream on which no byte
-     moves for half a minute is cut, with an error for whoever reads it. */
-  stream(method: 'GET' | 'PUT', path: string, body?: Readable): Promise<{ status: number; length: number | null; body: Readable }> {
+     moves for half a minute is cut, with an error for whoever reads it. length: how long the body is, said first where
+     the keeper takes only what came whole. */
+  stream(method: 'GET' | 'PUT', path: string, body?: Readable, length?: number): Promise<{ status: number; length: number | null; body: Readable }> {
     const session = this.leading()?.session;
     if (!session) return Promise.reject(new Error(NO_LEADER));
     return new Promise((resolve, reject) => {
       /* A session that ended since throws here, and the promise rejects with it. */
-      const stream = session.h2.request({ ':method': method, ':path': path }, { endStream: !body });
+      const stream = session.h2.request({ ':method': method, ':path': path, ...(length === undefined ? {} : { 'content-length': length }) }, { endStream: !body });
       let answered = false;
       stream.setTimeout(this.opts.streamIdleMs ?? STREAM_IDLE_MS, () => stream.destroy(new Error('The stream to the leader stopped moving.')));
       stream.on('error', err => void (answered || reject(err)));

@@ -1,4 +1,4 @@
-import { generateKeyPairSync, X509Certificate } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, X509Certificate } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import http2, { type ClientHttp2Session, type ClientHttp2Stream } from 'node:http2';
@@ -28,6 +28,7 @@ import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modu
 import { authorityOf } from '../src/modules/network/store.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { PeerDoor } from '../src/net/peer-door.js';
+import type { PeerSessions } from '../src/net/peer-sessions.js';
 import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
@@ -324,6 +325,51 @@ describe('the peer link in the keeper', () => {
     expect(await statusOf(`/peer/backups/${id}`)).toBe(403);
     expect(await statusOf(`/peer/backups/${id.replace(/^./, id.startsWith('0') ? '1' : '0')}`)).toBe(404);
     expect(await statusOf(`/peer/backups/${id}`, 'PUT')).toBe(403);
+  });
+
+  it('takes what a machine that left the data uploads, and from no other machine', async () => {
+    const c = await company(false);
+    const { keeper, controlDir } = await keeperBeside(c, await listening(c.app), folder(), { peerEveryMs: 20 });
+    const { peer } = await keeper.peerPorts();
+    const w = await worker(c);
+    const session = sessionOf(peer, w);
+    const put = (bytes: Buffer) => new Promise<number | null>(resolve => {
+      const stream = session.request({ ':method': 'PUT', ':path': `/peer/upload/${randomUUID()}`, 'content-length': bytes.length });
+      stream.on('error', ignore);
+      stream.once('response', headers => resolve(Number(headers[':status'])));
+      stream.once('close', () => resolve(null));
+      stream.resume();
+      stream.end(bytes);
+    });
+    /* A machine that owes nothing is refused. */
+    expect(await put(Buffer.from('rows'))).toBe(403);
+    expect(existsSync(join(controlDir, 'load.json'))).toBe(false);
+    /* Its owner lost the scope: the app names it, and the keeper takes its upload and asks the updater to load it. */
+    const networkId = `77cc${'3'.repeat(60)}`;
+    await c.db.update(machines).set({ networkId, uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, w.id));
+    await until(async () => (await put(Buffer.from('rows'))) === 201);
+    const load = JSON.parse(readFileSync(join(controlDir, 'load.json'), 'utf8')) as { machine: string; file: string; database: string; unpackMax: number };
+    expect(load.machine).toBe(w.id);
+    expect(load.database).toMatch(/^hornhoof_upload_77cc333333333333_[0-9]{8}t[0-9]{6}$/);
+    expect(load.unpackMax).toBeGreaterThan(2 ** 30);
+    expect(readFileSync(load.file, 'utf8')).toBe('rows');
+    expect(load.file.startsWith(join(controlDir, 'uploads', `${networkId}-`))).toBe(true);
+  });
+
+  it('reports the address its copies saw', async () => {
+    const c = await company(false);
+    const saw = { addresses: ['192.168.1.9'] };
+    /* What dials the copies, as far as the report asks it. */
+    const dial = { seen: () => saw.addresses, use: () => undefined, close: async () => undefined, reaches: () => false } as unknown as PeerSessions;
+    await keeperBeside(c, await listening(c.app), folder(), { addresses: ['192.168.1.5'], reportEveryMs: 20, copies: { dial } });
+    const own = async () => (await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0]?.addresses ?? [];
+    /* Its own address first, then the one a copy saw it come from: a machine that moved is found there. */
+    await until(async () => (await own()).length === 2);
+    expect(await own()).toEqual(['192.168.1.5', '192.168.1.9']);
+    /* What a session through the relay sees is this machine's own loopback, which is no address of it. */
+    saw.addresses = ['127.0.0.1'];
+    await until(async () => (await own()).length === 1);
+    expect(await own()).toEqual(['192.168.1.5']);
   });
 
   it('opens a door to a copy its app names', async () => {

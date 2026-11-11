@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { certificates, companies, departments, invites, machines, people, personAccess, recoveryKeys } from '../src/db/schema.js';
+import { certificates, companies, departments, invites, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys } from '../src/db/schema.js';
 import type { Carry } from '../src/modules/backups/types.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -57,13 +57,41 @@ describe('the carry of a restore', () => {
     const [openInvite] = await db.select().from(invites).where(sql`${invites.personId} = ${finn.id} AND ${invites.expiresAt} > now()`);
     expect(carry.invites).toEqual([openInvite!.tokenHash]);
     const machine = (id: string) => carry.machines.find(one => one.id === id);
-    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true });
-    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false });
+    expect(machine(live!.id)).toEqual({ id: live!.id, revoked: false, lendsTests: false, keepsBackups: true, role: 'worker', dataLeftAt: null, uploadState: null });
+    expect(machine(gone!.id)).toEqual({ id: gone!.id, revoked: true, lendsTests: true, keepsBackups: false, role: 'worker', dataLeftAt: null, uploadState: null });
+    /* A company with no link and no secrets of its peer services says so. */
+    expect(carry.link).toBeNull();
+    expect(carry.peerSecrets).toEqual([]);
     expect(carry.serials).toEqual(['bb02']);
     const key = (id: string) => carry.recoveryKeys.find(one => one.id === id)!;
     expect(carry.recoveryKeys).toHaveLength(2);
     expect(key(active!.id)).toMatchObject({ recipient: 'age1active', linkPrint: 'ab'.repeat(32), linkName: 'acme', linkUrl: 'https://acme.hornhoof.org', madeBy: owner!.id, retiredAt: null });
     expect(new Date(key(active!.id).madeAt).getTime()).toBe(active!.madeAt.getTime());
     expect(new Date(key(retired!.id).retiredAt!).getTime()).toBe(retired!.retiredAt!.getTime());
+  });
+
+  it('takes who holds the data and the link', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const left = new Date('2026-11-10T08:00:00.000Z');
+    const [copy, was] = await db.insert(machines).values([
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'copy', networkId: hashToken('copy'), role: 'data', serverOrder: 2, copyState: 'ready' },
+      { companyId: acme!.id, personId: owner!.id, machineKey: 'was', networkId: hashToken('was'), role: 'worker', dataLeftAt: left, uploadState: 'waiting' },
+    ]).returning();
+    const made = new Date('2026-11-01T00:00:00.000Z');
+    await db.insert(publicLinks).values({ companyId: acme!.id, name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'sealed-key', nextKeyEnc: 'sealed-next', tunnelEnc: 'sealed-tunnel', createdAt: made });
+    await db.insert(peerSecrets).values([{ kind: 'app', secretEnc: 'sealed-app' }, { kind: 'data', secretEnc: 'sealed-data' }]);
+    const answered = (await db.execute(sql.raw(CARRY))) as unknown as { rows: Record<string, unknown>[] };
+    const carry = Object.values(answered.rows[0]!)[0] as Carry;
+    const machine = (id: string) => carry.machines.find(one => one.id === id)!;
+    expect(machine(copy!.id)).toMatchObject({ role: 'data', dataLeftAt: null, uploadState: null });
+    expect(machine(was!.id)).toMatchObject({ role: 'worker', uploadState: 'waiting' });
+    expect(new Date(machine(was!.id).dataLeftAt!).getTime()).toBe(left.getTime());
+    /* The link whole, each secret as it is stored: sealed. */
+    expect(carry.link).toMatchObject({ name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'sealed-key', nextKeyEnc: 'sealed-next', tunnelEnc: 'sealed-tunnel' });
+    expect(new Date(carry.link!.createdAt).getTime()).toBe(made.getTime());
+    expect([...carry.peerSecrets!].sort((a, b) => a.kind.localeCompare(b.kind))).toEqual([{ kind: 'app', secretEnc: 'sealed-app' }, { kind: 'data', secretEnc: 'sealed-data' }]);
   });
 });

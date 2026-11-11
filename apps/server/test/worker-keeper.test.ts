@@ -14,6 +14,7 @@ import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.j
 import { PIN_FILE, readPin } from '../src/modules/keeper/owner-pin.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { PEERS_FILE, TICKET_FILE } from '../src/modules/keeper/worker.js';
+import { WIPE_FILE, WIPED_FILE } from '../src/modules/keeper/uploads.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
 import { refreshBuild } from '../src/modules/network/follow.js';
@@ -544,5 +545,36 @@ describe("a worker's keeper", () => {
     const c = await company({ addresses: ['192.0.2.4', '8.8.8.8'], hostname: 'deb', reportAs: undefined });
     await until(async () => (await c.serverRow())?.hostname === 'deb');
     expect(await c.serverRow()).toMatchObject({ hostname: 'deb', addresses: ['192.0.2.4'] });
+  });
+  it('says a machine that holds no database is wiped, and one that was wiped once its updater said so', async () => {
+    const c = await company();
+    const w = await worker(c);
+    const row = () => c.rowOf(w.machine);
+    /* Two more reports reached the leader. */
+    const reported = async () => {
+      for (let n = 0; n < 2; n++) {
+        const before = (await row()).reportAt?.getTime();
+        await until(async () => (await row()).reportAt?.getTime() !== before);
+      }
+    };
+    /* While its updater still wipes it, it says nothing of the kind. */
+    writeFileSync(join(w.config.controlDir, WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
+    await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
+    await reported();
+    expect((await row()).uploadState).toBe('kept');
+    /* The updater is done: the leader hears it, and the updater's word goes once it did. */
+    rmSync(join(w.config.controlDir, WIPE_FILE));
+    writeFileSync(join(w.config.controlDir, WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
+    await until(async () => (await row()).uploadState === null);
+    await until(() => !existsSync(join(w.config.controlDir, WIPED_FILE)));
+    /* The leader counts on a machine for what it held, though a worker's keeper holds no database: it says so, and owes
+       nothing. */
+    await c.db.update(machines).set({ uploadState: 'waiting' }).where(eq(machines.id, w.machine));
+    await until(async () => (await row()).uploadState === null);
+    /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either. */
+    writeFileSync(join(w.config.controlDir, 'replica.json'), '{}');
+    await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
+    await reported();
+    expect((await row()).uploadState).toBe('kept');
   });
 });

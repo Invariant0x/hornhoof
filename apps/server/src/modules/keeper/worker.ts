@@ -1,4 +1,5 @@
 import { createPrivateKey, sign, verify, X509Certificate } from 'node:crypto';
+import { existsSync, rmSync } from 'node:fs';
 import type http from 'node:http';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -17,12 +18,13 @@ import { renewedMessage, renewMessage } from '../network/renewal.js';
 import { ownAddresses } from './addresses.js';
 import { ageKey } from './age-key.js';
 import { answerOf, askApp, type AppAnswer } from './app-call.js';
-import { Becoming } from './become.js';
+import { Becoming, REPLICA_FILE } from './become.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { Following } from './following.js';
 import { HolderKeeper } from './holder.js';
+import { WIPE_FILE, WIPED_FILE } from './uploads.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 import { pinKey, readPin } from './owner-pin.js';
@@ -122,7 +124,7 @@ const Data = z.object({
 });
 const Copy = z.object({
   slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
-  old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'wipe']).nullable().default(null),
+  old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'received', 'wipe']).nullable().default(null),
 });
 /* dataSecret: a server of the build before says none, which reads as none. */
 const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
@@ -346,6 +348,13 @@ export class WorkerKeeper {
     if (this.hourly.due(what)) this.opts.log(line);
   }
 
+  /* Which service of the data machines this keeper's visitor reaches through the relay. A keeper that keeps a copy
+     reaches the one with the way to the data while the leader gives it that secret, and the app's, as a worker does,
+     once it gives none: a machine that stopped holding the data still has to give the leader what it holds. */
+  private visitKind(): 'app' | 'data' {
+    return this.opts.visitKind === 'data' && this.view?.link?.dataSecret ? 'data' : 'app';
+  }
+
   /* The data machines of the view, each with the loopback port the visitor opens to it while there is a link. */
   private targets(): DialTarget[] {
     if (this.disconnected || !this.view) return [];
@@ -353,7 +362,7 @@ export class WorkerKeeper {
     const { link } = this.view;
     /* A machine that keeps a copy is among the data machines itself, and dials the others. */
     const data = this.view.data.filter(machine => machine.networkId !== this.opts.config.machineId);
-    const through = this.opts.visitKind === 'data' ? Boolean(link?.dataSecret) : Boolean(link);
+    const through = Boolean(link);
     return data.map((machine, i) => ({ machine: machine.machine, networkId: machine.networkId, addresses: machine.addresses, peerPort: machine.peerPort, relayPort: through ? first + i : null }));
   }
 
@@ -386,17 +395,16 @@ export class WorkerKeeper {
     if (!link || data.length === 0) return null;
     const { name, serverAddr, serverPort, visitorKey, appSecret, dataSecret } = link;
     /* A machine that keeps a copy visits the service with the way to the data, and never itself. */
-    if (this.opts.visitKind === 'data') {
-      const others = data.filter(machine => machine.networkId !== this.opts.config.machineId);
-      if (!dataSecret || others.length === 0) return null;
-      return { link: { name, serverAddr, serverPort, visitorKey, appSecret, dataSecret }, targets: others.map(machine => machine.networkId) };
-    }
-    return { link: { name, serverAddr, serverPort, visitorKey, appSecret }, targets: data.map(machine => machine.networkId) };
+    const others = data.filter(machine => machine.networkId !== this.opts.config.machineId);
+    if (others.length === 0) return null;
+    if (this.visitKind() === 'data' && dataSecret) return { link: { name, serverAddr, serverPort, visitorKey, appSecret, dataSecret }, targets: others.map(machine => machine.networkId) };
+    return { link: { name, serverAddr, serverPort, visitorKey, appSecret }, targets: others.map(machine => machine.networkId) };
   }
 
+  /* A link with the secret of the data service is the one that reaches it. */
   private visitClient({ link, targets }: Visit): Client {
     const { machineId, dir } = this.opts.config;
-    return this.opts.visitClientFor?.(link, machineId, targets) ?? visitClientFor(link, { machineId, targets, dir, kind: this.opts.visitKind ?? 'app' });
+    return this.opts.visitClientFor?.(link, machineId, targets) ?? visitClientFor(link, { machineId, targets, dir, kind: link.dataSecret ? 'data' : 'app' });
   }
 
   private unredeemed(): string | null {
@@ -701,8 +709,11 @@ export class WorkerKeeper {
       /* What only a build that knows copies takes: a machine that could not become a data machine says so as a copy
          that stopped, and a keeper that keeps a copy says how it does. */
       const setup: CopyReport = { state: 'stopped', progress: null, error: 'setup', at: null, name: null, old: null };
-      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.() };
+      const wiped = this.wiped();
+      const backups = { ...(this.ageRecipient ? { ageKey: this.ageRecipient } : {}), heldBackups: this.holder.store().reported(), ...(this.becoming?.failure() ? { copy: setup } : {}), ...this.opts.extraReport?.(), ...(wiped ? { wiped } : {}) };
       let res = await this.askLeader('POST', '/api/network/report', { ...body, ...backups });
+      /* The leader heard that this machine holds nothing any more: the updater's word of it has done its work. */
+      if (res?.ok && wiped) rmSync(join(this.opts.config.controlDir, WIPED_FILE), { force: true });
       /* A leader an update took back to the build before refuses words it does not know: the report goes again at once
          without them. */
       if (res?.status === 400) res = await this.askLeader('POST', '/api/network/report', body);
@@ -710,6 +721,15 @@ export class WorkerKeeper {
     } catch (err) {
       if (!this.stopped) this.sayHourly('report', `Could not report this machine to the company server: ${reasonOf(err)}`);
     }
+  }
+
+  /* Whether this machine holds nothing of the company's data any more, though the leader still counts on it for what
+     it held: its updater said it wiped it, or it never held any, as a worker's keeper with no copy and no wipe going on. */
+  private wiped(): boolean {
+    const { controlDir } = this.opts.config;
+    if (existsSync(join(controlDir, WIPED_FILE))) return true;
+    if ((this.opts.role ?? 'worker') !== 'worker' || !this.view?.copy?.upload) return false;
+    return !existsSync(join(controlDir, WIPE_FILE)) && !existsSync(join(controlDir, REPLICA_FILE));
   }
 
   private noLeader(req: http.IncomingMessage): Refusal {

@@ -1,13 +1,14 @@
-import { statfsSync } from 'node:fs';
+import { createReadStream, statfsSync } from 'node:fs';
 import { DbDoor, composeAllowed } from '../../net/db-door.js';
 import { PeerDoor } from '../../net/peer-door.js';
-import { PeerServer } from '../../net/peer-server.js';
+import { PEER_PATHS, PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import { CopyMaker, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
 import type { FollowConfig } from './follow-config.js';
+import { Leaving, type LeavingOptions } from './leave.js';
 import type { Sql } from './lease-store.js';
 import { machineKey, reasonOf } from './machine-keys.js';
 import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
@@ -51,6 +52,8 @@ export type FollowKeeperOptions = {
   everyMs?: number;
   replicaEveryMs?: number;
   maker?: Partial<CopyMakerOptions>;
+  /* What a test changes in how the machine gives up the data once its owner lost the scope. */
+  leaving?: Partial<LeavingOptions>;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
@@ -59,9 +62,11 @@ export type FollowKeeperOptions = {
    database: it reaches the leader as a worker does and serves the company on its own address, and besides that it
    makes this machine's copy and keeps it, opens a door through which its database reaches the leader's, and serves a
    peer link of its own, so the leader can read what this machine holds. It takes no lease and runs no frpc of the
-   company's link, so nothing it does can make this machine write the company's tables. */
+   company's link, so nothing it does can make this machine write the company's tables. Once the leader says its owner
+   sees the whole company no more, it stops the copy, gives the leader what it holds, and has the machine wiped. */
 export class FollowKeeper {
   private readonly maker: CopyMaker;
+  private readonly leaving: Leaving;
   private readonly worker: WorkerKeeper;
   private readonly peerDoor: PeerDoor;
   private readonly door: DbDoor;
@@ -101,6 +106,14 @@ export class FollowKeeper {
       extraReport: () => ({ copy: this.maker.report() }),
       onView: view => this.heard(view),
       ...opts.worker,
+    });
+    this.leaving = new Leaving({
+      controlDir: config.controlDir,
+      dir: config.dir,
+      halt: () => this.maker.halt(),
+      put: (id, file, length) => this.put(id, file, length),
+      log,
+      ...opts.leaving,
     });
     this.peerDoor = new PeerDoor({ app: opts.app });
     this.door = new DbDoor({
@@ -206,15 +219,35 @@ export class FollowKeeper {
   }
 
   private async lookOnce(): Promise<void> {
+    /* A machine that stops holding the data makes no copy any more, and its app is off: what it holds is the leader's
+       to read, and nobody else's. */
+    const owed = this.view?.copy?.upload ?? null;
+    if (owed) {
+      this.giveWord('off');
+      await this.leaving.step(owed);
+      return;
+    }
     await this.maker.tick(this.view?.copy ?? null);
-    this.giveWord();
+    this.giveWord(this.maker.mode());
     await this.keepReplica();
   }
 
-  /* The app reads once the copy holds every table, and is off until then; it never leads on this keeper's word. */
-  private giveWord(): void {
+  /* What this machine holds goes to the keeper that leads, on a stream of its own, with its length said first. */
+  private async put(id: string, file: string, length: number): Promise<number> {
+    const body = createReadStream(file);
     try {
-      writeKeeperState(this.opts.config.controlDir, { mode: this.maker.mode(), at: new Date().toISOString(), link: null });
+      const answer = await this.worker.parts().link.stream('PUT', `${PEER_PATHS.upload}${id}`, body, length);
+      answer.body.destroy();
+      return answer.status;
+    } finally {
+      body.destroy();
+    }
+  }
+
+  /* The app reads once the copy holds every table, and is off until then; it never leads on this keeper's word. */
+  private giveWord(mode: 'off' | 'read'): void {
+    try {
+      writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${reasonOf(err)}`);

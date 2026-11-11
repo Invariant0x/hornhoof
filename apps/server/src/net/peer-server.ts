@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { PassThrough, type Duplex } from 'node:stream';
 import tls from 'node:tls';
 import type { PeerBackups } from '../modules/keeper/backups.js';
+import type { PeerUploads } from '../modules/keeper/uploads.js';
 import type { HeldCertificate } from '../modules/keeper/certificate.js';
 import type { MachineKey } from '../modules/keeper/machine-keys.js';
 import { certFacts } from '../modules/network/authority.js';
@@ -13,7 +14,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -33,12 +34,14 @@ export type PeerServerOptions = {
   hello: (peer: Peer) => Record<string, unknown>;
   /* The bundles this machine gives to the machines that hold them, and takes back from one; without it, neither. */
   backups?: PeerBackups;
+  /* What takes the upload of a machine that stopped holding the company's data; without it, none is taken. */
+  uploads?: PeerUploads;
   log: (line: string) => void;
   now?: () => Date;
   sweepMs?: number;
 };
 type Kind = 'peer' | 'app';
-type Route = { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'refused'; status: 403 | 404 };
+type Route = { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'upload'; id: string; length: number | null } | { to: 'refused'; status: 403 | 404 };
 type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number) => void; reject: (err: Error) => void };
 
 const SWEEP_MS = 5000;
@@ -64,6 +67,10 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if (method === 'CONNECT') return routeOfConnect(headers[':authority'], kind, role, db);
   if ((method === 'GET' || method === 'PUT') && path.startsWith(PEER_PATHS.backups) && UUID.test(path.slice(PEER_PATHS.backups.length))) {
     return { to: 'bundle', id: path.slice(PEER_PATHS.backups.length), put: method === 'PUT' };
+  }
+  if (method === 'PUT' && path.startsWith(PEER_PATHS.upload) && UUID.test(path.slice(PEER_PATHS.upload.length))) {
+    const length = /^\d{1,15}$/.test(String(headers['content-length'])) ? Number(headers['content-length']) : null;
+    return { to: 'upload', id: path.slice(PEER_PATHS.upload.length), length };
   }
   return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
 }
@@ -299,6 +306,7 @@ export class PeerServer {
     if (route.to === 'app') return void tunnel(stream, this.opts.door.connect(peer));
     if (route.to === 'db') return void tunnel(stream, openTcp(route.db), bytes => this.toDb.set(peer.machine, (this.toDb.get(peer.machine) ?? 0) + bytes));
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
+    if (route.to === 'upload') return void this.takeUpload(stream, peer, route.id, route.length);
     answerEmpty(stream, route.status);
   }
 
@@ -322,6 +330,21 @@ export class PeerServer {
     stream.pipe(body);
     stream.once('close', () => body.destroy());
     const status = this.opts.backups ? await this.opts.backups.put(peer, id, body).catch(() => 400 as const) : 404;
+    stream.unpipe(body);
+    body.destroy();
+    answerEmpty(stream, status);
+    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+  }
+
+  /* What a machine held when it stopped holding the company's data comes here. It is taken as the bundle above is: what
+     takes it reads a copy of the stream, and a machine that is refused, or sends too much, is cut at once. The machine
+     says first how long it is: a stream that a peer cut ends here as one that was sent whole does. */
+  private async takeUpload(stream: ServerHttp2Stream, peer: Peer, id: string, length: number | null): Promise<void> {
+    const body = new PassThrough();
+    body.on('error', ignore);
+    stream.pipe(body);
+    stream.once('close', () => body.destroy());
+    const status = this.opts.uploads ? await this.opts.uploads.put(peer, id, body, length).catch(() => 400 as const) : 404;
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);

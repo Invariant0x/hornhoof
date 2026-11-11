@@ -11,6 +11,9 @@
 # hornhoof_restore, db-<name> for any other; closed-<name> is there while a database takes no connections, and
 # oid-<name> holds the number the server knows it by, which it keeps under every name. STUB_FOLDS: the server keeps the
 # name of a database in capitals, as a real one keeps it in small letters, whatever it was asked.
+# STUB_TABLES and STUB_COLUMNS: the tables and the columns of the company's three schemas, as "schema.table" and
+# "schema.table.column". STUB_LED words name the databases that once led the company. STUB_STATE/volume-gone is there
+# once the database's volume is removed.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 word() {
   local key=$1 w
@@ -52,6 +55,11 @@ oid_of() {
 statement() {
   local from to
   case "$1" in
+    # The database an upload is loaded into, which is there from then on.
+    'CREATE DATABASE hornhoof_uploading_'*)
+      from=${1#CREATE DATABASE }
+      [ ! -f "$(db_file "$from")" ] || return 1
+      printf '0' > "$(db_file "$from")" ;;
     'DROP DATABASE IF EXISTS '* | 'DROP DATABASE '*)
       from=${1#DROP DATABASE }; from=${from#IF EXISTS }; from=${from%% *}
       rm -f "$(db_file "$from")" "$STUB_STATE/closed-$from" "$STUB_STATE/oid-$from" ;;
@@ -137,6 +145,20 @@ case "$1 $2" in
         copy=$(($(cat "$STUB_STATE/copies" 2> /dev/null || echo 0) + 1))
         printf '%s' "$copy" > "$STUB_STATE/copies"
         printf -- '-- a dump of the %s database\n-- migrations %s\n-- copy %s\n' "$of" "$(cat "$(db_file "$of")")" "$copy" ;;
+      # The tables and the columns a database has, one a line.
+      *'FROM information_schema.tables'*) for w in ${STUB_TABLES:-net.journal net_local.state public.agents public.tasks}; do echo "$w"; done ;;
+      *'FROM information_schema.columns'*)
+        for w in ${STUB_COLUMNS:-net.journal.id net.journal.tbl net_local.state.machine public.agents.id public.tasks.id public.tasks.title}; do echo "$w"; done ;;
+      # The rows of one table, as CSV with its header. STUB_COPY_OUT=fail: the table cannot be read.
+      *' TO STDOUT '*)
+        [ "${STUB_COPY_OUT:-ok}" != fail ] || { echo 'ERROR:  could not read block' >&2; exit 3; }
+        printf 'id,title\n1,a row\n' ;;
+      # Whether a database has the table that tells of a term it held, and whether that holds a row.
+      # STUB_STATE_ASK=fail: the database does not say.
+      *"relname = 'state'"*) [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2; echo 1 ;;
+      *'FROM net_local.state'*)
+        [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2
+        case " ${STUB_LED:-} " in *" $(db_named "$@") "*) echo 1 ;; *) echo 0 ;; esac ;;
       # What the updater had said by the time it first asked the database.
       *'FROM drizzle.__drizzle_migrations'*)
         of=$(db_named "$@")
@@ -170,6 +192,14 @@ case "$1 $2" in
   # The leader's schema, read through the keeper's door for a copy: the password comes by the environment and stands in
   # no argument. STUB_SCHEMA=fail: the leader cannot be read.
   'exec -e')
+    # The rows of one table of an upload, on standard input. STUB_COPY_IN=fail: the table does not take them.
+    case " $* " in
+      *'\copy '*)
+        [ "${STUB_COPY_IN:-ok}" != fail ] || { cat > /dev/null; echo 'ERROR:  null value in column' >&2; exit 3; }
+        table="$*"; table=${table#*\\copy }; table=${table%% *}
+        cat > "$STUB_STATE/copied-$(printf '%s' "$table" | tr -d '"')"
+        exit 0 ;;
+    esac
     [ -z "${PGPASSWORD:-}" ] || printf 'pg_dump had its password\n' >> "$STUB_LOG"
     [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
     case " $* " in
@@ -242,7 +272,13 @@ case "$1 $2" in
           *' pull '*)
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
-          *' config --services '*) services_in "$(compose_file "$@")" ;;
+          # With no profile on, as COMPOSE_PROFILES said empty, the services that keep data are not named.
+          *' config --services '*)
+            if [ "${COMPOSE_PROFILES-unset}" = '' ]; then services_in "$(compose_file "$@")" | grep -v -e '^db$' -e '^migrate$' -e '^app$'; else services_in "$(compose_file "$@")"; fi ;;
+          *' config --format json '*)
+            printf '{"services":{"db":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]}},"volumes":{"pgdata":{"name":"hornhoof_pgdata"},"control":{"name":"hornhoof_control"}}}\n' ;;
+          # A machine that stopped keeping a copy starts what a worker runs.
+          *' up -d --no-build --remove-orphans '*) [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG" ;;
           # Whether what a restore carried over is there for the app that starts now.
           *' up -d --no-build app '*) [ ! -f "$HORNHOOF_CONTROL_DIR/restore-carry.json" ] || printf 'up with the carry\n' >> "$STUB_LOG" ;;
           # The services of a machine that joined, started under the role compose is told. STUB_UP=fail: its database
@@ -291,6 +327,14 @@ case "$1 $2" in
           *' --entrypoint ip '*)
             [ "${STUB_IP:-}" != fail ] || exit 1
             printf '%s\n' "${STUB_IP:-}" ;;
+        esac ;;
+      # The volume of the database. STUB_VOLUME_RM=fail: it cannot be removed.
+      volume)
+        case "$2" in
+          inspect) [ ! -f "$STUB_STATE/volume-gone" ] || exit 1 ;;
+          rm)
+            [ "${STUB_VOLUME_RM:-ok}" != fail ] || { echo 'Error response from daemon: volume is in use' >&2; exit 1; }
+            touch "$STUB_STATE/volume-gone" ;;
         esac ;;
       # The container goes, and a command that runs in it ends.
       rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;

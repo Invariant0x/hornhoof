@@ -7,7 +7,7 @@ import type { Person } from '../../auth/session.js';
 import type { Mode } from '../keeper/state.js';
 import type { Db } from '../../db/client.js';
 import { MIGRATIONS } from '../../db/client.js';
-import { certificates, companies, computerRuns, departments, invites, machineAccess, machines, people, personAccess, recoveryKeys, sessions, teams } from '../../db/schema.js';
+import { certificates, companies, computerRuns, departments, invites, machineAccess, machines, PEER_SECRET_KINDS, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions, teams } from '../../db/schema.js';
 import { ApiError, loggable, type ErrorReason } from '../../errors.js';
 import { writeChoice } from '../merge/kept.js';
 import { authorityOf, findThisMachine } from '../network/store.js';
@@ -91,7 +91,8 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   await db.delete(invites).where(and(isNull(invites.usedAt), carry.invites.length > 0 ? notInArray(invites.tokenHash, carry.invites) : undefined));
   const live = new Set((await db.select({ id: machines.id }).from(machines).where(isNull(machines.revokedAt))).map(row => row.id));
   await disconnectMachines(ctx, carry.machines.filter(machine => machine.revoked && live.has(machine.id)).map(machine => machine.id));
-  for (const machine of carry.machines) await db.update(machines).set({ lendsTests: machine.lendsTests, keepsBackups: machine.keepsBackups }).where(eq(machines.id, machine.id));
+  for (const machine of carry.machines) await db.update(machines).set({ lendsTests: machine.lendsTests, keepsBackups: machine.keepsBackups, ...holdsNow(machine) }).where(eq(machines.id, machine.id));
+  await carryLink(db, company.id, carry);
   const now = new Date();
   if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
   await carryRecoveryKeys(db, company.id, carry, known, now);
@@ -103,6 +104,33 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   ctx.bus.accessChanged(company.id);
   ctx.bus.publish(company.id, { type: 'org' });
   ctx.bus.publish(company.id, { type: 'computer' });
+}
+
+/* Whether a machine holds the company's data now, as the old database had it when it closed: an older bundle would
+   else give the data back to a machine that stopped holding it. One that holds it no more has no place either; the
+   ranking gives the places anew. */
+function holdsNow(machine: Carry['machines'][number]): Partial<typeof machines.$inferInsert> {
+  if (machine.role === undefined) return {};
+  const left = machine.role !== 'data' ? { serverOrder: null, serverWhy: null } : {};
+  return { role: machine.role, dataLeftAt: machine.dataLeftAt ? new Date(machine.dataLeftAt) : null, uploadState: machine.uploadState ?? null, ...left };
+}
+
+/* The link and the secrets of the peer services as they were when the old database closed: the key the relay takes
+   now, a change of it that was under way, and secrets no machine that left knows. A company that has no link now gets
+   none back. */
+async function carryLink(db: Db, companyId: string, carry: Carry): Promise<void> {
+  await db.transaction(async tx => {
+    if (carry.link === null) await tx.delete(publicLinks);
+    else if (carry.link) {
+      const row = { name: carry.link.name, url: carry.link.url, keyEnc: carry.link.keyEnc, nextKeyEnc: carry.link.nextKeyEnc, tunnelEnc: carry.link.tunnelEnc, createdAt: new Date(carry.link.createdAt) };
+      await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: row });
+    }
+    if (!carry.peerSecrets) return;
+    await tx.delete(peerSecrets);
+    /* Only the kinds this build knows: a kind of a later one would not fit the table. */
+    const known = carry.peerSecrets.flatMap(secret => PEER_SECRET_KINDS.filter(kind => kind === secret.kind).map(kind => ({ kind, secretEnc: secret.secretEnc })));
+    if (known.length > 0) await tx.insert(peerSecrets).values(known);
+  });
 }
 
 /* The recovery keys as they were when the old database closed: its rows by their ids, and every other one retired. */

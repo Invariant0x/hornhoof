@@ -1,5 +1,6 @@
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
+import type { UploadState } from '../../db/schema.js';
 import type { CopyOrder } from '../keeper/copy.js';
 import { queryOf } from '../merge/leader.js';
 
@@ -30,12 +31,18 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
 
 /* What the leader tells a machine that keeps a copy: whether its slot is there and whole, how big the leader's database
    is, to count the copy's progress against, and how many migrations the leader's schema has, so a copy made with
-   another schema makes itself again. slot: null while the copy named none. */
-export async function copyOrder(ctx: Ctx, row: { copyName: string | null }): Promise<CopyOrder> {
+   another schema makes itself again. slot: null while the copy named none. A machine that stopped holding the data is
+   told what it still owes: what it holds, and its wipe once the leader has that merged and saved. */
+export async function copyOrder(ctx: Ctx, row: { id: string; copyName: string | null; copyOld?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
   const slot = !row.copyName ? null : !found ? 'missing' : found.walStatus === 'lost' ? 'lost' : 'ok';
   const [sized] = await q<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
   const [counted] = await q<{ n: number }>('SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations');
-  return { slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old: null, upload: null };
+  /* How far the leader is with the old database a copy that was made again still holds: until it is merged, or left
+     out, the copy keeps it. A merge that has no row yet gets one within the minute. */
+  const [merge] = row.copyOld ? await q<{ status: string }>('SELECT status FROM net.merges WHERE source = $1', [`machine:${row.id}:${row.copyOld}`]) : [];
+  const old = !row.copyOld ? null : merge?.status === 'merged' ? 'merged' : merge?.status === 'done' ? 'done' : 'waiting';
+  const upload = !row.uploadState ? null : row.uploadState === 'kept' ? 'wipe' : row.uploadState;
+  return { slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload };
 }

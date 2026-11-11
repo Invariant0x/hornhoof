@@ -7,7 +7,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, certificates, computerRuns, departments, invites, machineAccess, machines, people, personAccess, recoveryKeys, sessions } from '../src/db/schema.js';
+import { agents, certificates, computerRuns, departments, invites, machineAccess, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions } from '../src/db/schema.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, warningOf } from '../src/modules/backups/restore.js';
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
@@ -253,6 +253,46 @@ describe('a restore from a backup', () => {
     /* Twice is as once. */
     await applyCarry(s.app.ctx, carry);
     expect((await activeRecovery(db, s.config))?.recipient).toBe(newer.recipient);
+  });
+
+  it('keeps who holds the data and the link', async () => {
+    const s = await stand();
+    const { db } = s;
+    /* As the bundle has them: a machine that held the data then, a link key from then, and the secrets of then. */
+    const copy = await s.worker('mac');
+    const stays = await s.worker('laptop');
+    await db.update(machines).set({ role: 'data', serverOrder: 2 }).where(eq(machines.id, copy));
+    await db.insert(publicLinks).values({ companyId: s.acme.id, name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'older-key', tunnelEnc: 'older-tunnel' });
+    await db.delete(peerSecrets);
+    await db.insert(peerSecrets).values([{ kind: 'app', secretEnc: 'older-app' }, { kind: 'data', secretEnc: 'older-data' }]);
+    const left = '2026-11-10T08:00:00.000Z';
+    const made = '2026-11-01T00:00:00.000Z';
+    const carry: Carry = {
+      people: [], invites: [], serials: [], recoveryKeys: [],
+      machines: [
+        { id: copy, revoked: false, lendsTests: true, keepsBackups: true, role: 'worker', dataLeftAt: left, uploadState: 'waiting' },
+        { id: stays, revoked: false, lendsTests: true, keepsBackups: true, role: 'data', dataLeftAt: null, uploadState: null },
+      ],
+      link: { name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'newer-key', nextKeyEnc: 'newer-next', tunnelEnc: 'newer-tunnel', createdAt: made },
+      peerSecrets: [{ kind: 'app', secretEnc: 'newer-app' }, { kind: 'data', secretEnc: 'newer-data' }, { kind: 'visit', secretEnc: 'newer-visit' }],
+    };
+    await applyCarry(s.app.ctx, carry);
+    const machine = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    /* The machine that stopped holding the data since does not hold it again, and still owes its upload. */
+    expect(await machine(copy)).toMatchObject({ role: 'worker', dataLeftAt: new Date(left), uploadState: 'waiting', serverOrder: null });
+    expect(await machine(stays)).toMatchObject({ role: 'data', dataLeftAt: null, uploadState: null });
+    /* The link's key is the one the relay takes now, with a change that was under way, and the secrets are today's. */
+    expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'acme', keyEnc: 'newer-key', nextKeyEnc: 'newer-next', tunnelEnc: 'newer-tunnel', createdAt: new Date(made) }]);
+    expect((await db.select().from(peerSecrets)).map(row => `${row.kind}=${row.secretEnc}`).sort()).toEqual(['app=newer-app', 'data=newer-data', 'visit=newer-visit']);
+    /* A company that has no link now gets none back with an older bundle. */
+    await applyCarry(s.app.ctx, { ...carry, link: null, peerSecrets: [] });
+    expect(await db.select().from(publicLinks)).toEqual([]);
+    expect(await db.select().from(peerSecrets)).toEqual([]);
+    /* A carry of an updater from before knows none of this, and leaves it all as the bundle has it. */
+    await db.insert(publicLinks).values({ companyId: s.acme.id, name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'older-key', tunnelEnc: 'older-tunnel' });
+    await applyCarry(s.app.ctx, { people: [], invites: [], serials: [], recoveryKeys: [], machines: [{ id: stays, revoked: false, lendsTests: true, keepsBackups: true }] });
+    expect(await db.select().from(publicLinks)).toMatchObject([{ keyEnc: 'older-key' }]);
+    expect(await machine(stays)).toMatchObject({ role: 'data' });
   });
 
   it('marks a command that was on its way as lost', async () => {

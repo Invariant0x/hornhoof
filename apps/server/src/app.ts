@@ -207,7 +207,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.merger = new Merger(ctx, keptDatabases(deps.db, deps.config));
   ctx.ranking = new Ranking(ctx);
   ctx.replication = replicationOf(deps.db);
-  ctx.doorsWanted = async () => [];
+  ctx.doorsWanted = () => ctx.merger.doors();
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);

@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { companies, departments } from '../src/db/schema.js';
+import { companies, departments, machines, people } from '../src/db/schema.js';
 import * as apply from '../src/modules/merge/apply.js';
 import { CHOICE_FILE, type KeptDatabases } from '../src/modules/merge/kept.js';
-import { MERGE_EVERY_MS, Merger, RETRY_MAX_MS } from '../src/modules/merge/merger.js';
+import { forkWanted, MERGE_EVERY_MS, Merger, RETRY_MAX_MS } from '../src/modules/merge/merger.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
@@ -17,7 +17,7 @@ import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
 
-type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; tried_at: string | null; error: string | null; counts: { added?: number } };
+type MergeRow = { id: string; source: string; label: string; status: string; path: string | null; fork: string | null; tries: number; tried_at: string | null; error: string | null; machine: string | null; counts: { added?: number } };
 
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
 
@@ -188,6 +188,68 @@ describe('the databases a restore set aside', () => {
     await s.merger.discover();
     await s.merger.tick();
     expect([(await s.merges()).map(row => row.source), s.dropped]).toEqual([['kept:hornhoof_before_t1', 'kept:hornhoof_before_t2'], ['hornhoof_before_t1']]);
+  });
+
+  it('merges an upload and asks for its fork bundle', async () => {
+    const s = await stand();
+    const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
+    const [machine] = await s.db
+      .insert(machines)
+      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'ivan-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
+      .returning();
+    const stateOf = async () => (await s.db.select().from(machines).where(eq(machines.id, machine!.id)))[0]!.uploadState;
+    const name = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
+    /* What the machine held: a copy that never led, with a department the leader lost since. */
+    const upload = await s.keep(name);
+    await upload.client.exec('DELETE FROM net_local.lease; DELETE FROM net_local.state');
+    /* One the updater is still loading is no source yet. */
+    await s.keep('hornhoof_uploading_99bb2233aabbccdd_20261111t120009');
+    await s.merger.discover();
+    await s.merger.discover();
+    const [found, ...others] = await s.merges();
+    expect(others).toEqual([]);
+    expect(found).toMatchObject({ source: `upload:${name}`, status: 'pending', machine: machine!.id, label: "ivan-mac's copy, uploaded 11 Nov 12:00 UTC" });
+    expect(found!.fork).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await stateOf()).toBe('received');
+    /* Its bundle is asked of the keeper as that of a database a restore kept. */
+    expect(await forkWanted(s.db)).toEqual({ id: found!.fork, database: name });
+    /* The bundle recorded while the merge is only applied: nothing is told the machine yet. */
+    await s.backup(found!.fork!);
+    await s.db.execute(sql`UPDATE net.merges SET status = 'applied', tried_at = now(), tries = 20 WHERE id = ${found!.id}`);
+    await s.merger.tick();
+    expect([await stateOf(), s.dropped]).toEqual(['received', []]);
+    /* Merged and saved: the machine may wipe, the database goes and the merge is done. */
+    await s.db.execute(sql`UPDATE net.merges SET status = 'pending', tried_at = NULL, tries = 0 WHERE id = ${found!.id}`);
+    await s.merger.tick();
+    expect((await s.merges())[0]).toMatchObject({ status: 'merged', error: null });
+    await s.merger.tick();
+    expect([await stateOf(), s.dropped, (await s.merges())[0]!.status]).toEqual(['kept', [name], 'done']);
+  });
+
+  it('waits for the bundle of an upload, and asks a machine again whose upload is gone', async () => {
+    const s = await stand();
+    const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
+    const [machine] = await s.db
+      .insert(machines)
+      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'ivan-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
+      .returning();
+    const stateOf = async () => (await s.db.select().from(machines).where(eq(machines.id, machine!.id)))[0]!.uploadState;
+    const name = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
+    const upload = await s.keep(name);
+    await upload.client.exec('DELETE FROM net_local.lease; DELETE FROM net_local.state');
+    await s.merger.tick();
+    await s.merger.tick();
+    /* Merged, and not saved as a bundle yet: the machine keeps what it holds. */
+    expect([(await s.merges())[0]!.status, await stateOf(), s.dropped]).toEqual(['merged', 'received', []]);
+    /* A database that went before it was read: the machine is asked for it again. */
+    const again = 'hornhoof_upload_99bb2233aabbccdd_20261111t130000';
+    await s.keep(again);
+    await s.merger.discover();
+    s.databases.delete(again);
+    await s.merger.discover();
+    const lost = (await s.merges()).find(row => row.source === `upload:${again}`)!;
+    expect(lost).toMatchObject({ status: 'done', error: 'The database is not on this server any more, so nothing of it was brought back.' });
+    expect(await stateOf()).toBe('waiting');
   });
 
   it('goes on with the check after a stop', async () => {

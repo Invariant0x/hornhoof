@@ -430,6 +430,27 @@ describe('joining the company as a machine', () => {
     expect((await workerView(c.app.ctx, w.machine)).copy).toMatchObject({ slot: 'lost' });
   });
 
+  it('tells a machine that left to upload, then to wipe', async () => {
+    const c = await company({ HORNHOOF_KEEPER: 'on' });
+    await c.link('acme');
+    await c.serverCertificate();
+    const w = await c.worker();
+    type Said = { role: string; copy?: { slot: string | null; upload: string | null } | null };
+    const told = async () => (await c.peers(keeperOf(w.machine))).json() as Said;
+    /* It held the data and its owner lost the scope: a worker by its row, that still owes what it holds. */
+    await c.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
+    expect(await told()).toMatchObject({ role: 'worker', copy: { slot: null, upload: 'waiting' } });
+    /* The leader has it as a database: nothing more is asked of the machine until that is merged and saved. */
+    await c.db.update(machines).set({ uploadState: 'received' }).where(eq(machines.id, w.machine));
+    expect((await told()).copy).toMatchObject({ upload: 'received' });
+    await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
+    expect((await told()).copy).toMatchObject({ upload: 'wipe' });
+    expect((await workerView(c.app.ctx, w.machine)).copy).toMatchObject({ upload: 'wipe' });
+    /* Once it said it is wiped it is a worker like any other. */
+    await c.db.update(machines).set({ uploadState: null }).where(eq(machines.id, w.machine));
+    expect((await told()).copy).toBeNull();
+  });
+
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {
     const c = await company();
     const w = await c.worker();

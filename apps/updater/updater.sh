@@ -48,6 +48,12 @@
 # old database by, so whatever stops it, the next start puts everything back as it was, or goes on when the swap was
 # done. The old database is never removed here.
 #
+# A machine that stopped holding the company's data gives what it held to the company server and is then wiped. Its
+# keeper asks with upload.json {id} for every table of its database as CSV, packed into uploads/<id>.tar.gz. The
+# company server's keeper takes that file and asks with load.json for it as a database of its own, which this fills
+# with the server's own schema and the file's rows, as rows alone. Once the server has it merged and saved, the
+# machine's keeper asks with wipe.json {id} for the database, its dumps and the company's secrets to go, step by step.
+#
 # With HORNHOOF_ROLE=worker it runs on a machine that keeps none of the company's data. There the keeper writes
 # request.json for the build the company server runs. This downloads it, says so with the step wait, and installs once
 # the keeper passes on the server's word in go.json {id, commit, until}: the request's id, its tag, and the second the
@@ -283,8 +289,9 @@ same_node() {
 
 # A machine that joined the company: a worker, or one that keeps a copy of its data, which its keeper marks with
 # replica.json. Either follows the company server's build as a worker does: it saves no database and runs no migration
-# of its own, since a copy's schema is the company server's, and it installs when the server gives it its turn.
-worker() { [ "$ROLE" = worker ] || [ -f "$CONTROL/replica.json" ]; }
+# of its own, since a copy's schema is the company server's, and it installs when the server gives it its turn. A
+# machine whose settings say worker is one whatever this updater was started as: it was wiped of the data it kept.
+worker() { [ "$ROLE" = worker ] || [ -f "$CONTROL/replica.json" ] || [ "$(env_value HORNHOOF_ROLE)" = worker ]; }
 
 # The service whose container is the build that runs here: the app on a server, the keeper on a worker, which has no app.
 main_service() { if worker; then printf keeper; else printf app; fi; }
@@ -428,7 +435,7 @@ dump_failed() {
 }
 
 # The data keeper asks for a dump with dump.json {id}, or with {id, database, reason: "fork"} for a database a restore
-# set aside. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
+# set aside or one made of what a machine uploaded. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
 # keeper asks anew under another id.
 dump_request() {
   local id db database reason
@@ -445,7 +452,7 @@ dump_request() {
     # own time, and no pass dumps the database again by itself.
     if [ -z "$database" ] && [ -z "$reason" ]; then
       make_dump "$id" "$db" || dump_failed "$id" || drop_dump "$id"
-    elif [ "$reason" = fork ] && kept_name "$database"; then
+    elif [ "$reason" = fork ] && { kept_name "$database" || upload_name "$database"; }; then
       make_fork_dump "$id" "$db" "$database" || dump_failed "$id" || drop_dump "$id"
     else
       dump_failed "$id" 'Not a kept database.' || drop_dump "$id"
@@ -1141,6 +1148,340 @@ schema_request() {
   rm -f "$request"
 }
 
+# The name of a table as an upload holds it: one of the three schemas the company's rows are in, and its name. And the
+# name of a column. Nothing else of an upload ever stands in a statement, and each between quotes.
+plain_table() {
+  [[ "$1" =~ ^(public|net|net_local)\.[a-z_][a-z0-9_]*$ ]]
+}
+plain_column() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_]*$ ]]
+}
+# The name of a database made of an upload, as the keeper that took it names it, and of no other.
+upload_name() {
+  [[ "$1" =~ ^hornhoof_upload_[0-9a-f]{16}_[0-9]{8}t[0-9]{6}$ ]]
+}
+quoted_table() { printf '"%s"."%s"' "${1%%.*}" "${1#*.}"; }
+
+# The folder uploads are made in on a machine that leaves the data, and taken into on the company server.
+uploads_dir() { mkdir -p "$CONTROL/uploads" && owned "$CONTROL/uploads" 700; }
+
+# upload_said <name> <done | failed> [line]: how an upload, or its load, ended, for the keeper alone to read.
+upload_said() {
+  local file="$CONTROL/uploads/$1.$2"
+  (umask 077 && printf '%s' "${3:+$3
+}" > "$file") && owned "$file" 600
+}
+
+# make_upload <id> <db container>: every table of the company's three schemas in the database in use here, as CSV with
+# its header, one file a table, in one packed file for the keeper to send. UPLOAD_WHY says why it could not.
+UPLOAD_WHY=''
+make_upload() {
+  local id=$1 db=$2 dir="$CONTROL/uploads/$1.tables" file="$CONTROL/uploads/$1.tar.gz" tables table names=''
+  rm -rf "$dir" "$file.part"
+  UPLOAD_WHY='The folder for the upload could not be made.'
+  (umask 077 && mkdir "$dir") || return 1
+  UPLOAD_WHY="This machine's database could not be asked."
+  tables=$(docker exec "$db" psql -U hornhoof -d hornhoof -At -c "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema IN ('public', 'net', 'net_local') ORDER BY 1" 2> /dev/null) &&
+    [ -n "$tables" ] || return 1
+  UPLOAD_WHY='A table could not be read.'
+  for table in $tables; do
+    plain_table "$table" || return 1
+    (umask 077 && docker exec "$db" psql -U hornhoof -d hornhoof -v ON_ERROR_STOP=1 -q -c "COPY $(quoted_table "$table") TO STDOUT (FORMAT csv, HEADER true)" > "$dir/$table.csv" 2> /dev/null) || return 1
+    names="$names $table.csv"
+  done
+  UPLOAD_WHY='The upload could not be packed.'
+  # shellcheck disable=SC2086 # names is a list of file names made of checked table names.
+  (umask 077 && tar -czf "$file.part" -C "$dir" $names 2> /dev/null) && owned "$file.part" 600 && mv "$file.part" "$file" || return 1
+  rm -rf "$dir"
+}
+
+# The keeper of a machine that stopped holding the company's data asks, with upload.json {id}, for everything its
+# database holds, to send it to the company server. This answers in uploads/<id>.done beside uploads/<id>.tar.gz, or
+# in .failed with a line, and removes the request. Only a machine that keeps a copy makes one.
+upload_request() {
+  local request="$CONTROL/upload.json" id db
+  [ -f "$request" ] || return 0
+  [ -n "$SERVER_DIR" ] && [ -f "$CONTROL/replica.json" ] || return 0
+  id=$(jq -r '.id // empty | tostring' "$request" 2> /dev/null || true)
+  if ! plain_id "$id" || [ -f "$CONTROL/uploads/$id.done" ] || [ -f "$CONTROL/uploads/$id.failed" ]; then
+    rm -f "$request"
+    return 0
+  fi
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || return 0
+  uploads_dir || return 0
+  if make_upload "$id" "$db"; then
+    upload_said "$id" 'done' || true
+  else
+    rm -rf "$CONTROL/uploads/$id.tables" "$CONTROL/uploads/$id.tar.gz.part" "$CONTROL/uploads/$id.tar.gz"
+    upload_said "$id" failed "$UPLOAD_WHY" || true
+    say "Could not make the upload of this machine's copy: $UPLOAD_WHY"
+  fi
+  rm -f "$request"
+}
+
+# unpack_upload <file> <folder> <most bytes>: the files of an upload, each the rows of one table and nothing else: no
+# other name, no folder, no link, and no more than it may unpack to.
+unpack_upload() {
+  local file=$1 dir=$2 max=$3 n names name
+  UPLOAD_WHY='The folder to unpack the upload in could not be made.'
+  rm -rf "$dir"
+  (umask 077 && mkdir "$dir") || return 1
+  UPLOAD_WHY='The upload unpacks to more than it may.'
+  n=$( (gunzip -c "$file" 2> /dev/null || true) | head -c "$((max + 1))" | wc -c | tr -d ' ')
+  [ "$n" -le "$max" ] || return 1
+  UPLOAD_WHY='The upload cannot be read.'
+  names=$(tar -tzf "$file" 2> /dev/null) && [ -n "$names" ] || return 1
+  UPLOAD_WHY='The upload holds a file that is no table of the company.'
+  while IFS= read -r name; do
+    plain_table "${name%.csv}" && [ "$name" != "${name%.csv}" ] || return 1
+  done <<< "$names"
+  UPLOAD_WHY='The upload cannot be read.'
+  (umask 077 && tar -xzf "$file" -C "$dir" 2> /dev/null) || return 1
+  UPLOAD_WHY='The upload holds what is no file.'
+  [ -z "$(find "$dir" -mindepth 1 ! -type f 2> /dev/null; find "$dir" -type f -links +1 2> /dev/null)" ]
+}
+
+# load_table <database> <file> <table> <columns of the server, one a line>: the rows of one file go into their table,
+# by the columns its header names, each of which the table has. The rows reach the database on the standard input of a
+# command of their own, so nothing of them is ever read as a statement.
+load_table() {
+  local loading=$1 path=$2 table=$3 columns=$4 header='' column list='' names
+  UPLOAD_WHY='A file of the upload names a column its table has none of.'
+  IFS= read -r header < "$path" || [ -n "$header" ] || return 1
+  header=${header%$'\r'}
+  IFS=, read -r -a names <<< "$header"
+  [ "${#names[@]}" -gt 0 ] || return 1
+  for column in "${names[@]}"; do
+    plain_column "$column" || return 1
+    case "
+$columns
+" in *"
+$table.$column
+"*) ;; *) return 1 ;; esac
+    list="$list${list:+, }\"$column\""
+  done
+  UPLOAD_WHY='A table of the upload could not be loaded.'
+  docker exec -e PGOPTIONS='-c session_replication_role=replica' -i "$DBC" psql -U hornhoof -d "$loading" -v ON_ERROR_STOP=1 -q \
+    -c "\\copy $(quoted_table "$table") ($list) FROM STDIN WITH (FORMAT csv, HEADER true)" < "$path" > /dev/null 2>&1
+}
+
+# load_upload <file> <database> <most bytes unpacked>: what a machine uploaded becomes a database of this server, under
+# another name until it is whole: this server's own schema, and each file as the rows of its table, with no trigger
+# run. No statement of the machine's runs: its bytes reach the database only as rows. UPLOAD_WHY says why it could not.
+load_upload() {
+  local file=$1 database=$2 max=$3 loading="hornhoof_uploading_${2#hornhoof_upload_}" dir="$CONTROL/uploads/loading" schema="$CONTROL/uploads/loading.sql"
+  local tables columns path table
+  unpack_upload "$file" "$dir" "$max" || return 1
+  UPLOAD_WHY='The database for the upload could not be made.'
+  psql_on postgres -c "CREATE DATABASE $loading" > /dev/null 2>&1 || return 1
+  UPLOAD_WHY="This server's schema could not be loaded into the database for the upload."
+  (
+    umask 077
+    docker exec "$DBC" pg_dump -U hornhoof --schema-only --no-owner --no-privileges --no-publications --no-subscriptions -d hornhoof > "$schema" 2> /dev/null &&
+      docker exec "$DBC" pg_dump -U hornhoof --data-only --table=drizzle.__drizzle_migrations -d hornhoof >> "$schema" 2> /dev/null
+  ) &&
+    docker exec -i "$DBC" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$loading" < "$schema" > /dev/null 2>&1 || return 1
+  UPLOAD_WHY='The database for the upload could not be asked.'
+  tables=$(psql_on "$loading" -At -c "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema IN ('public', 'net', 'net_local')" 2> /dev/null) || return 1
+  columns=$(psql_on "$loading" -At -c "SELECT table_schema || '.' || table_name || '.' || column_name FROM information_schema.columns WHERE table_schema IN ('public', 'net', 'net_local')" 2> /dev/null) || return 1
+  for path in "$dir"/*.csv; do
+    table=$(basename "$path" .csv)
+    case "
+$tables
+" in
+      *"
+$table
+"*) ;;
+      *)
+        say "The upload holds a table this server has none of: $table."
+        continue
+        ;;
+    esac
+    load_table "$loading" "$path" "$table" "$columns" || return 1
+  done
+  UPLOAD_WHY='The database of the upload could not be given its name.'
+  psql_on postgres -c "ALTER DATABASE $loading RENAME TO $database" > /dev/null 2>&1
+}
+
+# The keeper of the company server took what a machine uploaded and asks, with load.json {id, machine, file, database,
+# unpackMax}, for it as a database the merge reads. This answers beside the file's place in uploads/, in <its name
+# without .tar.gz>.done or .failed with a line, removes the file and what it unpacked whatever the end, and then the
+# request. A database a stop left half loaded goes first, and one that failed goes at once.
+load_request() {
+  local request="$CONTROL/load.json" file database max name old ok=''
+  [ -f "$request" ] || return 0
+  if worker || [ -z "$SERVER_DIR" ]; then return 0; fi
+  file=$(jq -r '.file // empty | tostring' "$request" 2> /dev/null || true)
+  database=$(jq -r '.database // empty | tostring' "$request" 2> /dev/null || true)
+  max=$(jq -r '.unpackMax // empty | tostring' "$request" 2> /dev/null || true)
+  name=${file##*/}
+  name=${name%.tar.gz}
+  if ! [[ "$name" =~ ^[0-9A-Fa-f]{64}-[0-9a-f-]{36}$ ]] || [ -f "$CONTROL/uploads/$name.done" ] || [ -f "$CONTROL/uploads/$name.failed" ]; then
+    rm -f "$request"
+    return 0
+  fi
+  DBC=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$DBC" ] || return 0
+  uploads_dir || return 0
+  for old in $(db_names || true); do
+    case "$old" in hornhoof_uploading_*) if plain_database "$old"; then psql_on postgres -c "DROP DATABASE IF EXISTS $old" > /dev/null 2>&1 || true; fi ;; esac
+  done
+  UPLOAD_WHY='The request names no database of an upload.'
+  if upload_name "$database" && plain_number "$max" && [ "${#max}" -le 15 ] && load_upload "$CONTROL/uploads/$name.tar.gz" "$database" "$max"; then ok=1; fi
+  rm -rf "$CONTROL/uploads/loading" "$CONTROL/uploads/loading.sql" "$CONTROL/uploads/$name.tar.gz"
+  if [ -n "$ok" ]; then
+    upload_said "$name" 'done' || true
+  else
+    if upload_name "$database"; then psql_on postgres -c "DROP DATABASE IF EXISTS hornhoof_uploading_${database#hornhoof_upload_}" > /dev/null 2>&1 || true; fi
+    upload_said "$name" failed "$UPLOAD_WHY" || true
+    say "Could not load what a machine uploaded: $UPLOAD_WHY"
+  fi
+  rm -f "$request"
+}
+
+# The volume this machine's database keeps its files in, by the name Docker knows it by; nothing when compose does not
+# say.
+db_volume() {
+  COMPOSE_PROFILES=data compose config --format json 2> /dev/null |
+    jq -r '((.services.db.volumes // []) | map(select(.type == "volume" and .target == "/var/lib/postgresql/data")) | .[0].source // empty) as $key | .volumes[$key].name // empty' 2> /dev/null || true
+}
+
+# Whether this machine's database may be wiped: 0 when no database of it ever led the company, or its volume is gone
+# already; 2 when one did; 1 when it could not be asked, which wipes nothing either. A database that led holds what
+# only a merge may bring back, and is never removed here.
+wipe_check() {
+  local volume db names name has led
+  volume=$(db_volume)
+  [ -n "$volume" ] || return 1
+  docker volume inspect "$volume" > /dev/null 2>&1 || return 0
+  db=$(compose ps -q db 2> /dev/null || true)
+  if [ -z "$db" ]; then
+    HORNHOOF_ROLE=data COMPOSE_PROFILES=data compose up -d --no-build db > /dev/null 2>&1 || true
+    return 1
+  fi
+  names=$(docker exec "$db" psql -U hornhoof -d postgres -tAc "SELECT COALESCE(string_agg(datname, ' '), '') FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres'" 2> /dev/null) || return 1
+  for name in $names; do
+    plain_database "$name" || return 1
+    has=$(docker exec "$db" psql -U hornhoof -d "$name" -tAc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'net_local' AND c.relname = 'state'" 2> /dev/null | tr -d ' ') || return 1
+    [ "$has" != 0 ] || continue
+    led=$(docker exec "$db" psql -U hornhoof -d "$name" -tAc 'SELECT count(*) FROM net_local.state' 2> /dev/null | tr -d ' ') || return 1
+    [ "$led" = 0 ] || return 2
+  done
+}
+
+# .env of a machine that holds the company's data no more: none of the company's secrets, no password of a database,
+# no profile that starts one, and a worker's role. Every other line as it was.
+wipe_env() {
+  local file="$SERVER_DIR/.env"
+  (umask 077 && awk '
+    /^(HORNHOOF_SECRET|NODE_KEY|RELAY_URL|POSTGRES_PASSWORD)=/ { sub(/=.*/, "="); print; next }
+    /^COMPOSE_PROFILES=/ { next }
+    /^HORNHOOF_ROLE=/ { if (!put) print "HORNHOOF_ROLE=worker"; put = 1; next }
+    { print }
+    END { if (!put) print "HORNHOOF_ROLE=worker" }' "$file" > "$file.new") && as_env "$file.new"
+}
+
+# What a worker runs starts under a worker's role, with no profile on, and what is left of the services that kept the
+# data goes.
+wipe_up() {
+  local services
+  services=$(COMPOSE_PROFILES='' compose config --services 2> /dev/null | grep -v '^updater$' | tr '\n' ' ') || return 1
+  [ -n "${services// /}" ] || return 1
+  # shellcheck disable=SC2086 # services is a space-separated list of compose service names.
+  HORNHOOF_ROLE=worker COMPOSE_PROFILES='' compose up -d --no-build --remove-orphans $services > /dev/null 2>&1
+}
+
+# wipe_step <step>: one step of a wipe; WIPE_WHY says what it could not do.
+WIPE_WHY=''
+wipe_step() {
+  local volume
+  case "$1" in
+    stop)
+      WIPE_WHY='could not stop its database'
+      COMPOSE_PROFILES=data compose rm -sf db migrate app > /dev/null 2>&1
+      ;;
+    volume)
+      WIPE_WHY="could not remove the database's volume"
+      volume=$(db_volume)
+      [ -n "$volume" ] || return 1
+      if docker volume inspect "$volume" > /dev/null 2>&1; then docker volume rm "$volume" > /dev/null 2>&1 || return 1; fi
+      ;;
+    files)
+      WIPE_WHY='could not remove the files of its database'
+      rm -rf "$CONTROL/dumps" "$CONTROL/restore" "$CONTROL/schema" "$CONTROL/uploads" &&
+        rm -f "$SERVER_DIR"/backups/hornhoof-*.sql.gz "$SERVER_DIR"/backups/hornhoof-*.tunnel.json "$CONTROL/schema.json" "$CONTROL/dump.json" "$CONTROL/upload.json"
+      ;;
+    env)
+      WIPE_WHY="could not take the company's settings out"
+      wipe_env && rm -f "$CONTROL/replica.json"
+      ;;
+    up)
+      WIPE_WHY='could not start what a worker runs'
+      wipe_up
+      ;;
+  esac
+}
+
+# The keeper of a machine that stopped holding the company's data, once the company server has everything it held,
+# asks with wipe.json {id} for all of it to go: the database with its volume, every dump and file of it, and the
+# company's secrets, after which the machine is a worker like any other. Each step is written into the request before
+# it runs, so a step that failed, or an updater that stopped, goes on from it at the next pass. The last step says so
+# in wiped.json {id, at}, and the look at this updater's own role, which comes next, starts one as a worker's. The
+# settings of a company server name no role, and nothing is ever wiped there.
+WIPE_SAID=''
+wipe_request() {
+  local request="$CONTROL/wipe.json" id step next checked
+  [ -f "$request" ] || return 0
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
+  id=$(jq -r '.id // empty | tostring' "$request" 2> /dev/null || true)
+  if ! plain_id "$id" || [ -z "$(env_value HORNHOOF_ROLE)" ]; then
+    rm -f "$request"
+    return 0
+  fi
+  step=$(jq -r '.step // "check" | tostring' "$request" 2> /dev/null || true)
+  while true; do
+    case "$step" in
+      stop) next=volume ;;
+      volume) next=files ;;
+      files) next='env' ;;
+      env) next=up ;;
+      up) next='done' ;;
+      done) next='' ;;
+      *) step=check next=stop ;;
+    esac
+    (umask 077 && jq -n --arg id "$id" --arg step "$step" '{id: $id, step: $step}' > "$request.new") && owned "$request.new" 600 && mv "$request.new" "$request" || return 0
+    case "$step" in
+      check)
+        checked=0
+        wipe_check || checked=$?
+        if [ "$checked" = 2 ]; then
+          [ "$WIPE_SAID" = led ] || say "This machine's database once led the company, so it is not wiped."
+          WIPE_SAID=led
+          return 0
+        fi
+        WIPE_WHY='could not ask its database whether it ever led'
+        [ "$checked" = 0 ] || { wipe_waits check; return 0; }
+        ;;
+      done)
+        (umask 077 && jq -n --arg id "$id" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{id: $id, at: $at}' > "$CONTROL/wiped.json.new") &&
+          owned "$CONTROL/wiped.json.new" 600 && mv "$CONTROL/wiped.json.new" "$CONTROL/wiped.json" || return 0
+        rm -f "$request"
+        say "This machine holds nothing of the company's data any more."
+        return 0
+        ;;
+      *) wipe_step "$step" || { wipe_waits "$step"; return 0; } ;;
+    esac
+    step=$next
+  done
+}
+
+# A step of a wipe that could not be done is said once, and tried again at the next pass.
+wipe_waits() {
+  [ "$WIPE_SAID" = "$1" ] || say "Could not wipe this machine's copy yet: $WIPE_WHY."
+  WIPE_SAID=$1
+}
+
 # An updater whose own role is not the one the settings name replaces itself, so the next one is started with it. One
 # try a minute, so a swap that did not take is tried again. A server's settings name no role, and nothing happens there.
 ROLE_SWAP_AT=0
@@ -1826,8 +2167,11 @@ if [ "${1:-}" = --once ]; then
   write_addresses
   handle_request
   become_data
+  wipe_request
   match_role
   schema_request
+  upload_request
+  load_request
   sweep_dumps
   dump_request
   restore_request
@@ -1855,8 +2199,11 @@ trap 'kill $ALIVE $RUNS $ADDRS $NODES_LOOK 2> /dev/null || true' EXIT
 while true; do
   handle_request
   become_data
+  wipe_request
   match_role
   schema_request
+  upload_request
+  load_request
   sweep_dumps
   dump_request
   restore_request

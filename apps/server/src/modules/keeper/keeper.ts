@@ -25,6 +25,7 @@ import { answerOf, askApp } from './app-call.js';
 import { BackupKeeper, type PeerBackups } from './backups.js';
 import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { DataLinks, type DataLinksOptions } from './data-links.js';
+import { UploadTaker } from './uploads.js';
 import { keepSize, KEEP_SIZE_EVERY_MS, SLOTS_EVERY_MS, sweepSlots } from './slots.js';
 import { SyncController, type SyncControllerOptions } from './sync.js';
 import { KEEPER_DIR, reasonOf } from './machine-keys.js';
@@ -367,6 +368,7 @@ export class Keeper {
       holdMs: this.opts.holdMs,
       peerClientFor: this.opts.peerClientFor,
       backups: this.peerBackups(),
+      uploads: this.uploads().peer(),
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
@@ -433,6 +435,18 @@ export class Keeper {
       this.backupsTimer = setTimeout(() => void this.takeBackups(), this.opts.backupKeysRetryMs ?? BACKUP_KEYS_RETRY_MS);
       this.backupsTimer.unref();
     }
+  }
+
+  /* What takes the uploads of the machines that stopped holding the data: only while this keeper leads, and only from
+     the machines its app's last answer names. */
+  private uploads(): UploadTaker {
+    const taker = new UploadTaker({
+      controlDir: this.opts.config.controlDir,
+      allowed: () => (this.mode() === 'lead' ? (this.peers?.current()?.uploads ?? []) : []),
+      log: this.opts.log,
+    });
+    taker.start();
+    return taker;
   }
 
   /* What the peer link serves of backups, also before the keeper of backups is there: nothing yet. */

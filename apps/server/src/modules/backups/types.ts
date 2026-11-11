@@ -53,8 +53,15 @@ export type Carry = {
   people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; scopeKind: string; isOwner: boolean; isCeoDelegate: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
   /* The hashes of the invites open now. */
   invites: string[];
-  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean }[];
+  /* role, dataLeftAt, uploadState: whether the machine holds the company's data now, and what one that stopped still
+     owes. An updater of the build before says none of the three, and the restored row keeps its own. */
+  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean; role?: 'data' | 'worker' | null; dataLeftAt?: string | null; uploadState?: 'waiting' | 'received' | 'kept' | null }[];
   /* The certificates revoked. */
   serials: string[];
   recoveryKeys: { id: string; recipient: string; linkPrint: string | null; linkName: string | null; linkUrl: string | null; madeBy: string; madeAt: string; retiredAt: string | null }[];
+  /* The company's link as the relay takes it now, each secret sealed as it is stored; null: it has none now. And the
+     secrets of the peer services, sealed the same way. Left out by an updater of the build before, and then the
+     restored database keeps what the bundle has. */
+  link?: { name: string; url: string; keyEnc: string; nextKeyEnc: string | null; tunnelEnc: string; createdAt: string } | null;
+  peerSecrets?: { kind: string; secretEnc: string }[];
 };

@@ -160,6 +160,21 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state()).toEqual({ path: 'direct', directFails: false, refused: false });
   });
 
+  it('forgets what a session that ended saw', async () => {
+    const stand = await standUp();
+    const sessions = stand.sessionsWith();
+    sessions.use([stand.target()]);
+    await until(() => sessions.seen().length === 1);
+    expect(sessions.seen()).toEqual(['127.0.0.1']);
+    /* The data machine is listed no more: its session ends, and the address it saw goes with it. */
+    sessions.use([]);
+    await until(() => sessions.seen().length === 0);
+    expect(sessions.leader()).toBeNull();
+    /* A new session says what it sees anew. */
+    sessions.use([stand.target()]);
+    await until(() => sessions.seen().length === 1);
+  });
+
   it('takes the relay when direct does not answer, and says so only for an address on its own network', async () => {
     const stand = await standUp();
     /* The relay's local port leads to the server's app door, as the visitor frpc's does. */

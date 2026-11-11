@@ -3,7 +3,7 @@ import { withNamedKeys } from './apply.js';
 import { factsOf, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
-import { backupsOf, journalIds, journalRows, keyText, openConflicts, rowsByKeys, rowsOf, type Row } from './read.js';
+import { backupsOf, horizonOf, journalIds, journalRows, keyText, netTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
 import { ruleOf } from './rules.js';
 import type { MergeSource } from './source.js';
 
@@ -104,4 +104,52 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
     if (!there) missing.push({ table: 'net.merge_conflicts', key: { id: first } });
   }
   return { ok: missing.length === 0, missing: missing.slice(0, NAMED) };
+}
+
+/* How the old database of a copy, or what a machine uploaded, is dealt with. fast: it never wrote and holds nothing the
+   leader lacks, so it is merged by its ids alone. left_out: it holds nothing but what a database the CEO left out held.
+   whole: it is compared row by row, as any database that came back. */
+export type FastWay = 'fast' | 'left_out' | 'whole';
+
+/* Decides that from a few columns alone, so it runs before the two shapes are compared and a copy of an older schema
+   merges. A copy that never held a term wrote nothing of its own: every row it holds came from the leader, with its
+   journal row in the same transaction, so whatever it holds that the leader lacks is what the leader deleted since.
+   Only a restore takes rows from the leader that it did not delete itself: a source that lacks one of the leader's
+   restores is compared whole, unless the CEO left out the database that restore set aside, and then the copy, which
+   holds no more than that database did, is left out with it. restoreAt: the time of the newest such restore. */
+export async function fastWay(db: Db, source: MergeSource): Promise<{ way: FastWay; restoreAt: Date | null }> {
+  const q = queryOf(db);
+  const src = source.query;
+  const whole = { way: 'whole' as const, restoreAt: null };
+  const [state] = await src<{ there: boolean }>(`SELECT to_regclass('net_local.state') IS NOT NULL AS there`);
+  if (state?.there && (await src('SELECT 1 AS led FROM net_local.state LIMIT 1')).length > 0) return whole;
+
+  const theirs = new Set(await restoresOf(src));
+  const lacking = (await q<{ attempt: string; kept: string | null; at: Date | string }>('SELECT attempt, kept, dumped_at AS at FROM net.restores ORDER BY at, attempt')).filter(row => !theirs.has(row.attempt));
+  let restoreAt: Date | null = null;
+  for (const restore of lacking) {
+    const [merge] = restore.kept ? await q<{ fork: string | null; merged_at: unknown; status: string }>('SELECT fork, merged_at, status FROM net.merges WHERE source = $1', [`kept:${restore.kept}`]) : [];
+    if (!merge || merge.fork === null || merge.merged_at !== null || (merge.status !== 'removing' && merge.status !== 'done')) return whole;
+    const at = new Date(restore.at);
+    if (!restoreAt || at > restoreAt) restoreAt = at;
+  }
+  if (lacking.length > 0) return { way: 'left_out', restoreAt };
+
+  /* Every change the source knows of, from where the leader's own journal begins, is on the leader or was dealt with. */
+  const ids = [...(await journalIds(src, await horizonOf(q))).keys()];
+  for (let from = 0; from < ids.length; from += BATCH) {
+    const unknown = await q<{ id: string }>(
+      `SELECT v.value AS id FROM jsonb_array_elements_text($1::jsonb) v
+       WHERE NOT EXISTS (SELECT 1 FROM net.journal j WHERE j.id = v.value::uuid) AND NOT EXISTS (SELECT 1 FROM net.merge_consumed c WHERE c.journal = v.value::uuid) LIMIT 1`,
+      [JSON.stringify(ids.slice(from, from + BATCH))],
+    );
+    if (unknown.length > 0) return whole;
+  }
+  const tables = await netTables(src);
+  if (tables.has('merge_conflicts') && (await src('SELECT 1 AS open FROM net.merge_conflicts WHERE picked IS NULL LIMIT 1')).length > 0) return whole;
+  if (tables.has('backups')) {
+    const held = new Set((await q<{ id: string }>('SELECT id FROM net.backups')).map(row => row.id));
+    if ((await src<{ id: string }>('SELECT id FROM net.backups')).some(row => !held.has(row.id))) return whole;
+  }
+  return { way: 'fast', restoreAt: null };
 }

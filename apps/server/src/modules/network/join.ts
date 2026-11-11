@@ -112,7 +112,8 @@ export type DataMachine = { machine: string; networkId: string; hostname: string
 export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string; dataSecret: string | null };
 /* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
    keeps the link it has. */
-/* copy: what the leader says of this machine's copy; null for a machine that keeps none. */
+/* copy: what the leader says of this machine's copy, or of what it owes after it stopped keeping one; null for a
+   machine that keeps none. */
 export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link?: WorkerLink | null; build: LeaderBuild | null; go: Go | null; copy: CopyOrder | null };
 
 /* The machines that keep the company's data, with where their keepers said they are: the ones a worker dials. */
@@ -190,7 +191,7 @@ export async function workerView(ctx: Ctx, machineId: string): Promise<WorkerVie
   if (!row) throw notAMachine();
   const authority = await authorityOf(ctx.db, ctx.config);
   const link = await workerLink(ctx, row.role === 'data' && (await holdsData(ctx.db, row.personId)));
-  const copy = row.role === 'data' ? await copyOrder(ctx, row) : null;
+  const copy = row.role === 'data' || row.uploadState ? await copyOrder(ctx, row) : null;
   return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }), build: null, go: null, copy };
 }
 

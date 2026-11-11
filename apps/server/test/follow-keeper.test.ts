@@ -1,14 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { machines } from '../src/db/schema.js';
-import { copyName } from '../src/modules/keeper/copy.js';
+import { certificates, machines } from '../src/db/schema.js';
+import { COPY_STATE, copyName } from '../src/modules/keeper/copy.js';
 import { FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
+import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
 import { TEST_SECRET, until } from './helpers.js';
 import { ask, company, heldIn, SLEEPER, worker, type Company } from './worker-keeper-fixture.js';
 
@@ -149,6 +150,43 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* The request the updater gets names the door, and holds the password of the role it reads the leader with. */
     await until(() => existsSync(join(f.config.controlDir, 'schema.json')));
     expect(JSON.parse(readFileSync(join(f.config.controlDir, 'schema.json'), 'utf8'))).toMatchObject({ attempt: 1, database: 'hornhoof', port: 7432 });
+    for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
+  });
+  it('gives the leader what it holds once its owner lost the scope, and asks for its wipe only when the leader keeps it', async () => {
+    const c = await company();
+    const f = await follower(c, { leaving: { againMs: 50, retryMs: 20 } });
+    await until(async () => (await c.rowOf(f.machine)).copyState === 'making');
+    /* Its owner sees the whole company no more: the row as the server leaves it then, with its certificates revoked. */
+    await c.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, f.machine));
+    await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.machineId, f.machine));
+    /* It hears so by the renewal it signs, stops serving its copy, and asks its updater for everything it holds. */
+    const request = join(f.config.controlDir, UPLOAD_FILE);
+    await until(() => existsSync(request));
+    await until(() => readKeeperState(f.config.controlDir)?.mode === 'off');
+    await until(() => heldIn(f.config.dir).role === 'worker');
+    const { id } = JSON.parse(readFileSync(request, 'utf8')) as { id: string };
+    /* The updater's part. */
+    const uploads = join(f.config.controlDir, UPLOADS_DIR);
+    mkdirSync(uploads, { recursive: true });
+    writeFileSync(join(uploads, `${id}.tar.gz`), 'everything the copy held');
+    writeFileSync(join(uploads, `${id}.done`), '');
+    rmSync(request);
+    /* The keeper that leads takes it, from this machine alone, and asks its own updater to load it. */
+    const asked = join(c.control, LOAD_FILE);
+    await until(() => existsSync(asked));
+    const load = JSON.parse(readFileSync(asked, 'utf8')) as { machine: string; file: string };
+    expect(load.machine).toBe(f.machine);
+    expect(readFileSync(load.file, 'utf8')).toBe('everything the copy held');
+    /* Nothing here goes while the leader has not said it keeps it: neither the upload nor what the keeper knows of its copy. */
+    writeFileSync(join(f.config.dir, COPY_STATE), '{}');
+    expect([existsSync(join(f.config.controlDir, WIPE_FILE)), readdirSync(uploads).sort()]).toEqual([false, [`${id}.done`, `${id}.tar.gz`]]);
+    await c.db.update(machines).set({ uploadState: 'received' }).where(eq(machines.id, f.machine));
+    await until(() => readdirSync(uploads).length === 0);
+    expect([existsSync(join(f.config.controlDir, WIPE_FILE)), existsSync(join(f.config.dir, COPY_STATE))]).toEqual([false, true]);
+    /* Merged and saved on the leader: now the machine asks its updater for the wipe. */
+    await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, f.machine));
+    await until(() => existsSync(join(f.config.controlDir, WIPE_FILE)));
+    expect(existsSync(join(f.config.dir, COPY_STATE))).toBe(false);
     for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
   });
 });

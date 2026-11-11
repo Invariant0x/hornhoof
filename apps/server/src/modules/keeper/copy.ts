@@ -16,33 +16,52 @@ export const COPY_STATE = 'copy-state.json';
 export const ENABLE_FOR_MS = 600_000;
 /* Under this much free disk a subscription that stopped is taken to have stopped for want of room. */
 export const DISK_FULL = 2 ** 30;
+/* The database a copy is made again in, beside the one that is still read. */
+export const NEXT_DB = 'hornhoof_next';
+/* A slot the leader does not list any more counts as gone after this many views in a row said so. */
+export const MISSING_VIEWS = 2;
 const ENABLE_EVERY_MS = 60_000;
 const RETRY_MS = 600_000;
+/* How long the app gets to read that it is off before the databases change places. */
+const OFF_FOR_MS = 2_000;
 const FIRST_DB = 'hornhoof';
 const LEADER_DB = 'hornhoof';
 const PASSFILE = 'replica.pgpass';
+
+/* The steps of putting a copy that was made again in the place of the old one, each written down before it runs. */
+export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'drop_db' | 'read';
 
 /* What a copy says of itself in its keeper's report. at: the leader's pulse it holds. name: the name of its
    subscription, its slot on the leader and its connection there. old: the attempt whose database waits to be merged. */
 export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number } | null };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
-   migrations: how many the leader's schema has. old and upload: what becomes of an old database and of a machine that
-   stopped holding the data; none of either yet. */
-export type CopyOrder = { slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'wipe' | null };
+   migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
+   upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
+   its wipe. */
+export type CopyOrder = { slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null };
 
 type Closable = Sql & { close(): Promise<void> };
 const Kept = z.object({
   attempt: z.number().int().min(1),
   database: z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/),
-  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'drop']),
+  phase: z.enum(['schema', 'grant', 'subscribe', 'sync', 'ready', 'detach', 'drop']),
   /* How many migrations the schema this copy was made with has. */
   migrations: z.number().int().nullable().default(null),
   /* No request for a schema before this moment: an attempt failed, and the next one waits. */
   notBefore: z.string().nullable().default(null),
-  /* The attempt that is being given up while the phase is drop. */
-  dropping: z.number().int().nullable().default(null),
+  /* The attempt whose database, the one that is read, waits for the leader to merge it while a new copy is made beside
+     it, and the count of migrations that one was made with. */
+  old: z.object({ attempt: z.number().int().min(1), migrations: z.number().int().nullable() }).nullable().default(null),
+  /* Whether the leader listed this attempt's slot once, and how many views in a row have not since. */
+  seen: z.boolean().default(false),
+  missing: z.number().int().min(0).default(0),
+  /* The step of the swap that runs, the stamp the old database goes by, and when the app was told to stand still. */
+  swap: z.enum(['off', 'disable', 'rename', 'enable', 'drop_sub', 'drop_db', 'read']).nullable().default(null),
+  stamp: z.string().regex(/^[0-9]{8}t[0-9]{6}$/).nullable().default(null),
+  swapAt: z.string().nullable().default(null),
 });
 type Kept = z.infer<typeof Kept>;
+type Subscription = { name: string; oid: number; enabled: boolean; slot: string | null };
 
 export type CopyMakerOptions = {
   /* The owner's connection to the database postgres of this machine. */
@@ -69,11 +88,14 @@ export function copyName(networkId: string, attempt: number): string {
 
 const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`;
+const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').replace('T', 't').slice(0, 15);
 
 /* Makes this machine's copy of the company's database and keeps it: the leader's schema, loaded by the updater, then a
-   subscription to the leader's publication, which copies every row and follows every change from then on. One step
-   with each tick, each written down first, so nothing is done twice and nothing is left half done. It never touches a
-   database that once led the company. */
+   subscription to the leader's publication, which copies every row and follows every change from then on. A copy that
+   broke is made again in a database beside the old one, which goes on being read until the new one holds everything
+   and the leader has read what the old one holds; then the two change places. One step with each tick, each written
+   down first, so nothing is done twice and nothing is left half done. It never touches a database that once led the
+   company, and never drops one the leader has not read. */
 export class CopyMaker {
   private kept: Kept;
   private open: { database: string; sql: Closable } | null = null;
@@ -82,6 +104,7 @@ export class CopyMaker {
   private disabledSince: number | null = null;
   private enabledAt = 0;
   private failing = false;
+  private lastOrder: CopyOrder | null = null;
 
   constructor(private readonly opts: CopyMakerOptions) {
     this.kept = this.read();
@@ -92,9 +115,25 @@ export class CopyMaker {
     return this.said;
   }
 
-  /* What its app may do: nothing until the copy holds every table once, then read. */
+  /* What its app may do: read once the copy holds every table, also while a new copy is made beside it; nothing before
+     that, and nothing while the two databases change places. */
   mode(): 'off' | 'read' {
-    return this.kept.phase === 'ready' ? 'read' : 'off';
+    if (this.kept.swap) return ['off', 'disable', 'rename'].includes(this.kept.swap) ? 'off' : 'read';
+    return this.kept.phase === 'ready' || this.kept.old !== null ? 'read' : 'off';
+  }
+
+  /* The copy takes nothing more from the leader: every subscription of its databases is disabled, and stays, with its
+     slot, so nothing of what the copy holds changes while it is read. For a machine that stops holding the data. */
+  async halt(): Promise<void> {
+    try {
+      for (const database of [FIRST_DB, NEXT_DB]) {
+        if (!(await this.exists(database))) continue;
+        const sql = this.on(database);
+        for (const sub of await this.subscriptions(sql)) if (sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} DISABLE`);
+      }
+    } finally {
+      await this.close();
+    }
   }
 
   /* The count of migrations the copy's schema was made with; null before it has one. */
@@ -107,6 +146,7 @@ export class CopyMaker {
     if (this.busy) return;
     this.busy = true;
     try {
+      this.heard(order);
       await this.step(order);
       this.failing = false;
     } catch (err) {
@@ -137,7 +177,7 @@ export class CopyMaker {
     } catch {
       /* None yet. */
     }
-    return { attempt: 1, database: FIRST_DB, phase: 'schema', migrations: null, notBefore: null, dropping: null };
+    return Kept.parse({ attempt: 1, database: FIRST_DB, phase: 'schema' });
   }
 
   private keep(next: Partial<Kept>): void {
@@ -146,7 +186,15 @@ export class CopyMaker {
     this.kept = kept;
   }
 
-  /* One connection to the copy's database, opened anew after it was closed. */
+  /* Each view of the leader's counts once, however many ticks pass with it: whether it listed this attempt's slot. */
+  private heard(order: CopyOrder | null): void {
+    if (!order || order === this.lastOrder) return;
+    this.lastOrder = order;
+    if (order.slot === 'ok' && (!this.kept.seen || this.kept.missing > 0)) this.keep({ seen: true, missing: 0 });
+    else if (order.slot === 'missing' && this.kept.seen) this.keep({ missing: this.kept.missing + 1 });
+  }
+
+  /* One connection to a database of the copy, opened anew after it was closed. */
   private on(database: string): Closable {
     if (this.open?.database === database) return this.open.sql;
     void this.open?.sql.close().catch(() => undefined);
@@ -160,26 +208,37 @@ export class CopyMaker {
     await open?.sql.close().catch(() => undefined);
   }
 
-  private making(progress: number | null): CopyReport {
-    return { state: 'making', progress, error: null, at: null, name: this.name(), old: null };
+  /* Being made, or being made again beside the copy that is still read. */
+  private making(progress: number | null, at: string | null = null): CopyReport {
+    return { state: this.kept.old ? 'remaking' : 'making', progress, error: null, at, name: this.name(), old: null };
+  }
+
+  private stopped(error: CopyError, at: string | null = null): CopyReport {
+    return { state: 'stopped', progress: null, error, at, name: this.name(), old: null };
   }
 
   private async one<R>(sql: Sql, text: string, params?: unknown[]): Promise<R | undefined> {
     return (await sql.query<R>(text, params)).rows[0];
   }
 
+  private async exists(database: string): Promise<boolean> {
+    return Boolean(await this.one(this.opts.admin, 'SELECT 1 AS there FROM pg_database WHERE datname = $1', [database]));
+  }
+
   private async step(order: CopyOrder | null): Promise<void> {
+    if (this.kept.swap) return this.swap();
+    if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
     const sql = this.on(this.kept.database);
     if (await this.led(sql)) {
-      this.said = { state: 'stopped', progress: null, error: 'led', at: null, name: this.name(), old: null };
+      this.said = this.stopped('led');
       return;
     }
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
     if (this.kept.phase === 'subscribe') return this.subscribe(sql);
     if (this.kept.phase === 'sync') return this.sync(sql, order);
-    return this.ready(sql);
+    return this.ready(sql, order);
   }
 
   /* Whether the database once held a term of the company: such a one is never dropped, swapped or written here. A
@@ -223,8 +282,15 @@ export class CopyMaker {
     this.keep({ phase: 'subscribe' });
   }
 
-  private subscription(sql: Sql, name = this.name()): Promise<{ oid: number; enabled: boolean; slot: string | null } | undefined> {
-    return this.one(sql, `SELECT s.oid::int AS oid, s.subenabled AS enabled, s.subslotname::text AS slot FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() AND s.subname = $1`, [name]);
+  private async subscriptions(sql: Sql): Promise<Subscription[]> {
+    const { rows } = await sql.query<Subscription>(
+      `SELECT s.subname::text AS name, s.oid::int AS oid, s.subenabled AS enabled, s.subslotname::text AS slot FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() ORDER BY s.subname`,
+    );
+    return rows;
+  }
+
+  private async subscription(sql: Sql, name = this.name()): Promise<Subscription | undefined> {
+    return (await this.subscriptions(sql)).find(sub => sub.name === name);
   }
 
   /* The copy answers the leader each second, so the leader knows within seconds when it falls silent. The password is
@@ -243,7 +309,7 @@ export class CopyMaker {
       );
     }
     this.disabledSince = null;
-    this.keep({ phase: 'sync' });
+    this.keep({ phase: 'sync', seen: false, missing: 0 });
   }
 
   /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row. */
@@ -261,6 +327,12 @@ export class CopyMaker {
     return now - this.disabledSince;
   }
 
+  /* The pulse of the leader a database holds, in the leader's own clock; none before its first. */
+  private async pulse(sql: Sql): Promise<string | null> {
+    const pulse = await this.one<{ at: Date | string }>(sql, 'SELECT at FROM net.pulse').catch(() => undefined);
+    return pulse ? new Date(pulse.at).toISOString() : null;
+  }
+
   /* The first copy of every table. Its progress is this database's size over the leader's, never a whole hundred
      before every table is through. */
   private async sync(sql: Sql, order: CopyOrder | null): Promise<void> {
@@ -271,57 +343,159 @@ export class CopyMaker {
     const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
     if (tables && tables.total > 0 && tables.ready === tables.total) {
       this.keep({ phase: 'ready' });
-      return this.ready(sql);
+      return this.ready(sql, order);
     }
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
-    this.said = this.making(progress);
+    /* While it is made again, the copy that is read says how far it reaches. */
+    this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
+  }
+
+  private async oldPulse(): Promise<string | null> {
+    const sql = this.opts.db(FIRST_DB);
+    try {
+      return await this.pulse(sql);
+    } finally {
+      await sql.close().catch(() => undefined);
+    }
+  }
+
+  /* Why a copy that follows must be made again, or nothing: its slot is lost on the leader, or the leader has not
+     listed it for two views in a row after it did; its subscription stopped and no enabling held; or the leader's
+     schema is of another count of migrations than the one this copy was made with. */
+  private broken(order: CopyOrder | null, stopped: number): string | null {
+    if (order?.slot === 'lost') return 'the company server no longer keeps what this copy had still to read';
+    if (this.kept.missing >= MISSING_VIEWS) return 'the company server no longer lists this copy';
+    if (stopped >= ENABLE_FOR_MS) return 'its changes stopped coming in and would not start again';
+    if (order && order.migrations !== null && this.kept.migrations !== null && order.migrations !== this.kept.migrations) return 'the company server runs another version of the database';
+    return null;
   }
 
   /* The copy follows. One whose subscription stopped says why, as far as it can tell: no room left, or a change that
-     did not fit. */
-  private async ready(sql: Sql): Promise<void> {
+     did not fit. One that was made again says which old attempt waits for the leader, and changes places with it once
+     the leader has read it. */
+  private async ready(sql: Sql, order: CopyOrder | null): Promise<void> {
     const sub = await this.subscription(sql);
-    const pulse = await this.one<{ at: Date | string }>(sql, 'SELECT at FROM net.pulse').catch(() => undefined);
-    const at = pulse ? new Date(pulse.at).toISOString() : null;
+    const at = await this.pulse(sql);
     const stopped = sub ? await this.stoppedFor(sql, sub.enabled) : 0;
+    const why = this.broken(order, sub ? stopped : ENABLE_FOR_MS);
+    if (why) return this.kept.old ? this.giveUp() : this.remake(why);
     if (!sub || stopped > 0) {
       const free = this.opts.diskFree();
-      this.said = { state: 'stopped', progress: null, error: free !== null && free < DISK_FULL ? 'disk_full' : 'apply', at, name: this.name(), old: null };
+      this.said = this.stopped(free !== null && free < DISK_FULL ? 'disk_full' : 'apply', at);
       return;
     }
-    this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: null };
+    if (!this.kept.old) {
+      this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: null };
+      return;
+    }
+    this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: { attempt: this.kept.old.attempt } };
+    if (order?.old === 'merged' || order?.old === 'done') {
+      const now = new Date(this.now());
+      this.keep({ swap: 'off', stamp: stampOf(now), swapAt: now.toISOString() });
+    }
+  }
+
+  /* A copy that broke is made again beside the old one: the next attempt, in a database of its own. Written down
+     first; the old subscription is parted from its slot on the next ticks, so the leader drops that slot. */
+  private remake(why: string): void {
+    this.opts.log(`This machine's copy is made again: ${why}. The old one is read until the new one is whole.`);
+    this.keep({ old: { attempt: this.kept.attempt, migrations: this.kept.migrations }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null, notBefore: null, seen: false, missing: 0 });
+    this.disabledSince = null;
   }
 
   /* An attempt is given up whole before the next begins: the next number and the phase are written down first, so a
      keeper that starts in the middle goes on with what is left. */
   private giveUp(): void {
-    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', dropping: this.kept.attempt, notBefore: new Date(this.now() + RETRY_MS).toISOString() });
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: new Date(this.now() + RETRY_MS).toISOString(), seen: false, missing: 0 });
     this.disabledSince = null;
     this.said = this.making(0);
   }
 
-  /* Each step is skipped when it is done: the subscription disabled, parted from its slot, which the leader then
-     drops, and dropped; then the database, which is made anew and empty. */
+  /* Each subscription of a database is given up: disabled, parted from its slot, which the leader then drops, and
+     dropped. Each step is skipped when it is done. */
+  private async release(sql: Sql, drop: boolean): Promise<void> {
+    for (const sub of await this.subscriptions(sql)) {
+      if (sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} DISABLE`);
+      if (sub.slot) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} SET (slot_name = NONE)`);
+      if (drop) await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
+    }
+  }
+
+  /* The old copy stops following: its subscription is disabled and parted from its slot, and stays, with its database,
+     until the leader has read that one. Then the side database is made, empty. */
+  private async detach(): Promise<void> {
+    await this.release(this.on(FIRST_DB), false);
+    this.keep({ phase: 'drop' });
+  }
+
+  /* The database of an attempt that was given up goes, with its subscriptions, and is made anew and empty. Never one
+     that once led the company. */
   private async drop(): Promise<void> {
-    const { database, dropping } = this.kept;
-    this.said = this.making(0);
-    const exists = await this.one(this.opts.admin, 'SELECT 1 AS there FROM pg_database WHERE datname = $1', [database]);
-    if (exists) {
+    const { database } = this.kept;
+    this.said = this.making(0, this.said.at);
+    if (await this.exists(database)) {
       const sql = this.on(database);
       if (await this.led(sql)) {
-        this.said = { state: 'stopped', progress: null, error: 'led', at: null, name: this.name(), old: null };
+        this.said = this.stopped('led');
         return;
       }
-      const name = this.name(dropping ?? this.kept.attempt);
-      const sub = await this.subscription(sql, name);
-      if (sub?.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(name)} DISABLE`);
-      if (sub?.slot) await sql.query(`ALTER SUBSCRIPTION ${ident(name)} SET (slot_name = NONE)`);
-      if (sub) await sql.query(`DROP SUBSCRIPTION ${ident(name)}`);
+      await this.release(sql, true);
       await this.close();
       await this.opts.admin.query(`DROP DATABASE ${ident(database)} WITH (FORCE)`);
     }
     await this.opts.admin.query(`CREATE DATABASE ${ident(database)}`);
-    this.keep({ phase: 'schema', dropping: null, migrations: null });
+    this.keep({ phase: 'schema', migrations: null });
+  }
+
+  /* The copy that was made again takes the place of the old one. Each step is written down before it runs, and each
+     finds out for itself whether its work is done, so a keeper that starts in the middle goes on from there. */
+  private async swap(): Promise<void> {
+    const step = this.kept.swap!;
+    const old = `hornhoof_old_${this.kept.stamp!}`;
+    const { admin } = this.opts;
+    if (step === 'off') {
+      if (this.now() - Date.parse(this.kept.swapAt!) >= OFF_FOR_MS) this.keep({ swap: 'disable' });
+      return;
+    }
+    if (step === 'disable') {
+      if (await this.exists(NEXT_DB)) {
+        const sql = this.on(NEXT_DB);
+        if ((await this.subscription(sql))?.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(this.name())} DISABLE`);
+      }
+      return this.keep({ swap: 'rename' });
+    }
+    if (step === 'rename') {
+      await this.close();
+      await admin.query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND pid <> pg_backend_pid()`, [[FIRST_DB, NEXT_DB]]);
+      if ((await this.exists(NEXT_DB)) && (await this.exists(FIRST_DB)) && !(await this.exists(old))) await admin.query(`ALTER DATABASE ${ident(FIRST_DB)} RENAME TO ${ident(old)}`);
+      if ((await this.exists(NEXT_DB)) && !(await this.exists(FIRST_DB))) await admin.query(`ALTER DATABASE ${ident(NEXT_DB)} RENAME TO ${ident(FIRST_DB)}`);
+      return this.keep({ swap: 'enable', database: FIRST_DB });
+    }
+    if (step === 'enable') {
+      const sql = this.on(FIRST_DB);
+      const sub = await this.subscription(sql);
+      if (sub && !sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(this.name())} ENABLE`);
+      return this.keep({ swap: 'drop_sub' });
+    }
+    if (step === 'drop_sub') {
+      if (await this.exists(old)) await this.release(this.on(old), true);
+      return this.keep({ swap: 'drop_db' });
+    }
+    if (step === 'drop_db') {
+      if (await this.exists(old)) {
+        /* A database that once led the company stays, and the copy says so. */
+        if (await this.led(this.on(old))) {
+          this.said = this.stopped('led', this.said.at);
+          return;
+        }
+        await this.close();
+        await admin.query(`DROP DATABASE ${ident(old)} WITH (FORCE)`);
+      }
+      return this.keep({ swap: 'read' });
+    }
+    /* The role's rights are per database, so they are made in full on the one that is read now. */
+    await ensureReplica(() => this.opts.db(FIRST_DB), this.opts.password);
+    this.keep({ swap: null, stamp: null, swapAt: null, old: null, database: FIRST_DB, phase: 'ready' });
   }
 }

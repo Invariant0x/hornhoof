@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as x509 from '@peculiar/x509';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { authority, certificates, companies, machines, peerSecrets, people } from '../src/db/schema.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
+import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { as, setUpCompany, testApp, until } from './helpers.js';
@@ -143,7 +144,7 @@ describe('the network routes the keeper calls', () => {
   it('hands the peer secrets to the machine that offers them', async () => {
     const c = await company();
     const before = (await c.peers()).json();
-    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [], doors: [] });
+    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [], doors: [], uploads: [] });
 
     const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
     await saveLink(c.db, c.config, c.companyId, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel });
@@ -247,6 +248,42 @@ describe('the network routes the keeper calls', () => {
     for (const bad of [{ ...said, progress: 100 }, { ...said, state: 'other' }, { ...said, error: 'other' }, { ...said, name: 'x'.repeat(64) }, { ...said, old: { attempt: 0 } }]) {
       expect((await report({ copy: bad }, copy.id)).statusCode, JSON.stringify(bad)).toBe(400);
     }
+  });
+
+  it('names who must upload', async () => {
+    const c = await company();
+    await c.certificate(newKey());
+    type Own = { uploads?: { machine: string; networkId: string; max: number; unpackMax: number }[] };
+    expect(((await c.peers()).json() as Own).uploads).toEqual([]);
+    const nid = 'ab'.repeat(32);
+    const left = await c.joined('worker', newKey(), { networkId: nid, uploadState: 'waiting', dataLeftAt: new Date() });
+    /* One the leader already has, one that left the network, and one of no network id owe nothing here. */
+    await c.joined('worker', newKey(), { networkId: 'cd'.repeat(32), uploadState: 'received' });
+    await c.joined('worker', newKey(), { networkId: 'ef'.repeat(32), uploadState: 'waiting', revokedAt: new Date() });
+    await c.joined('worker', newKey(), { uploadState: 'waiting' });
+    const [{ size }] = (await c.db.execute(sql`SELECT pg_database_size(current_database())::float8 AS size`) as unknown as { rows: { size: number }[] }).rows as [{ size: number }];
+    const { uploads } = (await c.peers()).json() as Own;
+    expect(uploads).toEqual([{ machine: left.id, networkId: nid, max: 3 * size + UPLOAD_SPARE, unpackMax: 4 * size + UPLOAD_SPARE }]);
+    /* Only the leader's own keeper takes uploads: a peer hears of none. */
+    expect((await c.peers(from(left.id))).json()).not.toHaveProperty('uploads');
+  });
+
+  it('forgets the upload once wiped', async () => {
+    const c = await company();
+    const report = (payload: object, machine: string) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(machine) });
+    const rowOf = async (id: string) => (await c.db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    const held = { copyState: 'ready', copyName: 'copy_0f0f0f0f0f0f0f0f_2', copyAt: new Date(), copyOld: 1 } as const;
+    const left = await c.joined('worker', newKey(), { uploadState: 'kept', dataLeftAt: new Date(), ...held });
+    /* A report that says nothing of it keeps what the row has. */
+    expect((await report({ uptimeS: 3 }, left.id)).statusCode).toBe(204);
+    expect(await rowOf(left.id)).toMatchObject({ uploadState: 'kept', copyName: held.copyName });
+    expect((await report({ wiped: true }, left.id)).statusCode).toBe(204);
+    expect(await rowOf(left.id)).toMatchObject({ uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: null, copyOld: null });
+    /* A machine that holds the data again is not one that left, whatever an old keeper says. */
+    const copy = await c.joined('data', newKey(), held);
+    expect((await report({ wiped: true }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyName: held.copyName, copyOld: 1 });
+    expect((await report({ wiped: false }, left.id)).statusCode).toBe(400);
   });
 
   it('stores memory and cores', async () => {

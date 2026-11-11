@@ -9,6 +9,7 @@ import { PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import type { PeerBackups } from './backups.js';
+import type { PeerUploads } from './uploads.js';
 import type { HeldCertificate } from './certificate.js';
 import type { MachineIdentity } from './identity.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
@@ -31,6 +32,8 @@ const Answer = z.object({
   /* The machines that keep data and the doors to open to them, which an app of the build before does not say. */
   data: z.array(z.object({ machine: z.string(), networkId: z.string(), addresses: z.array(z.string()), peerPort: z.number().nullable() })).default([]),
   doors: z.array(z.string()).default([]),
+  /* The machines that stopped holding the data and owe what they held, and how large that may be. */
+  uploads: z.array(z.object({ machine: z.string(), networkId: z.string().regex(/^[0-9A-Fa-f]{64}$/), max: z.number().min(0), unpackMax: z.number().min(0) })).default([]),
 });
 type Answer = z.infer<typeof Answer>;
 /* The authority's list as the keeper holds it: the list, and the serials it names. */
@@ -58,6 +61,8 @@ export type PeerLinkOptions = {
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
   /* What this machine serves of backups to its peers; nothing when left out. */
   backups?: PeerBackups;
+  /* What takes the uploads of machines that stopped holding the data; none are taken when left out. */
+  uploads?: PeerUploads;
   log: (line: string) => void;
 };
 
@@ -204,6 +209,7 @@ export class PeerLink {
       db: this.opts.db,
       hello: () => this.hello(),
       backups: this.opts.backups,
+      uploads: this.opts.uploads,
       log: this.opts.log,
     });
     this.server = server;
