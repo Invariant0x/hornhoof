@@ -170,6 +170,11 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
   });
 }
 
+/* Nothing of a plan's key, not even its end, reaches someone who sees neither the whole company nor their own plan in it:
+   the owner of a department sees its employees on others' plans. */
+export const keyEndFor = (viewer: Pick<Viewer, 'id' | 'scopeKind'>, view: SubView): SubView =>
+  viewer.scopeKind === 'company' || view.owner.id === viewer.id ? view : { ...view, last4: null };
+
 export async function subView(db: Db, isOnline: IsOnline, id: string, viewer: Viewer | null = null): Promise<SubView | null> {
   return (await subViews(db, isOnline, id, viewer))[0] ?? null;
 }

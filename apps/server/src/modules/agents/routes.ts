@@ -12,7 +12,7 @@ import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, p
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
-import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
+import { keyEndFor, subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -227,9 +227,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const online: IsOnline = node => hub.isOnline(node);
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
-  /* Nothing of a plan's key, not even its end, reaches someone who sees neither the whole company nor their own plan in it:
-     the owner of a department sees its employees on others' plans. */
-  const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, me.scopeKind === 'company' || v.owner.id === me.id ? v : { ...v, last4: null }]));
+  const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
   /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
      counts all the same in what every turn sends. */
