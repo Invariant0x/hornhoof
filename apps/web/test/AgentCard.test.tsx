@@ -2,15 +2,15 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import type { AgentCardView, Me } from '../src/types';
+import type { AgentCardView } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
-import { CARD, ME, mockApi, TEAM_KEY } from './api-mock';
+import { CARD, mockApi, TEAM_KEY } from './api-mock';
 
-function open(routes: Record<string, unknown> = {}, me: Me = ME) {
+function open(routes: Record<string, unknown> = {}) {
   const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
   render(
     <LanguageProvider>
-      <AgentCard me={me} agentId="b1" onClose={() => {}} />
+      <AgentCard agentId="b1" onClose={() => {}} />
     </LanguageProvider>,
   );
   return { calls };
@@ -192,7 +192,7 @@ describe('AgentCard', () => {
     mockApi({ 'GET /api/agents/b1': [200, { ...CARD, retry }] });
     const card = (live?: Parameters<typeof AgentCard>[0]['live']) => (
       <LanguageProvider>
-        <AgentCard me={ME} agentId="b1" live={live} onClose={() => {}} />
+        <AgentCard agentId="b1" live={live} onClose={() => {}} />
       </LanguageProvider>
     );
     const { rerender } = render(card());
@@ -464,8 +464,7 @@ describe('AgentCard', () => {
   });
 
   it('only shows the card to someone who cannot change it', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({ 'GET /api/agents/b1': [200, { ...CARD, canEdit: false }] }, listed);
+    open({ 'GET /api/agents/b1': [200, { ...CARD, canEdit: false }] });
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Reset to template' })).not.toBeInTheDocument();
@@ -473,12 +472,16 @@ describe('AgentCard', () => {
   });
 
   it("lets a person of the department change the card but not remove the employee", async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({}, listed);
+    open({ 'GET /api/agents/b1': [200, { ...CARD, canRemove: false }] });
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Reset to template' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove from the company' })).not.toBeInTheDocument();
+  });
+
+  it("lets the owner of the employee's department remove it", async () => {
+    open();
+    expect(await screen.findByRole('button', { name: 'Remove from the company' })).toBeInTheDocument();
   });
 
   it('keeps edits made in both views of the prompt', async () => {
@@ -642,8 +645,7 @@ describe('AgentCard assignment', () => {
   });
 
   it('shows the assignment read-only to a person who cannot change the card', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({ 'GET /api/agents/b1': [200, { ...assignmentCard('Maintain billing.'), canEdit: false }] }, listed);
+    open({ 'GET /api/agents/b1': [200, { ...assignmentCard('Maintain billing.'), canEdit: false }] });
     expect(await screen.findByRole('textbox', { name: 'Assignment' })).toHaveValue('Maintain billing.');
     expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { departmentsHad, requireDepartmentHad } from '../../auth/departments.js';
+import { departmentsHad, requireDepartmentHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
@@ -213,7 +213,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* The task as this person reads it. */
-  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: actsAsCeo(me) });
+  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId) });
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from. */
   app.get('/api/task-departments', async req => {

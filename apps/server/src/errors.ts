@@ -9,6 +9,7 @@ export type ErrorReason =
   | 'signed_out'
   | 'cross_site'
   | 'company_scope_only'
+  | 'department_owner_only'
   | 'decision_not_allowed'
   | 'owner_ceo_only'
   | 'owner_no_access'

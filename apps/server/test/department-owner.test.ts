@@ -53,7 +53,7 @@ describe('decisionOwner with a department owner', () => {
   });
 
   it('keeps what only the CEO decides with the CEO, whoever owns the department', () => {
-    for (const topic of ['people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release', null]) expect(decisionOwner(question(dev, topic), [ceo, dana])).toBe('ceo');
+    for (const topic of ['people', 'access', 'subscriptions', 'machines', 'public_link', 'updates', null]) expect(decisionOwner(question(dev, topic), [ceo, dana])).toBe('ceo');
     expect(decisionOwner({ source: 'proposal' }, [ceo, dana])).toBe('ceo');
     expect(decisionOwner({ source: 'computer_access' }, [ceo, dana])).toBe('ceo');
   });

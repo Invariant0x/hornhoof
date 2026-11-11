@@ -27,8 +27,9 @@ type Crew = keyof AclCompany['crew'];
 type Viewer = keyof AclCompany['tokens'];
 type Call = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: object };
 
-/* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything. */
-type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; closedStatus?: 403 | 404 };
+/* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything;
+   ownerToo: or for the owner of the agent's department. */
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; closedStatus?: 403 | 404 };
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -51,7 +52,7 @@ const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
 const POINTED: Pointed[] = [
   { route: 'GET /api/agents/:id', of: anAgent('GET', '') },
   { route: 'PATCH /api/agents/:id', of: anAgent('PATCH', '', { effort: null }) },
-  { route: 'DELETE /api/agents/:id', of: anAgent('DELETE', ''), companyOnly: true },
+  { route: 'DELETE /api/agents/:id', of: anAgent('DELETE', ''), companyOnly: true, ownerToo: true },
   { route: 'GET /api/agents/:id/events', of: anAgent('GET', '/events') },
   { route: 'POST /api/agents/:id/messages', of: anAgent('POST', '/messages', { text: 'hi' }) },
   { route: 'POST /api/agents/:id/pictures', of: async (c, agent) => ({ method: 'POST', url: `/api/agents/${c.crew[agent].id}/pictures`, payload: {} }) },
@@ -64,7 +65,7 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
-  { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true },
+  { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true, ownerToo: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
   { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
   /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
@@ -108,7 +109,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
-  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
@@ -121,8 +122,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
-  'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
-  'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
+  'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
+  'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'GET /api/task-departments': 'backlog.test.ts: only the departments the person has',
   'GET /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'PUT /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
@@ -207,14 +208,14 @@ describe('every real route', () => {
 });
 
 describe('one thing of one agent', () => {
-  it.each(POINTED)('$route', async ({ route, of, companyOnly, closedStatus = 403 }) => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, closedStatus = 403 }) => {
     const c = await aclCompany();
     const got: string[] = [];
     /* Those that are closed first: what opens may change or remove what it is given. */
     for (const { name, viewer, agent, closed } of [...CASES].sort((a, b) => Number(b.closed) - Number(a.closed))) {
       const res = await call(c, await of(c, agent), viewer);
       got.push(`${name}: ${res.statusCode}`);
-      const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
+      const scoped = companyOnly && (viewer === 'ann' || (viewer === 'olga' && !ownerToo));
       if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
       else expect([403, closedStatus], `${route}, ${name}`).not.toContain(res.statusCode);
       if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);

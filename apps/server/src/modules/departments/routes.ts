@@ -8,6 +8,7 @@ import { accessOf } from '../../auth/access.js';
 import { viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { requireDecision } from '../../auth/decisions.js';
+import { requireDepartmentChanger } from '../../auth/departments.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
@@ -96,6 +97,14 @@ function staffedNote(department: string, hired: Hired[], present: Present[]): st
 
 const CARD: DecisionSubject = { source: 'proposal' };
 
+/* A structure change that only adds products and changes sub-units of departments that are there, and leaves the company's
+   brief, is a decision of those departments; making or removing one, or a card, is the CEO's. */
+function structureSubject(body: z.infer<typeof BuildBody>): DecisionSubject {
+  if (body.proposalId || body.brief !== undefined) return CARD;
+  const changed = body.items.map(item => (isNew(item) || item.remove ? null : item.department));
+  return changed.every((id): id is string => id !== null) ? { source: 'proposal', departments: changed } : CARD;
+}
+
 /* Checks that a sub-unit belongs to this department of this company before changing or removing it. */
 async function requireDepartmentTeam(tx: Db | Tx, companyId: string, departmentId: string, teamId: string): Promise<void> {
   const [team] = await tx
@@ -147,9 +156,9 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/departments/:id/teams', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    await requireDepartmentChanger(db, me, dept.id);
     const body = TeamBody.parse(req.body);
     const [team] = await db.insert(teams).values({ companyId: me.companyId, departmentId: dept.id, name: body.name }).returning();
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -159,8 +168,8 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.patch('/api/departments/:id/teams/:teamId', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id, teamId } = TeamParams.parse(req.params);
+    await requireDepartmentChanger(db, me, id);
     const body = TeamPatch.parse(req.body);
     const [team] = await db
       .update(teams)
@@ -174,8 +183,8 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete('/api/departments/:id/teams/:teamId', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id, teamId } = TeamParams.parse(req.params);
+    await requireDepartmentChanger(db, me, id);
     const freed = await db.transaction(tx => clearTeam(tx, me, id, teamId));
     await wakeFreed(ctx, me, freed);
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -195,11 +204,12 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   /* A card is the CEO's decision, with or without the card: the CEO's or the delegate's from their screen, or the
-     orchestrator's for the one its turn answers. */
-  async function cardDecision(me: Person): Promise<Delegation | undefined> {
+     orchestrator's for the one its turn answers. A change inside a department is its owner's too. */
+  async function cardDecision(me: Person, subject: DecisionSubject): Promise<Delegation | undefined> {
     const on = delegationOf(me);
-    requireCompanyScope(me);
-    requireDecision(CARD, me, await accessOf(db, me), me.companyId);
+    if (subject.source === 'proposal' && subject.departments) for (const id of subject.departments) await requireDepartmentChanger(db, me, id);
+    else requireCompanyScope(me);
+    requireDecision(subject, me, await accessOf(db, me), me.companyId);
     return on;
   }
   /* Who applied a card: the person, also when the orchestrator applied it for them. */
@@ -208,11 +218,14 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/departments/build', async (req, reply) => {
     const me = await requirePerson(req, db);
-    const on = await cardDecision(me);
+    /* Who may ask is checked before what was asked, so a body that does not parse is the CEO's card to refuse. */
+    const asked = BuildBody.safeParse(req.body);
+    const subject = asked.success ? structureSubject(asked.data) : CARD;
+    const on = await cardDecision(me, subject);
     const body = BuildBody.parse(req.body);
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, CARD, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on);
       let brief = body.brief;
       let agentId: string | null = null;
       if (body.proposalId) {
@@ -328,11 +341,12 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { created: result.fresh, removed: result.removed.map(r => r.id), hired: result.hired.map(h => h.id) };
   });
 
-  /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
+  /* The git repository the department's agents work in. The whole company or the department's owner sets it; the token
+     never comes back. */
   app.put('/api/departments/:id/repository', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
+    await requireDepartmentChanger(db, me, id);
     const body = RepoBody.parse(req.body);
     const checked = Repo.pick({ url: true, branch: true, author: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim(), author: body.author });
     if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address, a plain branch name, and an author name on one line with a full email.', 'repo_invalid');
@@ -360,8 +374,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete('/api/departments/:id/repository', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
+    await requireDepartmentChanger(db, me, id);
     await db
       .update(departments)
       .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1`, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null })
@@ -375,9 +389,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
      picks from its roles, products and subscriptions. */
   app.get('/api/departments/:id/roster', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    await requireDepartmentChanger(db, me, dept.id);
     const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
     const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
     const state = await stateSeen(db, me, dept);
@@ -395,17 +409,18 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { people: await templateRoster(ctx, dept, serving), roles, products: products.map(p => ({ id: p.id, name: deptName(p) })), subscriptions: serving };
   });
 
-  /* The CEO's click on a staff card, or the orchestrator's hire. */
+  /* The CEO's click on a staff card, a hire by the department's owner, or the orchestrator's hire. */
   app.post('/api/departments/:id/staff', async (req, reply) => {
     const me = await requirePerson(req, db);
-    const on = await cardDecision(me);
     const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    const subject: DecisionSubject = { source: 'proposal', departments: [dept.id] };
+    const on = await cardDecision(me, subject);
     const body = StaffBody.parse(req.body);
     const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, CARD, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on);
       let agentId: string | null = null;
       if (body.proposalId) {
         const [taken] = await tx

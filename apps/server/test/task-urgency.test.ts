@@ -15,7 +15,7 @@ import { applyTeams } from '../src/modules/departments/routes.js';
 import { cancel, createTask, report, submit, updateTask, type NewTask } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { mayHoldTask, setUrgent, urgentOnlyAgents } from '../src/modules/tasks/urgency.js';
-import { ONLY_CEO } from '../src/modules/tools/control.js';
+import { ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, createTestDb, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -170,11 +170,11 @@ describe('the task route', () => {
 describe('the orchestrator', () => {
   const item = (c: Awaited<ReturnType<typeof company>>, title: string, urgent?: boolean) => ({ department: c.dev.id, title, brief: '', body: '', ...(urgent === undefined ? {} : { urgent }) });
 
-  it('lays out urgent tasks only in a turn that answers the CEO', async () => {
+  it('lays out urgent tasks only in a turn that answers the CEO or the department\'s owner', async () => {
     const c = await company();
     const woken = await c.tools(c.orchestrator);
     const refused = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Fix', goal: 'Fix it.', tasks: [item(c, 'Forged', true)] });
-    expect(text(refused)).toBe(ONLY_CEO);
+    expect(text(refused)).toBe(ONLY_DEPARTMENT_OWNER);
     expect(await c.db.select().from(tasks).where(eq(tasks.title, 'Forged'))).toEqual([]);
     const plain = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Plain', goal: 'Plain work.', tasks: [item(c, 'Plain work')] });
     expect(plain.isError, text(plain)).toBeFalsy();
@@ -184,7 +184,7 @@ describe('the orchestrator', () => {
     const rows = await c.db.select().from(tasks);
     expect(rows.find(t => t.title === 'Real')!.urgent).toBe(true);
     expect(rows.find(t => t.title === 'Plain work')!.urgent).toBe(false);
-    expect(text(await call(woken, 'add_tasks', { turn: 1, tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_CEO);
+    expect(text(await call(woken, 'add_tasks', { turn: 1, tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_DEPARTMENT_OWNER);
   });
 
   it('alone has set_urgent and set_team_urgent_only', async () => {
@@ -198,21 +198,21 @@ describe('the orchestrator', () => {
     }
   });
 
-  it('sets a task urgent, only in a turn that answers the CEO, with all that is under it', async () => {
+  it('sets a task urgent, only in a turn that answers the CEO or the department\'s owner, with all that is under it', async () => {
     const c = await company();
     const top = await c.root();
     const part = await c.under(top.id);
-    expect(text(await call(await c.tools(c.orchestrator), 'set_urgent', { task: top.number, urgent: true }))).toBe(ONLY_CEO);
+    expect(text(await call(await c.tools(c.orchestrator), 'set_urgent', { task: top.number, urgent: true }))).toBe(ONLY_DEPARTMENT_OWNER);
     expect((await c.read(top.id)).urgent).toBe(false);
     const res = await call(await c.tools(c.orchestrator, true), 'set_urgent', { task: top.number, urgent: true });
     expect(res.isError, text(res)).toBeFalsy();
     expect([(await c.read(top.id)).urgent, (await c.read(part.id)).urgent]).toEqual([true, true]);
   });
 
-  it('sets a team to urgent work only, only in a turn that answers the CEO', async () => {
+  it('sets a team to urgent work only, only in a turn that answers the CEO or the department\'s owner', async () => {
     const c = await company();
     const args = { department: c.dev.id, team: c.quick.id, urgentOnly: true };
-    expect(text(await call(await c.tools(c.orchestrator), 'set_team_urgent_only', args))).toBe(ONLY_CEO);
+    expect(text(await call(await c.tools(c.orchestrator), 'set_team_urgent_only', args))).toBe(ONLY_DEPARTMENT_OWNER);
     expect((await c.db.select().from(teams).where(eq(teams.id, c.quick.id)))[0]!.urgentOnly).toBe(false);
     const res = await call(await c.tools(c.orchestrator, true), 'set_team_urgent_only', args);
     expect(res.isError, text(res)).toBeFalsy();

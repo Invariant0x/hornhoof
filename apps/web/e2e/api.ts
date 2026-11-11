@@ -76,7 +76,7 @@ const ROUTES: Record<string, unknown> = {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
     program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 },
-    runsOn: [], changes: [], interrupted: [], canEdit: true, timer: null,
+    runsOn: [], changes: [], interrupted: [], canEdit: true, canRemove: true, timer: null,
   } satisfies AgentCardView,
   '/api/agents/orchestrator/events?after=0': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
 };
