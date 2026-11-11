@@ -1,0 +1,43 @@
+import type { Manifest, RecoveryLink } from './bundle.js';
+
+/* The messages between keepers and the app about backups, which both sides read. */
+
+/* What the leading app tells its own keeper to restore. attempt: new for each start, so the same bundle can be tried
+   again. source: the keeper's own store, or what a holder or a browser sent it. identity: the recovery file's, held in
+   memory only, when the keeper's own key does not open the bundle. expect: what the database recorded of the bundle,
+   when there is a database. carry: whether to carry over who may get in now; false after a total loss. */
+export type RestoreOrder = {
+  attempt: string; id: string; dumpedAt: string; source: 'store' | 'incoming'; identity: string | null;
+  expect: { sha256: string; size: number; signer: string } | null; company: string; authorityPem: string; carry: boolean;
+};
+/* start is written only once the databases are swapped for good. */
+export type RestoreStep = 'fetch' | 'check' | 'open' | 'load' | 'swap' | 'start';
+export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'done' | 'failed'; step: RestoreStep; line: string; at: string; kept: string | null };
+
+/* What the data machine's keeper hears: whom to seal to, what was made last, which machines hold what, and what to
+   fetch or restore. */
+export type MakerView = {
+  company: string | null;
+  recipients: string[];
+  recovery: { id: string; recipient: string; link: RecoveryLink | null } | null;
+  last: { id: string; madeAt: string; recovery: string | null } | null;
+  holders: Record<string, string[]>;
+  wanted: { id: string; from: string }[];
+  order: RestoreOrder | null;
+};
+/* What a machine that may keep bundles hears. keeps: its owner's tick; false tells it to delete what it holds. hold: the
+   bundles to keep. want: the ones the leader asks it to send. */
+export type HolderView = { keeps: boolean; hold: Pick<Manifest, 'id' | 'size' | 'sha256'>[]; want: string[] };
+
+/* Who may get in now, taken from the database a restore replaces at the moment it closes, and applied to the restored
+   one: a restore never brings back a person who was disabled, a machine that was disconnected or a key that was
+   replaced since the bundle. */
+export type Carry = {
+  people: { id: string; status: 'active' | 'invited' | 'disabled'; passwordHash: string | null; scopeKind: string; isOwner: boolean; access: { departmentId: string | null; teamId: string | null }[] }[];
+  /* The hashes of the invites open now. */
+  invites: string[];
+  machines: { id: string; revoked: boolean; lendsTests: boolean; keepsBackups: boolean }[];
+  /* The certificates revoked. */
+  serials: string[];
+  recoveryKeys: { id: string; recipient: string; linkPrint: string | null; linkName: string | null; linkUrl: string | null; madeBy: string; madeAt: string; retiredAt: string | null }[];
+};

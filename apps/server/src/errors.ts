@@ -150,6 +150,9 @@ export type ErrorReason =
   | 'bad_grant'
   | 'key_not_held'
   | 'no_key'
+  | 'recovery_file_invalid'
+  | 'no_authority'
+  | 'not_owner_session'
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
