@@ -8,9 +8,11 @@ import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
 import { AgentIcon, DeputyIcon, PersonIcon } from '../ui/icons';
+import { AgentTick, AssistantCard, looksAfter, NewAssistant } from './PeopleAssistant';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
-type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean } | null;
+/* assistant: a person without the whole company adds their own assistant. */
+type Panel = { kind: 'invite' } | { kind: 'assistant' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean } | null;
 
 function InviteLink({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
   const t = useT();
@@ -29,7 +31,10 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
   );
 }
 
-function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: string, url: string) => void; onClose: () => void }) {
+type Invite = { org: Org | null; me: Me; people: PersonView[]; onSent: (name: string, url: string) => void; onAssistant: (person: PersonView) => void; onClose: () => void };
+
+/* Invites a person, or, with the tick, adds an agent that acts for one, keeping the name and title typed. */
+function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
   const t = useT();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -37,6 +42,8 @@ function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: 
   const [access, setAccess] = useState<AccessInput>({ whole: true });
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
+  const [agent, setAgent] = useState(false);
+  if (agent) return <NewAssistant me={me} people={people} own={false} tick={<AgentTick on onChange={setAgent} />} initial={{ name, title }} onMade={onAssistant} onClose={onClose} />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -61,6 +68,7 @@ function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: 
     <Edge className="panel" cut={12}>
       <h2>{t.people.invitePerson}</h2>
       <form onSubmit={e => void submit(e)} className="panel-form">
+        <AgentTick on={false} onChange={setAgent} />
         <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label={t.common.email}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>
@@ -202,7 +210,7 @@ function PersonDetails({ person, org, onClose }: { person: PersonView; org: Org 
   return <Edge className="panel" cut={12}>
     <h2>{person.name}</h2>
     <p>{person.title}</p>
-    <p>{accessText(t, person.access, org)}</p>
+    <p>{person.assistant ? t.people.actsFor(person.assistant.owner.name) : accessText(t, person.access, org)}</p>
     {telegramOf(person) && <p>{t.people.telegram}: {telegramOf(person)}</p>}
     <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
   </Edge>;
@@ -252,39 +260,67 @@ function selectionOf(me: Me, selected: CardRoute['selected'], people: PersonView
   return { person, edit };
 }
 
-function InvitationPanel({ panel, org, onSent, onClose }: { panel: Panel; org: Org | null; onSent: (name: string, url: string) => void; onClose: () => void }) {
+function InvitationPanel({ panel, ...invite }: { panel: Panel } & Invite) {
   return <>
-    {panel?.kind === 'invite' && <InviteForm org={org} onSent={onSent} onClose={onClose} />}
-    {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={onClose} />}
+    {panel?.kind === 'invite' && <InviteForm {...invite} />}
+    {panel?.kind === 'assistant' && <NewAssistant me={invite.me} people={invite.people} own initial={{ name: '', title: '' }} onMade={invite.onAssistant} onClose={invite.onClose} />}
+    {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={invite.onClose} />}
   </>;
 }
 
-function PersonEditPanel({ edit, me, org, onUpdated, onSaved, onClose }: { edit: PersonEdit | null; me: Me; org: Org | null; onUpdated: (person: PersonView) => void; onSaved: (person: PersonView) => void; onClose: () => void }) {
+type EditPanel = { edit: PersonEdit | null; me: Me; org: Org | null; people: PersonView[]; onUpdated: (person: PersonView) => void; onSaved: (person: PersonView) => void; onClose: () => void };
+
+function AssistantPanel({ edit, me, org, people, onUpdated, onSaved, onClose }: EditPanel & { edit: PersonEdit }) {
+  if (!looksAfter(me, edit.person, people)) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
+  return <AssistantCard key={edit.person.id} person={edit.person} manages={rightsOn(me, edit.person).manageable} rename={renames(me, edit.person)} onChanged={onUpdated} onSaved={onSaved} onClose={onClose} />;
+}
+
+function PersonEditPanel(props: EditPanel) {
+  const { edit, me, org, onUpdated, onSaved, onClose } = props;
   if (!edit) return null;
+  if (edit.person.assistant) return <AssistantPanel {...props} edit={edit} />;
   const canEdit = rightsOn(me, edit.person).manageable || edit.titleOnly;
   if (!canEdit) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
   return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} rename={renames(me, edit.person)} telegram={setsTelegram(me, edit.person)} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
 }
 
-function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: PersonView; me: Me; org: Org | null; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> }) {
+/* A person's name with their mark, or an assistant's as an agent's, with whom it acts for under it. */
+function NameCell({ p, routed, openPerson }: { p: PersonView; routed: boolean; openPerson: (person: PersonView) => void }) {
   const t = useT();
+  const inner = <>{p.assistant ? <AgentIcon /> : <PersonIcon />}{p.name}{p.isCeoDelegate && <DeputyMark />}</>;
+  /* One box, so the narrow layout keeps the note under the name and not under the column's label. */
+  return <div className="pwho">
+    {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}>{inner}</button> : <span className="pname">{inner}</span>}
+    {/* The space keeps the name and the note apart for screen readers, and takes no room on the screen. */}
+    {p.assistant && <>{' '}<span className="pnote">{t.people.assistantOf(p.assistant.owner.name)}</span></>}
+  </div>;
+}
+
+type Row = { p: PersonView; me: Me; org: Org | null; people: PersonView[]; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> };
+
+/* What one may do on a row: edit it, send a new invite link, which an assistant never takes, and switch it off or on. */
+function rowRights(me: Me, p: PersonView, people: PersonView[]) {
   const { manageable, titleOnly } = rightsOn(me, p);
+  return { edits: p.assistant ? looksAfter(me, p, people) : manageable || titleOnly, links: manageable && !p.assistant, manageable };
+}
+
+function PersonRow({ p, me, org, people, routed, openPerson, newLink, setStatus }: Row) {
+  const t = useT();
+  const { edits, links, manageable } = rowRights(me, p, people);
   return (
     <tr className={p.status}>
-      <td data-label={t.people.columns.name}>
-        {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</button> : <span className="pname"><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</span>}
-      </td>
+      <td data-label={t.people.columns.name}><NameCell p={p} routed={routed} openPerson={openPerson} /></td>
       <td data-label={t.people.columns.title}>{p.title}</td>
-      <td data-label={t.people.columns.access}>{accessText(t, p.access, org)}</td>
+      <td data-label={t.people.columns.access}>{p.assistant ? t.people.sameAs(p.assistant.owner.name) : accessText(t, p.access, org)}</td>
       <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
       <td className="row-actions" data-label={t.people.columns.actions}>
         <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>
-          {(manageable || titleOnly) && (
+          {edits && (
             <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
           )}
           {manageable && (
             <>
-              <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
+              {links && <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>}
               {p.status === 'disabled' ? (
                 <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
               ) : (
@@ -345,7 +381,8 @@ const missingSelection = (selected: CardRoute['selected'], people: PersonView[] 
 const peopleUnavailable = (failure: unknown, selected: CardRoute['selected'], people: PersonView[] | null, person: PersonView | null | undefined) =>
   unavailableFailure(failure) || missingSelection(selected, people, person);
 
-function PeopleHeader({ canManage, panel, onInvite }: { canManage: boolean; panel: Panel; onInvite: () => void }) {
+/* Someone with the whole company invites people; anyone else adds their own assistant here. */
+function PeopleHeader({ canManage, panel, onInvite, onAssistant }: { canManage: boolean; panel: Panel; onInvite: () => void; onAssistant: () => void }) {
   const t = useT();
   return (
       <header className="people-head">
@@ -353,9 +390,9 @@ function PeopleHeader({ canManage, panel, onInvite }: { canManage: boolean; pane
           <h1>{t.people.heading}</h1>
           <p className="muted">{t.people.intro}</p>
         </div>
-        {canManage && !panel && (
-          <button className="btn" type="button" onClick={onInvite}>{t.people.invitePerson}</button>
-        )}
+        {!panel && (canManage
+          ? <button className="btn" type="button" onClick={onInvite}>{t.people.invitePerson}</button>
+          : <button className="btn" type="button" onClick={onAssistant}>{t.people.addMyAssistant}</button>)}
       </header>
   );
 }
@@ -387,6 +424,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
 
   const replace = (person: PersonView) => {
     setPeople(list => replacePerson(list, person));
+    setPanel(p => (p?.kind === 'edit' && p.person.id === person.id ? { ...p, person } : p));
     tellOwnName(me, person, onRenamed);
   };
   const { person, edit } = selectionOf(me, selected, people, panel);
@@ -394,6 +432,11 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const openPerson = (person: PersonView) => {
     if (onSelect) onSelect(person.id);
     else setPanel({ kind: 'edit', person, ...rightsOn(me, person) });
+  };
+  /* A new assistant joins the list and its card opens, for its key. */
+  const added = (person: PersonView) => {
+    setPeople(list => [...(list ?? []), person]);
+    openPerson(person);
   };
 
   async function run(action: () => Promise<void>) {
@@ -419,21 +462,25 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
 
   return (
     <section className="people">
-      <PeopleHeader canManage={canManage} panel={panel} onInvite={() => setPanel({ kind: 'invite' })} />
+      <PeopleHeader canManage={canManage} panel={panel} onInvite={() => setPanel({ kind: 'invite' })} onAssistant={() => setPanel({ kind: 'assistant' })} />
 
       <InvitationPanel
         panel={panel}
         org={org}
+        me={me}
+        people={people ?? []}
         onSent={(name, url) => {
           setPanel({ kind: 'link', name, url });
           void load();
         }}
+        onAssistant={added}
         onClose={() => setPanel(null)}
       />
       <PersonEditPanel
         edit={edit}
         me={me}
         org={org}
+        people={people ?? []}
         onUpdated={replace}
         onSaved={person => {
           replace(person);
@@ -456,7 +503,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
               </tr>
             </thead>
             <tbody>
-              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
+              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={people} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
             </tbody>
           </table>
         </div>

@@ -84,6 +84,12 @@ const DELEGABLE = and(eq(people.status, 'active'), eq(people.scopeKind, 'company
 
 type Patch = z.infer<typeof PersonPatch>;
 
+/* An assistant reaches what its owner reaches, through its key: it has no access and no Telegram of its own. */
+function guardAssistantPatch(body: Patch, telegram: string | null | undefined): void {
+  if (body.access === undefined && telegram === undefined) return;
+  throw new ApiError(409, 'conflict', 'An assistant has no access or Telegram of its own: it acts with the rights of the person it belongs to.', 'assistant_has_owner_rights');
+}
+
 /* Only the CEO changes the access or status of the delegate. */
 function guardDelegate(me: Person, target: { isCeoDelegate: boolean }, body: Patch): void {
   const touches = body.access !== undefined || body.status !== undefined;
@@ -219,8 +225,9 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
-    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+    const [target] = await db.select({ ...personColumns, isAgent: people.isAgent }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (target.isAgent) throw new ApiError(409, 'conflict', 'An assistant never signs in: it reaches the company with its key. Make a new key on its card.', 'assistant_no_sign_in');
     if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
     if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
     if (target.isCeoDelegate && !me.isOwner) throw delegateLocked();
@@ -278,10 +285,11 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
     const [target] = await db
-      .select({ ...personColumns, passwordHash: people.passwordHash, telegramUsername: people.telegramUsername, telegramUserId: people.telegramUserId })
+      .select({ ...personColumns, passwordHash: people.passwordHash, telegramUsername: people.telegramUsername, telegramUserId: people.telegramUserId, isAgent: people.isAgent })
       .from(people)
       .where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (target.isAgent) guardAssistantPatch(body, telegram);
     if (telegram !== undefined) guardTelegram(me, target);
     guardRename(me, id, body);
     guardDisable(me, target, body);
@@ -292,8 +300,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const changes: Partial<typeof people.$inferInsert> = {};
     if (body.name !== undefined) changes.name = body.name;
     if (body.title !== undefined) changes.title = body.title;
-    /* A person who never set a password goes back to waiting for their invite. */
-    if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
+    /* A person who never set a password goes back to waiting for their invite; an assistant never has one. */
+    if (body.status) changes.status = body.status === 'active' && !target.passwordHash && !target.isAgent ? 'invited' : body.status;
     Object.assign(changes, markAfter(changes.status, body), telegramChange(telegram, target));
 
     const person = await db.transaction(async tx => {

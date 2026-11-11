@@ -29,6 +29,10 @@ describe('notification lines', () => {
     const message = { direction: 'in', from: { kind: 'person', id: 'p1', name: 'Ivan', role: null, department: null }, to: recipient, channel: 'telegram' } satisfies AgentMessageView;
     expect(messageLine(t, language, message)).toBe(expected);
   });
+  it.each([['en', en, 'Message from Ivan through the assistant Ava to Bruno'], ['ru', ru, 'Сообщение от Ivan через ассистента Ava для Bruno']] as const)('says a person wrote through their assistant in %s', (language, t, expected) => {
+    const message = { direction: 'in', from: { kind: 'person', id: 'p1', name: 'Ivan', role: null, department: null }, to: recipient, channel: 'assistant', assistant: { id: 'h1', name: 'Ava' } } satisfies AgentMessageView;
+    expect(messageLine(t, language, message)).toBe(expected);
+  });
   it('keeps the notice folded under its informative button', () => {
     render(<AgentMessage message={{ direction: 'in', from: service, to: recipient, notification: { ...notification, tasks: [...notification.tasks] } }} text="Continue your work." open={false} onToggle={() => {}} />);
     expect(screen.getByRole('button', { name: 'Hornhoof, turn ended before the work on #223 to Bruno' })).toHaveAttribute('aria-expanded', 'false');

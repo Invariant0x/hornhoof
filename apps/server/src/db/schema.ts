@@ -96,7 +96,8 @@ export const people = pgTable(
     id: id(),
     companyId: companyId(),
     name: text('name').notNull(),
-    email: text('email').notNull().unique(),
+    /* Every person signs in by it; an assistant never signs in, so it may have none. */
+    email: text('email').unique(),
     title: text('title').notNull().default(''),
     passwordHash: text('password_hash'),
     status: text('status', { enum: ['active', 'invited', 'disabled'] }).notNull(),
@@ -108,9 +109,102 @@ export const people = pgTable(
        the account, which a bot learns the first time they write under that username and goes by from then on. */
     telegramUsername: text('telegram_username'),
     telegramUserId: bigint('telegram_user_id', { mode: 'number' }),
+    /* A personal assistant: an outside agent that acts for the person it belongs to, with that person's rights as they are at
+       each call, through its key only. It never signs in with a password. */
+    isAgent: boolean('is_agent').notNull().default(false),
+    assistantOf: uuid('assistant_of').references((): AnyPgColumn => people.id),
     createdAt: createdAt(),
   },
-  t => [index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId)],
+  t => [
+    index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId),
+    index('people_assistant_of').on(t.assistantOf),
+    check('people_assistant', sql`(${t.isAgent} AND ${t.assistantOf} IS NOT NULL AND ${t.passwordHash} IS NULL) OR (NOT ${t.isAgent} AND ${t.assistantOf} IS NULL AND ${t.email} IS NOT NULL)`),
+  ],
+);
+
+export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'other'] as const;
+export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
+
+/* What an assistant runs as and how it is reached: its program, the address Hornhoof wakes it at, and its key, kept only as
+   a hash, with the secret its wakes are signed with, encrypted with the server's secret. Both are shown once, and come and
+   go together. */
+export const assistants = pgTable(
+  'assistants',
+  {
+    personId: uuid('person_id').primaryKey().references(() => people.id),
+    companyId: companyId(),
+    program: text('program', { enum: ASSISTANT_PROGRAMS }).notNull(),
+    eventsUrl: text('events_url'),
+    keyHash: text('key_hash').unique(),
+    keyCreatedAt: timestamp('key_created_at', { withTimezone: true }),
+    wakeSecretEnc: text('wake_secret_enc'),
+    createdAt: createdAt(),
+  },
+  t => [
+    check('assistants_program', sql`${t.program} IN ('avaclone', 'openclaw', 'other')`),
+    check('assistants_key_whole', sql`num_nonnulls(${t.keyHash}, ${t.keyCreatedAt}, ${t.wakeSecretEnc}) IN (0, 3)`),
+  ],
+);
+
+export const ASSISTANT_EVENT_KINDS = ['reply', 'reply_end', 'request', 'request_closed'] as const;
+export type AssistantEventKind = (typeof ASSISTANT_EVENT_KINDS)[number];
+
+/* What an assistant reads: what an agent said to it, and the requests that wait for its owner. Numbered by one counter per
+   company, which a new event takes under the counter's row lock, so the numbers commit in the order they grow and a reader
+   that asks for what comes after a number misses none. Kept for 30 days. */
+export const assistantEvents = pgTable(
+  'assistant_events',
+  {
+    id: id(),
+    companyId: companyId(),
+    assistantId: uuid('assistant_id').notNull().references(() => people.id),
+    seq: bigint('seq', { mode: 'number' }).notNull(),
+    kind: text('kind', { enum: ASSISTANT_EVENT_KINDS }).notNull(),
+    data: jsonb('data').notNull(),
+    createdAt: createdAt(),
+  },
+  t => [
+    unique('assistant_events_company_seq').on(t.companyId, t.seq),
+    index('assistant_events_assistant_seq').on(t.assistantId, t.seq),
+    index('assistant_events_created_at').on(t.createdAt),
+    check('assistant_events_kind', sql`${t.kind} IN ('reply', 'reply_end', 'request', 'request_closed')`),
+  ],
+);
+
+/* The last number a company's assistant events took. */
+export const assistantSeqs = pgTable('assistant_seqs', {
+  companyId: uuid('company_id').primaryKey().references(() => companies.id),
+  seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+});
+
+/* An assistant's message whose answer is still being collected: the agent, the turn that answers it now, the last event of
+   that turn already passed on, whether anything was, and when the turn was seen over with nothing going on from it. */
+export const assistantReplies = pgTable(
+  'assistant_replies',
+  {
+    id: id(),
+    companyId: companyId(),
+    assistantId: uuid('assistant_id').notNull().references(() => people.id),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    messageId: uuid('message_id').notNull(),
+    jobId: uuid('job_id').notNull().references(() => jobs.id),
+    afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
+    answered: boolean('answered').notNull().default(false),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  t => [unique('assistant_replies_message').on(t.messageId), index('assistant_replies_company').on(t.companyId)],
+);
+
+/* The open requests an assistant was told wait for its owner, so it hears once when each opens and once when it closes. */
+export const assistantRequests = pgTable(
+  'assistant_requests',
+  {
+    assistantId: uuid('assistant_id').notNull().references(() => people.id),
+    requestId: uuid('request_id').notNull().references(() => requests.id),
+    createdAt: createdAt(),
+  },
+  t => [primaryKey({ columns: [t.assistantId, t.requestId] })],
 );
 
 /* Where a person put the blocks of the company map: the hub, a department or a person, each by its top left in the map's
@@ -865,6 +959,8 @@ export const requests = pgTable(
     answeredByAgentId: uuid('answered_by_agent_id').references(() => agents.id),
     answerJobId: uuid('answer_job_id').references(() => jobs.id),
     answerSourceSeq: bigint('answer_source_seq', { mode: 'number' }),
+    /* When the person's assistant gave the answer for them. */
+    answeredByAssistantId: uuid('answered_by_assistant_id').references((): AnyPgColumn => people.id),
     /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
     explained: text('explained'),
     /* What it is about; none on requests from before topics, which go to the CEO. */

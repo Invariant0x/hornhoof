@@ -48,6 +48,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'identify', path: /^\/api\/nodes\/socket$/, rule: 'node key before websocket upgrade' },
   { name: 'nodeOf', path: /^\/api\/harness\/(?:claim|:key\/(?:done|failed|bundle|parts\/:index))$/, rule: 'node key, and a build of that node or of a product whose tests it may take' },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },
+  { name: 'requireAssistant', path: /^\/api\/assistant\//, rule: "assistant key, acting with its owner's rights as they are now" },
 ];
 
 function callName(node: ts.Expression): string | undefined {

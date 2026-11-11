@@ -106,7 +106,7 @@ select {
 select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 select:disabled { opacity: .55; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
-.field > label { font-size: 13px; font-weight: 500; color: var(--muted); }
+.field > label, .field > .label { font-size: 13px; font-weight: 500; color: var(--muted); }
 .field input {
   height: 40px; padding: 0 12px;
   border: 1px solid var(--line2); border-radius: 0;
@@ -470,6 +470,13 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .panel-form .alert, .panel-form .actions { grid-column: 1 / -1; }
 .panel-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .panel .actions { display: flex; justify-content: flex-end; }
+/* An assistant's key on its card: a line on it, the key and secret once made, and its buttons on one row that wraps whole. */
+.assistant-key { display: grid; gap: 10px; padding-block-start: 14px; border-block-start: 1px solid var(--line); }
+.assistant-key h3, .assistant-key p { margin: 0; }
+.assistant-key .actions { flex-wrap: wrap; gap: 10px; }
+/* A key keeps a readable width: where the row is too narrow for it and its Copy, Copy goes under it. */
+.assistant-key .command { display: flex; flex-wrap: wrap; }
+.assistant-key .command code { flex: 1 1 24ch; min-width: 0; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
 .ptable th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -477,6 +484,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ptable tr.disabled td { color: var(--muted); }
 .pname { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .pname .ic { color: var(--pink-ink); }
+/* Whom an assistant acts for, under its name. */
+.ptable .pwho { min-width: 0; }
+.ptable .pnote { display: block; margin-block-start: 2px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 /* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
 .badge.deputy { flex: none; display: inline-flex; align-items: center; gap: 3px; }
 .badge.deputy .ic { width: 11px; height: 11px; }

@@ -106,6 +106,14 @@ describe('the chat', () => {
     expect(within(lisa).getByText('Lisa, via Telegram')).toBeInTheDocument();
   });
 
+  it("names the assistant a person wrote through", async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
+      ev(1, 'message', { text: 'Plan the launch.' }, { person: { id: 'p2', name: 'Lisa' }, message: { direction: 'in', from: LISA, to: ORCH, channel: 'assistant', assistant: { id: 'h1', name: 'Ava' } } }),
+    ], state: READY }] });
+    const lisa = (await screen.findByText('Plan the launch.')).closest('article')!;
+    expect(within(lisa).getByText('Lisa, through the assistant Ava')).toBeInTheDocument();
+  });
+
   it('folds the steps of work into one quiet line that opens on a click', async () => {
     const user = userEvent.setup();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [

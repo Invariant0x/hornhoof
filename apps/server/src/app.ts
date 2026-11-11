@@ -30,6 +30,9 @@ import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
+import { assistantSetupRoutes } from './modules/assistants/setup.js';
+import { assistantRoutes } from './modules/assistants/routes.js';
+import { Assistants } from './modules/assistants/service.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
 import { signinRoutes } from './modules/subscriptions/signin.js';
@@ -85,6 +88,7 @@ export type Ctx = Deps & {
   templates: Templates;
   links: PublicLinks;
   telegram: TelegramBots;
+  assistants: Assistants;
 };
 
 declare module 'fastify' {
@@ -125,12 +129,15 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   ctx.telegram = new TelegramBots(ctx);
+  ctx.assistants = new Assistants(ctx);
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());
   app.addHook('onReady', async () => ctx.links.sync());
   /* A bot stops before the database and the nodes go, so a message it is taking reaches its agent first. */
   app.addHook('onReady', async () => ctx.telegram.start());
   app.addHook('preClose', async () => ctx.telegram.stop());
+  app.addHook('onReady', async () => ctx.assistants.start());
+  app.addHook('preClose', async () => ctx.assistants.stop());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   /* After the socket plugin, so a refused socket is closed by it. */
@@ -142,6 +149,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   setupRoutes(app, ctx);
   authRoutes(app, ctx);
   peopleRoutes(app, ctx);
+  assistantSetupRoutes(app, ctx);
   orgRoutes(app, ctx);
   mapLayoutRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
@@ -173,5 +181,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   linkRoutes(app, ctx);
   outboundRoutes(app, ctx);
   telegramRoutes(app, ctx);
+  assistantRoutes(app, ctx);
   return app;
 }
