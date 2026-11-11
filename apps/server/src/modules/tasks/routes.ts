@@ -466,7 +466,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!spots.some(t => reaches(viewer.access, t))) throw refuse(403, 'not_your_department', 'This department is not one you have.');
     }
     const facts = await treeFacts(db, me.companyId, dept.id, t => seesTask(viewer, t));
-    return { tree: workTree(factsFor(viewer, facts), new Date()) };
+    return { tree: workTree(factsFor(viewer, facts, dept.id), new Date()) };
   });
 
   /* The numbers add up all of a department, its agents' work whoever's plan they are on, so they go only with the full view
