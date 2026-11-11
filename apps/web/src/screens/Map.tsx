@@ -1,19 +1,22 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
-import { peopleLayout, rowCenters, type PeopleLayout, type PersonChip } from '../map-people';
-import { departmentPeople, mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
+import { arrangedBounds, arrangeMap, deptKey, GAP, H, HALO, HUB, HUB_KEY, personKey, TURN_H, W, type DeptSpot, type MapArrangement, type TopPerson } from '../map-arrange';
+import { useMapLayout } from '../map-layout';
+import type { PeopleLayout, PersonChip } from '../map-people';
+import { mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { CANVAS_ZOOM_LIMITS, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_ZOOM_LIMITS, DRAG_PX, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
+import type { Rect } from '../ui/ortho';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
@@ -21,17 +24,8 @@ import { TurnProgress } from '../ui/TurnProgress';
 import { useTurns } from '../tasks';
 import { clock } from './Subscriptions';
 
-/* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
-const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
-const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
-const DEPT_W = 280, DEPT_H = 160;
-/* Up to two rows sit at the prototype's corners; more rows stack evenly around the hub, this far apart. */
-const CORNER = 220, ROW = 220;
-/* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */
-const GAP = 28;
-const BELOW = CY + HUB + GAP;
-/* Where a department trace turns: 84 out on the diagonal, and the inner side of each column. */
-const BEND = 84, INNER = 210;
+export { deptLayout, type DeptSpot } from '../map-arrange';
+
 const GAUGE_SEGMENTS = 24;
 const { min: MIN_K, max: MAX_K } = CANVAS_ZOOM_LIMITS;
 /* The orchestrator's window covers the right of a wide screen; Fit keeps the company clear of it. */
@@ -44,8 +38,8 @@ const FLY_MS = 600;
 /* A square of an employee flashes this long when what it does changes, and a department's frame when work reaches or leaves it. */
 const PING_MS = 950;
 const FLASH_MS = 1400;
-
-export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
+/* A grip is this big to touch on the screen at any zoom. An arrow key moves its block this far, ten times as far with Shift. */
+const GRIP = 44, KEY_STEP = 10;
 
 /* What a plan that is not ready waits for: its owner's machine, the login or the first setup of its program. */
 function planWaits(t: Messages, sub: SubView): string {
@@ -64,44 +58,11 @@ export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: st
   return sub.kind === 'api_key' ? t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '') : t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
-/* How far above or below the hub each row's middle sits. */
-function rowOffsets(rows: number): number[] {
-  if (rows <= 2) return [-CORNER, CORNER].slice(0, rows);
-  return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * ROW);
-}
-
-/* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others leave it at 45 degrees. */
-export function deptLayout(n: number): DeptSpot[] {
-  const offsets = rowOffsets(Math.ceil(n / 2));
-  return Array.from({ length: n }, (_, i) => {
-    const side = i % 2 ? 1 : -1;
-    const midY = CY + offsets[Math.floor(i / 2)]!;
-    const up = Math.sign(midY - CY);
-    const edgeX = CX + side * INNER;
-    return {
-      x: side < 0 ? edgeX - DEPT_W : edgeX,
-      y: midY - DEPT_H / 2,
-      w: DEPT_W,
-      h: DEPT_H,
-      path: up ? [[CX, CY], [CX + side * BEND, CY + up * BEND], [CX + side * BEND, midY], [edgeX, midY]] : [[CX, CY], [edgeX, CY]],
-    };
-  });
-}
-
-/* The people sit just above the top row, and their bus runs 14 below them. */
-function chipsTop(n: number): number {
-  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2))[0] ?? -CORNER) - DEPT_H / 2 - GAP - CHIP_H;
-}
-const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
-
-/* The company's turn sits right under the hub, between the traces that leave it downwards, in two lines at most. */
-const TURN_TOP = CY + HUB + 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
-
 /* Only a running turn needs the tracker's numbers; the rest of the map stays independent of their request. */
-function HubTurn({ current }: { current: Org['turn'] }) {
+function HubTurn({ current, at }: { current: Org['turn']; at: Rect }) {
   const t = useT();
   const { turns, failure } = useTurns(!!current);
-  const style = { left: CX - TURN_W / 2, top: TURN_TOP, width: TURN_W };
+  const style = { left: at.x, top: at.y, width: at.w };
   if (!current) return null;
   if (failure !== null) {
     const message = errorText(t, failure);
@@ -118,9 +79,6 @@ function HubTurn({ current }: { current: Org['turn'] }) {
   </div>;
 }
 
-const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
-const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
-
 /* One gauge segment lights per 1/24 of the agents at work, and at least one while any agent works. */
 function gaugeArc(working: number, total: number): { d: string; n: number } {
   const n = working && total ? Math.max(1, Math.round((GAUGE_SEGMENTS * working) / total)) : 0;
@@ -134,24 +92,12 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
 
-function deptPeopleOf(org: Org, spots = deptLayout(org.departments.length)): PeopleLayout {
-  const named = org.departments.map((d, i) => ({ id: d.id, ...spots[i]! }));
-  return peopleLayout(named, departmentPeople(org));
-}
-
 function topDeptId(org: Org, deptId: string): string | undefined {
   return org.departments.find(d => d.id === deptId || d.products.some(pr => pr.id === deptId))?.id;
 }
 
-/* The way from the hub's edge up to a whole-company person's card on the top row. */
-function toTopPerson(org: Org, id: string): Point[] | null {
-  const people = wholeCompanyPeople(org);
-  const i = people.findIndex(p => p.id === id);
-  if (i < 0) return null;
-  const x = chipCenters(people.length)[i]!;
-  const n = org.departments.length;
-  return [[CX, CY - HUB], [CX, busY(n)], [x, busY(n)], [x, chipsTop(n) + CHIP_H]];
-}
+/* The way from the hub up to a whole-company person's card. */
+const toTopPerson = (arr: MapArrangement, id: string): Point[] | null => arr.top.find(p => p.id === id)?.path ?? null;
 
 function deptDecisionRoutes(org: Org, placed: PeopleLayout, personId: string): Point[][] {
   const routes = placed.routes.filter(r => r.personId === personId);
@@ -162,50 +108,53 @@ function deptDecisionRoutes(org: Org, placed: PeopleLayout, personId: string): P
 }
 
 /* The ways to each person decisions wait for: from the hub for whole-company people, from their department otherwise. */
-function decisionWays(org: Org, placed: PeopleLayout): { key: string; id: string; pts: Point[] }[] {
+function decisionWays(org: Org, arr: MapArrangement): { key: string; id: string; pts: Point[] }[] {
   return mapPeople(org).flatMap(p => {
     if (!p.pendingDecisions) return [];
-    const topPts = toTopPerson(org, p.id);
+    const topPts = toTopPerson(arr, p.id);
     if (topPts) return [{ key: p.id, id: p.id, pts: topPts }];
-    return deptDecisionRoutes(org, placed, p.id).map((pts, i) => ({ key: `${p.id}:${i}`, id: p.id, pts }));
+    return deptDecisionRoutes(org, arr.people, p.id).map((pts, i) => ({ key: `${p.id}:${i}`, id: p.id, pts }));
   });
 }
 
 const isDeptPerson = (org: Org, id: string) => !wholeCompanyPeople(org).some(p => p.id === id);
 
-function deptPersonRoute(org: Org, personId: string, deptEndpointId: string): Point[] | null {
+function deptPersonRoute(org: Org, arr: MapArrangement, personId: string, deptEndpointId: string): Point[] | null {
   const deptId = topDeptId(org, deptEndpointId);
-  const route = deptId ? deptPeopleOf(org).routes.find(r => r.personId === personId && r.deptId === deptId) : undefined;
+  const route = deptId ? arr.people.routes.find(r => r.personId === personId && r.deptId === deptId) : undefined;
   return route?.pts ?? null;
 }
 
-function deptPersonPulse(from: Endpoint, to: Endpoint, org: Org): Point[] | null | undefined {
+function deptPersonPulse(from: Endpoint, to: Endpoint, org: Org, arr: MapArrangement): Point[] | null | undefined {
   if (from.kind === 'person' && isDeptPerson(org, from.id)) {
-    const pts = to.kind === 'department' ? deptPersonRoute(org, from.id, to.id) : null;
+    const pts = to.kind === 'department' ? deptPersonRoute(org, arr, from.id, to.id) : null;
     return pts ? [...pts].reverse() : null;
   }
   if (to.kind === 'person' && isDeptPerson(org, to.id)) {
-    return from.kind === 'department' ? deptPersonRoute(org, to.id, from.id) : null;
+    return from.kind === 'department' ? deptPersonRoute(org, arr, to.id, from.id) : null;
   }
   return undefined;
 }
 
-/* The way from an endpoint to the hub: down from a top-row person's chip, or in from a department along its trace. */
-function toHub(e: Endpoint, org: Org): Point[] | null {
+/* The way from an endpoint to the hub: down from a whole-company person's card, or in from a department along its trace. */
+function toHub(e: Endpoint, org: Org, arr: MapArrangement): Point[] | null {
   if (e.kind === 'orchestrator') return [];
   /* Agents inside one department run on its card. */
   if (e.kind === 'agent') return null;
-  if (e.kind === 'person') return toTopPerson(org, e.id)?.reverse() ?? null;
+  if (e.kind === 'person') {
+    const pts = toTopPerson(arr, e.id);
+    return pts ? [...pts].reverse() : null;
+  }
   const topId = topDeptId(org, e.id);
-  const i = topId ? org.departments.findIndex(d => d.id === topId) : -1;
-  return i < 0 ? null : [...deptLayout(org.departments.length)[i]!.path].reverse();
+  const dept = topId ? arr.depts.find(d => d.id === topId) : undefined;
+  return dept ? [...dept.path].reverse() : null;
 }
 
-/* The points a message's pulse runs along, or null when one end is not on the map. */
-export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | null {
-  const direct = deptPersonPulse(from, to, org);
+/* The points a message's pulse runs along, on the map as the person arranged it, or null when one end is not on the map. */
+export function pulsePath(from: Endpoint, to: Endpoint, org: Org, arr: MapArrangement = arrangeMap(org)): Point[] | null {
+  const direct = deptPersonPulse(from, to, org, arr);
   if (direct !== undefined) return direct;
-  const a = toHub(from, org), b = toHub(to, org);
+  const a = toHub(from, org, arr), b = toHub(to, org, arr);
   if (!a || !b) return null;
   const pts = [...a, ...[...b].reverse()];
   return pts.length >= 2 ? pts : null;
@@ -261,34 +210,13 @@ function deptClass(d: Department, flashing: boolean): string {
 
 const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
 
-function expandBox(b: { x0: number; y0: number; x1: number; y1: number }, x0: number, y0: number, x1: number, y1: number) {
-  b.x0 = Math.min(b.x0, x0);
-  b.y0 = Math.min(b.y0, y0);
-  b.x1 = Math.max(b.x1, x1);
-  b.y1 = Math.max(b.y1, y1);
-}
-
-/* The part of the world that has something on it, so Fit fills the screen with it. */
-function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
-  const topPeople = wholeCompanyPeople(org);
-  const half = Math.max(chipsWidth(topPeople.length) / 2, 260);
-  const n = org.departments.length;
-  const b = { x0: CX - half, x1: CX + half, y0: topPeople.length ? chipsTop(n) : CY - HUB, y1: BELOW + (org.turn ? TURN_H : 0) + (n ? 0 : 120) };
-  const spots = deptLayout(n);
-  spots.forEach(s => expandBox(b, s.x, s.y, s.x + s.w, s.y + s.h));
-  const placed = deptPeopleOf(org, spots);
-  placed.chips.forEach(c => expandBox(b, c.x, c.y, c.x + c.w, c.y + c.h));
-  placed.wires.forEach(w => w.pts.forEach(([x, y]) => expandBox(b, x, y, x, y)));
-  return b;
-}
-
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string; speed: number };
 
 const pulsePersonId = (from: Endpoint, to: Endpoint) => from.kind === 'person' ? from.id : to.kind === 'person' ? to.id : undefined;
 
 /* The way to each department runs while its head works on the orchestrator's task, down the trace to the card, and for
    five minutes after it gave a result back, up the trace to the hub. */
-function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: DeptSpot[]; stateOf(up: string, down: string): LineState; still: boolean }) {
+function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: MapArrangement['depts']; stateOf(up: string, down: string): LineState; still: boolean }) {
   const orchestrator = org.orchestrator;
   if (!orchestrator) return null;
   return org.departments.map((d, i) => {
@@ -332,17 +260,21 @@ function PersonChipCard({ org, person, cut, onOpen }: { org: Org; person: MapPer
   );
 }
 
-/* Whole-company people on the top row, each card opening the decisions waiting for that person. */
-function PeopleRow({ org, people, top, onOpen }: { org: Org; people: MapPerson[]; top: number; onOpen(personId: string): void }) {
+/* Whole-company people, on the top row unless the person moved them, each card opening the decisions waiting for that person. */
+function PeopleRow({ org, people, cards, onOpen }: { org: Org; people: MapPerson[]; cards: TopPerson[]; onOpen(personId: string): void }) {
   const t = useT();
-  if (!people.length) return null;
+  if (!cards.length) return null;
+  const byId = new Map(people.map(p => [p.id, p]));
   return (
-    <ul className="chips" style={{ left: CX - chipsWidth(people.length) / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
-      {people.map(p => (
-        <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
-          <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
-        </li>
-      ))}
+    <ul className="chips" aria-label={t.map.leaders}>
+      {cards.flatMap(c => {
+        const p = byId.get(c.id);
+        return p ? (
+          <li key={c.id} style={{ left: c.x, top: c.y, width: c.w, height: c.h }}>
+            <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
+          </li>
+        ) : [];
+      })}
     </ul>
   );
 }
@@ -365,6 +297,67 @@ function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: Person
   );
 }
 
+type At = { x: number; y: number };
+const ARROWS: Record<string, Point> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+/* The handle at a block's top left corner: drag it by mouse, touch or pen, or move the block with the arrow keys. It stays the
+   same size on the screen at any zoom and stands up and to the left of the corner, outside the block, so a press on the block
+   still opens it and a press on the map around still moves the map. While the hand moves, onMove shows the block where it is,
+   and null puts it back; onPut keeps the place where the hand let go. */
+function Grip({ label, corner, from, k, onMove, onPut }: { label: string; corner: Point; from: At; k: number; onMove(at: At | null): void; onPut(at: At): void }) {
+  const press = useRef<{ id: number; x: number; y: number; from: At; at: At | null } | null>(null);
+  return (
+    <button
+      type="button"
+      className="grip"
+      aria-label={label}
+      title={label}
+      style={{ left: corner[0] - GRIP, top: corner[1] - GRIP, width: GRIP, height: GRIP, transform: `scale(${1 / k})` }}
+      onPointerDown={e => {
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        press.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from, at: null };
+      }}
+      onPointerMove={e => {
+        const p = press.current;
+        if (!p || p.id !== e.pointerId) return;
+        e.stopPropagation();
+        const dx = e.clientX - p.x, dy = e.clientY - p.y;
+        if (!p.at && Math.abs(dx) + Math.abs(dy) <= DRAG_PX) return;
+        p.at = { x: Math.round(p.from.x + dx / k), y: Math.round(p.from.y + dy / k) };
+        onMove(p.at);
+      }}
+      onPointerUp={e => {
+        const p = press.current;
+        if (!p || p.id !== e.pointerId) return;
+        e.stopPropagation();
+        press.current = null;
+        if (p.at) onPut(p.at);
+      }}
+      onPointerCancel={e => {
+        if (press.current?.id !== e.pointerId) return;
+        press.current = null;
+        onMove(null);
+      }}
+      onKeyDown={e => {
+        const step = ARROWS[e.key];
+        if (!step) return;
+        e.preventDefault();
+        const n = e.shiftKey ? KEY_STEP * 10 : KEY_STEP;
+        onPut({ x: from.x + step[0] * n, y: from.y + step[1] * n });
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+      </svg>
+    </button>
+  );
+}
+
+/* Where a block's grip stands: at its top left corner, and for the round hub on its rim, up and to the left. */
+const gripCorner = (key: string, r: Rect): Point => (key === HUB_KEY ? [r.x + HUB - Math.round(HUB * Math.SQRT1_2), r.y + HUB - Math.round(HUB * Math.SQRT1_2)] : [r.x, r.y]);
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
@@ -385,6 +378,13 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /* Where this person put blocks, and the block their hand moves now. */
+  const layout = useMapLayout();
+  const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
+  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed) : null), [org, layout.placed, moving]);
+  /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
+  const arrRef = useRef(arr);
+  arrRef.current = arr;
 
   useEffect(() => {
     const pending = timers.current;
@@ -436,26 +436,28 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   /* Real signals only: a pulse runs once per message or move of a task. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
     if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent') return;
-    const pts = org && pulsePath(m.from, m.to, org);
+    const pts = org && pulsePath(m.from, m.to, org, arrRef.current ?? undefined);
     if (pts) fire(pts, m);
     /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
     else held.current = [...held.current.filter(h => Date.now() - h.at < HOLD_MS), { m, at: Date.now() }];
   });
 
   useEffect(() => {
-    if (!org || !held.current.length) return;
+    if (!org || !arr || !held.current.length) return;
     const now = Date.now();
     held.current = held.current.filter(h => {
-      const pts = pulsePath(h.m.from, h.m.to, org);
+      const pts = pulsePath(h.m.from, h.m.to, org, arr);
       if (pts) fire(pts, h.m);
       return !pts && now - h.at < HOLD_MS;
     });
-  }, [org, fire]);
+  }, [org, arr, fire]);
 
+  /* Moving a block leaves the view where it is; the arrangement coming from the server or put back shows all of it again. */
   const fit = useCallback(() => {
     const el = box.current;
-    if (!el || !el.clientWidth || !org || inside) return;
-    const { x0, y0, x1, y1 } = contentBounds(org);
+    const shown = arrRef.current;
+    if (!el || !el.clientWidth || !org || !shown || inside) return;
+    const { x0, y0, x1, y1 } = arrangedBounds(shown, org);
     /* The header floats over the top of the map and the zoom over the bottom. */
     const padX = 32, padTop = 76, padBottom = 72;
     const { left, width } = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
@@ -463,7 +465,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
     setMinZoom(Math.min(MIN_K, k));
     setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, leftPanelOpen, inside, setView]);
+  }, [org, windowOpen, leftPanelOpen, inside, setView, layout.version]);
 
   useEffect(() => {
     fit();
@@ -494,25 +496,30 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
-  if (!org) return <div className="map" aria-busy="true" />;
+  if (!org || !arr) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;
   const limitUntil = org.orchestrator?.limitUntil ?? null;
   const limitAt = limitUntil && Date.parse(limitUntil) > Date.now() ? clock(language, limitUntil) : null;
   const status = orchestratorStatus(t, sub, limitAt);
-  const spots = deptLayout(depts.length);
-  const top = chipsTop(depts.length), bus = busY(depts.length);
+  const spots = arr.depts, placed = arr.people, { hub } = arr;
+  const mx = hub.x + HUB, my = hub.y + HUB;
   const allPeople = mapPeople(org);
   const peopleById = new Map(allPeople.map(p => [p.id, p]));
   const topPeople = wholeCompanyPeople(org);
-  const chips = chipCenters(topPeople.length);
-  const placed = deptPeopleOf(org, spots);
   /* The hub blinks while decisions wait for whole-company people wired to it. */
-  const asked = decisionWays(org, placed);
+  const asked = decisionWays(org, arr);
   const hubAsked = topPeople.some(p => (p.pendingDecisions ?? 0) > 0);
   const gauge = gaugeArc(org.agents.working, org.agents.total);
-  const hubPlace = { left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 };
+  const hubPlace = { left: hub.x, top: hub.y, width: hub.w, height: hub.h };
+  /* What each grip names: the orchestrator, a department or a person. */
+  const blockName = (key: string): string => {
+    if (key === HUB_KEY) return t.map.orchestrator;
+    const dept = depts.find(d => deptKey(d.id) === key);
+    return dept ? deptLabel(t, dept) : (allPeople.find(p => personKey(p.id) === key)?.name ?? '');
+  };
+  const arranged = Object.keys(layout.placed).length > 0;
   const hubArt = (
     <>
       <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
@@ -548,23 +555,23 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
         }}
       >
-        <div className="halo" style={{ left: CX - 260, top: CY - 260, width: 520, height: 520 }} />
+        <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
           <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
-          {chips.length > 0 && (
+          {arr.bus && (
             <>
-              <path className="tr" d={`M ${chips[0]} ${top + CHIP_H} V ${bus} H ${chips[chips.length - 1]} V ${top + CHIP_H}`} />
-              {chips.slice(1, -1).map(x => (
-                <path key={x} className="tr" d={`M ${x} ${top + CHIP_H} V ${bus}`} />
+              {arr.bus.lines.map(pts => (
+                <path key={toD(pts)} className="tr" d={toD(pts)} />
               ))}
-              <path className="tr" data-wire="people" d={`M ${CX} ${bus} V ${CY - HUB}`} />
-              <circle className="via" cx={CX} cy={bus} r="4" />
+              <path className="tr" data-wire="people" d={toD(arr.bus.drop)} />
+              <circle className="via" cx={arr.bus.via[0]} cy={arr.bus.via[1]} r="4" />
             </>
           )}
-          {spots.map((s, i) => (
-            <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
+          {arr.top.map(p => p.apart && <path key={p.id} className="tr" data-wire={p.id} d={toD(p.path)} />)}
+          {spots.map(s => (
+            <path key={s.id} className="tr" data-wire={s.id} d={toD(s.path)} />
           ))}
-          {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
+          {spots.map(s => s.via && <circle key={s.id} className="via" cx={s.via[0]} cy={s.via[1]} r="4" />)}
           <PeopleWires placed={placed} />
           <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
 
@@ -576,7 +583,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           ))}
         </svg>
 
-        <PeopleRow org={org} people={topPeople} top={top} onOpen={openDecisions} />
+        <PeopleRow org={org} people={topPeople} cards={arr.top} onOpen={openDecisions} />
         <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
 
         {company ? (
@@ -589,10 +596,10 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           </div>
         )}
 
-        <HubTurn current={org.turn} />
+        <HubTurn current={org.turn} at={arr.turn} />
 
         {depts.length === 0 && (
-          <div className="start" style={{ left: CX - 260, top: BELOW + (org.turn ? TURN_H : 0) }}>
+          <div className="start" style={{ left: mx - 260, top: hub.y + hub.h + GAP + (org.turn ? TURN_H : 0) }}>
             <p>{t.map.emptyHint}</p>
             {company && (
               <button className="btn" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
@@ -603,7 +610,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         )}
 
         {depts.map((d: Department, i) => (
-          <button key={d.id} type="button" className={deptClass(d, flashing.has(d.id))} style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }} onClick={() => enter(spots[i]!, d.id)}>
+          <button key={d.id} type="button" className={deptClass(d, flashing.has(d.id))} style={{ left: spots[i]!.x, top: spots[i]!.y, width: spots[i]!.w, height: spots[i]!.h }} onClick={() => enter(spots[i]!, d.id)}>
             <Edge cut={12} corner>
               <span className="row1">
                 <b className="dname">{deptLabel(t, d)}</b>
@@ -634,9 +641,34 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             </Edge>
           </button>
         ))}
+
+        {arr.blocks.map(b => (
+          <Grip
+            key={b.key}
+            label={t.map.moveBlock(blockName(b.key))}
+            corner={gripCorner(b.key, b.rect)}
+            from={b.rect}
+            k={view.k}
+            onMove={at => setMoving(at && { key: b.key, at })}
+            onPut={at => {
+              setMoving(null);
+              layout.place(b.key, at);
+            }}
+          />
+        ))}
       </div>
 
       <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={fit} />
+      {(arranged || layout.failed) && (
+        <div className="map-arrange" onPointerDown={e => e.stopPropagation()}>
+          {layout.failed && <p className="alert" role="alert">{t.map.layoutNotSaved}</p>}
+          {arranged && (
+            <button className="btn ghost" type="button" onClick={layout.reset}>
+              {t.map.putBack}
+            </button>
+          )}
+        </div>
+      )}
       {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
       {!windowOpen && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>

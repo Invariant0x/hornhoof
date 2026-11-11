@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PH, PW, peopleLayout, rowCenters, type DeptPersonInput, type Spot } from '../src/map-people';
+import { PH, PW, peopleLayout, rowCenters, wirePeople, type DeptPersonInput, type Spot } from '../src/map-people';
 import { deptLayout } from '../src/screens/Map';
 import type { Point } from '../src/ui/wires';
 
@@ -61,6 +61,17 @@ function segmentsCross(s1: Seg, s2: Seg, allowedShared: Point[]): boolean {
   return hits.some(h => !allowedShared.some(v => samePoint(h, v)));
 }
 
+/* The part of a department's trace outside the hub, which covers the rest: where the trace crosses the hub's edge, it starts. */
+function outsideHub(pts: Point[]): Point[] {
+  const inside = (p: Point) => Math.hypot(p[0] - CX, p[1] - CY) <= HUB;
+  const first = pts.findIndex(p => !inside(p));
+  if (first <= 0) return pts;
+  const [a, b] = [pts[first - 1]!, pts[first]!];
+  /* A run across or down leaves the hub where it is HUB from the middle. */
+  const edge: Point = a[0] === b[0] ? [a[0], CY + Math.sign(b[1] - CY) * Math.sqrt(HUB * HUB - (a[0] - CX) ** 2)] : [CX + Math.sign(b[0] - CX) * Math.sqrt(HUB * HUB - (a[1] - CY) ** 2), a[1]];
+  return [edge, ...pts.slice(first)];
+}
+
 /* Closest distance from the hub center to a segment. */
 function distToHub(a: Point, b: Point): number {
   const dx = b[0] - a[0], dy = b[1] - a[1];
@@ -96,10 +107,12 @@ function assertPlanarScene(spots: (Spot & { path: Point[] })[], people: DeptPers
   const allSegs: Seg[] = [];
   const allowedByOwner = new Map<string, Point[]>();
 
+  /* The hub covers its middle, where the traces of departments meet: only what shows of them may not cross. */
   const hubShared: Point[] = [[CX, CY]];
   for (const s of spots) {
-    allSegs.push(...segmentsOf(s.path, 'hub'));
-    for (const pt of s.path.slice(1, -1)) hubShared.push(pt);
+    const shown = outsideHub(s.path);
+    allSegs.push(...segmentsOf(shown, 'hub'));
+    for (const pt of shown.slice(0, -1)) hubShared.push(pt);
   }
   const topY = Math.min(...spots.map(s => s.y)) - 28 - 56;
   const busY = topY + 56 + 14;
@@ -126,6 +139,8 @@ function assertPlanarScene(spots: (Spot & { path: Point[] })[], people: DeptPers
     }
   }
 
+  /* The wires, their forks and their bridges come from the routes and the cards alone. */
+  expect(wirePeople(layout.routes, layout.chips)).toEqual({ wires: layout.wires, vias: layout.vias, gaps: layout.gaps });
   return layout;
 }
 

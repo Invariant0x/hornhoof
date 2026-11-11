@@ -155,6 +155,10 @@ export const en = {
     zoomOut: 'Zoom out',
     zoomIn: 'Zoom in',
     showAll: 'Show everything',
+    /* A handle at a block's top left corner: drag it, or press the arrow keys, to move the block on your own map. */
+    moveBlock: (name: string) => `Move ${name}`,
+    putBack: 'Put back as it was',
+    layoutNotSaved: 'Could not save where you moved it. Move it again to try once more.',
     needsSubscription: 'Needs a subscription to start',
     runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
