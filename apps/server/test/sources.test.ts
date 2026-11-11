@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { writeGate } from '../src/db/gate.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies, departments } from '../src/db/schema.js';
 import { listed, outsideSources, recordNow, recordSources, sources, stepOf, touch, withSource, WRITE_TEXT } from '../src/db/sources.js';
@@ -139,6 +140,22 @@ describe('the source of a change', () => {
     const ops = (await db.execute<{ op: string }>(sql`select op from net.journal where tbl = 'applied' order by at`)).rows.map(row => row.op);
     expect(ops).toEqual(['insert', 'update']);
     expect(await listed(db, 'web:other')).toBeNull();
+  });
+
+  it('records as before behind the gate', async () => {
+    const db = await createTestDb();
+    const id = await aCompany(db);
+    /* A merge holds the gate: the write waits before its transaction, and still lists its step once. */
+    let free!: () => void;
+    const merge = writeGate.exclusive(() => new Promise<void>(resolve => (free = resolve)));
+    const write = withSource('web:gated', () => rename(db, id, 'Behind the gate'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await db.select().from(companies))[0]!.name).toBe('Acme');
+    expect(await appliedRows(db)).toEqual([]);
+    free();
+    await Promise.all([merge, write]);
+    expect((await db.select().from(companies))[0]!.name).toBe('Behind the gate');
+    expect(await appliedRows(db)).toEqual([{ source: 'web:gated:0', base: 'web:gated' }]);
   });
 
   it('wraps a db once', async () => {

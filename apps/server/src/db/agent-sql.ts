@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { stripSettings } from './client.js';
 import { confirmCommits, keepErrors } from './confirm.js';
+import { writeGate } from './gate.js';
 import { REFUSED_FUNCTIONS } from './sql-check.js';
 
 export { REFUSED_FUNCTIONS };
@@ -210,7 +211,14 @@ async function poolOfRole(admin: pg.Client, url: string, name: string, grants: s
   return pool;
 }
 
+/* An agent's text that may write waits at the gate of the app's writes, as the app's own do; one that reads goes on. */
+export const gated = <T>(mode: SqlMode, work: () => Promise<T>): Promise<T> => (mode === 'write' ? writeGate.through(work) : work());
+
 async function runOn(pool: pg.Pool, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
+  return gated(mode, () => inOwnTransaction(pool, text, mode, call));
+}
+
+async function inOwnTransaction(pool: pg.Pool, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
   const client = await pool.connect();
   try {
     return await inOneTransaction(client, text, mode, call);

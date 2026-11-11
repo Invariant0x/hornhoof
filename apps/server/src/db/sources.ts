@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { asc, eq, sql } from 'drizzle-orm';
 import type { Db } from './client.js';
+import { writeGate } from './gate.js';
 import { applied } from './schema.js';
 
 /* The work running now, when a node message, a page's request or a tool call started it: its name without a step, the
@@ -62,37 +63,44 @@ async function insertStep(tx: Db, source: Source): Promise<void> {
   await tx.insert(applied).values({ source: stepOf(source.base, step), base: source.base });
 }
 
+/* A transaction that may write goes through the gate of the app's writes before it begins, in a source or not. */
 function recordingTransaction(session: Session): Session['transaction'] {
   const transaction = session.transaction.bind(session);
   return async <T>(work: Work<T>, config?: Config): Promise<T> => {
-    const source = openNow();
-    if (!source || config?.accessMode === 'read only') return transaction(work, config);
-    let recorded = false;
-    const result = await transaction(async tx => {
-      const answer = await work(tx);
-      recorded = await recordStep(tx, source);
-      return answer;
-    }, config);
-    if (recorded) source.wrote = true;
-    return result;
+    if (config?.accessMode === 'read only') return transaction(work, config);
+    return writeGate.through(async () => {
+      const source = openNow();
+      if (!source) return transaction(work, config);
+      let recorded = false;
+      const result = await transaction(async tx => {
+        const answer = await work(tx);
+        recorded = await recordStep(tx, source);
+        return answer;
+      }, config);
+      if (recorded) source.wrote = true;
+      return result;
+    });
   };
 }
 
-/* A write outside a transaction runs as the same query in a transaction of its own, which records its step. */
+/* A write outside a transaction goes through the gate too. In a source it runs as the same query in a transaction of its
+   own, which records its step. */
 function recordingPrepare(db: Db, session: Session): Session['prepareQuery'] {
   const prepare = session.prepareQuery.bind(session);
   return (query, ...rest) => {
     const prepared = prepare(query, ...rest);
     if (!WRITE_TEXT.test(query.sql)) return prepared;
     const execute = prepared.execute.bind(prepared);
-    prepared.execute = (values, token) => (openNow() ? db.transaction(tx => sessionOf(tx).prepareQuery(query, ...rest).execute(values, token)) : execute(values, token));
+    prepared.execute = (values, token) =>
+      writeGate.through(async () => (openNow() ? db.transaction(tx => sessionOf(tx).prepareQuery(query, ...rest).execute(values, token)) : execute(values, token)));
     return prepared;
   };
 }
 
-/* The same db, wrapped once: inside an open source, each transaction that wrote, and each write outside a transaction,
-   lists its step of the source in `applied` in its own commit. It reaches into drizzle's session, the one place that
-   does, and the tests of sources fail if drizzle changes it. */
+/* The same db, wrapped once: every transaction that may write, and every write outside one, waits at the gate of the
+   app's writes while a merge holds it; and inside an open source, each transaction that wrote, and each write outside
+   a transaction, lists its step of the source in `applied` in its own commit. It reaches into drizzle's session, the
+   one place that does, and the tests of sources fail if drizzle changes it. */
 export function recordSources<T extends Db>(db: T): T {
   const session = sessionOf(db);
   if (session[RECORDS]) return db;

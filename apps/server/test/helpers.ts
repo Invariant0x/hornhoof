@@ -12,7 +12,7 @@ import { buildApp, type Deps } from '../src/app.js';
 import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
+import { agentRole, gated, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
 import type { LeaseKind, LeaseSync } from '../src/db/net.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
@@ -58,14 +58,14 @@ export const viaLink = (token?: string) => ({
 
 /* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
    hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
-function agentSqlOn(client: PGlite): AgentSql {
+export function agentSqlOn(client: PGlite): AgentSql {
   const roles = { write: agentRole('postgres'), read: readerRole('postgres') };
   let granted: Promise<unknown> | null = null;
   return {
     run: async (text, mode, call) => {
       granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
       await granted;
-      return client.transaction(async tx => {
+      return gated(mode, () => client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
         await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
         const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
@@ -74,7 +74,7 @@ function agentSqlOn(client: PGlite): AgentSql {
           await tx.query(RECORD_CALL, [call.invocation, call.jobId, JSON.stringify(call.answer(answers))]);
         } else if (mode === 'write') await tx.exec(PRE_COMMIT);
         return answers;
-      });
+      }));
     },
     close: async () => {},
   };

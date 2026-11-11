@@ -316,6 +316,13 @@ export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
   return { client, db };
 }
 
+/* A database a test made from another one's files, as a test database: with its own parsers, fenced and wrapped. */
+export async function asTestDb(client: PGlite): Promise<{ client: PGlite; db: TestDb }> {
+  await withOwnParsers(client);
+  await client.exec(`SET ${FENCED} = 'on'`);
+  return { client, db: recordSources(drizzle(client, { schema })) };
+}
+
 /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
    cannot race in a test; this shows instead that a move takes the locks that make them go one after the other. */
 export function statements(): { sql: string; params: unknown[] }[] {
