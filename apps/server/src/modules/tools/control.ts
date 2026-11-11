@@ -11,6 +11,7 @@ import { AgentPatch } from '../agents/routes.js';
 import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
+import { NewRepositoryBody } from '../departments/repo-hosts.js';
 import { LinkBody } from '../link/routes.js';
 import { SHOWN_TO_CEO } from '../nodes/command.js';
 import { LendBody } from '../nodes/routes.js';
@@ -61,6 +62,7 @@ export const CEO_ONLY = new Set([
   'lend_machine',
   'set_repository',
   'add_repository',
+  'create_repository',
   'remove_repository',
   'set_public_link',
   'remove_public_link',
@@ -112,7 +114,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'view',
     'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/task-departments, /api/tasks?status=all&department=<department id, or none for your own>, /api/tasks/<id>, /api/departments/<id>/backlog, ' +
       '/api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), /api/agents/<id>/events (its conversation), ' +
-      '/api/departments/<id>/roster, /api/updates, /api/link (the public link) and /api/link/names/<name> (whether a name for it is free).',
+      '/api/departments/<id>/roster, /api/updates, /api/link (the public link), /api/link/names/<name> (whether a name for it is free) and /api/repo-host (the GitHub owner whose key creates the company\'s repositories; /api/org shows each department\'s as repoHost).',
     { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },
     ({ path }) => {
       const url = new URL(path, 'http://hornhoof');
@@ -159,6 +161,14 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       'and a task names that product to change it. The fields are those of set_repository. To connect a repository to a product the department has, use set_repository with the product\'s id.',
     { department: Id('department'), ...RepositoryBody.shape },
     ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories`, payload: body, department }),
+  );
+  tool(
+    'create_repository',
+    'Creates a private repository on GitHub for a department, with a first commit holding its README, and connects it with the same key: the key the department saved, else the company\'s. ' +
+      'It becomes the repository of a department or product that has none, else a new product of the department named after it. name: its name on GitHub; author { name, email } as in set_repository. ' +
+      'Without a key it answers what is missing: tell the person that, and offer to connect a repository they have with set_repository instead.',
+    { department: Id('department'), ...NewRepositoryBody.shape },
+    ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories/new`, payload: body, department }),
   );
   tool('remove_repository', 'Disconnects a department\'s git repository.', { department: Id('department') }, ({ department }) => ({ method: 'DELETE', url: `/api/departments/${department}/repository`, department }));
 

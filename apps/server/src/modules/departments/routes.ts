@@ -25,6 +25,7 @@ import { checkStaff, departmentOf, HireLine, requiredState, servingSubscriptions
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
+import { repoHostRoutes } from './repo-hosts.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
 import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../outbound/extension.js';
@@ -523,6 +524,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
+  repoHostRoutes(app, ctx);
   waitPolicyRoutes(app, ctx);
   workModeRoutes(app, ctx);
   modelCheckRoutes(app, ctx);
