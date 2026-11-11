@@ -1,8 +1,8 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { clearNodeWords, pump } from '../conversation/queue.js';
-import { afterLeave, cutReplication } from '../copies/scope.js';
+import { afterLeave, cutReplication, holdsSecrets } from '../copies/scope.js';
 import { revokeMachineRows, visitorKeyOf } from '../network/join.js';
 import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
@@ -13,11 +13,11 @@ import { liveNode, settlePlans } from './nodes.js';
    the agents on them pick another machine of their plan at their next turn, and a plan left with no machine waits for
    one again. A turn that waited for one of these machines goes out on another one now. A machine of the network is cut
    off for good: its certificates, tickets and commands end in the same transaction that marks its row. One that held the
-   company's data is cut from the server's changes first, and leaves holding nothing that opens the company's link: the
-   link's key changes too. */
+   company's data, or still owes what it held, is cut from the server's changes first, and leaves holding nothing that
+   opens the company's link: the link's key changes too. */
 export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
   if (machineIds.length === 0) return;
-  const copies = await ctx.db.select({ id: machines.id, networkId: machines.networkId }).from(machines).where(and(inArray(machines.id, machineIds), eq(machines.role, 'data'), isNull(machines.revokedAt)));
+  const copies = await ctx.db.select({ id: machines.id, networkId: machines.networkId }).from(machines).where(and(inArray(machines.id, machineIds), holdsSecrets, isNull(machines.revokedAt)));
   await cutReplication(ctx.replication, copies);
   const { ids, moved, cored } = await ctx.db.transaction(async tx => {
     const now = new Date();

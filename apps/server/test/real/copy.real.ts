@@ -41,7 +41,7 @@ describe('a copy of the company on a second Postgres', () => {
   it('makes a copy that holds every row', async () => {
     const name = copyName(p.networkId, 1);
     expect(p.maker.mode()).toBe('off');
-    await p.until(() => p.maker.report().state === 'ready');
+    await p.until(() => p.maker.report()?.state === 'ready');
     expect(p.maker.mode()).toBe('read');
     expect(p.maker.report()).toMatchObject({ state: 'ready', error: null, name, old: null });
     expect(p.lines).toEqual([]);
@@ -56,7 +56,7 @@ describe('a copy of the company on a second Postgres', () => {
       expect(tables.length).toBeGreaterThan(80);
       /* The pulse is the leader's own clock on the copy. */
       const pulse = (await p.leader.admin.query<{ at: Date }>('SELECT at FROM net.pulse')).rows[0]!.at;
-      await p.until(async () => p.maker.report().at === pulse.toISOString());
+      await p.until(async () => p.maker.report()?.at === pulse.toISOString());
       const differing: string[] = [];
       for (const table of tables) if ((await hashOf(copy, table)) !== (await hashOf(p.leader.admin, table))) differing.push(table);
       expect(differing).toEqual([]);
@@ -96,7 +96,7 @@ describe('a copy of the company on a second Postgres', () => {
   }, 600_000);
 
   it("gives the agents' roles their rights on a schema that came later", async () => {
-    await p.until(() => p.maker.report().state === 'ready');
+    await p.until(() => p.maker.report()?.state === 'ready');
     /* As the copy's app does when its keeper's first word takes it out of off: the roles did not come with the schema. */
     const role = agentRole('hornhoof');
     const admin = await connected(p.copyUrl('hornhoof'));

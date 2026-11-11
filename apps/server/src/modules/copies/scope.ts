@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
@@ -14,16 +14,20 @@ const CUT_PAUSE_MS = 50;
 
 export type Leaving = { id: string; networkId: string | null };
 
+/* A row of a machine that holds the company's secrets: one that holds the data, or owes what it held. */
+export const holdsSecrets = or(eq(machines.role, 'data'), isNotNull(machines.uploadState));
+
 const leaderScope = (hostname: string) => new ApiError(409, 'conflict', `${hostname || 'This machine'} runs the company server. Move the server to another machine first.`, 'leader_scope');
 const tryAgain = () => new ApiError(503, 'unavailable', 'Try again in a minute.', 'try_again');
 
-/* The person's machines that hold the company's data. The machine that leads cannot give its data up: the server moves
-   to another machine first. */
+/* The person's machines that hold the company's data, and those that held it and still owe it: a copy that was
+   retired holds the company's secrets and a database until its wipe. The machine that leads cannot give its data up:
+   the server moves to another machine first. */
 export async function leavingData(db: Db, config: Config, personId: string): Promise<Leaving[]> {
   const rows = await db
     .select({ id: machines.id, networkId: machines.networkId, hostname: machines.hostname })
     .from(machines)
-    .where(and(eq(machines.personId, personId), eq(machines.role, 'data'), isNull(machines.revokedAt)));
+    .where(and(eq(machines.personId, personId), holdsSecrets, isNull(machines.revokedAt)));
   const leader = rows.length > 0 ? await findThisMachine(db, config) : null;
   const leads = rows.find(row => row.id === leader?.id);
   if (leads) throw leaderScope(leads.hostname);
@@ -52,13 +56,17 @@ export async function cutReplication(replication: Replication, leaving: { networ
 
 /* The rows of machines that stop holding the data, in the transaction that takes their person's scope: no place, a
    worker's role, the upload of what they hold owed, their certificates revoked, and the secrets they knew made anew:
-   those of the peer services at once, the link's key started here and finished after the commit. lost false: a copy
+   those of the peer services at once, the link's key started here and finished after the commit. What the leader
+   already took from one of them is not asked for again. lost false: a copy
    the ranking handed to another machine. Its owner still sees the whole company, so it keeps its place in the order
    and no key changes: it gets a worker's role, owes what it holds, and its certificates are revoked, nothing else. */
 export async function leaveData(ctx: Ctx, tx: Db, machineIds: string[], now: Date, opts: { lost?: boolean } = {}): Promise<void> {
   if (machineIds.length === 0) return;
   const lost = opts.lost ?? true;
-  await tx.update(machines).set({ role: 'worker', uploadState: 'waiting', ...(lost ? { serverOrder: null, serverWhy: null, dataLeftAt: now } : {}) }).where(inArray(machines.id, machineIds));
+  await tx
+    .update(machines)
+    .set({ role: 'worker', uploadState: sql`COALESCE(${machines.uploadState}, 'waiting')`, ...(lost ? { serverOrder: null, serverWhy: null, dataLeftAt: now } : {}) })
+    .where(inArray(machines.id, machineIds));
   await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.machineId, machineIds), isNull(certificates.revokedAt)));
   if (!lost) return;
   await dropPeerSecrets(tx);

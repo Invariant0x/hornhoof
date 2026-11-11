@@ -59,7 +59,7 @@ describe.each([[HOST, OTHER], [OTHER, HOST]] as const)('a leader on %s with its 
         await new Promise(resolve => setTimeout(resolve, 50));
       }
     })();
-    await p.wait(() => p.maker.report().state === 'ready', 540_000, 'the copy ready');
+    await p.wait(() => p.maker.report()?.state === 'ready', 540_000, 'the copy ready');
     writing = false;
     await writer;
     /* The lease was renewed all along: the same term still stands. */
@@ -146,7 +146,7 @@ describe.each([[HOST, OTHER], [OTHER, HOST]] as const)('a leader on %s with its 
     /* The copy's subscription stops, and its keeper is not there to start it again: its connection to the leader is gone. */
     p.keeping(false);
     try {
-      await p.copy.admin.query(`ALTER SUBSCRIPTION ${p.maker.report().name} DISABLE`);
+      await p.copy.admin.query(`ALTER SUBSCRIPTION ${p.maker.report()?.name} DISABLE`);
       await p.wait(async () => p.record()?.state === 'off' && (await setting()) === '', 60_000, 'the copy dropped from sync');
       expect(p.controller.flag()).toBe('relay_off');
       await app.query(NOTE(++notes));
@@ -213,14 +213,14 @@ describe.each([[HOST, OTHER], [OTHER, HOST]] as const)('a leader on %s with its 
       await p.wait(async () => (await sweepSlots(sql, line => lines.push(line), new Map(), 0)).includes(stale) || (await slot()).length === 0, 60_000, 'the stale slot dropped');
       expect(await slot()).toEqual([]);
       /* The copy's own slot stays: its machine names that attempt. */
-      expect((await p.leader.admin.query('SELECT 1 FROM pg_replication_slots WHERE slot_name = $1', [p.maker.report().name])).rows).toHaveLength(1);
+      expect((await p.leader.admin.query('SELECT 1 FROM pg_replication_slots WHERE slot_name = $1', [p.maker.report()?.name])).rows).toHaveLength(1);
     } finally {
       await sql.close();
     }
   });
 
   it('loses a slot to the WAL limit', LONG, async () => {
-    const name = p.maker.report().name;
+    const name = p.maker.report()?.name;
     await p.leader.admin.query(`ALTER SYSTEM SET max_slot_wal_keep_size = '1MB'`);
     await p.leader.admin.query('SELECT pg_reload_conf()');
     await p.pause();
@@ -246,7 +246,7 @@ describe.each([[HOST, OTHER], [OTHER, HOST]] as const)('a leader on %s with its 
     await p.leader.admin.query('SELECT pg_reload_conf()');
     /* The copy makes itself again beside the old database, the leader reads the old one by its ids, and the two change
        places. */
-    await p.wait(() => p.maker.report().name === second && p.maker.report().state === 'ready' && p.maker.report().old === null && p.maker.mode() === 'read', 540_000, 'the copy made again and in place');
+    await p.wait(() => p.maker.report()?.name === second && p.maker.report()?.state === 'ready' && p.maker.report()?.old === null && p.maker.mode() === 'read', 540_000, 'the copy made again and in place');
     await onCopy.end().catch(() => undefined);
     onCopy = await connected(p.copyUrl('hornhoof'));
     await caughtUp();

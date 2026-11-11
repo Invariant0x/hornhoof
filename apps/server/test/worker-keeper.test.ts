@@ -16,6 +16,7 @@ import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { PEERS_FILE, TICKET_FILE } from '../src/modules/keeper/worker.js';
 import { WIPE_FILE, WIPED_FILE } from '../src/modules/keeper/uploads.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
+import type { VisitSettings } from '../src/modules/link/visit-client.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
 import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
@@ -23,7 +24,7 @@ import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { as, SETUP, TEST_SECRET, testApp, until } from './helpers.js';
 
-import { type Company, DAY_MS, MAC, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
+import { type Company, DAY_MS, MAC, SLEEPER, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -260,6 +261,33 @@ describe("a worker's keeper", () => {
     expect(call.status).toBe(503);
     expect((call.json() as { error: { reason: string } }).error.reason).toBe('no_leader');
     expect(again.status().certificate).toBe(true);
+  });
+
+  it("dials by the view's secret", async () => {
+    const c = await company();
+    const w = await worker(c);
+    await until(async () => hasLeader(w.status()) && (await c.rowOf(w.machine)).reportAt !== null);
+    await w.stop();
+    await c.stop();
+    /* The view the keeper wrote down, with a link of the company as the leader gives it to a machine that holds the
+       data, or to any other. */
+    const peers = join(w.config.dir, PEERS_FILE);
+    const view = JSON.parse(readFileSync(peers, 'utf8')) as Record<string, unknown>;
+    const link = { name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'relay.hornhoof.test', serverPort: 443, appSecret: 'a'.repeat(43), visitorKey: 'v'.repeat(32) };
+    const started = async (dataSecret: string | null, over: { visitKind?: 'view' } = {}) => {
+      writePrivately(peers, JSON.stringify({ ...view, link: { ...link, dataSecret } }));
+      const visits: VisitSettings[] = [];
+      const again = await workerOn(c, w.config, { ...over, visitClientFor: settings => (visits.push(settings), SLEEPER) });
+      await until(() => visits.length > 0);
+      await again.stop();
+      return visits[0]!;
+    };
+    /* A keeper that keeps a copy reaches the service with the way to the data while its view carries that secret. */
+    expect(await started('d'.repeat(43), { visitKind: 'view' })).toMatchObject({ appSecret: link.appSecret, dataSecret: 'd'.repeat(43) });
+    /* Its copy was retired: the leader gives it that secret no more, and it reaches the app's service from the start. */
+    expect(await started(null, { visitKind: 'view' })).not.toHaveProperty('dataSecret');
+    /* A worker's keeper never reaches for the data, whatever its view says. */
+    expect(await started('d'.repeat(43))).not.toHaveProperty('dataSecret');
   });
 
   it('renews by its key when its certificate has ended', async () => {

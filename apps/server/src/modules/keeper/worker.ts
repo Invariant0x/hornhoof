@@ -81,11 +81,12 @@ export type WorkerKeeperOptions = {
   backupKeyRetryMs?: number;
   /* What the keeper of a machine that keeps a copy changes in the worker's keeper it runs inside it. role: what it
      says it is; a worker's keeper alone takes the steps that make its machine a data machine. visitKind: which service
-     of the data machines its visitor reaches through the relay: the one with the way to the data. ownApp: this
+     of the data machines its visitor reaches through the relay: 'view' is the one with the way to the data while the
+     last view, at the start the one it wrote down, carries that secret, and the app's without it. ownApp: this
      machine's own app, which the front door passes to once no leader was in reach for afterMs: it reads. extraReport:
      what goes into each report besides. onView: called with each view of the leader's. */
   role?: MachineRole;
-  visitKind?: 'app' | 'data';
+  visitKind?: 'app' | 'view';
   ownApp?: { target: Target; afterMs: number };
   extraReport?: () => object;
   /* What measures this machine's connection to the internet; none where a test gives none. */
@@ -127,6 +128,7 @@ const Data = z.object({
 const Copy = z.object({
   slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
   old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'received', 'wipe']).nullable().default(null),
+  lastAttempt: z.number().int().min(1).nullable().default(null),
 });
 /* dataSecret: a server of the build before says none, which reads as none. */
 const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
@@ -354,7 +356,7 @@ export class WorkerKeeper {
      reaches the one with the way to the data while the leader gives it that secret, and the app's, as a worker does,
      once it gives none: a machine that stopped holding the data still has to give the leader what it holds. */
   private visitKind(): 'app' | 'data' {
-    return this.opts.visitKind === 'data' && this.view?.link?.dataSecret ? 'data' : 'app';
+    return this.opts.visitKind === 'view' && this.view?.link?.dataSecret ? 'data' : 'app';
   }
 
   /* The data machines of the view, each with the loopback port the visitor opens to it while there is a link. */

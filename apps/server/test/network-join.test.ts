@@ -456,6 +456,18 @@ describe('joining the company as a machine', () => {
     expect((await told()).copy).toBeNull();
   });
 
+  it('names the last attempt', async () => {
+    const c = await company();
+    await c.serverCertificate();
+    const w = await c.worker();
+    const copy = async () => (await workerView(c.app.ctx, w.machine)).copy;
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    expect(await copy()).toMatchObject({ slot: null, lastAttempt: null });
+    /* It kept a copy before, was wiped, and holds the data again: its row still names the last one. */
+    await c.db.update(machines).set({ copyName: 'copy_0f0f0f0f0f0f0f0f_7' }).where(eq(machines.id, w.machine));
+    expect(await copy()).toMatchObject({ slot: 'missing', lastAttempt: 7 });
+  });
+
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {
     const c = await company();
     const w = await c.worker();

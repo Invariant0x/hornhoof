@@ -236,16 +236,15 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
         copy === undefined || who.own || row?.role !== 'data'
           ? {}
           : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name, copyOld: copy.old?.attempt ?? null };
-      /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy. */
-      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyName: null, copyOld: null } : {};
+      /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
+         its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
+      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null } : {};
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
-      /* It counts the attempts of its copy from 1 again when it next keeps one, so the merges of its old copies give
-         their names up, and one the leader never read is ended: that database is gone. */
+      /* A merge of an old copy of its that the leader never read is ended: that database is gone. */
       if ('uploadState' in left) {
         await queryOf(tx)(
-          `UPDATE net.merges SET source = source || ':wiped:' || id::text, status = 'done', done_at = COALESCE(done_at, now()),
-                  error = CASE WHEN status IN ('pending', 'applied') THEN $2 ELSE error END
-            WHERE machine = $1::uuid AND source ~ '^machine:[0-9a-f-]{36}:[0-9]+$'`,
+          `UPDATE net.merges SET status = 'done', done_at = now(), error = $2
+            WHERE machine = $1::uuid AND source ~ '^machine:[0-9a-f-]{36}:[0-9]+$' AND status IN ('pending', 'applied')`,
           [machine.id, 'The machine was wiped before its old copy was read.'],
         );
       }

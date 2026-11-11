@@ -9,7 +9,9 @@ const NETWORK_ID = `99BB2233aabbccdd${'2'.repeat(48)}`;
 const NAME = 'copy_99bb2233aabbccdd_1';
 const PASSWORD = 'the-replica-password';
 const MIB = 2 ** 20;
-const ORDER: CopyOrder = { slot: 'ok', leaderSize: 4 * MIB, migrations: 108, old: null, upload: null };
+const ORDER: CopyOrder = { slot: 'ok', leaderSize: 4 * MIB, migrations: 108, old: null, upload: null, lastAttempt: null };
+/* What the leader says of a machine that never kept a copy. */
+const FIRST: CopyOrder = { ...ORDER, slot: null };
 
 type Sub = { enabled: boolean; slot: string | null; rels: string[] };
 type Database = { tables: boolean; led: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub> };
@@ -124,11 +126,31 @@ describe('the maker of a copy', () => {
     expect(copyName(NETWORK_ID, 12)).toBe('copy_99bb2233aabbccdd_12');
   });
 
+  it('starts above its last attempt after a wipe', async () => {
+    const s = stand();
+    const maker = s.maker();
+    /* Not before the leader said which attempt this machine's row names: nothing is asked, and nothing said of a copy. */
+    await maker.tick(null);
+    expect([s.request(), maker.report(), existsSync(join(s.dir, COPY_STATE))]).toEqual([null, null, false]);
+    await maker.tick({ ...ORDER, slot: 'missing', lastAttempt: 7 });
+    expect(s.request()).toMatchObject({ attempt: 8 });
+    expect(maker.report()).toMatchObject({ state: 'making', name: 'copy_99bb2233aabbccdd_8' });
+    s.loaded(8);
+    await until(s, maker, 'sync', null);
+    expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual(['copy_99bb2233aabbccdd_8']);
+    /* A keeper that starts again goes on from what it wrote down. */
+    expect(s.maker().report()).toMatchObject({ name: 'copy_99bb2233aabbccdd_8' });
+    /* A machine that never kept one starts at 1. */
+    const first = stand();
+    await first.maker().tick(FIRST);
+    expect(first.request()).toMatchObject({ attempt: 1 });
+  });
+
   it('asks for the schema once', async () => {
     const s = stand();
     const maker = s.maker();
     expect(maker.mode()).toBe('off');
-    await maker.tick(null);
+    await maker.tick(FIRST);
     expect(s.request()).toEqual({ attempt: 1, database: 'hornhoof', port: 7432, password: PASSWORD });
     expect(statSync(join(s.controlDir, SCHEMA_FILE)).mode & 0o777).toBe(0o600);
     const written = statSync(join(s.controlDir, SCHEMA_FILE)).mtimeMs;
@@ -143,7 +165,7 @@ describe('the maker of a copy', () => {
   it('tries again with the next attempt', async () => {
     const s = stand();
     const maker = s.maker();
-    await maker.tick(null);
+    await maker.tick(FIRST);
     mkdirSync(join(s.controlDir, 'schema'));
     writeFileSync(join(s.controlDir, 'schema', '1.failed'), 'The database is not empty.\n');
     rmSync(join(s.controlDir, SCHEMA_FILE));
@@ -214,7 +236,7 @@ describe('the maker of a copy', () => {
     const sub = db.subs.get(NAME)!;
     sub.rels = ['r', 'd'];
     await maker.tick(ORDER);
-    expect(maker.report().state).toBe('making');
+    expect(maker.report()?.state).toBe('making');
     sub.rels = ['r', 'r'];
     db.pulse = '2026-11-11T11:59:59.000Z';
     await maker.tick(ORDER);
@@ -399,7 +421,7 @@ describe('the maker of a copy', () => {
     /* A copy the leader never listed yet is not gone for that. */
     const fresh = stand();
     const made = fresh.maker();
-    await made.tick(null);
+    await made.tick(FIRST);
     fresh.loaded();
     await until(fresh, made, 'sync', null);
     fresh.databases.get('hornhoof')!.subs.get(NAME)!.rels = ['r'];
@@ -420,7 +442,7 @@ describe('the maker of a copy', () => {
     await maker.tick({ ...ORDER });
     await maker.tick({ ...ORDER });
     expect(s.kept()).toMatchObject({ attempt: 1, phase: 'ready' });
-    expect(maker.report().state).toBe('ready');
+    expect(maker.report()?.state).toBe('ready');
     /* Stopped for ten minutes whatever is tried. */
     for (let minutes = 0; minutes <= 10; minutes++) {
       sub.enabled = false;

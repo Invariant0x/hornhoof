@@ -35,7 +35,8 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
 /* What the leader tells a machine that keeps a copy: whether its slot is there and whole, how big the leader's database
    is, to count the copy's progress against, and how many migrations the leader's schema has, so a copy made with
    another schema makes itself again. slot: null while the copy named none. A machine that stopped holding the data is
-   told what it still owes: what it holds, and its wipe once the leader has that merged and saved. */
+   told what it still owes: what it holds, and its wipe once the leader has that merged and saved. lastAttempt: the
+   attempt the row's copy is named by, which a machine that was wiped starts above. */
 export async function copyOrder(ctx: Ctx, row: { id: string; copyName: string | null; copyOld?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
@@ -47,5 +48,6 @@ export async function copyOrder(ctx: Ctx, row: { id: string; copyName: string | 
   const [merge] = row.copyOld ? await q<{ status: string }>('SELECT status FROM net.merges WHERE source = $1', [`machine:${row.id}:${row.copyOld}`]) : [];
   const old = !row.copyOld ? null : merge?.status === 'merged' ? 'merged' : merge?.status === 'done' ? 'done' : 'waiting';
   const upload = !row.uploadState ? null : row.uploadState === 'kept' ? 'wipe' : row.uploadState;
-  return { slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload };
+  const attempt = /_(\d+)$/.exec(row.copyName ?? '')?.[1];
+  return { slot, leaderSize: sized ? Number(sized.size) : null, migrations: counted?.n ?? null, old, upload, lastAttempt: attempt ? Number(attempt) : null };
 }

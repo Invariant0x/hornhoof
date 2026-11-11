@@ -38,8 +38,11 @@ export type CopyReport = { state: CopyState; progress: number | null; error: Cop
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
-   its wipe. */
-export type CopyOrder = { slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null };
+   its wipe. lastAttempt: the attempt the machine's row names its copy by; null where it never kept one. */
+export type CopyOrder = {
+  slot: 'ok' | 'lost' | 'missing' | null; leaderSize: number | null; migrations: number | null; old: 'waiting' | 'merged' | 'done' | null; upload: 'waiting' | 'received' | 'wipe' | null;
+  lastAttempt: number | null;
+};
 
 type Closable = Sql & { close(): Promise<void> };
 const Kept = z.object({
@@ -100,6 +103,8 @@ export const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '
    company, and never drops one the leader has not read. */
 export class CopyMaker {
   private kept: Kept;
+  /* Nothing is written down of a copy yet: the first attempt's number waits for the leader's word. */
+  private fresh = false;
   private open: { database: string; sql: Closable } | null = null;
   /* The connection to the copy that is still read while the next one is made beside it. */
   private beside: Closable | null = null;
@@ -115,8 +120,10 @@ export class CopyMaker {
     this.said = this.making(null);
   }
 
-  report(): CopyReport {
-    return this.said;
+  /* Null before the first attempt has its number: nothing is said of a copy until then, so the row keeps the name of
+     the copy the machine kept before. */
+  report(): CopyReport | null {
+    return this.fresh ? null : this.said;
   }
 
   /* What its app may do: read once the copy holds every table, also while a new copy is made beside it; nothing before
@@ -150,6 +157,15 @@ export class CopyMaker {
     if (this.busy) return;
     this.busy = true;
     try {
+      /* A machine that kept a copy before and was wiped starts above the attempt its row still names, so no slot,
+         connection or merge of the old copy shares its name with the new one. Until the leader says which that was,
+         nothing is asked. */
+      if (this.fresh) {
+        if (!order) return;
+        this.keep({ attempt: (order.lastAttempt ?? 0) + 1 });
+        this.fresh = false;
+        this.said = this.making(null);
+      }
       this.heard(order);
       await this.step(order);
       this.failing = false;
@@ -181,6 +197,7 @@ export class CopyMaker {
     } catch {
       /* None yet. */
     }
+    this.fresh = true;
     return Kept.parse({ attempt: 1, database: FIRST_DB, phase: 'schema' });
   }
 

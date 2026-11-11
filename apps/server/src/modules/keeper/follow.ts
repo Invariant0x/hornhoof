@@ -101,9 +101,12 @@ export class FollowKeeper {
       log,
       now: opts.now,
       role: 'data',
-      visitKind: 'data',
+      visitKind: 'view',
       ownApp: { target: opts.app, afterMs: opts.ownAppAfterMs ?? OWN_APP_AFTER_MS },
-      extraReport: () => ({ copy: this.maker.report() }),
+      extraReport: () => {
+        const copy = this.maker.report();
+        return copy ? { copy } : {};
+      },
       onView: view => this.heard(view),
       ...opts.worker,
     });
@@ -136,7 +139,7 @@ export class FollowKeeper {
     return { front, door };
   }
 
-  status(): WorkerStatus & { copy: CopyReport } {
+  status(): WorkerStatus & { copy: CopyReport | null } {
     return { ...this.worker.status(), copy: this.maker.report() };
   }
 

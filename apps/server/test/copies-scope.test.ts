@@ -174,6 +174,41 @@ describe("a machine whose owner no longer sees the whole company", () => {
     expect({ key: await c.keyOf(), secrets: await c.db.select().from(peerSecrets), calls: c.keyChanges() }).toEqual(before);
   });
 
+  it('takes the data from a copy being retired', async () => {
+    const c = await company();
+    c.app.ctx.replication = fakeReplication(c.seen).replication;
+    /* The ranking handed Maria's copy on: a worker's row that still holds the secrets and owes its database. */
+    await c.db.transaction(tx => leaveData(c.app.ctx, tx, [c.d.id], new Date(), { lost: false }));
+    const before = await c.keyOf();
+    expect((await c.patch()).statusCode).toBe(200);
+    const d = await c.rowOf(c.d.id);
+    expect(d).toMatchObject({ role: 'worker', uploadState: 'waiting', serverOrder: null });
+    expect(d.dataLeftAt).toBeInstanceOf(Date);
+    await until(async () => (await c.linkRow()).nextKeyEnc === null && (await c.keyOf()) !== before);
+    expect(c.keyChanges()).toBe(1);
+    expect((await c.secrets()).filter(kind => kind !== 'visit')).toEqual([]);
+    /* What the leader already took from it is not asked for again. */
+    expect((await c.patch({ whole: true })).statusCode).toBe(200);
+    await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: null }).where(eq(machines.id, c.d.id));
+    expect((await c.patch()).statusCode).toBe(200);
+    const kept = await c.rowOf(c.d.id);
+    expect(kept).toMatchObject({ role: 'worker', uploadState: 'kept' });
+    expect(kept.dataLeftAt).toBeInstanceOf(Date);
+    await until(() => c.keyChanges() === 2);
+  });
+
+  it('changes the link key when a retiring machine is disconnected', async () => {
+    const c = await company();
+    c.app.ctx.replication = fakeReplication(c.seen).replication;
+    await c.db.transaction(tx => leaveData(c.app.ctx, tx, [c.d.id], new Date(), { lost: false }));
+    const before = await c.keyOf();
+    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.d.id}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
+    const d = await c.rowOf(c.d.id);
+    expect([d.revokedAt, d.dataLeftAt].map(at => at instanceof Date)).toEqual([true, true]);
+    await until(async () => (await c.linkRow()).nextKeyEnc === null && (await c.keyOf()) !== before);
+    expect(c.keyChanges()).toBe(1);
+  });
+
   it('scores the order after a lost scope', async () => {
     const c = await company();
     c.app.ctx.replication = fakeReplication(c.seen).replication;

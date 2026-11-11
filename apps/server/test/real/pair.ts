@@ -99,7 +99,7 @@ export async function pair(opts: { leader?: Platform; copy?: Platform } = {}): P
     const until = async (done: () => boolean | Promise<boolean>, ms = 120_000): Promise<void> => {
       const end = Date.now() + ms;
       for (;;) {
-        await made0.tick({ slot: 'ok', leaderSize: 50 * 2 ** 20, migrations: null, old: null, upload: null });
+        await made0.tick({ slot: 'ok', leaderSize: 50 * 2 ** 20, migrations: null, old: null, upload: null, lastAttempt: null });
         await playUpdater();
         if (await done()) return;
         if (Date.now() > end) throw new Error(`The copy did not get there in time. It says ${JSON.stringify(made0.report())}, and its keeper said: ${lines.join(' | ') || 'nothing'}`);
@@ -234,14 +234,14 @@ export async function syncedPair(opts: { leader?: Platform; copy?: Platform } = 
         if (making || !keeps) return;
         making = true;
         void (async () => {
-          const slot = await p.leader.admin.query<{ status: string | null }>('SELECT wal_status AS status FROM pg_replication_slots WHERE slot_name = $1', [p.maker.report().name]);
+          const slot = await p.leader.admin.query<{ status: string | null }>('SELECT wal_status AS status FROM pg_replication_slots WHERE slot_name = $1', [p.maker.report()?.name ?? null]);
           const lost = slot.rows[0]?.status === 'lost';
-          const old = await oldOf(p.maker.report().old?.attempt);
-          await p.maker.tick({ slot: lost ? 'lost' : slot.rows.length ? 'ok' : 'missing', leaderSize: 50 * 2 ** 20, migrations: null, old, upload: null });
+          const old = await oldOf(p.maker.report()?.old?.attempt);
+          await p.maker.tick({ slot: lost ? 'lost' : slot.rows.length ? 'ok' : 'missing', leaderSize: 50 * 2 ** 20, migrations: null, old, upload: null, lastAttempt: null });
           await p.playUpdater();
           const report = p.maker.report();
           const text = JSON.stringify(report);
-          if (text === said.text) return;
+          if (!report || text === said.text) return;
           said.text = text;
           await p.leader.admin.query('UPDATE machines SET copy_state = $2, copy_name = $3, copy_at = $4, copy_progress = $5, copy_error = $6 WHERE id = $1', [machine, report.state, report.name, report.at, report.progress, report.error]);
         })()
