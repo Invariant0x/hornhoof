@@ -1,6 +1,6 @@
 # Assistant API
 
-A personal assistant is an outside program, such as AvaClone, OpenClaw or any program that speaks HTTP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, reads what they answer, and answers the requests that wait for its owner. It never administers the company.
+A personal assistant is an outside program, such as AvaClone, OpenClaw or any program that speaks HTTP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, reads what they answer, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
 
 This document is the whole contract. A program built from it alone works with Hornhoof.
 
@@ -18,9 +18,10 @@ In Hornhoof, on the People screen, someone adds a person and ticks "This is an a
 
 An assistant acts with its owner's rights as they are at the moment of each call. When the owner's access changes, the assistant's changes with it, at once.
 
-* It writes to the agents its owner may write to in the agent's window. It writes to the orchestrator only when its owner sees the whole company: the CEO, the CEO delegate or a person with access to the whole company.
-* It answers the requests its owner may answer, except a request about administering the company.
-* It never administers the company: people and their access, plans, machines, updates, the public link, Telegram bots, repositories and their tokens, company settings, hiring or removing employees. No route here does any of that, and an agent does none of that on an assistant's word: it tells the owner to do it in Hornhoof.
+* It writes to exactly the agents its owner may write to in the agent's window, the orchestrator among them when the owner's window shows it.
+* It answers every request its owner may answer, whatever it is about.
+* An agent weighs the assistant's words exactly as its owner's words in the window. What the owner may ask an agent for, the assistant may ask for too, managing the company included, for example people and their access, plans, machines or settings.
+* The key opens only the calls below. For anything else, the assistant asks an agent in words, and the agent acts with the owner's rights.
 * While its owner is switched off or gone, every call is refused with `403 assistant_owner_inactive`.
 
 Everything an assistant does is recorded as done by its owner through the assistant. The agent's window marks its messages with the assistant's name, and an answered request records both.
@@ -55,7 +56,6 @@ An error answers with a status and this body:
 | 401 | `assistant_key_invalid` | No key, a key in another form, a replaced or revoked key, or an assistant that is switched off. |
 | 403 | `assistant_owner_inactive` | The owner is switched off or gone. |
 | 403 | `assistant_agent_refused` | The owner does not write to this agent. |
-| 403 | `assistant_not_allowed` | The request is about administering the company, so only the owner answers it. |
 | 403 | `decision_not_allowed` | The owner does not take this decision. |
 | 404 | `agent_unknown` | There is no such agent in the company, or it was removed. |
 | 404 | `request_unknown` | There is no such request in the company. |
@@ -83,7 +83,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 ```
 
 * `program` is `avaclone`, `openclaw` or `other`.
-* `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company, and only then may the assistant write to the orchestrator.
+* `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
 * `departments` and `teams` are the places the owner was given access to. `responsibleFor` lists the departments the owner is responsible for.
 * `telegram` is the owner's Telegram as it is in People now: `username` without the `@`, in lower case, and `id`, the account's number, typed in People or learned once one of the company's Telegram bots met the owner. Each is `null` while unknown, and both are always there. A program that serves several people binds the key to exactly one of them by this, so that nobody else acts with the owner's rights through it. It changes when the owner's Telegram changes, so read it again, for example when the program starts.
 
@@ -117,7 +117,7 @@ Writes to an agent for the owner, as the owner would in the agent's window.
 { "message": { "id": "…", "agentId": "…" } }
 ```
 
-The agent reads the message as the owner's own words, marked as written by the assistant, and is told who the owner is in the company. A message to an agent that is busy waits for it, as a person's does. If the message answers a question the agent asked the owner in its window, Hornhoof records it as the owner's answer given by the assistant, except a question about administering the company.
+The agent reads the message as the owner's own words, marked as written by the assistant, and is told who the owner is in the company. A message to an agent that is busy waits for it, as a person's does. If the message answers a question the agent asked the owner in its window, Hornhoof records it as the owner's answer given by the assistant.
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;
 
@@ -195,7 +195,7 @@ The requests that wait for the owner now: the ones Hornhoof would show to the ow
 * `approval`: for an approval a department's rules asked for, `{ channel, kind, amount }` (what is sent, what kind of work, how much), or `null`.
 * `link`: a web address that shows the work, or `null`.
 * `agent` is `null` when the owner does not see the agent that asked. `department` is `null` for work of no department.
-* `answerable` is false when the request is about administering the company, or the owner may not take it. The assistant shows such a request to its owner and leaves the answer to them, in Hornhoof.
+* `answerable` is true exactly when the owner may answer the request in Hornhoof. When it is false, the assistant may show the request to its owner, but neither of them answers it.
 
 ### POST /api/assistant/requests/:id/answer
 
@@ -214,7 +214,7 @@ No other field is allowed. Answers `200`:
 { "request": { "id": "…", "status": "answered", "picked": null, "answer": "Stripe." } }
 ```
 
-`status` is `answered`, `approved` or `declined`; `picked` is the option's number for a pick. A `request_closed` event follows. Refusals: `403 assistant_not_allowed` for administering the company, `403 decision_not_allowed` when the owner does not take this decision, `409 request_closed` when it is answered already, `400 task_invalid` when the answer does not fit the kind (for example `approve` on a question, or a `pick` that is not an option).
+`status` is `answered`, `approved` or `declined`; `picked` is the option's number for a pick. A `request_closed` event follows. Refusals: `403 decision_not_allowed` when the owner does not take this decision, `409 request_closed` when it is answered already, `400 task_invalid` when the answer does not fit the kind (for example `approve` on a question, or a `pick` that is not an option).
 
 ## Wake
 
@@ -280,7 +280,7 @@ BASE=https://hornhoof.example.com
 
 curl -s -H "$H" $BASE/api/assistant/me
 curl -s -H "$H" $BASE/api/assistant/agents
-# Hana, the head of Development, is among the agents. The orchestrator is not, as Olga does not see the whole company.
+# Hana, the head of Development, is among the agents. The orchestrator is not, as Olga's own window does not show it either.
 
 curl -s -H "$H" -H 'Content-Type: application/json' \
   -d '{"agentId":"8a3c…","text":"How far is the checkout?"}' $BASE/api/assistant/messages
