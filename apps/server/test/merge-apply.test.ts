@@ -516,7 +516,6 @@ describe('a merge applied', () => {
     for (const kept of [true, false]) {
       const s = await stand();
       const fork = await s.sides.fork();
-      // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A fork's own database, which closes with its test.
       await fork.client.exec(`ALTER TABLE tasks DISABLE TRIGGER net_journal; UPDATE tasks SET title = 'Unjournaled' WHERE id = '${s.one.id}'; ALTER TABLE tasks ENABLE TRIGGER net_journal`);
       const { id, result } = await s.merge(fork, { kept });
       expect(await s.titleOf(s.db, s.one.id)).toBe('One');
@@ -657,7 +656,6 @@ describe('a merge applied', () => {
     expect((await rowsOf<{ status: string }>(s.db, sql`SELECT status FROM net.merges`)).map(row => row.status)).toEqual(['pending']);
     /* Two shapes never merge. */
     const other = await s.sides.fork();
-    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A fork's own database, which closes with its test.
     await other.client.exec('ALTER TABLE teams ADD COLUMN nickname text');
     await expect(s.merge(other)).rejects.toThrow(new MergeRefused('The two databases are of different versions.'));
     /* Nor does another company's database. */
