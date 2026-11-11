@@ -83,7 +83,7 @@ describe("the repository's full test command", () => {
         <RepoSettings placeId="d2" repository={null} />
       </LanguageProvider>,
     );
-    await user.click(screen.getByRole('button', { name: 'Add repository' }));
+    await user.click(screen.getByRole('button', { name: 'Connect repository' }));
     await user.type(screen.getByLabelText('Address'), REPO.url);
     await user.type(screen.getByLabelText(FULL), 'npm test');
     await user.click(screen.getByRole('button', { name: 'Save' }));

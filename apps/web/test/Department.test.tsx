@@ -619,7 +619,7 @@ describe('Department view', () => {
     await drawer(user, 'Department tasks');
     expect(within(screen.getByRole('region', { name: 'Tasks' })).getByRole('button', { name: 'New task' })).toBeInTheDocument();
     await drawer(user, 'About the department');
-    expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Repositories' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Sub-units' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Hire' })).not.toBeInTheDocument();
   });
@@ -635,7 +635,7 @@ describe('Department view', () => {
     await flyIn(user);
     await drawer(user, 'About the department');
     const about = screen.getByRole('complementary', { name: 'About the department' });
-    expect(within(about).getByRole('region', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(about).getByRole('region', { name: 'Repositories' })).toBeInTheDocument();
     expect(within(about).getByRole('region', { name: 'Sub-units' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '+ Hire' }));
     expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
@@ -663,7 +663,7 @@ describe('Department view', () => {
     );
     await flyIn(user);
     await drawer(user, 'About the department');
-    const repo = screen.getByRole('region', { name: 'Repository' });
+    const repo = screen.getByRole('region', { name: 'Repositories' });
     expect(repo).toHaveTextContent('https://github.com/acme/app.git');
     expect(repo).toHaveTextContent('Branch main');
     expect(repo).toHaveTextContent('Token ending in 1234');
@@ -691,7 +691,7 @@ describe('Department view', () => {
     );
     await flyIn(user);
     await drawer(user, 'About the department');
-    const repo = screen.getByRole('region', { name: 'Repository' });
+    const repo = screen.getByRole('region', { name: 'Repositories' });
     expect(repo).toHaveTextContent('A test run needs a machine with 4 GB of free memory');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
     const memory = within(repo).getByLabelText('Free memory for a test run, GB');
@@ -711,7 +711,7 @@ describe('Department view', () => {
           <RepoSettings placeId="d2" repository={null} />
         </LanguageProvider>,
       );
-      await user.click(screen.getByRole('button', { name: 'Добавить репозиторий' }));
+      await user.click(screen.getByRole('button', { name: 'Подключить репозиторий' }));
       expect(screen.getByLabelText('Автор коммитов')).toHaveAttribute('placeholder', 'Анна Смирнова');
     } finally {
       localStorage.removeItem('hh-lang');
@@ -728,7 +728,7 @@ describe('Department view', () => {
     );
     await flyIn(user);
     await drawer(user, 'About the department');
-    const repo = screen.getByRole('region', { name: 'Repository' });
+    const repo = screen.getByRole('region', { name: 'Repositories' });
     expect(repo).not.toHaveTextContent('Commits as');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
     await user.type(within(repo).getByLabelText('Commit author'), 'Ivan Korol');
@@ -747,7 +747,7 @@ describe('Department view', () => {
     );
     await flyIn(user);
     await drawer(user, 'About the department');
-    const repo = screen.getByRole('region', { name: 'Repository' });
+    const repo = screen.getByRole('region', { name: 'Repositories' });
     expect(repo).toHaveTextContent('Commits as Ivan Korol <ivan@acme.dev>');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
     expect(within(repo).getByLabelText('Commit author')).toHaveValue('Ivan Korol');
@@ -762,15 +762,90 @@ describe('Department view', () => {
     const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/pd1/repository': [200, { repository: REPO }] });
     await flyIn(user);
     await drawer(user, 'About the department');
-    const products = screen.getByRole('region', { name: 'Products' });
-    expect(within(screen.getByRole('region', { name: 'Repository' })).getByText('No repository yet. Agents work in empty folders.')).toBeInTheDocument();
-    await user.click(within(products).getByRole('button', { name: 'Add repository' }));
-    await user.type(within(products).getByLabelText('Address'), 'https://github.com/acme/mascot.git');
-    await user.type(within(products).getByLabelText('Token'), 'ghp_mascot5678');
-    await user.click(within(products).getByRole('button', { name: 'Save' }));
+    const repos = screen.getByRole('region', { name: 'Repositories' });
+    const own = within(repos).getByRole('listitem', { name: "The department's own" });
+    expect(own).toHaveTextContent('No repository of its own yet. A task that names no product works in an empty folder.');
+    const mascot = within(repos).getByRole('listitem', { name: 'Mascot' });
+    await user.click(within(mascot).getByRole('button', { name: 'Connect repository' }));
+    await user.type(within(mascot).getByLabelText('Address'), 'https://github.com/acme/mascot.git');
+    await user.type(within(mascot).getByLabelText('Token'), 'ghp_mascot5678');
+    await user.click(within(mascot).getByRole('button', { name: 'Save' }));
     await vi.waitFor(() =>
       expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/departments/pd1/repository', body: { url: 'https://github.com/acme/mascot.git', branch: 'main', token: 'ghp_mascot5678' } }),
     );
+    /* The products list keeps their briefings; their repositories are under Repositories. */
+    expect(within(screen.getByRole('region', { name: 'Products' })).queryByRole('button', { name: 'Connect repository' })).not.toBeInTheDocument();
+  });
+
+  it("lists the department's own repository first, then each product's", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const mobile = { url: 'https://github.com/acme/mobile.git', branch: 'release', tokenLast4: null };
+    shell(
+      { [DEV_TASKS]: [200, { tasks: [] }] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: REPO, products: [{ id: 'pd1', name: 'Mascot', repository: null }, { id: 'pd2', name: 'Mobile', repository: mobile }] }] },
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const repos = screen.getByRole('region', { name: 'Repositories' });
+    expect(within(repos).getAllByRole('listitem').map(li => li.querySelector('b')?.textContent)).toEqual(["The department's own", 'Mascot', 'Mobile']);
+    expect(within(repos).getByRole('listitem', { name: "The department's own" })).toHaveTextContent('https://github.com/acme/app.git');
+    const line = within(repos).getByRole('listitem', { name: 'Mobile' });
+    expect(line).toHaveTextContent('https://github.com/acme/mobile.git');
+    expect(line).toHaveTextContent('Branch release');
+    expect(line).toHaveTextContent('No token, for a public repository');
+    expect(within(within(repos).getByRole('listitem', { name: 'Mascot' })).getByRole('button', { name: 'Connect repository' })).toBeInTheDocument();
+  });
+
+  it('adds another repository as a product named after its address, unless another name is typed', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const made = { product: { id: 'pd2', name: 'mobile-app', repository: { url: 'https://github.com/acme/mobile-app.git', branch: 'main', tokenLast4: '9999' } } };
+    const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'POST /api/departments/d2/repositories': [201, made] }, { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] });
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const repos = screen.getByRole('region', { name: 'Repositories' });
+    await user.click(within(repos).getByRole('button', { name: 'Add repository' }));
+    const form = within(repos).getByRole('form', { name: 'Add repository' });
+    await user.type(within(form).getByLabelText('Address'), 'https://github.com/acme/mobile-app.git');
+    expect(within(form).getByLabelText('Name')).toHaveValue('mobile-app');
+    await user.type(within(form).getByLabelText('Token'), 'ghp_mobile9999');
+    expect(within(form).getByLabelText('Token')).toHaveAttribute('type', 'password');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST' && c.path === '/api/departments/d2/repositories')?.body).toEqual({ name: 'mobile-app', url: 'https://github.com/acme/mobile-app.git', branch: 'main', token: 'ghp_mobile9999' }),
+    );
+    expect(within(repos).queryByRole('form', { name: 'Add repository' })).not.toBeInTheDocument();
+
+    await user.click(within(repos).getByRole('button', { name: 'Add repository' }));
+    const again = within(repos).getByRole('form', { name: 'Add repository' });
+    await user.type(within(again).getByLabelText('Name'), 'Server');
+    await user.type(within(again).getByLabelText('Address'), 'https://github.com/acme/api.git');
+    expect(within(again).getByLabelText('Name')).toHaveValue('Server');
+    await user.type(within(again).getByLabelText('Commit author'), 'Ivan Korol');
+    expect(within(again).getByRole('button', { name: 'Add' })).toBeDisabled();
+    await user.type(within(again).getByLabelText('Author email'), 'ivan@acme.dev');
+    await user.click(within(again).getByRole('button', { name: 'Add' }));
+    await vi.waitFor(() =>
+      expect(calls.filter(c => c.method === 'POST' && c.path === '/api/departments/d2/repositories').map(c => c.body)[1]).toEqual({ name: 'Server', url: 'https://github.com/acme/api.git', branch: 'main', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } }),
+    );
+  });
+
+  it('says why another repository was refused, and keeps what was typed', async () => {
+    const user = userEvent.setup();
+    const refused = { error: { code: 'conflict', message: 'The department Development keeps https://github.com/acme/app.git.', reason: 'repo_folder_taken' } };
+    shell({ [DEV_TASKS]: [200, { tasks: [] }], 'POST /api/departments/d2/repositories': [409, refused] });
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const repos = screen.getByRole('region', { name: 'Repositories' });
+    await user.click(within(repos).getByRole('button', { name: 'Add repository' }));
+    const form = within(repos).getByRole('form', { name: 'Add repository' });
+    await user.type(within(form).getByLabelText('Address'), 'https://github.com/other/app.git');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Another repository of this department has an address that ends in the same name.');
+    expect(within(form).getByLabelText('Address')).toHaveValue('https://github.com/other/app.git');
+    await user.click(within(form).getByRole('button', { name: 'Cancel' }));
+    expect(within(repos).queryByRole('form', { name: 'Add repository' })).not.toBeInTheDocument();
   });
 
   it('lists a sub-unit employee under the sub-unit name instead of its role group, and creates, renames, moves and deletes a sub-unit from the screen', async () => {

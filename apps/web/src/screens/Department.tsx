@@ -13,7 +13,7 @@ import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, Tree
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
-import { RepoSettings } from '../ui/RepoSettings';
+import { Repositories } from '../ui/RepoSettings';
 import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
@@ -591,12 +591,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                     <BriefingPanel placeId={d.id} />
                   </section>
                 )}
-                {runs && (
-                  <section aria-labelledby={`${id}-repo`}>
-                    <h3 id={`${id}-repo`}>{t.dept.repository}</h3>
-                    <RepoSettings placeId={d.id} repository={d.repository} />
-                  </section>
-                )}
+                {runs && <Repositories department={d} />}
                 {d.products.length > 0 && (
                   <section aria-labelledby={`${id}-products`}>
                     <h3 id={`${id}-products`}>{t.dept.products}</h3>
@@ -604,7 +599,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                       {d.products.map(p => (
                         <li key={p.id}>
                           <b>{p.name}</b>
-                          {runs && <RepoSettings placeId={p.id} repository={p.repository} compact />}
                           {sees && (
                             <section className="briefing-product" aria-label={`${t.briefing.title}: ${p.name}`}>
                               <h4>{t.briefing.title}</h4>
