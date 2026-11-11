@@ -184,8 +184,10 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
         .filter(machine => machine.heldBackups.includes(id))
         .map(machine => (machine.id === own?.id ? { machine: null, name: 'this server', online: true } : { machine: machine.id, name: machine.hostname, online: online(machine.reportAt) }))
         .sort((a, b) => Number(a.machine !== null) - Number(b.machine !== null) || a.name.localeCompare(b.name));
+    /* The last backup of the company as it is now: one made before it was last restored is none. */
+    const [last] = await bundleRows(db, { limit: 1, forks: 'none', sinceRestore: true });
     return {
-      last: rows[0]?.madeAt ?? null,
+      last: last?.madeAt ?? null,
       recovery: active ? { madeAt: active.madeAt.toISOString(), madeBy: maker?.name ?? '' } : null,
       recoveryNeeded: !active,
       /* A key that is not retired and is not the company's now was saved with another link. */

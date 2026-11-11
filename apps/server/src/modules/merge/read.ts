@@ -74,17 +74,26 @@ export async function lastChange(q: Query): Promise<Date | null> {
   return row?.at ? dateOf(row.at) : null;
 }
 
+/* A row as JSON. A file in it is read as its hash, as the journal keeps it, so a table of files is compared without
+   their bytes ever leaving the database; whole: with its bytes, for a row that is written. */
+export const FILE_HASH = 'sha256:';
+const rowOf = (t: TableFacts, whole: boolean): string => {
+  const files = whole ? [] : t.columns.filter(column => column.type === 'bytea').map(column => column.name);
+  if (files.length === 0) return 'to_jsonb(t)';
+  return `to_jsonb(t) || jsonb_build_object(${files.map(name => `'${name}', '${FILE_HASH}' || encode(sha256(t.${quote(name)}), 'hex')`).join(', ')})`;
+};
+
 /* The columns of a key as jsonb_to_recordset reads them back, each with its own type. */
 const typed = (t: TableFacts, columns: string[]): string => columns.map(name => `${quote(name)} ${t.columns.find(column => column.name === name)!.type}`).join(', ');
 
 /* The rows with these keys, by keyText of each one's key; by: another column than the key that names a row, as a log's
    match, and then the keys hold that column alone. */
-export async function rowsByKeys(q: Query, t: TableFacts, keys: Record<string, unknown>[], by?: string): Promise<Map<string, Row>> {
+export async function rowsByKeys(q: Query, t: TableFacts, keys: Record<string, unknown>[], by?: string, whole = false): Promise<Map<string, Row>> {
   const columns = by ? [by] : t.key;
   const found = new Map<string, Row>();
   for (const batch of batches(keys, KEYS_BATCH)) {
     const rows = await q<{ row: Row }>(
-      `SELECT to_jsonb(t) AS row FROM public.${quote(t.name)} t JOIN jsonb_to_recordset($1::jsonb) AS k(${typed(t, columns)}) ON ${columns.map(name => `t.${quote(name)} = k.${quote(name)}`).join(' AND ')}`,
+      `SELECT ${rowOf(t, whole)} AS row FROM public.${quote(t.name)} t JOIN jsonb_to_recordset($1::jsonb) AS k(${typed(t, columns)}) ON ${columns.map(name => `t.${quote(name)} = k.${quote(name)}`).join(' AND ')}`,
       [JSON.stringify(batch)],
     );
     for (const { row } of rows) found.set(keyText(Object.fromEntries(columns.map(name => [name, row[name]]))), row);
@@ -100,7 +109,7 @@ export async function* rowsOf(q: Query, t: TableFacts, batch: number = ROWS_BATC
   for (;;) {
     const from: string = after ? `, jsonb_to_record($2::jsonb) AS k(${typed(t, t.key)}) WHERE (${key}) > (${t.key.map(name => `k.${quote(name)}`).join(', ')})` : '';
     const params: unknown[] = after ? [batch, JSON.stringify(Object.fromEntries(t.key.map(name => [name, after![name]])))] : [batch];
-    const rows: { row: Row }[] = await q<{ row: Row }>(`SELECT to_jsonb(t) AS row FROM public.${quote(t.name)} t${from} ORDER BY ${key} LIMIT $1`, params);
+    const rows: { row: Row }[] = await q<{ row: Row }>(`SELECT ${rowOf(t, false)} AS row FROM public.${quote(t.name)} t${from} ORDER BY ${key} LIMIT $1`, params);
     if (rows.length === 0) return;
     yield rows.map(found => found.row);
     if (rows.length < batch) return;

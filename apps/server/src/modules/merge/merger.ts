@@ -3,7 +3,8 @@ import type { Ctx } from '../../app.js';
 import { GateBusy } from '../../db/gate.js';
 import { loggable } from '../../errors.js';
 import { readRestoreStatus } from '../backups/restore.js';
-import { MergeRefused, runMerge } from './apply.js';
+import { ANOTHER_COMPANY, MergeRefused, runMerge } from './apply.js';
+import { DIFFERENT } from './facts.js';
 import { complete } from './check.js';
 import { dropChoice, readChoice, type KeptDatabases } from './kept.js';
 import { queryOf } from './leader.js';
@@ -15,6 +16,7 @@ import { timeWords } from './words.js';
 export const MERGE_EVERY_MS = 60_000;
 export const RETRY_MAX_MS = 3_600_000;
 const KEPT = 'kept:';
+const GONE = 'The database is not on this server any more, so nothing of it was brought back.';
 
 /* The database set aside before a merge that is not saved as a bundle yet, for the data keeper to dump and seal: the
    oldest first. The bundle is asked for at once and the merge does not wait for it, as the database stays until both
@@ -57,9 +59,11 @@ export class Merger {
     return this.opts.now?.() ?? new Date();
   }
 
-  /* Whether a merge waits to be applied or checked: until then the journal is not pruned and no update goes on. */
+  /* Whether a merge waits to be applied or checked, so that no update goes on meanwhile: migrations could part the
+     shapes of the two databases. One that can never run, as its database is of another shape or another company
+     already, holds no update: it waits for the CEO to leave it out. */
   async pending(): Promise<boolean> {
-    const [row] = await queryOf(this.ctx.db)("SELECT 1 AS found FROM net.merges WHERE status IN ('pending', 'applied') LIMIT 1");
+    const [row] = await queryOf(this.ctx.db)("SELECT 1 AS found FROM net.merges WHERE status IN ('pending', 'applied') AND error IS DISTINCT FROM $1 AND error IS DISTINCT FROM $2 LIMIT 1", [DIFFERENT, ANOTHER_COMPANY]);
     return Boolean(row);
   }
 
@@ -78,7 +82,14 @@ export class Merger {
       );
     }
     const known = new Set((await q<{ source: string }>('SELECT source FROM net.merges')).map(row => row.source));
-    for (const name of await this.kept.list()) {
+    const there = await this.kept.list();
+    /* A merge whose database is gone has nothing to bring back or to save, as when a backup restored later brings the
+       record of a merge that still waited when it was made. */
+    const waiting = await q<{ id: string; source: string }>("SELECT id, source FROM net.merges WHERE status IN ('pending', 'applied', 'merged', 'removing') AND source LIKE 'kept:%'");
+    for (const row of waiting.filter(found => !there.includes(found.source.slice(KEPT.length)))) {
+      await q("UPDATE net.merges SET status = 'done', done_at = now(), error = $2 WHERE id = $1::uuid", [row.id, GONE]);
+    }
+    for (const name of there) {
       /* Only ever a database a restore kept, whatever the list says. */
       if (!KEPT_NAME.test(name) || known.has(`${KEPT}${name}`)) continue;
       try {

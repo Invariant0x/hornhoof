@@ -378,6 +378,101 @@ describe('a merge applied', () => {
     expect((await s.db.select().from(tasks).where(eq(tasks.id, s.one.id)))[0]!.number).toBe(1);
   });
 
+  it('lists once a row that takes some columns, lists others, and is then refused', async () => {
+    const s = await stand();
+    const fork = await s.sides.fork();
+    /* The number is proven and the title is not; the number then meets a task this side made meanwhile. */
+    await fork.db.update(tasks).set({ number: 7, title: 'There' }).where(eq(tasks.id, s.one.id));
+    await s.db.update(tasks).set({ title: 'Here' }).where(eq(tasks.id, s.one.id));
+    await s.task(s.db, 7, 'Seven here');
+    const { id, result } = await s.merge(fork);
+    const [conflict, ...more] = await s.conflicts(id);
+    expect(more).toEqual([]);
+    expect(conflict).toMatchObject({ tbl: 'tasks', key: { id: s.one.id }, op: 'update', kind: 'refused' });
+    expect([...conflict!.cols].sort()).toEqual(['number', 'title']);
+    expect(conflict!.why).toContain('tasks_company_number');
+    expect(conflict!.why).toContain('title: here "Here", there "There"');
+    expect(result.counts.conflicts).toBe(1);
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, s.one.id)))[0]).toMatchObject({ number: 1, title: 'Here' });
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('brings back nothing the company removed since the restore, and lists it', async () => {
+    const s = await stand();
+    const [maria] = await s.db.insert(people).values({ ...s.on, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'listed' }).returning();
+    const [sales] = await s.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SALES' }).returning();
+    await s.db.insert(personAccess).values([{ ...s.on, personId: maria!.id, departmentId: s.dev.id }, { ...s.on, personId: maria!.id, departmentId: sales!.id }]);
+    const gone = await s.task(s.db, 3, 'Removed since', { turnId: null });
+    const fork = await s.sides.fork();
+    /* The restore: its carry writes her places anew, and leaves its mark. */
+    await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
+    await s.db.insert(personAccess).values([{ ...s.on, personId: maria!.id, departmentId: s.dev.id }, { ...s.on, personId: maria!.id, departmentId: sales!.id }]);
+    await s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), now(), 'hornhoof_before_t1')`);
+    /* A moment later, on a clock that may count in milliseconds, the CEO narrows her access to one department, as the
+       screen does: all of her places go, and one comes back. And a task is removed. */
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
+    const [left] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
+    await s.db.delete(tasks).where(eq(tasks.id, gone.id));
+    const { id, result } = await s.merge(fork, { kept: true });
+    /* She reaches what she reached after the CEO's change, and nothing more; the task stays removed. */
+    expect((await s.db.select().from(personAccess).where(eq(personAccess.personId, maria!.id))).map(row => row.id)).toEqual([left!.id]);
+    expect(await s.titleOf(s.db, gone.id)).toBeNull();
+    expect(result.counts).toMatchObject({ added: 0, matched: 1 });
+    expect((await s.conflicts(id)).map(conflict => [conflict.tbl, conflict.kind, conflict.op, conflict.topic])).toEqual([['person_access', 'changed_removed', 'insert', 'access'], ['tasks', 'changed_removed', 'insert', 'work']]);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('reads a file by its hash, and brings its bytes only for a row it writes', async () => {
+    const s = await stand();
+    const file = (side: Db, bytes: string) => side.insert(attachments).values({ ...s.on, agentId: s.ana.id, mediaType: 'text/plain', bytes: Buffer.from(bytes), size: bytes.length, taskId: s.one.id }).returning().then(rows => rows[0]!);
+    const same = await file(s.db, 'the same on both');
+    const fork = await s.sides.fork();
+    const added = await file(fork.db, 'only there');
+    const asked: string[] = [];
+    const source = await fork.source();
+    const { id } = await (async () => {
+      const [row] = await rowsOf<{ id: string }>(s.db, sql`INSERT INTO net.merges (source, label) VALUES ('kept:hornhoof_before_t9', 'the fork') RETURNING id`);
+      const watched = { ...source, query: (async (text: string, params?: unknown[]) => {
+        asked.push(text);
+        return source.query(text, params);
+      }) as typeof source.query };
+      await runMerge(s.db, { id: row!.id, label: 'the fork', kept: true, companyId: s.acme.id }, watched, { log: () => undefined });
+      return { id: row!.id };
+    })();
+    await source.close();
+    const [kept] = await s.db.select().from(attachments).where(eq(attachments.id, added.id));
+    expect(Buffer.from(kept!.bytes).toString()).toBe('only there');
+    expect(Buffer.from((await s.db.select().from(attachments).where(eq(attachments.id, same.id)))[0]!.bytes).toString()).toBe('the same on both');
+    /* Every page of the table comes with a hash in place of each file; the one file that is written is asked for by
+       its key. */
+    const reads = asked.filter(text => text.includes('public."attachments"'));
+    expect(reads.filter(text => !text.includes('sha256')).length).toBe(1);
+    expect(reads.find(text => !text.includes('sha256'))).toContain('jsonb_to_recordset');
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('writes in few passes however deep what hangs on a refused row goes', async () => {
+    const s = await stand();
+    const [parent] = await s.db.insert(departments).values({ ...s.on, name: 'Parent', roleCode: 'PAR' }).returning();
+    const fork = await s.sides.fork();
+    await s.db.delete(departments).where(eq(departments.id, parent!.id));
+    /* A chain five deep under the department that is gone: a department, a team, an agent, a task of his, its event. */
+    const [child] = await fork.db.insert(departments).values({ ...s.on, name: 'Child', roleCode: 'CHI', parentId: parent!.id }).returning();
+    const [team] = await fork.db.insert(teams).values({ ...s.on, departmentId: child!.id, name: 'Team' }).returning();
+    const [agent] = await fork.db.insert(agents).values({ ...s.staff, kind: 'worker', name: 'Deep', departmentId: child!.id, teamId: team!.id }).returning();
+    const task = await s.task(fork.db, 3, 'Deep', { departmentId: child!.id, assigneeAgentId: agent!.id, turnId: null });
+    await fork.db.insert(taskEvents).values({ ...s.on, taskId: task.id, kind: 'created', agentId: agent!.id });
+    for (let n = 4; n < 10; n += 1) await s.task(fork.db, n, `Plain ${n}`, { turnId: null });
+    let units = 0;
+    const { id, result } = await s.merge(fork, { onUnit: () => void (units += 1) });
+    expect(result.counts).toMatchObject({ added: 6, conflicts: 5 });
+    /* Asked of the database once per pass: what hangs on a refused row is found without writing it again and again. */
+    const passes = await rowsOf<{ n: number }>(s.db, sql`SELECT (counts->>'passes')::int AS n FROM net.merges WHERE id = ${id}`);
+    expect(passes[0]!.n).toBeLessThanOrEqual(2);
+    expect(units).toBe(11);
+  });
+
   it('stops what the source left running', async () => {
     const s = await stand();
     const [machine] = await s.db.insert(machines).values({ ...s.on, personId: s.owner.id, machineKey: 'm1', hostname: 'marat-mac' }).returning();

@@ -6,7 +6,7 @@ import { MergeCard } from '../src/ui/MergeCard';
 import type { MergeConflict, MergeDecision } from '../src/types';
 import { mockApi } from './api-mock';
 
-const MERGE: MergeDecision = { id: 'm1', label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 3 };
+const MERGE: MergeDecision = { id: 'm1', label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 3, ownerPersonId: 'p1' };
 const conflict = (over: Partial<MergeConflict>): MergeConflict => ({
   id: 'c1', merge: 'm1', label: MERGE.label, table: 'people', topic: 'people', what: 'Maria (maria@acme.test)', kind: 'differs', cols: ['name', 'password_hash'],
   here: { name: '"Maria Here"', password_hash: '(hidden)' }, there: { name: '"Maria There"', password_hash: '(hidden)' }, at: '2026-11-10T09:00:00.000Z', task: null, whose: 'ceo', picked: null, ...over,

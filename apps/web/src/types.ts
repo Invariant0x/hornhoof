@@ -580,7 +580,7 @@ export type KeptMerge = { id: string; status: 'pending' | 'applied' | 'merged' |
 
 /* A merge that left the CEO something to settle. after: the time of the backup a restore went back to, when the merge
    is of the database that restore set aside. */
-export type MergeDecision = { id: string; label: string; after: string | null; open: number };
+export type MergeDecision = { id: string; label: string; after: string | null; open: number; ownerPersonId: string };
 export type MergeTopic = 'people' | 'access' | 'plans' | 'machines' | 'protected' | 'work';
 /* What a merge could not prove of one row, with both values in plain words; a secret is never among them. */
 export type MergeConflict = {

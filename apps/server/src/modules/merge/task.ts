@@ -1,12 +1,11 @@
 import type { Ctx } from '../../app.js';
-import { HIDDEN } from '../../db/agent-sql.js';
 import type { Db } from '../../db/client.js';
 import { createTask, updateTask } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { CodeLine, Counts } from './apply.js';
 import { queryOf } from './leader.js';
 import type { Path } from './plan.js';
-import { ceosConflict } from './rules.js';
+import { ceos } from './rules.js';
 import { rangeWords, timeWords } from './words.js';
 
 /* How many conflicts a task's text holds; the tool lists the rest. */
@@ -23,8 +22,6 @@ type ConflictRow = { tbl: string; why: string; task_id: string | null };
 
 const dateOf = (value: string | Date | null): Date | null => (value === null ? null : new Date(value));
 const listed = (labels: string[]): string => (labels.length < 2 ? labels.join('') : `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`);
-/* Whose a conflict is: the CEO's by its topic, and whatever the orchestrator's own SQL may not see. */
-const ceos = (table: string): boolean => ceosConflict(table) || HIDDEN.includes(table);
 const did = (path: Path | null): string => (path === 'compare' ? 'held' : 'did while apart');
 
 /* A task's title is stored text every reader sees alike, so its times are UTC. */

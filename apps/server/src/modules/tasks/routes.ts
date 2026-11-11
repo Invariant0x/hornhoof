@@ -391,7 +391,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A page loaded before machines had access of their own reads the old key, which held one request or none. */
       computerAccess: null,
       machineAccess: computers.map(c => computerView(c, names)),
-      merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open }) => ({ id, label, after, open })),
+      merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
       counts: decisions.counts,
     };

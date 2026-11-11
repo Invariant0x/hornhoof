@@ -164,7 +164,8 @@ function KeptDatabase({ kept, asking, onAsk, onLeave, onNo }: { kept: Kept; aski
   const merge = kept.merge ?? null;
   const waits = merge?.status === 'pending' || merge?.status === 'applied';
   const state = !merge ? null
-    : waits ? (merge.error ? t.backups.keptStates.notYet(merge.error) : t.backups.keptStates.bringing)
+    /* The server writes why in English: another language says that it did not go through yet. */
+    : waits ? (merge.error ? (language === 'en' ? t.backups.keptStates.notYet(merge.error) : t.backups.keptStates.notYetPlain) : t.backups.keptStates.bringing)
       : merge.status === 'merged' ? t.backups.keptStates.merged(merge.added, merge.conflicts)
         : merge.status === 'removing' ? t.backups.keptStates.removing : null;
   return (

@@ -106,7 +106,7 @@ function orderOf(tables: Map<string, TableFacts>): string[] {
   return order;
 }
 
-const DIFFERENT = 'The two databases are of different versions.';
+export const DIFFERENT = 'The two databases are of different versions.';
 
 /* Whether the two sides hold the same tables with the same columns of the same types; nothing else is asked. */
 export function sameShape(a: Facts, b: Facts): string | null {

@@ -174,6 +174,7 @@ export const en = {
     keptStates: {
       bringing: 'Bringing back what came after it.',
       notYet: (error: string) => `Could not bring it back yet: ${error}`,
+      notYetPlain: 'Could not bring back what came after it yet. Hornhoof tries again.',
       merged: (added: number, conflicts: number) => `Brought back: ${added} added, ${conflicts} to decide. Removed once its backup is made.`,
       removing: 'Left out. Removed once its backup is made.',
     },

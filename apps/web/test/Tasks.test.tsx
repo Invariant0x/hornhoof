@@ -337,7 +337,7 @@ describe('the decisions of one person', () => {
     const user = userEvent.setup();
     let open = 1;
     const calls = shell({
-      'GET /api/requests': () => [200, decisions([], { merges: open ? [{ id: 'm1', label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open }] : [] })],
+      'GET /api/requests': () => [200, decisions([], { merges: open ? [{ id: 'm1', label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open, ownerPersonId: 'p1' }] : [] })],
       'GET /api/merges/m1/conflicts': () => [200, { conflicts: open ? [{
         id: 'c1', merge: 'm1', label: 'x', table: 'people', topic: 'people', what: 'Maria (maria@acme.test)', kind: 'differs', cols: ['name'],
         here: { name: '"Maria Here"' }, there: { name: '"Maria There"' }, at: null, task: null, whose: 'ceo', picked: null,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HIDDEN } from '../src/db/agent-sql.js';
 import { factsOf, sameShape, type Facts, type Query } from '../src/modules/merge/facts.js';
-import { BOOKKEEPING, CEO_TOPICS, CLOSING, SOFT_REFS, TABLE_RULES, ceosConflict, isSecret, ruleOf } from '../src/modules/merge/rules.js';
+import { BOOKKEEPING, CEO_TOPICS, CLOSING, SOFT_REFS, TABLE_RULES, ceos, ceosConflict, isSecret, ruleOf } from '../src/modules/merge/rules.js';
 import { nameOf, rangeWords, timeWords, valueWords } from '../src/modules/merge/words.js';
 import { openTestDb } from './helpers-db.js';
 
@@ -46,6 +46,9 @@ describe('the rule of each table in a merge', () => {
     /* What a person's guarded route alone writes is the CEO's too, hidden or not. */
     for (const name of ['requests', 'request_internal', 'proposals', 'approval_policies', 'wait_policies', 'task_waits', 'outbound_messages', 'model_checks']) expect([name, ceosConflict(name)]).toEqual([name, true]);
     for (const name of ['tasks', 'turns', 'agents', 'departments', 'jobs', 'notebook_notes', 'backlog_items']) expect([name, ceosConflict(name)]).toEqual([name, false]);
+    /* One rule for whose a conflict is, wherever it is asked: the CEO's by its topic, whatever the orchestrator's SQL
+       may not see, and a table this build has no rule for. */
+    expect(['people', 'applied', 'sessions', 'a_table_of_another_build', 'tasks', 'jobs'].map(ceos)).toEqual([true, true, true, true, false, false]);
   });
 
   it('carries over nothing that belongs to the machine that leads, and lets nothing run again', () => {

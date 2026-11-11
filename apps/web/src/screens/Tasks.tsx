@@ -203,7 +203,7 @@ function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: s
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
   if (!decisions) return { requests: [], proposals: [], machineAccess: [], merges: [], machinesAway: [] };
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), machineAccess: theirs(decisions.machineAccess ?? []), merges: decisions.merges ?? [], machinesAway: decisions.machinesAway ?? [] };
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), machineAccess: theirs(decisions.machineAccess ?? []), merges: theirs(decisions.merges ?? []), machinesAway: decisions.machinesAway ?? [] };
 }
 
 const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.machineAccess.length && !s.merges.length && !s.machinesAway.some(m => !m.back);

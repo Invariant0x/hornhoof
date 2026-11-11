@@ -1,5 +1,5 @@
 import type { Ctx } from '../../app.js';
-import { HIDDEN, orchestratorWrites } from '../../db/agent-sql.js';
+import { orchestratorWrites } from '../../db/agent-sql.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { UnitWriter, type Unit } from './apply.js';
@@ -7,7 +7,7 @@ import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
 import { rowsByKeys, type Row } from './read.js';
-import { SOFT_REFS, TABLE_RULES, ceosConflict, ruleOf } from './rules.js';
+import { ORCHESTRATORS_TABLES, SOFT_REFS, TABLE_RULES, ceos, ruleOf } from './rules.js';
 import { nameOf, valueWords } from './words.js';
 
 /* here keeps the leader's row as it is, there takes the source's side, value writes the picker's own for one conflict. */
@@ -33,9 +33,6 @@ type ConflictRow = {
 /* Why a conflict stays open; said to whoever picked. */
 class NotTaken extends Error {}
 
-/* The CEO's by its topic, and whatever the orchestrator's own SQL may not see. */
-const ceos = (table: string): boolean => !TABLE_RULES[table] || ceosConflict(table) || HIDDEN.includes(table);
-const CEOS_TABLES = (): string[] => Object.keys(TABLE_RULES).filter(ceos);
 const iso = (value: string | Date | null): string | null => (value === null ? null : new Date(value).toISOString());
 
 /* The words of a filter as SQL, with its values after those already there. */
@@ -51,7 +48,7 @@ function where(f: PickFilter & { settled?: boolean; after?: string }, who: Picke
   if (f.from) add(n => `COALESCE(c.at, c.created_at) >= $${n}::timestamptz`, f.from);
   if (f.to) add(n => `COALESCE(c.at, c.created_at) <= $${n}::timestamptz`, f.to);
   if (f.after) add(n => `(COALESCE(c.at, c.created_at), c.id) > (SELECT COALESCE(a.at, a.created_at), a.id FROM net.merge_conflicts a WHERE a.id = $${n}::uuid)`, f.after);
-  if (who.kind === 'orchestrator') add(n => `c.tbl <> ALL (SELECT jsonb_array_elements_text($${n}::jsonb))`, JSON.stringify(CEOS_TABLES()));
+  if (who.kind === 'orchestrator') add(n => `c.tbl IN (SELECT jsonb_array_elements_text($${n}::jsonb))`, JSON.stringify(ORCHESTRATORS_TABLES()));
   if (f.settled !== undefined) said.push(f.settled ? 'c.picked IS NOT NULL' : 'c.picked IS NULL');
   return said.length > 0 ? said.join(' AND ') : 'true';
 }
@@ -141,7 +138,7 @@ async function unitOf(q: Query, facts: Facts, conflict: ConflictRow, take: 'ther
 /* Everything a pick must hold to before it writes; it throws why not. */
 function allowed(who: Picker, conflict: ConflictRow, take: Take, value?: Record<string, unknown>): void {
   if (conflict.picked) throw new NotTaken('Already settled.');
-  const own = ruleOf(conflict.tbl).hereOnly ?? [];
+  const own = TABLE_RULES[conflict.tbl]?.hereOnly ?? [];
   const written = take === 'value' ? Object.keys(value ?? {}) : take === 'there' && conflict.op === 'update' ? (conflict.cols.length > 0 ? conflict.cols : own) : [];
   if (written.some(column => own.includes(column))) throw new NotTaken(OWNERS_ALONE);
   if (who.kind === 'orchestrator' && ceos(conflict.tbl)) throw new NotTaken(`This one is the CEO's (${conflict.topic}); it waits on his screen.`);
@@ -220,6 +217,8 @@ async function settle(q: Query, facts: Facts, who: Picker, by: string, asked: Co
 async function write(q: Query, facts: Facts, group: ConflictRow[], take: 'there' | 'value', value?: Record<string, unknown>): Promise<void> {
   const [said] = await q<{ now: string }>("SELECT to_jsonb(now()) #>> '{}' AS now");
   const writer = new UnitWriter(q, facts, { now: said!.now, label: group[0]!.label, afterRestore: group[0]!.path === 'compare' });
+  /* Rows that hang together come back together, which may take longer than the app lets a transaction of its own. */
+  await q('SET LOCAL transaction_timeout = 0');
   await q('SET CONSTRAINTS ALL DEFERRED');
   const order = new Map(facts.order.map((name, index) => [name, index]));
   const units = (await Promise.all(group.map(conflict => unitOf(q, facts, conflict, take, value)))).filter(unit => unit !== null).sort((a, b) => order.get(a.table)! - order.get(b.table)!);

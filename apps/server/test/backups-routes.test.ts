@@ -145,6 +145,8 @@ describe('the backups routes', () => {
     /* The company was restored since: what it holds now is in no backup, whatever records came back with a merge. */
     await c.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, at) VALUES (gen_random_uuid(), ${made.id}, now(), now() + interval '1 minute')`);
     expect((await c.view<MakerView>()).last).toBeNull();
+    /* The CEO is told the same: the company as it is now has no backup yet. */
+    expect(((await c.app.inject({ url: '/api/backups', ...as(c.ceo) })).json() as { last: string | null }).last).toBeNull();
     const after = await c.head({ now: new Date(Date.now() + 120_000) });
     expect((await c.record(after.head)).statusCode).toBe(201);
     expect((await c.view<MakerView>()).last).toMatchObject({ id: after.id });

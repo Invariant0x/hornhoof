@@ -6,7 +6,7 @@ import {
   compareOutcome, cutoffOf, differing, divergence, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
 } from './plan.js';
 import {
-  backupsOf, consumedIds, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
+  backupsOf, consumedIds, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
 } from './read.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ruleOf, type TableRule } from './rules.js';
 import type { MergeSource } from './source.js';
@@ -14,6 +14,8 @@ import { nameOf, valueWords } from './words.js';
 
 export type Counts = {
   added: number; changed: number; deleted: number; equal: number; skipped: number; conflicts: number; carried: number; matched: number; rewritten: number;
+  /* How many times the units were written before none of them pointed at a row that is not here. */
+  passes: number;
   byTable: Record<string, { added: number; changed: number; deleted: number; conflicts: number }>;
 };
 /* A task with code: its number on the source, the branch by that number, and the machines the source's turns on it ran
@@ -24,6 +26,7 @@ export type MergeResult = { path: Path; counts: Counts; tasks: string[]; code: C
 
 /* A merge that cannot run as it is: two shapes, another company, applied already. Trying again changes nothing. */
 export class MergeRefused extends Error {}
+export const ANOTHER_COMPANY = 'This database is of another company.';
 
 type Listed = { kind: 'differs' | 'changed_removed' | 'removed_changed'; cols: string[]; there: Row | null };
 /* One row of the source and what the merge does with it. */
@@ -51,6 +54,7 @@ export type Unit = {
 
 const CLASS_23 = /^23/;
 const LOCK_NOT_TAKEN = '55P03';
+const NO_FILE = 'Its file was not kept.';
 const TASK_NUMBERS: Record<string, string> = { tasks: 'task_numbers_used', turns: 'turn_numbers_used' };
 const ENDED_TASKS = ['done', 'cancelled'];
 const UNITS = 'merge_units';
@@ -60,6 +64,7 @@ const typeOf = (t: TableFacts, column: string): string => t.columns.find(found =
 const typed = (t: TableFacts, columns: string[]): string => columns.map(name => `${quote(name)} ${typeOf(t, name)}`).join(', ');
 const keyOf = (t: TableFacts, row: Row): Record<string, unknown> => Object.fromEntries(t.key.map(name => [name, row[name]]));
 const matches = (alias: string, columns: string[]): string => columns.map(name => `${alias}.${quote(name)} = k.${quote(name)}`).join(' AND ');
+const placeOf = (row: Row): string => JSON.stringify([row.person_id ?? null, row.department_id ?? null, row.team_id ?? null]);
 const codeOf = (err: unknown): string => String((err as { cause?: { code?: unknown }; code?: unknown }).cause?.code ?? (err as { code?: unknown }).code ?? '');
 /* What Postgres names of a refused row: the constraint, or the column that may not be empty. */
 function refusalOf(err: unknown): string {
@@ -116,8 +121,19 @@ export class UnitWriter {
   constructor(
     readonly q: Query,
     readonly facts: Facts,
-    private readonly opts: { now: string; label: string; afterRestore: boolean },
+    private readonly opts: { now: string; label: string; afterRestore: boolean; whole?: (t: TableFacts, key: Record<string, unknown>) => Promise<Row | null> },
   ) {}
+
+  /* A file is read as its hash; a row that is written needs its bytes, from the source while it is there. False when
+     they cannot be had: such a row is not written. */
+  private async withFiles(t: TableFacts, unit: Unit, row: Row, columns: string[]): Promise<boolean> {
+    const files = columns.filter(name => typeOf(t, name) === 'bytea' && typeof row[name] === 'string' && (row[name] as string).startsWith(FILE_HASH));
+    if (files.length === 0) return true;
+    const whole = await this.opts.whole?.(t, unit.key);
+    if (!whole) return false;
+    for (const name of files) row[name] = whole[name];
+    return true;
+  }
 
   /* Before a pass over these units: what is open here now. */
   async begin(writes: Unit[]): Promise<void> {
@@ -228,6 +244,7 @@ export class UnitWriter {
   private async insert(t: TableFacts, unit: Unit): Promise<void> {
     const row = await this.prepared(t, ruleOf(t.name), unit);
     if (!row) return;
+    if (!(await this.withFiles(t, unit, row, t.columns.map(column => column.name)))) return void (unit.refused = NO_FILE);
     await this.q(`INSERT INTO public.${quote(t.name)} SELECT * FROM jsonb_populate_record(NULL::public.${quote(t.name)}, $1::jsonb)`, [JSON.stringify(row)]);
     unit.written = row;
     unit.done = 'added';
@@ -263,6 +280,7 @@ export class UnitWriter {
       if (numbered) row.source_key = numbered.key;
     }
     if (Object.keys(was).length > 0) unit.rewritten = { cols: Object.keys(was), was };
+    if (!(await this.withFiles(t, unit, row, set))) return void (unit.refused = NO_FILE);
     unit.written = { ...unit.y!, ...Object.fromEntries(set.map(column => [column, row[column]])) };
     unit.done = 'changed';
     if (set.length === 0) return;
@@ -336,6 +354,40 @@ export class UnitWriter {
     return refused;
   }
 
+  /* What hangs on a refused row is refused with it, found here without asking the database: a unit whose row points at
+     a row a refused unit would have added, and on from there. How many it refused. */
+  spread(writes: Unit[]): number {
+    let refused = 0;
+    const text = (values: unknown[]): string => JSON.stringify(values.map(value => (value === null || value === undefined ? null : String(value))));
+    for (let grew = true; grew; ) {
+      grew = false;
+      const gone = new Map<string, Set<string>>();
+      const lostOf = (table: string, columns: string[]): Set<string> => {
+        const sign = `${table}|${columns.join(',')}`;
+        let found = gone.get(sign);
+        if (!found) gone.set(sign, (found = new Set(writes.filter(unit => unit.refused && unit.op === 'insert' && unit.table === table && unit.x).map(unit => text(columns.map(column => unit.x![column]))))));
+        return found;
+      };
+      for (const unit of writes) {
+        const row = unit.written;
+        if (unit.refused || !row) continue;
+        const t = this.facts.tables.get(unit.table)!;
+        const fk = t.fks.find(one => (unit.op === 'insert' || one.columns.some(column => unit.set.includes(column))) && lostOf(one.parent, one.parentColumns).has(text(one.columns.map(column => row[column]))));
+        const soft = fk ? undefined : SOFT_REFS.find(ref => {
+          if (ref.table !== unit.table || !(unit.op === 'insert' || unit.set.includes(ref.column)) || (ref.when && row[ref.when.column] !== ref.when.value)) return false;
+          const value = row[ref.column];
+          const ids = ref.list ? (Array.isArray(value) ? value : []) : value === null || value === undefined ? [] : [value];
+          return ids.some(id => lostOf(ref.parent, ['id']).has(text([id])));
+        });
+        if (!fk && !soft) continue;
+        unit.refused = `Its ${fk?.parent ?? soft!.parent} row is not here.`;
+        refused += 1;
+        grew = true;
+      }
+    }
+    return refused;
+  }
+
   private async lost(t: TableFacts, fk: ForeignKey, asked: Unit[]): Promise<Unit[]> {
     if (asked.length === 0) return [];
     const parent = this.facts.tables.get(fk.parent)!;
@@ -352,7 +404,7 @@ export class UnitWriter {
 /* The merge of one source, inside its transaction. */
 class Merge {
   readonly units: Unit[] = [];
-  private readonly counts: Counts = { added: 0, changed: 0, deleted: 0, equal: 0, skipped: 0, conflicts: 0, carried: 0, matched: 0, rewritten: 0, byTable: {} };
+  private readonly counts: Counts = { added: 0, changed: 0, deleted: 0, equal: 0, skipped: 0, conflicts: 0, carried: 0, matched: 0, rewritten: 0, passes: 0, byTable: {} };
   /* Journal rows nothing is done with: of tables that are never merged, and of keys that came out equal. */
   private readonly quiet: JournalRow[] = [];
   private path: Path = 'compare';
@@ -361,6 +413,9 @@ class Merge {
   private proving: JournalRow[] = [];
   private asked = 0;
   private now = '';
+  /* When the restore that set this source aside left its mark here, and what this side removed since, table by table. */
+  private restoredAt: string | Date | null = null;
+  private readonly removed = new Map<string, { keys: Set<string>; places: Set<string>; here: Set<string> }>();
 
   constructor(
     private readonly q: Query,
@@ -381,12 +436,13 @@ class Merge {
     const [row] = await q<{ status: string; source: string; now: string }>('SELECT status, source, to_jsonb(now()) #>> \'{}\' AS now FROM net.merges WHERE id = $1::uuid FOR UPDATE', [merge.id]);
     if (row?.status !== 'pending') throw new MergeRefused('The merge was applied already.');
     this.now = row.now;
+    if (row.source.startsWith('kept:')) this.restoredAt = (await q<{ at: string | Date }>('SELECT at FROM net.restores WHERE kept = $1 ORDER BY at DESC LIMIT 1', [row.source.slice(5)]))[0]?.at ?? null;
     this.facts = await factsOf(q);
     const shape = sameShape(this.facts, await factsOf(src));
     if (shape) throw new MergeRefused(shape);
     for (const name of this.facts.tables.keys()) ruleOf(name);
     const [theirs] = await src<{ id: string }>('SELECT id FROM public.companies LIMIT 1');
-    if (theirs?.id !== merge.companyId) throw new MergeRefused('This database is of another company.');
+    if (theirs?.id !== merge.companyId) throw new MergeRefused(ANOTHER_COMPANY);
 
     await this.plan();
     await this.write();
@@ -474,12 +530,30 @@ class Merge {
         await withNamedKeys(this.src, page);
         await withNamedKeys(this.q, ys);
       }
-      page.forEach((x, index) => {
-        const outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
+      for (const [index, x] of page.entries()) {
+        let outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
+        /* A row the company removed since the restore is not brought back behind its back: it is listed. */
+        if (outcome.do === 'add' && rule.kind === 'rows' && (await this.removedSince(t, x))) outcome = { do: 'conflict', kind: 'changed_removed', cols: [] };
         if (outcome.do === 'equal') this.counts.equal += 1;
         else this.unit(t, rule, { key: keyOf(t, x), x, y: ys[index]!, outcome, rows: [], skipped: [], left: false });
-      });
+      }
     }
+  }
+
+  /* Whether this side removed the row since the restore that set the source aside, as its own journal says. A place of
+     a person is told by the place, whatever id its row had: the restore's carry writes those rows anew, and a place
+     that is here now was not removed. */
+  private async removedSince(t: TableFacts, x: Row): Promise<boolean> {
+    if (!this.restoredAt) return false;
+    let removed = this.removed.get(t.name);
+    if (!removed) {
+      const gone = await this.q<{ key: Record<string, unknown>; old: Row | null }>("SELECT key, old FROM net.journal WHERE tbl = $1 AND op = 'delete' AND at > $2::timestamptz", [t.name, this.restoredAt]);
+      const here = t.name === 'person_access' ? await this.q<Row>('SELECT person_id, department_id, team_id FROM public.person_access') : [];
+      removed = { keys: new Set(gone.map(row => keyText(row.key))), places: new Set(gone.flatMap(row => (row.old ? [placeOf(row.old)] : []))), here: new Set(here.map(placeOf)) };
+      this.removed.set(t.name, removed);
+    }
+    if (removed.keys.has(keyText(keyOf(t, x)))) return true;
+    return t.name === 'person_access' && removed.places.has(placeOf(x)) && !removed.here.has(placeOf(x));
   }
 
   private unit(t: TableFacts, rule: TableRule, planned: { key: Record<string, unknown>; x: Row | null; y: Row | null; outcome: Outcome; rows: JournalRow[]; skipped: JournalRow[]; left: boolean }): void {
@@ -509,7 +583,10 @@ class Merge {
     const numbered = (unit: Unit): number => Number(unit.x?.[ruleOf(unit.table).sequence ?? ''] ?? 0);
     const writes = this.units.filter(unit => unit.op === 'insert' || unit.op === 'update').sort((a, b) => order.get(a.table)! - order.get(b.table)! || numbered(a) - numbered(b));
     const deletes = this.units.filter(unit => unit.op === 'delete').sort((a, b) => order.get(b.table)! - order.get(a.table)!);
-    const writer = new UnitWriter(q, this.facts, { now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare' });
+    const writer = new UnitWriter(q, this.facts, {
+      now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare',
+      whole: async (t, key) => (await rowsByKeys(this.src, t, [key], undefined, true)).values().next().value ?? null,
+    });
     await q(`SAVEPOINT ${UNITS}`);
     for (let pass = 0; ; pass += 1) {
       if (pass > 0) await q(`ROLLBACK TO SAVEPOINT ${UNITS}`);
@@ -519,7 +596,9 @@ class Merge {
         if (pass === 0) await this.onUnit?.((this.asked += 1));
         if (!unit.refused) await writer.attempt(unit);
       }
+      this.counts.passes = pass + 1;
       if ((await writer.references(writes)) === 0) break;
+      writer.spread(writes);
     }
     await q(`RELEASE SAVEPOINT ${UNITS}`);
   }
@@ -555,6 +634,17 @@ class Merge {
     return typeof value === 'string' ? value : null;
   }
 
+  /* The source's row of a refused unit with the bytes of its file, so that taking it later, when the source is gone,
+     still has them. */
+  private async withFile(unit: Unit): Promise<Row | null> {
+    const t = this.facts.tables.get(unit.table)!;
+    const x = unit.x;
+    const files = x ? t.columns.filter(column => column.type === 'bytea' && typeof x[column.name] === 'string' && (x[column.name] as string).startsWith(FILE_HASH)).map(column => column.name) : [];
+    if (!x || files.length === 0) return x;
+    const whole = (await rowsByKeys(this.src, t, [unit.key], undefined, true)).values().next().value;
+    return whole ? { ...x, ...Object.fromEntries(files.map(name => [name, whole[name]])) } : x;
+  }
+
   private count(unit: Unit, what: 'added' | 'changed' | 'deleted' | 'conflicts'): void {
     this.counts[what] += 1;
     const table = (this.counts.byTable[unit.table] ??= { added: 0, changed: 0, deleted: 0, conflicts: 0 });
@@ -579,8 +669,16 @@ class Merge {
     };
     for (const unit of this.units) {
       let touched = false;
+      /* What a row lists beside what it takes, in words. */
+      const differs = (): string => {
+        const { cols, there } = unit.listed!;
+        const shown = unit.y && there ? (cols.length > 0 ? cols : differing(this.facts.tables.get(unit.table)!, there, unit.y)) : [];
+        return shown.map(column => `${column}: here ${valueWords(unit.table, column, unit.y![column])}, there ${valueWords(unit.table, column, there![column])}`).join('; ');
+      };
       if (unit.refused) {
-        listed(unit, { op: unit.op!, kind: 'refused', cols: unit.op === 'update' ? unit.set : [], there: unit.x, why: this.why(unit, unit.refused) });
+        /* One conflict for a row: what it would have taken and what it lists besides are settled together. */
+        const also = unit.listed?.kind === 'differs' ? unit.listed : null;
+        listed(unit, { op: unit.op!, kind: 'refused', cols: unit.op === 'update' ? [...unit.set, ...(also?.cols ?? [])] : [], there: await this.withFile(unit), why: this.why(unit, also ? `${unit.refused} ${differs()}` : unit.refused) });
         touched = true;
       } else if (unit.done === 'still_used') {
         listed(unit, { op: 'delete', kind: 'still_used', cols: [], there: null, why: this.why(unit, 'removed there, and something here still points at it.') });
@@ -592,12 +690,9 @@ class Merge {
         this.counts.matched += 1;
         kept.push({ merge: merge.id, tbl: unit.table, key: this.named(unit), how: 'matched', cols: [], was: null, here: unit.matched });
       }
-      if (unit.listed) {
+      if (unit.listed && !unit.refused) {
         const { kind, cols, there } = unit.listed;
-        const t = this.facts.tables.get(unit.table)!;
-        const shown = kind === 'differs' && unit.y && there ? (cols.length > 0 ? cols : differing(t, there, unit.y)) : [];
-        const words = kind === 'differs' ? shown.map(column => `${column}: here ${valueWords(unit.table, column, unit.y![column])}, there ${valueWords(unit.table, column, there![column])}`).join('; ')
-          : kind === 'changed_removed' ? 'changed there, and not here any more.' : 'removed there, and changed here.';
+        const words = kind === 'differs' ? differs() : kind === 'changed_removed' ? 'changed there, and not here any more.' : 'removed there, and changed here.';
         listed(unit, { op: kind === 'differs' ? 'update' : kind === 'changed_removed' ? 'insert' : 'delete', kind, cols, there, why: this.why(unit, words) });
         touched = true;
       }

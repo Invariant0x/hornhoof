@@ -1,4 +1,4 @@
-import { SECRET } from '../../db/agent-sql.js';
+import { HIDDEN, SECRET } from '../../db/agent-sql.js';
 
 /* Whose a conflict is. The first five are the CEO's: people, what they reach, the plans and the machines the company
    runs on, and protected, the records only a person's guarded route or one of Hornhoof's own gateways writes (what
@@ -178,3 +178,12 @@ export function isSecret(table: string, column: string): boolean {
 export function ceosConflict(table: string): boolean {
   return CEO_TOPICS.includes(ruleOf(table).topic);
 }
+
+/* Whose a conflict is, wherever that is asked: the CEO's by its topic, whatever the orchestrator's own SQL may not
+   see, and a table this build has no rule for, as a conflict carried from another build may name. */
+export function ceos(table: string): boolean {
+  const rule = TABLE_RULES[table];
+  return !rule || CEO_TOPICS.includes(rule.topic) || HIDDEN.includes(table);
+}
+/* The tables whose conflicts the orchestrator settles. */
+export const ORCHESTRATORS_TABLES = (): string[] => Object.keys(TABLE_RULES).filter(table => !ceos(table));

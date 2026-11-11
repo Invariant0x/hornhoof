@@ -214,6 +214,18 @@ describe('Backups in Settings', () => {
     await waitFor(() => expect(screen.getAllByText('Left out. Removed once its backup is made.')).toHaveLength(2));
   });
 
+  it("says in the person's language that a kept database could not be brought back yet, without the server's words", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      mockApi({ 'GET /api/backups': [200, viewOf({ kept: [{ name: 'hornhoof_before_20261110_090000', at: '2026-11-10T09:00:00.000Z', merge: { id: 'm1', status: 'applied', added: 0, conflicts: 0, error: 'Not complete yet: tasks {"id":"x"}' } }] })] });
+      shown();
+      expect(await screen.findByText('Пока не удалось вернуть то, что было после нее. Hornhoof попробует еще раз.')).toBeInTheDocument();
+      expect(screen.queryByText(/Not complete yet/)).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('asks for the recovery file when it must', async () => {
     const calls = mockApi({
       'GET /api/backups': [200, viewOf({ bundles: [bundle({ why: 'needs_recovery_file' }), bundle({ id: OTHER, dumpedAt: '2026-11-09T08:00:00.000Z', restorable: false, why: 'newer_build' }), bundle({ id: '0f0f0f0f-0000-4000-8000-00000000000c', dumpedAt: '2026-11-08T08:00:00.000Z', restorable: false, why: 'not_held' })] })],

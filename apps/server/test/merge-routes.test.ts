@@ -9,7 +9,7 @@ import { mergeApp, rowsOf } from './merge-app-fixture.js';
 /* Each test forks its database, which a shared one would not survive. */
 ownDatabases();
 
-type Decisions = { merges: { id: string; label: string; after: string | null; open: number }[]; counts: { total: number; byPerson: Record<string, number>; byAgent: Record<string, number> } };
+type Decisions = { merges: { id: string; label: string; after: string | null; open: number; ownerPersonId: string }[]; counts: { total: number; byPerson: Record<string, number>; byAgent: Record<string, number> } };
 
 /* A merge that left a conflict of each kind: about a person, about a machine's access, and about a task. */
 async function stand() {
@@ -68,7 +68,9 @@ describe("the CEO's conflicts of a merge", () => {
     const decisions = async (who: object) => (await s.app.inject({ url: '/api/requests', ...who })).json() as Decisions;
     const mine = await decisions(as(s.ceo));
     /* One card for the merge, however many conflicts it holds, with the time of the backup the restore went back to. */
-    expect(mine.merges).toEqual([{ id: s.id, label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 2 }]);
+    expect(mine.merges).toEqual([{ id: s.id, label: 'the database from before the restore of 10 Nov 08:00 UTC', after: '2026-11-10T08:00:00.000Z', open: 2, ownerPersonId: s.owner.id }]);
+    /* Listed for one person, it shows only for its owner. */
+    expect((await decisions({ ...as(s.ceo), query: { person: s.maria.id } } as object)).merges).toEqual([]);
     expect([mine.counts.total, mine.counts.byPerson[s.owner.id], mine.counts.byAgent[s.orchestrator.id]]).toEqual([1, 1, 1]);
     /* Nobody else is shown it: not a person of the whole company, not a department's own, not the orchestrator acting
        for the CEO. */

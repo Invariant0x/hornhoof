@@ -9,6 +9,7 @@ import { nodeSource, withSource } from '../../src/db/sources.js';
 import { runMerge } from '../../src/modules/merge/apply.js';
 import { complete } from '../../src/modules/merge/check.js';
 import { keptDatabases } from '../../src/modules/merge/kept.js';
+import { pick } from '../../src/modules/merge/picks.js';
 import { keptSource, type MergeSource } from '../../src/modules/merge/source.js';
 import { TEST_SECRET } from '../helpers-basic.js';
 import { ENDLESS_LEASE } from '../prepare-environment.js';
@@ -276,6 +277,25 @@ describe('a merge on real Postgres', () => {
     /* No value of this side changed: row by row, but for the rows that were added. */
     expect(await run(live, `SELECT to_jsonb(t) AS row FROM tasks t WHERE number < 3 ORDER BY number`)).toEqual(before);
     expect(await run(live, `SELECT to_jsonb(d) AS row FROM departments d WHERE name <> 'Sales' ORDER BY name`)).toEqual(departments);
+    expect(await checked(db, name, merge.id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('settles a conflict, and brings a file back with its bytes', async () => {
+    await run(live, `INSERT INTO attachments (company_id, agent_id, media_type, bytes, size) VALUES ('${COMPANY}', '${AGENT}', 'text/plain', 'the same on both'::bytea, 16)`);
+    const name = await fork();
+    await into(name, `UPDATE tasks SET title = 'Kept title' WHERE number = 1;
+      INSERT INTO attachments (company_id, agent_id, media_type, bytes, size) VALUES ('${COMPANY}', '${AGENT}', 'text/plain', 'only there'::bytea, 10)`);
+    const db = appDb();
+    const { merge, result } = await merged(db, name, true);
+    /* A file both hold is told the same by its hash, and the one that is added comes with its bytes. */
+    expect(result.counts).toMatchObject({ added: 1, conflicts: 1 });
+    expect((await run<{ said: string }>(live, `SELECT convert_from(bytes, 'UTF8') AS said FROM attachments ORDER BY size`)).map(row => row.said)).toEqual(['only there', 'the same on both']);
+    /* The CEO takes the other side's title: a pick's own transaction, on the app's pool with its limits. */
+    const [conflict] = await run<{ id: string }>(live, 'SELECT id FROM net.merge_conflicts WHERE merge = $1', [merge.id]);
+    const ctx = { db, bus: { publish: () => undefined } } as unknown as Parameters<typeof pick>[0];
+    expect(await pick(ctx, { kind: 'ceo', personId: OWNER }, { ids: [conflict!.id] }, 'there')).toMatchObject({ settled: 1, there: 1, refused: [] });
+    expect(await titles(live)).toEqual(['Kept title', 'Two']);
+    expect(await run(live, 'SELECT picked, picked_by FROM net.merge_conflicts WHERE id = $1', [conflict!.id])).toEqual([{ picked: 'there', picked_by: `person:${OWNER}` }]);
     expect(await checked(db, name, merge.id)).toEqual({ ok: true, missing: [] });
   });
 

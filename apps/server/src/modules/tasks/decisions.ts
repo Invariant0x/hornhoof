@@ -5,11 +5,10 @@ import { canReach, WHOLE, withOwned } from '../../auth/access.js';
 import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
-import { HIDDEN } from '../../db/agent-sql.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, machineAccess, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
-import { TABLE_RULES, ceosConflict } from '../merge/rules.js';
+import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
 import { seesTask, type TaskPlace } from './sight.js';
@@ -123,11 +122,11 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
 async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Candidate[]): Promise<Decisions['merges']> {
   if (!me.isOwner || me.via) return [];
   const { db } = ctx;
-  const mine = Object.keys(TABLE_RULES).filter(table => ceosConflict(table) || HIDDEN.includes(table));
+  const his = ORCHESTRATORS_TABLES();
   const found = (await db.execute(sql`SELECT m.id, m.label, m.source, count(*)::int AS open,
       (SELECT r.dumped_at FROM net.restores r WHERE m.source = 'kept:' || r.kept ORDER BY r.at DESC LIMIT 1) AS after
     FROM net.merge_conflicts c JOIN net.merges m ON m.id = c.merge
-    WHERE c.picked IS NULL AND c.tbl = ANY (${sql.raw(`ARRAY[${mine.map(table => `'${table}'`).join(', ')}]::text[]`)})
+    WHERE c.picked IS NULL AND c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)})
     GROUP BY m.id ORDER BY m.created_at, m.source`)) as unknown as { rows: { id: string; label: string; open: number; after: string | Date | null }[] };
   if (found.rows.length === 0) return [];
   const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));

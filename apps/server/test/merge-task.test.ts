@@ -79,6 +79,9 @@ describe('the task a merge leaves the orchestrator', () => {
     expect(body).toContain('task #1 "Here"');
     /* A task nobody worked on there has no code to move. */
     expect(body).not.toContain('Code:');
+    /* A conflict carried from a build that had a table this one has no rule for is the CEO's too, and stops nothing. */
+    await s.db.execute(sql`INSERT INTO net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, why) VALUES (${id}, gen_random_uuid(), 'a_table_of_another_build', '{"id": "1"}'::jsonb, 'insert', 'refused', 'work', 'x')`);
+    expect(await bodyOf(s.db, [id])).toContain('To settle: 1 for you; 3 for the CEO');
   });
 
   it('joins a second merge into the open task', async () => {

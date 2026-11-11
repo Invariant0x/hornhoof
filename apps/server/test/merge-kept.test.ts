@@ -237,6 +237,28 @@ describe('the databases a restore set aside', () => {
     expect((await s.merges())[0]!.tries).toBe(31);
   });
 
+  it('lets go of a merge whose database is not there any more', async () => {
+    const s = await stand();
+    /* As a backup restored later brings back the record of a merge that was still waiting when it was made. */
+    await s.db.execute(sql`INSERT INTO net.merges (source, label, fork) VALUES ('kept:hornhoof_before_t7', 'a database long gone', gen_random_uuid())`);
+    expect(await s.merger.pending()).toBe(true);
+    await s.merger.tick();
+    expect(await s.merges()).toMatchObject([{ status: 'done', error: 'The database is not on this server any more, so nothing of it was brought back.' }]);
+    expect([await s.merger.pending(), s.dropped]).toEqual([false, []]);
+  });
+
+  it('holds no update for a merge that can never run', async () => {
+    const s = await stand();
+    const kept = await s.keep('hornhoof_before_t1');
+    await s.merger.discover();
+    expect(await s.merger.pending()).toBe(true);
+    /* A database of another shape never merges: it waits for the CEO to leave it out, and holds nothing else up. */
+    await kept.client.exec('ALTER TABLE teams ADD COLUMN nickname text');
+    await s.merger.tick();
+    expect((await s.merges())[0]).toMatchObject({ status: 'pending', error: 'The two databases are of different versions.' });
+    expect(await s.merger.pending()).toBe(false);
+  });
+
   it('says what is not complete yet, and stays applied', async () => {
     const s = await stand();
     const kept = await s.keep('hornhoof_before_t1');
