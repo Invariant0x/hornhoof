@@ -39,7 +39,7 @@ async function prepare(page: Page, info: TestInfo, { lang, theme, width }: Setti
 
 async function openBruno(page: Page, lang: Settings['lang']) {
   await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
+  await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
 }
 
