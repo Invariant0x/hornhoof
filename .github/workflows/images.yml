@@ -178,6 +178,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --prefer-offline --no-audit --no-fund
+      # The tests of copies run pairs of Postgres on both processors, each beside the other.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64,amd64
       - run: npm run test:real
 
   images:

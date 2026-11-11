@@ -155,8 +155,10 @@ function nameRules(relay: FakeRelay) {
   };
 }
 
-/* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
-export async function fakeRelay(): Promise<FakeRelay> {
+/* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. It ends with the test that made it;
+   one made with keep ends when its close is called, as for tests that share one. host: where it listens, this
+   computer alone unless the lab's machines are to reach it. */
+export async function fakeRelay(opts: { keep?: boolean; host?: string } = {}): Promise<FakeRelay & { close(): Promise<void> }> {
   const app = Fastify({ forceCloseConnections: true });
   const relay = newRelay();
   const { check, cannotTell } = nameRules(relay);
@@ -221,8 +223,8 @@ export async function fakeRelay(): Promise<FakeRelay> {
   app.get('/api/v1/health', async (_req, reply) =>
     relay.frpsDown ? reply.code(503).send({ ok: false, frps: false }) : { ok: true, frps: true, relayStarted: relay.relayStarted, passthrough: relay.passthrough },
   );
-  await listenAt(port => app.listen({ host: '127.0.0.1', port }));
+  await listenAt(port => app.listen({ host: opts.host ?? '127.0.0.1', port }));
   relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-  onTestFinished(() => app.close());
-  return relay;
+  if (!opts.keep) onTestFinished(() => app.close());
+  return Object.assign(relay, { close: async () => void (await app.close()) });
 }

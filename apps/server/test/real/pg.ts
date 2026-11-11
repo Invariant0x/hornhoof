@@ -22,6 +22,9 @@ export function realServer(): string {
 
 async function connected(url: string): Promise<pg.Client> {
   const client = new pg.Client({ connectionString: url });
+  /* What a test does may end this session, as a copy's swap ends every session on its databases: the next query on it
+     fails, and nothing else comes of it. */
+  client.on('error', () => undefined);
   await client.connect();
   return client;
 }
