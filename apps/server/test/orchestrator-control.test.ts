@@ -17,6 +17,7 @@ import { BASE, HEAD } from './development-echelons-fixture.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, echelonsTurn } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -35,7 +36,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   const [acme] = await db.select().from(companies);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;

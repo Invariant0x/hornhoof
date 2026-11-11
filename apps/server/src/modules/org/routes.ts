@@ -24,7 +24,7 @@ import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
-import { keyEndFor, subView } from '../subscriptions/views.js';
+import { keyEndFor, onlineIn, subView } from '../subscriptions/views.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }, roleEffort?: string): string | null {
@@ -227,7 +227,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         held: holds.get(orchestrator.id)!,
-        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
+        subscription: orchestrator.subscriptionId ? await subView(db, onlineIn(hub, ctx.config), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
       agents: { total: allAgents.length, working: await workingSeen(db, me.companyId, viewer) },

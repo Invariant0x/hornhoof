@@ -18,7 +18,7 @@ const COPY = {
 const SECRETS = { HORNHOOF_SECRET: Buffer.alloc(32, 7).toString('base64'), NODE_KEY: 'n'.repeat(44), RELAY_URL: 'https://relay.hornhoof.test', POSTGRES_PASSWORD: 'p'.repeat(24) };
 const COPY_ENV =
   `COMPOSE_FILE=compose.yaml:compose.worker.yaml\nHORNHOOF_ROLE=data\nHORNHOOF_SECRET=${SECRETS.HORNHOOF_SECRET}\nNODE_KEY=${SECRETS.NODE_KEY}\nHORNHOOF_VERSION=0.4.0\n` +
-  `RELAY_URL=${SECRETS.RELAY_URL}\nPOSTGRES_PASSWORD=${SECRETS.POSTGRES_PASSWORD}\nCOMPOSE_PROFILES=data\n`;
+  `RELAY_URL=${SECRETS.RELAY_URL}\nPOSTGRES_PASSWORD=${SECRETS.POSTGRES_PASSWORD}\nCOMPOSE_PROFILES=data,builtin\n`;
 const TABLES = ['net.journal', 'net_local.state', 'public.agents', 'public.tasks'];
 const NID = `99bb2233aabbccdd${'2'.repeat(48)}`;
 const DATABASE = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
@@ -255,7 +255,7 @@ describe('the updater and what a machine held when it stopped holding the data',
     const at = (text: string) => r.calls.findIndex(c => c.includes(text));
     /* It looks first whether a database here ever led, then stops what holds the data and removes the volume. */
     const asked = at('FROM net_local.state');
-    const stop = r.calls.indexOf('docker compose rm -sf db migrate app');
+    const stop = r.calls.indexOf('docker compose rm -sf db migrate app node');
     const volume = r.calls.indexOf('docker volume rm hornhoof_pgdata');
     const up = r.calls.indexOf('docker compose up -d --no-build --remove-orphans front keeper');
     expect(asked).toBeGreaterThanOrEqual(0);
@@ -290,7 +290,7 @@ describe('the updater and what a machine held when it stopped holding the data',
     /* The next pass goes on from there, and looks and stops no second time. */
     const second = await runOnce(s, null, COPY);
     const fresh = second.calls.slice(first.calls.length);
-    expect(fresh.some(c => c === 'docker compose rm -sf db migrate app' || c.includes('FROM net_local.state'))).toBe(false);
+    expect(fresh.some(c => c === 'docker compose rm -sf db migrate app node' || c.includes('FROM net_local.state'))).toBe(false);
     expect(fresh).toContain('docker volume rm hornhoof_pgdata');
     expect([has(s, 'wiped.json'), has(s, 'wipe.json'), has(s, 'dumps')]).toEqual([true, false, false]);
     expect(envOf(s)).toMatchObject({ HORNHOOF_SECRET: '', HORNHOOF_ROLE: 'worker' });

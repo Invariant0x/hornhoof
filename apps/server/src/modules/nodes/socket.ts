@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodes } from '../../db/schema.js';
-import { BUILTIN, type NodeIdentity } from './hub.js';
+import { builtinOf, ownBuiltin, type NodeIdentity } from './hub.js';
 
 /* Results can be long; anything bigger than this closes the socket. */
 const MAX_FRAME = 4 * 1024 * 1024;
@@ -20,10 +20,12 @@ function sameKey(given: string, expected: string): boolean {
    id>. The node key itself never travels in it. */
 const MACHINE_KEY = /^builtin\.([0-9a-f]{32}|[0-9a-f]{64})\.([0-9a-f]{64})$/;
 
-function isBuiltin(key: string, nodeKey: string): boolean {
-  if (sameKey(key, nodeKey)) return true;
+/* The machine a built-in node's key was made for; '' for the bare node key, as a node of a build before sends it; null
+   for any other key. */
+function builtinMachine(key: string, nodeKey: string): string | null {
+  if (sameKey(key, nodeKey)) return '';
   const [, machineId, mac] = MACHINE_KEY.exec(key) ?? [];
-  return machineId !== undefined && sameKey(mac!, createHmac('sha256', nodeKey).update(`hornhoof builtin node ${machineId}`).digest('hex'));
+  return machineId !== undefined && sameKey(mac!, createHmac('sha256', nodeKey).update(`hornhoof builtin node ${machineId}`).digest('hex')) ? machineId : null;
 }
 
 /* The built-in node's key, bare as a node from before sends it or made for its machine, or the key a node got at join.
@@ -32,7 +34,10 @@ export async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdent
   const header = req.headers.authorization ?? '';
   const key = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!key) return null;
-  if (ctx.config.nodeKey && isBuiltin(key, ctx.config.nodeKey)) return BUILTIN;
+  const machine = ctx.config.nodeKey ? builtinMachine(key, ctx.config.nodeKey) : null;
+  /* Each machine's built-in node is its own, wherever the server runs: after a switch the old leader's node, reaching the
+     new one, is still that machine's. */
+  if (machine !== null) return machine ? builtinOf(machine) : ownBuiltin(ctx.config);
   const keyHash = hashToken(key);
   const [node] = await ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.keyHash, keyHash));
   return node ? { kind: 'node', nodeId: node.id, keyHash } : null;

@@ -1,6 +1,6 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -10,7 +10,7 @@ import { agents, attachments, companies, departments, jobs, machines, nodes, peo
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, shownMachine } from '../nodes/nodes.js';
 import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
@@ -30,7 +30,8 @@ import { pickMachine } from './pick.js';
 import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
-import { holdsMachine, installingMachines } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, installingMachines } from '../network/follow.js';
+import { builtinName } from '../nodes/builtin.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -59,12 +60,18 @@ const TAIL_CHARS = 2000;
 const SHOWN_FAILURES = 3;
 const GIB = 1024 ** 3;
 
-const BUILTIN_NAME = 'the built-in node';
 const isId = (s: string) => z.uuid().safeParse(s).success;
 
 /* The node a part went to. */
-const nodeOf = (p: Pick<Part, 'builtin' | 'nodeId'>): NodeIdentity | null => (p.builtin ? BUILTIN : p.nodeId ? nodeIdentity(p.nodeId) : null);
-const ofNode = (id: NodeIdentity): SQL => (id.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, id.nodeId));
+/* The node a part runs on: a plan's, or the built-in node of the machine named, this app's own where none is. */
+const nodeOf = (ctx: Ctx, p: Pick<Part, 'builtin' | 'builtinMachine' | 'nodeId'>): NodeIdentity | null => (p.builtin ? (p.builtinMachine ? builtinOf(p.builtinMachine) : ownBuiltin(ctx.config)) : p.nodeId ? nodeIdentity(p.nodeId) : null);
+/* The parts a node may touch: a plan's node those sent to it, a machine's built-in node those it was given. A part
+   from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
+const ofNode = (ctx: Ctx, id: NodeIdentity): SQL => {
+  if (id.kind === 'node') return eq(testParts.nodeId, id.nodeId);
+  const here = id.machine === ownMachine(ctx.config) ? or(eq(testParts.builtinMachine, id.machine), isNull(testParts.builtinMachine)) : eq(testParts.builtinMachine, id.machine);
+  return and(eq(testParts.builtin, true), here)!;
+};
 
 /* What a run is called where agents read of it, and its state there: a run of work that passed is done. */
 const named = (run: Pick<Run, 'kind' | 'number'>) => `${run.kind === 'work' ? 'Work run' : 'Test run'} ${run.number}`;
@@ -180,12 +187,16 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
 /* A place a part can run: a computer of the company through one of its nodes, or the built-in node. access: what the
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
-export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
+/* builtinMachine: the machine of a built-in node's place. */
+export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; builtinMachine: string | null; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
 export type BrowserHeldPlace = { name: string; lent: boolean; access: Access | null; works: boolean; browserError: string };
 
-const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'machineId' | 'nodeId' | 'computer'>): ComputerPlace => {
-  const id = nodeOf(part);
-  return { key: part.builtin ? 'builtin' : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
+/* The key of a built-in node's place: the server's own by its bare word, as it always went, another machine's by its id. */
+const builtinPlaceKey = (ctx: Ctx, machine: string | null): string => (!machine || machine === ownMachine(ctx.config) ? 'builtin' : `builtin:${machine}`);
+
+const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'builtinMachine' | 'machineId' | 'nodeId' | 'computer'>): ComputerPlace => {
+  const id = nodeOf(ctx, part);
+  return { key: part.builtin ? builtinPlaceKey(ctx, part.builtinMachine) : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
 };
 
 async function companyComputers(db: Ctx['db'], companyId: string) {
@@ -207,12 +218,18 @@ async function companyComputers(db: Ctx['db'], companyId: string) {
 
 /* Only nodes that say how busy they are know test runs, only those with a user of their own for runs take them, and one
    that waits for an update takes none. */
+/* The machines whose built-in node is there, the one this server runs on first, then by id. */
+const builtinsFirstOwn = (ctx: Ctx): string[] => {
+  const own = ownMachine(ctx.config);
+  return ctx.hub.builtins().sort((a, b) => Number(b === own) - Number(a === own) || (a < b ? -1 : 1));
+};
+
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
   !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null;
 
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
-  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
+  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, builtinMachine: testParts.builtinMachine, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
   const { rows, live } = await companyComputers(db, companyId);
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
@@ -227,6 +244,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       machineId: machine.id,
       nodeId: node,
       builtin: false,
+      builtinMachine: null,
       lent: machine.lendsTests,
       busy: false,
       running: 0,
@@ -235,10 +253,19 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       works: hub.runsWork(nodeIdentity(node)),
     });
   }
-  if (takesParts(ctx, BUILTIN)) {
-    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: false, running: 0, load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
+  /* Each machine's built-in node that is there is a place too, the server's own first. */
+  const builtins = builtinsFirstOwn(ctx);
+  for (const machine of builtins) {
+    const node = builtinOf(machine);
+    if (!takesParts(ctx, node)) continue;
+    const own = machine === ownMachine(ctx.config);
+    const [row] = own ? [] : await db.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+    places.push({
+      key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId: row?.id ?? null, nodeId: null, builtin: true, builtinMachine: machine,
+      lent: true, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
+    });
   }
-  const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), hub.loadOf(BUILTIN)];
+  const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), ...builtins.map(machine => hub.loadOf(builtinOf(machine)))];
   return places.map(p => ({ ...p, ...computerState(p, running, reports, ctx.config.runsPerHost) }));
 }
 
@@ -252,8 +279,11 @@ export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<Br
     if (!browserError) continue;
     held.push({ name: machine.hostname, lent: machine.lendsTests, access: await accessOf(db, owner), works: mine.some(id => hub.runsWork(id)), browserError });
   }
-  const builtinError = hub.browserHoldOf(BUILTIN);
-  if (builtinError) held.push({ name: BUILTIN_NAME, lent: true, access: null, works: hub.runsWork(BUILTIN), browserError: builtinError });
+  for (const machine of builtinsFirstOwn(ctx)) {
+    const node = builtinOf(machine);
+    const builtinError = hub.browserHoldOf(node);
+    if (builtinError) held.push({ name: await builtinName(ctx, db, machine), lent: true, access: null, works: hub.runsWork(node), browserError: builtinError });
+  }
   return held;
 }
 
@@ -290,7 +320,7 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   /* A machine that installs its build is no place for a part: offered, it would be picked for being idle, and every
      part would wait for it while others stand free. The server's own node is never such a machine. */
   const busy = await installingMachines(ctx.db);
-  for (const id of new Set(companyIds)) places.set(id, (await placesOf(ctx, id)).filter(place => place.builtin || !place.machineId || !busy.has(place.machineId)));
+  for (const id of new Set(companyIds)) places.set(id, (await placesOf(ctx, id)).filter(place => !place.machineId || !busy.has(place.machineId)));
   return places;
 }
 
@@ -489,7 +519,7 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
   await ctx.db
     .update(testParts)
     .set({ startedAt: new Date() })
-    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(id)));
+    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(ctx, id)));
 }
 
 /* How a part's end counts for its run. A part of a pinned run that checked another commit, or passed without saying
@@ -513,7 +543,7 @@ async function keepPartResults(ctx: Ctx, run: Run, part: Part, ended: Part, msg:
 export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Promise<void> {
   const { db } = ctx;
   if (isId(msg.partId)) {
-    const [found] = await db.select({ part: testParts, run: testRuns }).from(testParts).innerJoin(testRuns, eq(testRuns.id, testParts.runId)).where(and(eq(testParts.id, msg.partId), ofNode(id)));
+    const [found] = await db.select({ part: testParts, run: testRuns }).from(testParts).innerJoin(testRuns, eq(testRuns.id, testParts.runId)).where(and(eq(testParts.id, msg.partId), ofNode(ctx, id)));
     if (found && found.part.status !== 'queued') {
       const [ended] = await db
         .update(testParts)
@@ -535,9 +565,9 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
    meanwhile stop. A node of a build before test runs knows none. */
 export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = []): Promise<void> {
   const known = has.filter(isId);
-  await loseParts(ctx, and(ofNode(id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
+  await loseParts(ctx, and(ofNode(ctx, id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
-    const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(id)));
+    const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
     const keep = new Set(open.map(p => p.id));
     for (const partId of known) if (!keep.has(partId)) ctx.hub.send(id, { type: 'tests.cancel', partId });
   }
@@ -556,11 +586,11 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
   for (const { part, run } of open) {
     if (part.status === 'running' && part.startedAt && part.startedAt.getTime() + run.timeoutMs + LATE_MS < now.getTime()) {
       const [ended] = await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, 'timeout');
-      const node = ended && nodeOf(ended);
+      const node = ended && nodeOf(ctx, ended);
       if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: part.id });
       continue;
     }
-    const node = part.status === 'running' ? nodeOf(part) : null;
+    const node = part.status === 'running' ? nodeOf(ctx, part) : null;
     const away = node && ctx.hub.awaySince(node);
     if (away && away + AWAY_MS < now.getTime()) await loseParts(ctx, eq(testParts.id, part.id), 'machine_offline');
     if (part.status === 'queued' && part.queuedAt.getTime() + WAIT_MS < now.getTime()) {
@@ -790,7 +820,7 @@ async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other
 
 function cancelParts(ctx: Ctx, parts: Part[]): void {
   for (const p of parts) {
-    const node = nodeOf(p);
+    const node = nodeOf(ctx, p);
     if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
   }
 }
@@ -819,7 +849,7 @@ export async function workPartOn(ctx: Ctx, id: NodeIdentity, partId: string): Pr
     .from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
-    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), eq(testRuns.kind, 'work'), ofNode(id)));
+    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), eq(testRuns.kind, 'work'), ofNode(ctx, id)));
   return found ?? null;
 }
 
@@ -893,10 +923,10 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
     /* No part goes to a machine that installs its build now: asked and claimed in one transaction, so the word to install
        and this part never cross. The server's own node is never held so. */
     const taken = await db.transaction(async tx => {
-      if (!place.builtin && (await holdsMachine(tx, place.nodeId))) return null;
+      if (place.builtin ? await holdsBuiltin(tx, place.builtinMachine) : await holdsMachine(tx, place.nodeId)) return null;
       const [claimed] = await tx
         .update(testParts)
-        .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
+        .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, builtinMachine: place.builtinMachine, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
         .returning();
       return claimed ?? null;

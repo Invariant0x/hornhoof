@@ -17,7 +17,7 @@ import { readMessage } from '../src/modules/events/parties.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { hostIdOf } from '../src/modules/network/join.js';
 import { thisMachine } from '../src/modules/network/store.js';
-import { identityOf } from '../src/modules/nodes/hub.js';
+import { builtinOf, identityOf } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -30,6 +30,8 @@ const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn t
 const SERVER = 'the company server';
 const NOT_THEIRS = `Only the CEO, the CEO delegate or Ivan, who owns ${SERVER}, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.`;
 const HOST_ID = hostIdOf('server-0001-abcd');
+/* The built-in node of the machine this test's server runs on. */
+const BUILTIN = builtinOf(HOST_ID);
 
 /* A company whose server's own machine has its keeper asking, with its updater alive, and a running turn of the
    orchestrator that answers the CEO. */
@@ -47,7 +49,7 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   /* A turn that answers the CEO is one the CEO started. */
   const running = (token: string, answersCeo: boolean) =>
@@ -310,7 +312,7 @@ describe('access to the computer the server runs on', () => {
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [] });
-    await until(() => app.ctx.hub.hasTerminals({ kind: 'builtin' }));
+    await until(() => app.ctx.hub.hasTerminals(BUILTIN));
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     let note = await builtin.next();
     while (note.type !== 'job.run') note = await builtin.next();
@@ -402,7 +404,7 @@ describe('access to the computer the server runs on', () => {
 
     const retried = await openClickedRetry(c);
     c.builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [retried.jobId] });
-    await until(() => c.app.ctx.hub.hasTerminals({ kind: 'builtin' }));
+    await until(() => c.app.ctx.hub.hasTerminals(BUILTIN));
     const retryClient = await mcp(c.app, retried.toolToken!);
     const [first] = await Promise.all([call(retryClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(first)).toBe('Exit code 0.\nPlenty.\n');
@@ -449,7 +451,7 @@ describe('access to the computer the server runs on', () => {
 
     const retried = await openClickedRetry(c);
     c.builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [retried.jobId] });
-    await until(() => c.app.ctx.hub.hasTerminals({ kind: 'builtin' }));
+    await until(() => c.app.ctx.hub.hasTerminals(BUILTIN));
     const [marked] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, retried.jobId), eq(agentEvents.kind, 'typed')));
     const { data, message } = readMessage(marked!.data);
     const replayText = addressed((data as { text: string }).text, message!);

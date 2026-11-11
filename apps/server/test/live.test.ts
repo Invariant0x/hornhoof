@@ -2,7 +2,8 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agents, jobs, subscriptions } from '../src/db/schema.js';
 import { sayLive, said } from '../src/modules/conversation/live.js';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 type Say = Extract<ServerMessage, { type: 'agent.say' }>;

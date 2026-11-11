@@ -2,8 +2,8 @@ import { generateKeyPairSync } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, jobs, machines, nodeCodes, nodes, people, testParts, testRuns } from '../src/db/schema.js';
-import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsMachine, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
+import { agents, companies, jobs, machines, nodeCodes, nodes, people, subscriptions, testParts, testRuns } from '../src/db/schema.js';
+import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsBuiltin, holdsMachine, installingBuiltins, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
 import type { Build } from '../src/modules/updates/registry.js';
 import { as, connectNode, listen, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
@@ -125,6 +125,22 @@ describe("following the server's build", () => {
     await c.report(copy, { commit: COMMIT, update: null });
     expect(await c.view(copy)).toMatchObject({ build: null, go: null });
     expect((await c.view(w)).go).toMatchObject({ commit: COMMIT });
+    /* A copy's own built-in node runs the work of the company's keys: while a turn or a part of a test run is on it, the
+       copy waits, as it waits for the work of its plans' nodes. */
+    const again = await c.worker('three', { role: 'data', copyState: 'ready' });
+    const [{ networkId }] = [await c.rowOf(again)];
+    const [sub] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'anthropic_api', kind: 'api_key', label: 'Key', status: 'ready', ownerPersonId: c.ownerId }).returning();
+    const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: sub!.id, prompt: 'x', timeoutMs: 60_000, status: 'running', startedAt: new Date(), builtinMachine: networkId }).returning();
+    await c.report(w, { commit: COMMIT, update: null });
+    await c.ready(again);
+    expect((await c.view(again)).go).toBeNull();
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, turn!.id));
+    expect((await c.view(again)).go).toMatchObject({ commit: COMMIT });
+    /* With the word given, nothing new goes to its built-in node. */
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, networkId))).toBe(true);
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, HOST_ID))).toBe(false);
+    expect([...(await installingBuiltins(c.db))]).toEqual([networkId]);
+    await c.report(again, { commit: COMMIT, update: null });
     /* The machine the server itself runs on follows nobody. */
     await c.app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: newKey() }, remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } });
     const [server] = await c.db.select().from(machines).where(eq(machines.networkId, HOST_ID));

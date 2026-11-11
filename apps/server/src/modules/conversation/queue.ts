@@ -12,9 +12,10 @@ import { dispatchJob } from '../jobs/dispatch.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
-import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { holdsMachine, machineInstalls } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
+import { pickBuiltin } from '../nodes/builtin.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -224,7 +225,7 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
 /* A node and the owner of the subscription it runs: the person who may type into the agent's terminal there. */
 export type ProgramNode = { node: NodeIdentity; ownerPersonId: string; planId: string };
 
-const JOB_PLAN = { id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId };
+const JOB_PLAN = { id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine };
 
 /* A program stays up after its last turn, on the plan that turn ran on, until a turn of another plan takes its place. Company
    keys share the built-in node, so a window there shows that plan's program, even when the agent is on another key by now. A
@@ -252,7 +253,7 @@ export async function programPlan(ctx: Ctx, agentId: string) {
     .limit(1);
   if (running) return running;
   const [own] = await ctx.db
-    .select({ id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id })
+    .select({ id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id, builtinMachine: agents.builtinMachine })
     .from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
     .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
@@ -263,7 +264,7 @@ export async function programPlan(ctx: Ctx, agentId: string) {
 /* The node that holds the agent's program now. A company key's agents are on the built-in node. */
 export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
   const own = await programPlan(ctx, agentId);
-  const node = own && identityOf(own, own.nodeId);
+  const node = own && identityOf(own, own.nodeId, own.builtinMachine, ownBuiltin(ctx.config));
   return node ? { node, ownerPersonId: own.ownerPersonId, planId: own.id } : null;
 }
 
@@ -289,9 +290,9 @@ async function placedProgram(ctx: Ctx, agentId: string): Promise<ProgramNode | n
 
 /* The machine of its plan the agent's next turn would go to, which it keeps from now on. */
 async function nextTurnNode(ctx: Ctx, agentId: string, sub: Parameters<typeof placement>[2]): Promise<NodeIdentity | null> {
-  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
   const place = agent ? await placement(ctx, agent, sub) : null;
-  if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
+  if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId, builtinMachine: place.builtinMachine }).where(eq(agents.id, agentId));
   return place?.node ?? null;
 }
 
@@ -573,19 +574,22 @@ function keepsSessionAcrossTurns(kind: string): boolean {
 }
 
 type Agent = { id: string; companyId: string; kind: string; name: string };
-type On = { subscriptionId: string; nodeId: string | null };
+/* Where a turn runs: the plan and its node, or for an API key the machine of the built-in node. own: the machine this
+   server runs on, which a turn of an API key from before machines' built-in nodes were told apart ran on. */
+type On = { subscriptionId: string; nodeId: string | null; builtinMachine: string | null; own: string };
 type Session = { sessionId: string | null; catchUp: string | null };
 /* The original prompt goes along when the continuation cannot resume the session that holds it. */
 type Continuation = { sessionId: string | null; originalPrompt: string | null };
 
-/* Whether a session of that turn goes on here: on the same plan and node with the same instructions. */
-const sameRun = (turn: { subscriptionId: string | null; nodeId: string | null; instructionsHash: string | null }, on: On, instructionsHash: string): boolean =>
-  turn.subscriptionId === on.subscriptionId && turn.nodeId === on.nodeId && turn.instructionsHash === instructionsHash;
+/* Whether a session of that turn goes on here: on the same plan and node, an API key's on the same machine's built-in
+   node, with the same instructions. */
+const sameRun = (turn: { subscriptionId: string | null; nodeId: string | null; builtinMachine: string | null; instructionsHash: string | null }, on: On, instructionsHash: string): boolean =>
+  turn.subscriptionId === on.subscriptionId && turn.nodeId === on.nodeId && (on.builtinMachine === null || (turn.builtinMachine ?? on.own) === on.builtinMachine) && turn.instructionsHash === instructionsHash;
 
 /* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
    instructions; otherwise what that turn was asked. */
 async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<Continuation> {
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt, continueOf: jobs.continueOf, retryOf: jobs.retryOf }).from(jobs).where(eq(jobs.id, jobId));
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt, continueOf: jobs.continueOf, retryOf: jobs.retryOf }).from(jobs).where(eq(jobs.id, jobId));
   if (!from) return { sessionId: null, originalPrompt: null };
   return { sessionId: sameRun(from, on, instructionsHash) ? from.sessionId : null, originalPrompt: await originalPromptOf(ctx, from) };
 }
@@ -611,7 +615,7 @@ async function queuedSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: s
 /* What a turn asks: a continuation that lost its session says again what the turn that ended was asked. */
 const withOriginal = (asked: string, original: string | null) => (original && !asked.includes(original) ? `${asked}\n\nThe turn that ended was asked:\n\n${original}` : asked);
 
-type SavedSession = Pick<typeof jobs.$inferSelect, 'subscriptionId' | 'nodeId' | 'sessionId' | 'instructionsHash' | 'startedAt' | 'finishedAt'>;
+type SavedSession = Pick<typeof jobs.$inferSelect, 'subscriptionId' | 'nodeId' | 'builtinMachine' | 'sessionId' | 'instructionsHash' | 'startedAt' | 'finishedAt'>;
 
 function companySessionStarts(agent: Agent, last: SavedSession | undefined, turn: { openedAt: Date } | undefined, job: SessionJob, startedAt: Date | null): boolean {
   if (!last || !turn || !startedAt) return false;
@@ -644,7 +648,7 @@ async function lastSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: str
   const repeated = await unheardSession(ctx, agent.id, job.id, on, instructionsHash);
   if (repeated) return { sessionId: repeated, catchUp: null };
   const [last] = await ctx.db
-    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
+    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
     .from(jobs)
     .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
@@ -692,24 +696,32 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
 export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_NODE): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
 
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
-type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
+/* builtinMachine: the machine of the built-in node, for an API key's turn. moves: the agent's program is not there yet. */
+type Placement = { node: NodeIdentity; nodeId: string | null; builtinMachine: string | null; moves: boolean };
 
-type PlacedAgent = { id: string; kind: 'orchestrator' | 'head' | 'worker'; nodeId: string | null; roleKey: string | null };
+type PlacedAgent = { id: string; kind: 'orchestrator' | 'head' | 'worker'; nodeId: string | null; builtinMachine: string | null; roleKey: string | null };
 
 /* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
 
-/* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
+/* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
+   else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
+   the one picked waits for an update or has no room. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. A turn that would start a new program goes only to a machine with free memory for it; roomy: whether
    a node has, which the agent's state also asks as if every node had. */
 async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeldFrom(ctx, BUILTIN, agent.roleKey, isLeader(agent)) && roomy(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+  if (sub.kind === 'api_key') {
+    const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
+    if (!machine) return null;
+    const node = builtinOf(machine);
+    return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
+  }
   const all = await planNodes(ctx.db, [sub.id]);
   const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
   const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need, roomy)));
-  return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
+  return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
 /* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom
@@ -835,7 +847,7 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf'>;
 type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId' | 'prompt'>;
 /* What a turn goes out with: where it runs and what it says. */
-type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'sessionId' | 'toolTokenHash' | 'instructionsHash'>;
+type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'builtinMachine' | 'prompt' | 'sessionId' | 'toolTokenHash' | 'instructionsHash'>;
 
 /* A continuation carried inside another task's turn takes its original work along too. */
 async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: string): Promise<string> {
@@ -855,7 +867,7 @@ const HELD = 'held';
 
 async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
   if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
-  if (await holdsMachine(tx, sending.nodeId)) return HELD;
+  if ((await holdsMachine(tx, sending.nodeId)) || (await holdsBuiltin(tx, sending.builtinMachine))) return HELD;
   const [row] = await tx
     .update(jobs)
     .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
@@ -986,7 +998,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const effort = effortOfTurn(ctx, agent, effortsOf(models, model));
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const on = { subscriptionId: sub.id, nodeId: place.nodeId };
+  const on = { subscriptionId: sub.id, nodeId: place.nodeId, builtinMachine: place.builtinMachine, own: ownMachine(ctx.config) };
   const { sessionId, catchUp, originalPrompt, prompts } = await queuedSession(ctx, agent, on, runHash, job, along);
   const asked = along.length ? [ALONG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
   const said = withOriginal(asked, originalPrompt);
@@ -996,12 +1008,13 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf })) : '';
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
-  const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
+  /* The machine of the built-in node it goes to is written with it, so that node alone may answer for it. */
+  const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, builtinMachine: place.builtinMachine, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (taken === HELD) return;
   if (!taken) return sendNext(ctx, agentId);
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
-  if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
+  if (place.moves) await db.update(agents).set({ nodeId: place.nodeId, builtinMachine: place.builtinMachine }).where(eq(agents.id, agentId));
   let sent = false;
   let operatorDelivery: OperatorDelivery | undefined;
   try {
@@ -1011,6 +1024,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       id: job.id,
       subscriptionId: sub.id,
       nodeId: place.nodeId,
+      builtinMachine: place.builtinMachine,
       role: agent.roleKey,
       leader: isLeader(agent),
       prompt,
@@ -1082,7 +1096,7 @@ const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node)
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
 async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
-  if (sub.kind === 'api_key') return notAway(ctx, BUILTIN) ? null : 'machine_offline';
+  if (sub.kind === 'api_key') return ctx.hub.builtins().length > 0 || notAway(ctx, ownBuiltin(ctx.config)) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
@@ -1096,7 +1110,7 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
 /* The update its next turn waits for: of its own machine or, with that one away, of the one its plan has left. */
 async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } | undefined, sub: { id: string; kind: 'personal' | 'api_key' } | null, shown: NodeIdentity | null): Promise<MachineDrain | null> {
   if (!agent || !sub) return null;
-  if (sub.kind === 'api_key') return nodeDrain(ctx, BUILTIN);
+  if (sub.kind === 'api_key') return nodeDrain(ctx, ownBuiltin(ctx.config));
   const plan = (await planNodes(ctx.db, [sub.id])).map(n => nodeIdentity(n.id));
   const own = agent.nodeId ? [nodeIdentity(agent.nodeId)] : [];
   return [...(shown ? [shown] : []), ...own, ...plan].map(node => nodeDrain(ctx, node)).find(Boolean) ?? null;
@@ -1124,7 +1138,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
+  const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   const place = sub && agent ? await placement(ctx, agent, sub) : null;
   const shown = await shownNode(ctx, agentId, place);

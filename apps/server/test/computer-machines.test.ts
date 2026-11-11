@@ -12,7 +12,7 @@ import { Computers, HELD_GRACE_S, LEGACY_FILE, SEEN_MS, SENT_GRACE_S, WAITING_MS
 import type { Grant } from '../src/modules/computer/grant.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { VIA } from '../src/modules/network/via.js';
-import { identityOf } from '../src/modules/nodes/hub.js';
+import { identityOf, ownBuiltin } from '../src/modules/nodes/hub.js';
 import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, viaLink } from './helpers.js';
 import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
 
@@ -72,7 +72,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, ownBuiltin(app.ctx.config))!));
   /* A running turn of the orchestrator that a person started and nobody else wrote into. */
   const running = async (token: string, createdBy: string | null) => {
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, orchestrator!.id), eq(jobs.status, 'running')));

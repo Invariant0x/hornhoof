@@ -5,6 +5,7 @@ import { agents, departments, companies, jobs, machines, nodeCodes, nodeConnecti
 import { hashToken } from '../src/crypto/tokens.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 
@@ -140,7 +141,7 @@ describe('POST /api/nodes/join', () => {
 
     const reconnected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) })).json();
     await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: first.nodeId, keyHash: hashToken(first.key) }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
-    await receiveNodeMessage(app.ctx, { kind: 'builtin' }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await receiveNodeMessage(app.ctx, BUILTIN, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
     const second = (await join(app, codeOf(reconnected.command), { machineId: 'mac-0002-efgh', hostname: 'machine-b' })).json().nodes[0];
     expect(second.nodeId).toBe(first.nodeId);
     expect(second.key).not.toBe(first.key);

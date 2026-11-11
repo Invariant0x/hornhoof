@@ -23,6 +23,7 @@ import { linkRoutes } from './modules/link/routes.js';
 import { outboundRoutes } from './modules/outbound/extension.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
+import { nameBuiltinWork } from './modules/nodes/builtin.js';
 import { handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
 import { handleNumbered } from './modules/nodes/numbered.js';
@@ -221,6 +222,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.tls = new LinkTls(ctx);
   app.addHook('onClose', async () => ctx.tls.stop());
   ctx.telegram = new TelegramBots(ctx);
+  /* First of what a leader does: the work its one built-in node ran before each machine had its own is named as this
+     machine's, before anything else looks at it. A failure is one line, and the next time it leads tries again. */
+  ctx.mode.whenLead(() => nameBuiltinWork(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, "Could not name the built-in node's earlier work as this machine's.")), () => undefined);
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   /* The heads' bots listen only while this app leads: a message one takes is written down, and two apps asking
      Telegram for the same bot's messages would take them from each other. A bot stops before the database and the

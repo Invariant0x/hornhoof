@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
@@ -49,7 +49,12 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
   return { tier: tiers.size === 1 ? [...tiers][0]! : null, differ };
 }
 
-export type IsOnline = (node: NodeIdentity) => boolean;
+/* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
+   work runs. */
+export type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+
+export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
+  node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);
 
 /* Never selects secret_enc, so it cannot leak into a response. */
 const columns = {
@@ -153,7 +158,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       kind: r.kind,
       label: r.label,
       status: shown?.status ?? r.status,
-      online: r.kind === 'api_key' ? isOnline(BUILTIN) : Boolean(shown),
+      online: r.kind === 'api_key' ? isOnline('builtin') : Boolean(shown),
       last4: r.last4,
       owner: { id: r.ownerId, name: r.ownerName },
       place: subscriptionPlace(r, ownerDepartments(r.ownerId, access, orderedDepts, teamDept), depts, teamDept),

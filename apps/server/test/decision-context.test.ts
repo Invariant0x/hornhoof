@@ -10,7 +10,7 @@ import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { personParty } from '../src/modules/events/parties.js';
 import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/modules/events/store.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';

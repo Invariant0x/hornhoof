@@ -20,20 +20,35 @@ export function parseOperatorNodeMessage(raw: string): ProgramNodeMessage | null
   } catch { return null; }
 }
 
-/* Who is on the other end of a socket: one node on a machine, or the built-in node that runs every API key. */
-export type NodeIdentity = { kind: 'node'; nodeId: string; keyHash?: string } | { kind: 'builtin' };
-
-export const BUILTIN: NodeIdentity = { kind: 'builtin' };
+/* Who is on the other end of a socket: one node on a machine, or the built-in node of a machine that holds the company's
+   data, which runs API keys' work. machine: that machine's network id. */
+export type NodeIdentity = { kind: 'node'; nodeId: string; keyHash?: string } | { kind: 'builtin'; machine: string };
 
 export const nodeIdentity = (nodeId: string): NodeIdentity => ({ kind: 'node', nodeId });
 
-/* The node a job or an agent of this subscription runs on: an API key's is the built-in node, a plan's the one named. */
-export const identityOf = (sub: { kind: 'personal' | 'api_key' }, nodeId: string | null): NodeIdentity | null =>
-  sub.kind === 'api_key' ? BUILTIN : nodeId ? nodeIdentity(nodeId) : null;
+export const builtinOf = (machine: string): NodeIdentity => ({ kind: 'builtin', machine });
 
-export const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.nodeId);
+/* The one built-in node of an install that was not set up again since machines had ids runs under this. */
+export const UNNAMED_BUILTIN = '0'.repeat(32);
+
+/* The machine this app runs on, as its built-in node is named by it. */
+export const ownMachine = (config: { machineId: string | null }): string => config.machineId ?? UNNAMED_BUILTIN;
+
+/* The built-in node of the machine this app runs on. */
+export const ownBuiltin = (config: { machineId: string | null }): NodeIdentity => builtinOf(ownMachine(config));
+
+/* The node a job or an agent of this subscription runs on: a plan's is the one named; an API key's the built-in node of
+   the machine named, or this app's own where none is named yet. */
+export const identityOf = (sub: { kind: 'personal' | 'api_key' }, nodeId: string | null, builtinMachine: string | null, own: NodeIdentity): NodeIdentity | null =>
+  sub.kind === 'api_key' ? (builtinMachine ? builtinOf(builtinMachine) : own) : nodeId ? nodeIdentity(nodeId) : null;
+
+export const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? `builtin:${id.machine}` : id.nodeId);
 
 export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf(b);
+
+/* The identity a key of keyOf stands for. The bare word of a build before, and of the updater, which knows the server's
+   own built-in node by it, is this app's own. */
+export const identityOfKey = (key: string, own: NodeIdentity): NodeIdentity => (key === 'builtin' ? own : key.startsWith('builtin:') ? builtinOf(key.slice('builtin:'.length)) : nodeIdentity(key));
 
 /* A node that misses this many pings in a row is dropped. */
 const MISSED_PINGS = 3;
@@ -327,6 +342,11 @@ export class NodeHub {
   isReady(id: NodeIdentity): boolean {
     const entry = this.sockets.get(keyOf(id));
     return entry?.socket.readyState === 1 && entry.greeted;
+  }
+
+  /* The machines whose built-in node is connected and has said hello, in no order. */
+  builtins(): string[] {
+    return [...this.sockets.entries()].filter(([key, entry]) => key.startsWith('builtin:') && entry.socket.readyState === 1 && entry.greeted).map(([key]) => key.slice('builtin:'.length));
   }
 
   /* Ready, and shows its agents' terminals. */

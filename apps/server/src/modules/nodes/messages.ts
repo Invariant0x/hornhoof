@@ -1,5 +1,5 @@
 import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
@@ -18,7 +18,7 @@ import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
-import { sameNode, type NodeIdentity } from './hub.js';
+import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
@@ -33,10 +33,13 @@ const OPEN_JOBS = ['queued', 'running'] as const;
 
 const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
-/* A node may only touch the jobs sent to it; the built-in node those of API keys. */
+/* A node may only touch the jobs sent to it; a machine's built-in node those of API keys that went out to it. A job
+   from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
 export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
-  return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
+  return and(ofKeys, here)!;
 }
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };

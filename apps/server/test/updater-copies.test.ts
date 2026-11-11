@@ -39,7 +39,8 @@ describe('the updater of a worker that is given the data', () => {
     asked(s);
     const r = await runOnce(s, null, WORKER);
     const env = envOf(s);
-    expect(env).toMatchObject({ ...SECRETS, HORNHOOF_ROLE: 'data', COMPOSE_PROFILES: 'data', COMPOSE_FILE: 'compose.yaml:compose.worker.yaml', HORNHOOF_VERSION: '0.4.0' });
+    /* The profiles start its database and app, and its own built-in node, which runs the company's keys' work. */
+    expect(env).toMatchObject({ ...SECRETS, HORNHOOF_ROLE: 'data', COMPOSE_PROFILES: 'data,builtin', COMPOSE_FILE: 'compose.yaml:compose.worker.yaml', HORNHOOF_VERSION: '0.4.0' });
     expect(env.POSTGRES_PASSWORD).toMatch(/^[A-Za-z0-9]{24}$/);
     expect(statSync(join(s.server, '.env')).mode & 0o777).toBe(0o600);
     /* Everything but the updater starts, as a data machine, whatever role the updater itself was started with. */
@@ -86,7 +87,7 @@ describe('the updater of a worker that is given the data', () => {
       expect(readFileSync(join(s.control, 'role.failed'), 'utf8').trim(), name).toBe(FAILED_LINE);
       expect(statSync(join(s.control, 'role.failed')).mode & 0o777, name).toBe(0o600);
       /* What may have started is taken away, and the worker's own two run as a worker's. */
-      const rm = r.calls.findIndex(c => c === 'docker compose rm -sf db migrate app');
+      const rm = r.calls.findIndex(c => c === 'docker compose rm -sf db migrate app node');
       const up = upOf(r.calls, 'front keeper');
       expect(rm, name).toBeGreaterThanOrEqual(0);
       expect(up, name).toBeGreaterThan(rm);
@@ -107,7 +108,7 @@ describe('the updater of a worker that is given the data', () => {
 
   it('finishes what a restart cut short', async () => {
     /* It stopped after the settings were written: the start and the swap run again, and the settings of before go. */
-    const done = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\nPOSTGRES_PASSWORD=abc\n`);
+    const done = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data,builtin\nPOSTGRES_PASSWORD=abc\n`);
     writeFileSync(join(done.server, '.env.before-data'), WORKER_ENV);
     writeFileSync(join(done.control, 'replica.json'), '{}');
     const r = await runOnce(done, null, WORKER);
@@ -115,7 +116,7 @@ describe('the updater of a worker that is given the data', () => {
     expect(up).toBeGreaterThanOrEqual(0);
     expect(r.calls.findIndex(c => c.includes('compose up -d --no-build updater'))).toBeGreaterThan(up);
     expect(existsSync(join(done.server, '.env.before-data'))).toBe(false);
-    expect(envOf(done)).toMatchObject({ HORNHOOF_ROLE: 'data', COMPOSE_PROFILES: 'data' });
+    expect(envOf(done)).toMatchObject({ HORNHOOF_ROLE: 'data', COMPOSE_PROFILES: 'data,builtin' });
     expect(has(done, 'replica.json')).toBe(true);
 
     /* It stopped while it wrote them: the settings of before come back whole, and the machine stays a worker. */
@@ -131,7 +132,7 @@ describe('the updater of a worker that is given the data', () => {
   });
 
   it('swaps itself when its role is not the one its settings name', async () => {
-    const s = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\n`);
+    const s = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data,builtin\n`);
     writeFileSync(join(s.control, 'replica.json'), '{}');
     /* Each wait of the loop leaves a mark, so the test counts the rounds that passed and no clock does. */
     const loop = startLoop(s, { ...WORKER, STUB_DURING_SLEEP: `echo round >> ${s.dir}/rounds; /bin/sleep 0.02` });
@@ -150,7 +151,7 @@ describe('the updater of a worker that is given the data', () => {
   });
 
   it('updates a copy as a worker', async () => {
-    const s = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\n`);
+    const s = stand(`${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data,builtin\n`);
     writeFileSync(join(s.control, 'replica.json'), '{}');
     const later = Math.floor(Date.now() / 1000) + 900;
     const word = JSON.stringify({ id: 'w1', commit: '0.4.1', until: later });
@@ -166,7 +167,7 @@ describe('the updater of a worker that is given the data', () => {
   });
 
   it("loads a copy's schema", async () => {
-    const copy = `${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data\n`;
+    const copy = `${WORKER_ENV.replace('HORNHOOF_ROLE=worker', 'HORNHOOF_ROLE=data')}COMPOSE_PROFILES=data,builtin\n`;
     const password = 'the-replica-password';
     const request = (s: Stand, over: object = {}) => {
       writeFileSync(join(s.control, 'replica.json'), '{}');

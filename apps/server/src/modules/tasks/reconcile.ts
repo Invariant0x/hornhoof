@@ -2,7 +2,7 @@ import { and, eq, gt, gte, inArray, isNull, lte, notInArray, or, sql } from 'dri
 import type { Ctx } from '../../app.js';
 import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } from '../../db/schema.js';
 import { agentState, liveSubscription } from '../conversation/queue.js';
-import { identityOf } from '../nodes/hub.js';
+import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, giver, lastMove, openAfter, type Task, type Wake } from './engine.js';
@@ -21,7 +21,7 @@ async function failAwayTurns(ctx: Ctx, now: Date): Promise<void> {
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')));
   for (const { job, sub } of running) {
-    const node = identityOf(sub, job.nodeId);
+    const node = identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
     if (!node) continue;
     const away = ctx.hub.awaySince(node);
     if (away !== null && away + MACHINE_AWAY_MS < now.getTime()) await failOpenJobs(ctx, eq(jobs.id, job.id), 'machine_offline');

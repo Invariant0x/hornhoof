@@ -4,7 +4,8 @@ import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
+import { builtinName } from '../nodes/builtin.js';
 import { builtinMachine, shownMachine } from '../nodes/nodes.js';
 import { availableMemory } from './capacity.js';
 import { machineNodes, machineState, together } from './load.js';
@@ -98,7 +99,11 @@ export async function poolOf(ctx: Ctx, who: Person) {
     .where(and(eq(testParts.companyId, who.companyId), inArray(testParts.status, ['running', 'queued'])))
     .orderBy(asc(testRuns.createdAt), asc(testParts.part));
   const open = allOpen.filter(r => seesAgentId(sight, r.run.agentId));
-  const on = (machineId: string | null, builtin = false) => open.filter(r => r.part.status === 'running' && (builtin ? r.part.builtin : r.part.machineId === machineId)).map(running);
+  const ownId = ownMachine(ctx.config);
+  /* What runs on a machine's nodes, and what runs on a machine's built-in node: a part from before those were told apart
+     ran on this server's own. */
+  const on = (machineId: string) => open.filter(r => r.part.status === 'running' && !r.part.builtin && r.part.machineId === machineId).map(running);
+  const onBuiltin = (machine: string) => open.filter(r => r.part.status === 'running' && r.part.builtin && (r.part.builtinMachine ?? ownId) === machine).map(running);
   const loadOf = (ids: NodeIdentity[]) => together(ids.map(id => hub.loadOf(id)));
 
   const places = whole ? await placesOf(ctx, who.companyId) : [];
@@ -107,7 +112,14 @@ export async function poolOf(ctx: Ctx, who: Person) {
   for (const row of whole ? open.filter(r => r.part.status === 'queued') : []) {
     waiting.push({ ...view(row), waitingSince: row.part.queuedAt.toISOString(), why: await whyWaits(ctx, places, row.run, targets) });
   }
-  const builtinLoad = loadOf([BUILTIN]);
+  const own = ownBuiltin(ctx.config);
+  const builtinLoad = loadOf([own]);
+  const others = hub.builtins().filter(machine => machine !== ownId).sort();
+  const builtinPlace = async (machine: string) => {
+    const node = builtinOf(machine);
+    const load = loadOf([node]);
+    return { machine, name: await builtinName(ctx, db, machine), online: hub.isOnline(node), noRuns: hub.noRunsOf(node), load, loaded: load ? loaded(load) : false, parts: onBuiltin(machine) };
+  };
   const host = whole ? await builtinMachine(db, ctx.config.hostId, who.companyId, ctx.config.machineId) : null;
   return {
     machines: rows.map(m => {
@@ -122,14 +134,16 @@ export async function poolOf(ctx: Ctx, who: Person) {
        counts once. */
     builtin: whole
       ? {
-          online: hub.isOnline(BUILTIN),
-          noRuns: hub.noRunsOf(BUILTIN),
+          online: hub.isOnline(own),
+          noRuns: hub.noRunsOf(own),
           load: builtinLoad,
           loaded: builtinLoad ? loaded(builtinLoad) : false,
-          parts: on(null, true),
+          parts: onBuiltin(ownId),
           machine: host && { id: host.id, name: host.hostname },
         }
       : null,
+    /* The built-in nodes of the other machines that hold the company's data, which take parts too. */
+    builtins: whole ? await Promise.all(others.map(machine => builtinPlace(machine))) : [],
     waiting,
   };
 }

@@ -2,7 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { vi } from 'vitest';
 import { agents, departments, jobs, subscriptions, taskEvents } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { Failure } from '@hornhoof/protocol';
 import { as, setUpCompany, testApp } from './helpers.js';

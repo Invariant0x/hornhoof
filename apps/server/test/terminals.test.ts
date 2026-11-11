@@ -6,7 +6,7 @@ import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { decisionPrincipal, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, openTypedTurn, pump } from '../src/modules/conversation/queue.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
 import { nextOf as next } from './helpers.js';
 import { handled } from './terminal-company.js';
@@ -742,7 +742,8 @@ describe('opening a terminal while the plan is at its limit', () => {
 describe('who typed into the terminal, for the decisions of a turn', () => {
   it('takes the Enter of a person once, and only from the node that shows the terminal', async () => {
     const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
-    const { BUILTIN, nodeIdentity } = await import('../src/modules/nodes/hub.js');
+    const { BUILTIN } = await import('./builtin.js');
+    const { nodeIdentity } = await import('../src/modules/nodes/hub.js');
     const relay = new TerminalRelay();
     const other = nodeIdentity('00000000-0000-4000-8000-0000000000aa');
     relay.typing('agent-1', 'ivan', BUILTIN);
@@ -754,7 +755,8 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
 
   it('keeps an Enter pressed in a turn for that turn and node, each once, the last one first', async () => {
     const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
-    const { BUILTIN, nodeIdentity } = await import('../src/modules/nodes/hub.js');
+    const { BUILTIN } = await import('./builtin.js');
+    const { nodeIdentity } = await import('../src/modules/nodes/hub.js');
     const relay = new TerminalRelay();
     const other = nodeIdentity('00000000-0000-4000-8000-0000000000aa');
     relay.pressedIn('agent-1', 'job-1', 'ivan', BUILTIN);
@@ -772,7 +774,7 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
 
   it('forgets an Enter pressed in a turn once no turn can still run, and keeps a few for an agent', async () => {
     const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
-    const { BUILTIN } = await import('../src/modules/nodes/hub.js');
+    const { BUILTIN } = await import('./builtin.js');
     const relay = new TerminalRelay();
     const now = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now);

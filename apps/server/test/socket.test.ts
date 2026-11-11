@@ -8,7 +8,8 @@ import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { agentProgramState } from '../src/modules/tasks/silent.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 import { createHmac } from 'node:crypto';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 
 /* No round of pings comes during a test unless it says so: the longest wait a timer takes. */
 async function liveCompany(pingMs = '2147483647') {
@@ -38,20 +39,23 @@ describe('node socket', () => {
     await expect(connectNode(url, 'not-a-key')).rejects.toThrow(/401/);
   });
 
-  it("takes the built-in node's machine key, and the bare key of a node from before", async () => {
+  it('names a built-in node by its machine, and one with the bare key of a node from before as its own', async () => {
     const NODE_KEY = 'k'.repeat(40);
     const { app } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' });
     const url = await listen(app);
     const machine = 'a1b2c3d4'.repeat(4);
     const signed = (id: string, key = NODE_KEY) => createHmac('sha256', key).update(`hornhoof builtin node ${id}`).digest('hex');
-    const builtinNow = () => app.ctx.hub.isOnline(BUILTIN);
+    const online = () => [app.ctx.hub.isOnline(builtinOf(machine)), app.ctx.hub.isOnline(BUILTIN)];
 
+    /* Each machine's built-in node signs in with a key made for its machine, and is that machine's. */
     const byMachine = await connectNode(url, `builtin.${machine}.${signed(machine)}`);
-    expect(builtinNow()).toBe(true);
+    expect(online()).toEqual([true, false]);
+    /* A node of a build before sends the key bare: it is the one of the machine this server runs on. */
+    const bare = await connectNode(url, NODE_KEY);
+    expect(online()).toEqual([true, true]);
     byMachine.close();
     await byMachine.closed;
-    const bare = await connectNode(url, NODE_KEY);
-    expect(builtinNow()).toBe(true);
+    expect(online()).toEqual([false, true]);
     bare.close();
 
     const other = 'f'.repeat(32);

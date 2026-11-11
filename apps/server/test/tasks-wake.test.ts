@@ -13,6 +13,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
   const { app, db } = await testApp(env);
@@ -79,7 +80,7 @@ describe('a person who speaks to an agent directly', () => {
   it("does not let a person answer an internal stuck request through the agent's terminal", async () => {
     const c = await stuck();
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
-    expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting', silent: SILENT_TURNS }]);
   });
@@ -89,7 +90,7 @@ describe('a person who speaks to an agent directly', () => {
     const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const [maria] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
     await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
-    expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null, null, BUILTIN)!, c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
   });
@@ -1019,7 +1020,7 @@ async function busyQueue() {
   const c = await company({ NODE_KEY });
   const builtin = await connectNode(await listen(c.app), NODE_KEY);
   builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
-  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null, null, BUILTIN)!));
   const hold = async (agentId: string) => (await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning())[0]!;
   const busy = await hold(c.bruno.id);
   const release = async (id = busy.id) => {

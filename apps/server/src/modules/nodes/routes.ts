@@ -26,7 +26,7 @@ import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines } from './disconnect.js';
-import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
+import { nodeIdentity, ownBuiltin, ownMachine as machineOfServer, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans, shownMachine } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
@@ -259,6 +259,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await runningAgents(ctx, me);
     const programHost = await builtinMachine(db, config.hostId, me.companyId, config.machineId);
+    /* The built-in node of the machine this app runs on, and whether work that names a built-in node's machine, or none,
+       as from before those were told apart, is on it. */
+    const own = ownBuiltin(config);
+    const onOwn = (machine: string | null): boolean => !machine || machine === machineOfServer(config);
     /* The server's own place in the network, as its keeper reported it, and the workers on its own network that said
        within the last day that they could not reach it there. */
     const refusing = () =>
@@ -282,7 +286,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const accessOf = (machineId: string | undefined) => access.find(view => view.machine.id === machineId) ?? null;
     const sight = await viewerOf(db, me);
     const allParts = await db
-      .select({ machineId: testParts.machineId, builtin: testParts.builtin, runBy: testRuns.agentId, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
+      .select({ machineId: testParts.machineId, builtin: testParts.builtin, builtinMachine: testParts.builtinMachine, runBy: testRuns.agentId, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
       .from(testParts)
       .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
       .leftJoin(tasks, eq(tasks.id, testRuns.taskId))
@@ -293,7 +297,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
       agents: placed.filter(holds).map(a => a.view),
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip placement keys used only for filtering
-      parts: parts.filter(runs).map(({ machineId: _, builtin: __, runBy: ___, ...p }) => p),
+      parts: parts.filter(runs).map(({ machineId: _, builtin: __, builtinMachine: ____, runBy: ___, ...p }) => p),
     });
     return {
       /* The node that comes with the server runs the company's API keys and test runs too, and names the company's machine
@@ -301,13 +305,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       builtin:
         me.scopeKind === 'company'
           ? {
-              online: hub.isOnline(BUILTIN),
-              load: together([hub.loadOf(BUILTIN)]),
-              running: running(a => Boolean(a.builtin), p => p.builtin),
+              online: hub.isOnline(own),
+              load: together([hub.loadOf(own)]),
+              running: running(a => a.builtin && onOwn(a.builtinMachine), p => p.builtin && onOwn(p.builtinMachine)),
               machine: serverMachine,
-              drain: nodeDrain(ctx, BUILTIN),
-              programs: programsFor(hub, [BUILTIN]),
-              browserError: hub.browserErrorOf(BUILTIN),
+              drain: nodeDrain(ctx, own),
+              programs: programsFor(hub, [own]),
+              browserError: hub.browserErrorOf(own),
               webPort: ownRow?.webPort ?? null,
               refusedBy,
               access: accessOf(ownRow?.id),
@@ -321,7 +325,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
         ...machineState(hub, on(m.id).map(n => n.id)),
-        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost),
+        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost, own),
         otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
@@ -334,8 +338,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* Whether it keeps the company's backups, and how many it holds; none of either without the core. */
         keepsBackups: m.networkId ? m.keepsBackups : null,
         heldBackups: m.networkId ? m.heldBackups.length : null,
-        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
-        running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
+        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost, own)),
+        /* Its plans' nodes, its own built-in node when it keeps a copy of the data, and the server's when the server runs
+           on it. */
+        running: running(
+          a => (a.builtin && (onOwn(a.builtinMachine) ? serverMachine?.id === m.id : a.builtinMachine === m.networkId)) || on(m.id).some(n => n.id === a.nodeId),
+          p => (p.builtin ? (onOwn(p.builtinMachine) ? serverMachine?.id === m.id : p.builtinMachine === m.networkId) : p.machineId === m.id),
+        ),
       })),
       ...(held ? { copies: held.copies } : {}),
       /* Whether this person sees the order the server passes on in. */

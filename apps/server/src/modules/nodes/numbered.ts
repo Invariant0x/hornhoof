@@ -3,7 +3,7 @@ import { fromDatabase, notConfirmed } from '../../db/confirm.js';
 import { isLeaseRefused } from '../../db/net.js';
 import { listed, nodeSource, touch, withSource } from '../../db/sources.js';
 import { ApiError, loggable } from '../../errors.js';
-import { keyOf, type NodeIdentity, type NodeTransport, type NumberedMessage } from './hub.js';
+import type { NodeIdentity, NodeTransport, NumberedMessage } from './hub.js';
 import { receiveNodeMessage } from './lifecycle.js';
 
 /* The ends of jobs and of test parts commit more than once, and their own guards make a second run safe, so one that is
@@ -45,7 +45,9 @@ export function passing(err: unknown): boolean {
    or failed for a reason that sending it again would not mend. False: it failed for a reason that will pass, and the
    node sends it again, with everything it sent after it. */
 export async function handleNumbered(ctx: Ctx, id: NodeIdentity, stream: string, msg: NumberedMessage, transport: NodeTransport): Promise<boolean> {
-  const base = nodeSource(keyOf(id), stream, msg.n);
+  /* A built-in node's messages are named without its machine: each node's stream is its own, so two never share a name,
+     and a message applied by a build before, which knew one built-in node, is found again. */
+  const base = nodeSource(id.kind === 'builtin' ? 'builtin' : id.nodeId, stream, msg.n);
   try {
     const before = await listed(ctx.db, base);
     if (before && !AGAIN_WHEN_LISTED.has(msg.type)) await touch(ctx.db, before.first);

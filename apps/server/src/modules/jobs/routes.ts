@@ -10,7 +10,8 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { cancelJob } from '../tasks/wake.js';
 import { holdsMachine, installingMachines } from '../network/follow.js';
-import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { pickBuiltin } from '../nodes/builtin.js';
+import { nodeIdentity, ownBuiltin, ownMachine } from '../nodes/hub.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';
@@ -51,7 +52,10 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!sub) throw new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
     if (sub.ownerPersonId !== me.id && me.scopeKind !== 'company') throw notOwner();
     const online = sub.kind === 'api_key' ? [] : (await planNodes(db, [sub.id])).filter(n => hub.isOnline(nodeIdentity(n.id)));
-    if (sub.kind === 'api_key' ? !hub.isOnline(BUILTIN) : !online.length) throw offline();
+    /* An API key's check runs on a built-in node: the server's own as soon as it is connected, as the check is what
+       makes its plan ready; else another machine's that is ready. */
+    const builtinMachine = sub.kind !== 'api_key' ? null : hub.isOnline(ownBuiltin(ctx.config)) ? ownMachine(ctx.config) : await pickBuiltin(ctx, db, null);
+    if (sub.kind === 'api_key' ? !builtinMachine : !online.length) throw offline();
     /* A machine that installs a build takes no check: one of the plan's other machines does, or the person hears why not. */
     const installing = await installingMachines(db);
     const ready = online.filter(n => n.status === 'ready');
@@ -65,12 +69,12 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (await holdsMachine(tx, nodeId)) return null;
       const [made] = await tx
         .insert(jobs)
-        .values({ companyId: sub.companyId, subscriptionId: sub.id, nodeId, prompt: TEST_PROMPT, timeoutMs: TEST_TIMEOUT_MS, createdBy: me.id })
+        .values({ companyId: sub.companyId, subscriptionId: sub.id, nodeId, builtinMachine, prompt: TEST_PROMPT, timeoutMs: TEST_TIMEOUT_MS, createdBy: me.id })
         .returning({ id: jobs.id });
       return made!;
     });
     if (!job) throw updating();
-    if (!(await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, nodeId, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS, instructions: null, toolToken: null }))) {
+    if (!(await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, nodeId, builtinMachine, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS, instructions: null, toolToken: null }))) {
       await db.update(jobs).set({ status: 'failed', error: 'machine_offline', finishedAt: new Date() }).where(eq(jobs.id, job.id));
       throw offline();
     }

@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
-import type { NodeIdentity } from '../nodes/hub.js';
+import { ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 
 export async function drainWork(ctx: Ctx, node: NodeIdentity) {
@@ -50,7 +50,7 @@ export type ServerNode = { name: string; node: NodeIdentity };
 
 /* All identities on the server's physical host, across companies. The installer also sweeps its personal nodes. */
 export async function namedServerNodes(ctx: Ctx): Promise<ServerNode[]> {
-  const builtin: ServerNode = { name: 'builtin', node: { kind: 'builtin' } };
+  const builtin: ServerNode = { name: 'builtin', node: ownBuiltin(ctx.config) };
   if (!ctx.config.hostId) return [builtin];
   const { hashToken } = await import('../../crypto/tokens.js');
   const hosts = await ctx.db.select({ id: machines.id, key: machines.machineKey }).from(machines).where(isNull(machines.revokedAt));

@@ -11,6 +11,7 @@ import { markCommit, type TestsMark } from '../src/modules/testruns/github-statu
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { as, connectNode, createTestDb, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { BUILTIN } from './builtin.js';
 
 const FULL = 'npm test';
 const MOVED = 'b'.repeat(40);
@@ -66,7 +67,7 @@ async function company({ full = FULL as string | null, env = {} as NodeJS.Proces
     if (node) return node;
     node = await connectNode(url, NODE_KEY);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load, tests: [], work: true });
-    await until(() => ctx.hub.loadOf({ kind: 'builtin' }) !== null);
+    await until(() => ctx.hub.loadOf(BUILTIN) !== null);
     return node;
   };
   const nextPart = async () => {

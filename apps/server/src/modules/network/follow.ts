@@ -114,6 +114,12 @@ export async function tryGrant(tx: Db, machineId: string, build: LeaderBuild, no
   const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
   const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
   if (turn || part) return false;
+  /* The same for what its own built-in node runs: the work of the company's keys. */
+  if (row.networkId) {
+    const [keyTurn] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.builtinMachine, row.networkId), ON_NODE)).limit(1);
+    const [keyPart] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.builtinMachine, row.networkId), eq(testParts.status, 'running'))).limit(1);
+    if (keyTurn || keyPart) return false;
+  }
   await tx.update(machines).set({ goCommit: build.commit, goAt: now }).where(eq(machines.id, machineId));
   return true;
 }
@@ -173,10 +179,24 @@ export async function holdsMachine(tx: Pick<Db, 'select'>, nodeId: string | null
   return row !== null && installs(row, now);
 }
 
+/* The same for the built-in node of the machine with this network id, with that machine's row held the same way. The
+   machine this server runs on follows nobody, and is never held. */
+export async function holdsBuiltin(tx: Pick<Db, 'select'>, machine: string | null | undefined, now = new Date()): Promise<boolean> {
+  if (!machine) return false;
+  const [row] = await tx.select().from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt), joined)).for('share');
+  return row !== undefined && installs(row, now);
+}
+
 /* The same for a caller that only looks, before it does work that a held machine would make useless. */
 export async function machineInstalls(db: Pick<Db, 'select'>, nodeId: string | null | undefined, now = new Date()): Promise<boolean> {
   const row = await machineOfNode(db, nodeId, false);
   return row !== null && installs(row, now);
+}
+
+/* The network ids of the machines that install now, for whoever picks a built-in node. */
+export async function installingBuiltins(db: Pick<Db, 'select'>, now = new Date()): Promise<Set<string>> {
+  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+  return new Set(rows.filter(row => installs(row, now)).map(row => row.networkId!));
 }
 
 /* The machines that install now, for whoever places work: none of it is offered to them. */

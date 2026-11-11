@@ -8,6 +8,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'builtin-drain-key-0123456789abcdef';
 const headers = { authorization: `Bearer ${NODE_KEY}` };
@@ -48,10 +49,10 @@ describe('planned node updates', () => {
     const logs: string[] = [];
     const { app } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control }, { level: 'error', stream: { write: (line: string) => void logs.push(line) } });
     expect(logs.join('\n')).toContain('node-drains.json');
-    expect(nodeDrain(app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(app.ctx, BUILTIN)).toBeNull();
     const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers, payload: {} });
     expect(response.statusCode).toBe(200);
-    expect(nodeDrain(app.ctx, { kind: 'builtin' })?.state).toBe('restarting');
+    expect(nodeDrain(app.ctx, BUILTIN)?.state).toBe('restarting');
   });
 
   it('waits for the last running turn without interrupting it, then permits the update', async () => {
@@ -136,11 +137,11 @@ describe('planned node updates', () => {
     const turn = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, nodeId, kind: 'conversation', prompt: 'On the host', status: 'running', startedAt: new Date(), timeoutMs: 900_000 }).returning();
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
     expect((await server('POST')).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toMatchObject({ state: 'restarting' });
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toMatchObject({ state: 'restarting' });
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, turn[0]!.id));
     expect((await server('POST')).json().ready).toBe(true);
     expect((await server('DELETE')).statusCode).toBe(204);
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId })).toBeNull();
   });
 
@@ -156,9 +157,9 @@ describe('planned node updates', () => {
     const node = await connectNode(url, NODE_KEY);
     const boot = { startedAt: '2026-11-04T10:00:00.000Z', machineUpAt: '2026-11-04T09:00:00.000Z', container: 'first' };
     node.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [f.job.id], boot });
-    await until(() => f.app.ctx.hub.isReady({ kind: 'builtin' }));
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
     await f.prepare();
-    expect(f.app.ctx.hub.isReady({ kind: 'builtin' })).toBe(true);
+    expect(f.app.ctx.hub.isReady(BUILTIN)).toBe(true);
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
     expect((await f.prepare()).json().ready).toBe(true);
     node.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], boot });

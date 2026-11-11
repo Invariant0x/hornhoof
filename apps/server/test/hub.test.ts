@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import type { NodeMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { BUILTIN, NodeHub } from '../src/modules/nodes/hub.js';
+import { builtinOf, NodeHub } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { until } from './helpers-basic.js';
 
 /* A ping round that never comes during a test, the longest a timer takes: no socket here answers pings. */
@@ -44,6 +45,28 @@ describe('the node hub', () => {
     next.readyState = 3;
     next.emit('close');
     expect(current.isCurrentLink?.(node, links[1]!)).toBe(false);
+  });
+
+  it('keeps two built-in nodes apart', () => {
+    const hub = new NodeHub({ pingMs: NO_PING_MS, onClose: async () => {}, onMessage: async () => {} });
+    onTestFinished(() => hub.stop());
+    const socket = () => Object.assign(new EventEmitter(), { readyState: 1, sent: [] as string[], close() { this.readyState = 3; }, ping() {}, send(frame: string) { this.sent.push(frame); } });
+    const [a, b] = [builtinOf('a'.repeat(32)), builtinOf('b'.repeat(32))];
+    const [onA, onB] = [socket(), socket()];
+    hub.attach(a, onA as unknown as WebSocket);
+    hub.attach(b, onB as unknown as WebSocket);
+    expect([hub.isOnline(a), hub.isOnline(b), hub.isOnline(BUILTIN)]).toEqual([true, true, false]);
+    /* What is sent to one reaches only its socket. */
+    expect(hub.send(b, { type: 'job.cancel', jobId: 'j1' })).toBe(true);
+    expect([onA.sent.length, onB.sent.map(frame => (JSON.parse(frame) as { jobId: string }).jobId)]).toEqual([0, ['j1']]);
+    /* The machine's node that comes again takes the place of its own older socket alone. */
+    const again = socket();
+    hub.attach(a, again as unknown as WebSocket);
+    expect([onA.readyState, onB.readyState, hub.isOnline(a), hub.isOnline(b)]).toEqual([3, 1, true, true]);
+    /* Only one that said hello counts as there for work. */
+    expect(hub.builtins()).toEqual([]);
+    hub.greet(b);
+    expect(hub.builtins()).toEqual(['b'.repeat(32)]);
   });
 
   it('takes the word that words went in at once, though a message before it still waits for that word', async () => {

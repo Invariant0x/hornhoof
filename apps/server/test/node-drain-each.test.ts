@@ -10,6 +10,7 @@ import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/co
 import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 import { gets } from './test-runs-company.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'builtin-each-key-0123456789abcdef';
 const HOST_KEY = 'each-host-machine-key';
@@ -78,7 +79,7 @@ describe('each node on the server computer is replaced on its own', () => {
     expect(answer.ready).toBe(false);
     expect(answer.free.sort()).toEqual(['builtin', claude.plan].sort());
     expect(answer.drain).toMatchObject({ state: 'waiting', turnsLeft: 1 });
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toMatchObject({ state: 'restarting' });
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toMatchObject({ state: 'restarting' });
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toMatchObject({ state: 'restarting' });
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', turnsLeft: 1 });
     expect(await f.statusOf(turn.id)).toMatchObject({ status: 'running', error: null });
@@ -92,7 +93,7 @@ describe('each node on the server computer is replaced on its own', () => {
     const answer = (await f.server('POST', [google.plan])).json();
 
     expect(answer).toMatchObject({ ready: true, free: [google.plan], drain: { state: 'restarting' } });
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toBeNull();
   });
 
@@ -105,7 +106,7 @@ describe('each node on the server computer is replaced on its own', () => {
 
     expect((await f.server('DELETE', ['builtin', claude.plan])).statusCode).toBe(204);
 
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', until: before });
   });
@@ -128,7 +129,7 @@ describe('each node on the server computer is replaced on its own', () => {
   it('starts the orchestrator on its free node as soon as that one is back, while another node still waits', async () => {
     const f = await computer();
     const builtin = await f.online(NODE_KEY);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'builtin' }));
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
     const google = await f.plan('antigravity');
     const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
     const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
@@ -150,7 +151,7 @@ describe('each node on the server computer is replaced on its own', () => {
     const res = await f.server('POST', ['a-plan-of-another-server']);
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ready: false, free: [], drain: null });
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect((await f.server('DELETE', ['a-plan-of-another-server'])).statusCode).toBe(204);
   });
 
@@ -178,7 +179,7 @@ describe('each node on the server computer is replaced on its own', () => {
     const asNode = { authorization: `Bearer ${claude.key}` };
     const own = await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: asNode, payload: { nodes: ['builtin'] } });
     expect(own.statusCode).toBe(200);
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toMatchObject({ state: 'restarting' });
     expect((await f.app.inject({ method: 'DELETE', url: '/api/nodes/update', headers: asNode, payload: { scope: 'server', nodes: ['builtin'] } })).statusCode).toBe(403);
   });
@@ -250,7 +251,7 @@ describe('the orchestrator and the heads while their node waits', () => {
   it('holds a head on the built-in node up to the limit too, when the company key runs it', async () => {
     const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
     const builtin = await f.online(NODE_KEY);
-    await until(() => f.app.ctx.hub.isReady({ kind: 'builtin' }));
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
     const head = await f.hire('Hana', 'head', f.apiKey.id);
     await f.longTurn(await f.hire('Dev', 'worker', f.apiKey.id), null);
     await f.server('POST');

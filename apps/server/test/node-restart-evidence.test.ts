@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, nodes, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 

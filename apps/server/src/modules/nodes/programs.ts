@@ -5,15 +5,16 @@ import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { machineNodes } from '../testruns/load.js';
-import { BUILTIN, nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
+import { nodeIdentity, ownBuiltin, type NodeHub, type NodeIdentity } from './hub.js';
 import { builtinMachine } from './nodes.js';
 
 type Person = Awaited<ReturnType<typeof requirePerson>>;
 type OwnMachine = (person: Person, id: string) => Promise<{ id: string }>;
 const Target = z.object({ id: z.union([z.literal('builtin'), z.uuid()]) });
 
-export function machineProgramNodes(ids: string[], machineId: string, builtin: { id: string } | null): NodeIdentity[] {
-  return [...ids.map(nodeIdentity), ...(builtin?.id === machineId ? [BUILTIN] : [])];
+/* own: the built-in node of the machine this app runs on, which is builtin's. */
+export function machineProgramNodes(ids: string[], machineId: string, builtin: { id: string } | null, own: NodeIdentity): NodeIdentity[] {
+  return [...ids.map(nodeIdentity), ...(builtin?.id === machineId ? [own] : [])];
 }
 
 function combined(before: ProgramInfo | undefined, after: ProgramInfo): ProgramInfo {
@@ -34,8 +35,8 @@ export function programsFor(hub: NodeHub, ids: NodeIdentity[]): ProgramInfo[] | 
   return [...programs.values()].sort((a, b) => a.id.localeCompare(b.id) || String(a.version).localeCompare(String(b.version)));
 }
 
-export function machineProgramState(hub: NodeHub, ids: string[], machineId: string, builtin: { id: string } | null) {
-  const nodes = machineProgramNodes(ids, machineId, builtin);
+export function machineProgramState(hub: NodeHub, ids: string[], machineId: string, builtin: { id: string } | null, own: NodeIdentity) {
+  const nodes = machineProgramNodes(ids, machineId, builtin, own);
   return {
     online: nodes.some(id => hub.isOnline(id)),
     programs: programsFor(hub, nodes),
@@ -46,12 +47,12 @@ export function machineProgramState(hub: NodeHub, ids: string[], machineId: stri
 async function targets(ctx: Ctx, person: Person, id: string, ownMachine: OwnMachine): Promise<NodeIdentity[]> {
   if (id === 'builtin') {
     requireCompanyScope(person);
-    return [BUILTIN];
+    return [ownBuiltin(ctx.config)];
   }
   await ownMachine(person, id);
   const nodes = await machineNodes(ctx.db, person.companyId);
   const host = await builtinMachine(ctx.db, ctx.config.hostId, person.companyId, ctx.config.machineId);
-  return machineProgramNodes(nodes.filter(node => node.machineId === id).map(node => node.id), id, host);
+  return machineProgramNodes(nodes.filter(node => node.machineId === id).map(node => node.id), id, host, ownBuiltin(ctx.config));
 }
 
 export function machineProgramRoutes(app: FastifyInstance, ctx: Ctx, ownMachine: OwnMachine): void {

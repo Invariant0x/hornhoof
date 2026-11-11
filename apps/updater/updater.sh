@@ -1045,7 +1045,7 @@ stay_worker() {
   if [ -f "$SERVER_DIR/.env.before-data" ]; then as_env "$SERVER_DIR/.env.before-data" || true; fi
   if [ -n "$password" ] && [ -z "$(env_value POSTGRES_PASSWORD)" ]; then PUT_VALUE=$password put_env POSTGRES_PASSWORD || true; fi
   rm -f "$CONTROL/role.json" "$CONTROL/role-secrets.json" "$CONTROL/replica.json"
-  COMPOSE_PROFILES=data compose rm -sf db migrate app > /dev/null 2>&1 || true
+  COMPOSE_PROFILES=data,builtin compose rm -sf db migrate app node > /dev/null 2>&1 || true
   HORNHOOF_ROLE=worker compose up -d --no-build front keeper > /dev/null 2>&1 || true
   (umask 077 && printf "The company's settings cannot be written here, so this machine stays a worker.\n" > "$CONTROL/role.failed.new") &&
     owned "$CONTROL/role.failed.new" 600 && mv "$CONTROL/role.failed.new" "$CONTROL/role.failed" || true
@@ -1053,7 +1053,8 @@ stay_worker() {
 }
 
 # The settings a copy needs go into .env: the company's three, each checked as a backup's are, a password for its own
-# database when it has none, and the role and profile that start the database and the app. No value is said.
+# database when it has none, and the role and the profiles that start the database, the app and this machine's own
+# built-in node. No value is said.
 data_settings() {
   local from="$CONTROL/role-secrets.json" secret node_key relay
   (umask 077 && jq '.secrets // {}' "$CONTROL/role.json" > "$from" 2> /dev/null) || return 1
@@ -1061,7 +1062,7 @@ data_settings() {
   [ -n "$secret" ] && [ -n "$relay" ] || return 1
   write_env "$secret" "$node_key" "$relay" || return 1
   if [ -z "$(env_value POSTGRES_PASSWORD)" ]; then PUT_VALUE=$(new_password) put_env POSTGRES_PASSWORD || return 1; fi
-  PUT_VALUE=data put_env HORNHOOF_ROLE && PUT_VALUE=data put_env COMPOSE_PROFILES
+  PUT_VALUE=data put_env HORNHOOF_ROLE && PUT_VALUE=data,builtin put_env COMPOSE_PROFILES
 }
 
 # The keeper of a worker that the company server gave the data left role.json {id, secrets}: this machine becomes one
@@ -1082,7 +1083,7 @@ become_data() {
 # new settings whole, it starts what they name and replaces itself; else it stays a worker.
 finish_become() {
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env.before-data" ] || return 0
-  if [ "$(env_value HORNHOOF_ROLE)" != data ] || [ "$(env_value COMPOSE_PROFILES)" != data ]; then
+  if [ "$(env_value HORNHOOF_ROLE)" != data ] || [ "$(env_value COMPOSE_PROFILES)" != data,builtin ]; then
     stay_worker 'finish what a restart cut short'
     return 0
   fi
@@ -1405,7 +1406,8 @@ wipe_step() {
   case "$1" in
     stop)
       WIPE_WHY='could not stop its database'
-      COMPOSE_PROFILES=data compose rm -sf db migrate app > /dev/null 2>&1
+      # Its built-in node goes with the database: it runs on the company's key, which the wipe takes away.
+      COMPOSE_PROFILES=data,builtin compose rm -sf db migrate app node > /dev/null 2>&1
       ;;
     volume)
       WIPE_WHY="could not remove the database's volume"

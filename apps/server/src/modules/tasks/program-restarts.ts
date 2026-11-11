@@ -4,7 +4,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf, onAgent } from '../conversation/queue.js';
-import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { agentProgramState, signInTurn } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
@@ -34,7 +34,7 @@ async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: n
   if (after === null) return refuse(`Hornhoof never restarts ${sub.provider}; its program must end its own wait. Tell the head if it stays silent.`);
   const quiet = now - signInTurn(program, job)!;
   if (quiet < after) return refuse(`The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${sub.provider} needs at least ${after / 60_000} minutes without a sign before a restart.`);
-  const node = identityOf(sub, job.nodeId);
+  const node = identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
   if (!node || !ctx.hub.isOnline(node)) return refuse('The turn\'s node is offline. Bring that machine online first.');
   if (!ctx.hub.hasTerminals(node)) return refuse('The turn\'s node has no live terminals. It cannot restart this program.');
   return { ready: { job, node, minutes: Math.floor(quiet / 60_000) } };
@@ -106,6 +106,6 @@ export async function programRestarted(ctx: Ctx, node: NodeIdentity, msg: Extrac
   }
   const [found] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, msg.agentKey), eq(jobs.kind, 'conversation'), isNotNull(jobs.restartedAt))).limit(1);
-  const owner = found && identityOf(found.sub, found.job.nodeId);
+  const owner = found && identityOf(found.sub, found.job.nodeId, found.job.builtinMachine, ownBuiltin(ctx.config));
   if (owner && sameNode(owner, node)) await recordRestartReply(ctx, found.job, reply);
 }
