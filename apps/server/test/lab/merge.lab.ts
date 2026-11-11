@@ -56,8 +56,11 @@ describe('the lab, merges', () => {
     await sql(m1, `INSERT INTO departments (company_id, name, role_code) SELECT id, 'Before', 'BEF' FROM companies`);
     await sql(m1, `INSERT INTO tasks (company_id, number, title, department_id) SELECT c.id, 1, 'Of before', d.id FROM companies c, departments d WHERE d.name = 'Before'`);
     const before = new Date();
-    const saved = await http(m1, 'POST', `${server.url}/api/backups/recovery`);
-    expect(saved.status, saved.body).toBe(200);
+    /* The company's certificate authority is made a moment after the setup; the recovery file needs it. */
+    const saved = await within(2, 'the recovery file is saved', async () => {
+      const answer = await http(m1, 'POST', `${server.url}/api/backups/recovery`);
+      return answer.status === 200 ? answer : null;
+    });
     const file = JSON.parse(saved.json<{ text: string }>().text.split('\n')[1]!) as { recipient: string };
     const first = await bundleAfter(before, file.recipient);
     await log('1. the server is set up, and a backup of the company is made');
