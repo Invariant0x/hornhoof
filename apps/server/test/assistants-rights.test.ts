@@ -1,4 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { people } from '../src/db/schema.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -36,6 +38,7 @@ describe("an assistant's key", () => {
       owner: {
         id: c.ids.olga, name: 'Olga', title: '', ceo: false, ceoDelegate: false, wholeCompany: false,
         departments: [{ id: c.dev.id, name: 'Development' }], teams: [], responsibleFor: [{ id: c.dev.id, name: 'Development' }],
+        telegram: { username: null, id: null },
       },
       company: { name: 'Acme' },
     });
@@ -43,6 +46,17 @@ describe("an assistant's key", () => {
       expect((await asAssistant(c, key, url)).statusCode, url).toBe(401);
     }
     expect((await c.app.inject({ method: 'POST', url: '/api/people/invite', ...bearer(key), payload: { name: 'X', email: 'x@acme.com', access: { whole: true } } })).statusCode).toBe(401);
+  });
+
+  it("names the owner's Telegram as it is now, so a program can tell its owner from another person", async () => {
+    const c = await aclCompany();
+    const { key } = await assistantOf(c, 'olga');
+    const telegram = async () => (await asAssistant(c, key, '/api/assistant/me')).json().owner.telegram;
+    expect(await telegram()).toEqual({ username: null, id: null });
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.olga}`, payload: { telegram: '@Olga_K' }, ...as(c.tokens.olga) })).statusCode).toBe(200);
+    expect(await telegram()).toEqual({ username: 'olga_k', id: null });
+    await c.app.ctx.db.update(people).set({ telegramUserId: 5550001 }).where(eq(people.id, c.ids.olga));
+    expect(await telegram()).toEqual({ username: 'olga_k', id: 5550001 });
   });
 
   it('is refused when missing, wrong, replaced, revoked, or its assistant is switched off', async () => {

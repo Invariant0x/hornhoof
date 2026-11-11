@@ -61,6 +61,8 @@ async function whoAmI(ctx: Ctx, me: Person) {
       id: me.id, name: me.name, title: me.title, ceo: me.isOwner, ceoDelegate: actsAsCeo(me) && !me.isOwner, wholeCompany: wholeCompany(me),
       departments: view.access.departments, teams: view.access.teams.map(t => ({ id: t.id, name: t.name, departmentId: t.departmentId })),
       responsibleFor: named.map(d => ({ id: d.id, name: departmentParty(d).name.en })),
+      /* A program that serves several people binds the key to the one whose Telegram this is. */
+      telegram: { username: view.telegram?.username ?? null, id: view.telegram?.id ?? null },
     },
     company: { name: company!.name },
   };

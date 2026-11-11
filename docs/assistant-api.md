@@ -75,7 +75,8 @@ Who the assistant is, whom it acts for, and what that person is in the company n
     "ceo": false, "ceoDelegate": false, "wholeCompany": false,
     "departments": [{ "id": "…", "name": "Development" }],
     "teams": [{ "id": "…", "name": "Payments", "departmentId": "…" }],
-    "responsibleFor": [{ "id": "…", "name": "Development" }]
+    "responsibleFor": [{ "id": "…", "name": "Development" }],
+    "telegram": { "username": "olga_k", "id": 5550001 }
   },
   "company": { "name": "Acme" }
 }
@@ -84,6 +85,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 * `program` is `avaclone`, `openclaw` or `other`.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company, and only then may the assistant write to the orchestrator.
 * `departments` and `teams` are the places the owner was given access to. `responsibleFor` lists the departments the owner is responsible for.
+* `telegram` is the owner's Telegram as it is in People now: `username` without the `@`, in lower case, and `id`, the account's number, typed in People or learned once one of the company's Telegram bots met the owner. Each is `null` while unknown, and both are always there. A program that serves several people binds the key to exactly one of them by this, so that nobody else acts with the owner's rights through it. It changes when the owner's Telegram changes, so read it again, for example when the program starts.
 
 ### GET /api/assistant/agents
 
@@ -149,7 +151,15 @@ The kinds of event and their `data`:
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
 
-A `reply_end` comes once the agent's turn is over, together with any turn that goes on from it, and 30 seconds passed with no new turn. When the assistant writes again to an agent before the `reply_end` of its earlier message, both messages wait on the same answer, and the words after the newer message come as replies once for each of them.
+#### When the answer to a message is over
+
+An agent answers a message in a turn, and its words come as `reply` events while it works. A turn may go on in another turn, for example after the agent waited for a machine, so the end of the turn is not yet the end of the answer. Hornhoof sends `reply_end` once for each message, after its turn and every turn that goes on from it are over and 30 seconds passed with no new turn. After `reply_end` no more `reply` comes for that `messageId`.
+
+* `answered`: whether any `reply` came for the message. False when the agent worked without a word for the owner, for example when it only acted on a task.
+* `failed`: whether the last turn failed, for example when the agent's program broke off. The words that came before stay valid. The program may tell the owner and write again later.
+* A program that shows a "typing" mark keeps it from the `202` of `POST /api/assistant/messages` to the `reply_end`.
+
+When the assistant writes again to an agent before the `reply_end` of its earlier message, both messages wait on the same answer, and the words after the newer message come as replies once for each of them.
 
 ### GET /api/assistant/requests
 
