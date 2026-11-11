@@ -16,6 +16,7 @@ import { linkOf, publicUrl } from '../link/link.js';
 import { buildSoon, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { seenAccess } from '../computer/seen.js';
+import { setPriority } from '../copies/priority.js';
 import { holding } from '../copies/view.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
@@ -67,6 +68,8 @@ const TicksBody = z
   .strict()
   .refine(ticks => ticks.lendsTests !== undefined || ticks.keepsBackups !== undefined, 'Say which tick to change.');
 export const PlanBody = z.object({ subscription: z.uuid() }).strict();
+/* A machine's place by hand: null for none, 'none' to keep it from the server, or the place, from 2. */
+const PriorityBody = z.object({ pin: z.union([z.null(), z.literal('none'), z.number().int().min(2).max(999)]) }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
 const alreadyThere = () => new ApiError(409, 'conflict', 'This machine runs it already.', 'already_on_machine');
@@ -350,6 +353,18 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await ownMachine(me, id);
     await disconnectMachines(ctx, [id]);
+    return reply.code(204).send();
+  });
+
+  /* The CEO's choice of a machine's place in the order the server passes on in: left to the score, a place by hand,
+     or kept from the server. His alone, on his own session. */
+  app.put('/api/machines/:id/priority', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
+    const { id } = IdParams.parse(req.params);
+    const { pin } = PriorityBody.parse(req.body);
+    await ownMachine(me, id);
+    await setPriority(ctx, id, pin);
     return reply.code(204).send();
   });
 

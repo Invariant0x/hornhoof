@@ -146,7 +146,7 @@ type Placed = { changed: number; scored: boolean; leave: Leaving[]; retire: { id
 
 /* The copies that are up to date, and the one commits wait for, as the keeper that leads reads them from its own
    Postgres, by machine. A word that is old or missing names none. */
-function readyCopies(ctx: Ctx, rows: { id: string; copyName: string | null }[], now: Date): { ready: Set<string>; sync: string | null } {
+export function readyCopies(ctx: Ctx, rows: { id: string; copyName: string | null }[], now: Date): { ready: Set<string>; sync: string | null } {
   const said = freshState(ctx.config.controlDir, now.getTime())?.copies ?? [];
   const stateOf = (row: { copyName: string | null }) => said.find(copy => copy.name === row.copyName)?.state ?? null;
   return {

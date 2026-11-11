@@ -505,6 +505,19 @@ describe('POST /api/machines/:id/disconnect', () => {
     expect((await join(app, spare, { machineId: 'mac-0002-abcd' })).statusCode).toBe(410);
   });
 
+  it('knows the priority route', async () => {
+    const { app, db, ceo } = await connected(['claude']);
+    const put = (id: string) => app.inject({ method: 'PUT', url: `/api/machines/${id}/priority`, payload: { pin: null }, ...as(ceo) });
+    const unknown = await put('00000000-0000-4000-8000-000000000000');
+    expect([unknown.statusCode, unknown.json().error.reason]).toEqual([404, 'machine_unknown']);
+    /* The row of the machine the server itself runs on is no machine people act on. */
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [own] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'server:0f0f', networkId: '0f'.repeat(16), role: 'data' }).returning();
+    const server = await put(own!.id);
+    expect([server.statusCode, server.json().error.reason]).toEqual([404, 'machine_unknown']);
+  });
+
   it('says when the machine does not exist', async () => {
     const { app, ceo } = await connected(['claude']);
     const res = await app.inject({ method: 'POST', url: '/api/machines/00000000-0000-4000-8000-000000000000/disconnect', ...as(ceo) });
