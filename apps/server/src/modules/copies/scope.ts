@@ -52,11 +52,15 @@ export async function cutReplication(replication: Replication, leaving: { networ
 
 /* The rows of machines that stop holding the data, in the transaction that takes their person's scope: no place, a
    worker's role, the upload of what they hold owed, their certificates revoked, and the secrets they knew made anew:
-   those of the peer services at once, the link's key started here and finished after the commit. */
-export async function leaveData(ctx: Ctx, tx: Db, machineIds: string[], now: Date): Promise<void> {
+   those of the peer services at once, the link's key started here and finished after the commit. lost false: a copy
+   the ranking handed to another machine. Its owner still sees the whole company, so it keeps its place in the order
+   and no key changes: it gets a worker's role, owes what it holds, and its certificates are revoked, nothing else. */
+export async function leaveData(ctx: Ctx, tx: Db, machineIds: string[], now: Date, opts: { lost?: boolean } = {}): Promise<void> {
   if (machineIds.length === 0) return;
-  await tx.update(machines).set({ serverOrder: null, serverWhy: null, role: 'worker', dataLeftAt: now, uploadState: 'waiting' }).where(inArray(machines.id, machineIds));
+  const lost = opts.lost ?? true;
+  await tx.update(machines).set({ role: 'worker', uploadState: 'waiting', ...(lost ? { serverOrder: null, serverWhy: null, dataLeftAt: now } : {}) }).where(inArray(machines.id, machineIds));
   await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.machineId, machineIds), isNull(certificates.revokedAt)));
+  if (!lost) return;
   await dropPeerSecrets(tx);
   await ctx.links.startKey(tx);
 }
@@ -70,5 +74,6 @@ export async function afterLeave(ctx: Ctx): Promise<void> {
     ctx.log.warn({ error: loggable(err) }, "Could not change the key of the company's link yet. The next minute tries again.");
   }
   await visitorKeyOf(ctx, { force: true });
-  ctx.ranking.now();
+  /* A machine left, so the order is scored anew; a run that fails says so itself and the next minute scores. */
+  void ctx.ranking.now({ rescore: true }).catch(() => undefined);
 }

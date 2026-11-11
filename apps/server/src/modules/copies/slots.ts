@@ -15,6 +15,8 @@ export type Replication = {
   end(pid: number): Promise<void>;
   /* Throws while a connection still reads it. */
   drop(name: string): Promise<void>;
+  /* The copy commits wait for now, as the setting names it: its text, empty with none. */
+  standby(): Promise<string>;
 };
 
 export function replicationOf(db: Db): Replication {
@@ -23,6 +25,7 @@ export function replicationOf(db: Db): Replication {
     slots: () => q<CopySlot>('SELECT slot_name::text AS name, active_pid AS pid, wal_status AS "walStatus", confirmed_flush_lsn::text AS confirmed FROM pg_replication_slots ORDER BY slot_name'),
     end: async pid => void (await q('SELECT pg_terminate_backend($1::int)', [pid])),
     drop: async name => void (await q('SELECT pg_drop_replication_slot($1::text)', [name])),
+    standby: async () => (await q<{ synchronous_standby_names: string }>('SHOW synchronous_standby_names'))[0]?.synchronous_standby_names ?? '',
   };
 }
 

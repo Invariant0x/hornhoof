@@ -419,7 +419,7 @@ describe('joining the company as a machine', () => {
     expect(((await c.peers(keeperOf(w.machine))).json() as Said).copy).toBeNull();
     await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
     let slots: { name: string; pid: number | null; walStatus: string | null; confirmed: string | null }[] = [];
-    c.app.ctx.replication = { slots: async () => slots, end: async () => undefined, drop: async () => undefined };
+    c.app.ctx.replication = { slots: async () => slots, end: async () => undefined, drop: async () => undefined, standby: async () => '' };
     const told = async () => ((await c.peers(keeperOf(w.machine))).json() as Said).copy!;
     /* It named no copy yet. */
     expect(await told()).toMatchObject({ slot: null, old: null, upload: null });

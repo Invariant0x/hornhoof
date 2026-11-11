@@ -2,11 +2,11 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { asc, eq, isNotNull } from 'drizzle-orm';
+import { asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { companies, machines, people, publicLinks } from '../src/db/schema.js';
+import { certificates, companies, machineOnline, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { storeThroughput } from '../src/modules/copies/measured.js';
-import { rank, Ranking, rankOf } from '../src/modules/copies/order.js';
+import { planRoles, rank, Ranking, rankOf } from '../src/modules/copies/order.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { unfit, type Candidate } from '../src/modules/copies/qualify.js';
 import { setUpCompany, testApp, until } from './helpers.js';
@@ -49,18 +49,18 @@ describe('the order of the machines that may hold the data', () => {
     const b = candidate('b', { createdAt: hoursAgo(60), owner: WHOLE });
     const c = candidate('c', { createdAt: hoursAgo(10) });
     expect(ranked([b, c, LEADER, a])).toEqual({
-      l: { number: 1, why: 'server', data: true },
-      a: { number: 2, why: 'new', data: true },
-      c: { number: 3, why: 'new', data: true },
-      b: { number: 4, why: 'next', data: false },
+      l: { number: 1, why: 'server' },
+      a: { number: 2, why: 'new' },
+      c: { number: 3, why: 'new' },
+      b: { number: 4, why: 'next' },
     });
   });
 
   it('numbers the leader 1 whatever it measures', () => {
     const leader = candidate('l', { server: true, role: 'data', reportAt: null, memory: GIB, fsyncP99Ms: null, share: 0 });
-    expect(ranked([leader, candidate('a')]).l).toEqual({ number: 1, why: 'server', data: true });
+    expect(ranked([leader, candidate('a')]).l).toEqual({ number: 1, why: 'server' });
     /* A pin ends when its machine becomes number 1. */
-    expect(ranked([{ ...leader, pin: '3' }, candidate('a')]).l).toEqual({ number: 1, why: 'server', data: true, clearPin: true });
+    expect(ranked([{ ...leader, pin: '3' }, candidate('a')]).l).toEqual({ number: 1, why: 'server', clearPin: true });
   });
 
   it('marks a copy whose person no longer sees the whole company', () => {
@@ -68,12 +68,12 @@ describe('the order of the machines that may hold the data', () => {
     const b = candidate('b', { owner: LISTED, role: 'data' });
     const c = candidate('c', { createdAt: hoursAgo(10) });
     expect(ranked([a, b, c, LEADER])).toEqual({
-      l: { number: 1, why: 'server', data: true },
-      b: { number: null, why: null, data: false, leave: true },
-      a: { number: 2, why: 'new', data: true },
-      c: { number: 3, why: 'new', data: true },
+      l: { number: 1, why: 'server' },
+      b: { number: null, why: null, leave: true },
+      a: { number: 2, why: 'new' },
+      c: { number: 3, why: 'new' },
     });
-    expect(ranked([candidate('b', { owner: { ...WHOLE, active: false }, role: 'data' }), LEADER]).b).toEqual({ number: null, why: null, data: false, leave: true });
+    expect(ranked([candidate('b', { owner: { ...WHOLE, active: false }, role: 'data' }), LEADER]).b).toEqual({ number: null, why: null, leave: true });
   });
 
   it("gives data only to whole-company people's fit computers", () => {
@@ -94,7 +94,7 @@ describe('the order of the machines that may hold the data', () => {
     cases.forEach(([over, why], at) => {
       const row = candidate(`m${at}`, over);
       expect([over, unfit(row, OPTS)]).toEqual([over, why]);
-      expect([over, ranked([LEADER, row])[row.id]]).toEqual([over, { number: null, why: null, data: false }]);
+      expect([over, ranked([LEADER, row])[row.id]]).toEqual([over, { number: null, why: null }]);
     });
     /* The first failure is the reason. */
     expect(unfit(candidate('x', { kind: 'phone', owner: LISTED, memory: GIB }), OPTS)).toEqual({ why: 'phone' });
@@ -114,16 +114,16 @@ describe('the order of the machines that may hold the data', () => {
 
   it('says of a machine that still gives up a copy that it does', () => {
     expect(unfit(candidate('a', { owes: true }), OPTS)).toEqual({ why: 'leaving' });
-    expect(ranked([LEADER, candidate('a', { owes: true })]).a).toEqual({ number: null, why: null, data: false });
+    expect(ranked([LEADER, candidate('a', { owes: true })]).a).toEqual({ number: null, why: null });
   });
 
   it('gives no copy without a link', () => {
     const a = candidate('a');
     const b = candidate('b', { owner: WHOLE });
     expect(ranked([a, b, LEADER], { link: false })).toEqual({
-      l: { number: 1, why: 'server', data: true },
-      a: { number: null, why: null, data: false },
-      b: { number: null, why: null, data: false },
+      l: { number: 1, why: 'server' },
+      a: { number: null, why: null },
+      b: { number: null, why: null },
     });
     expect(unfit(a, { ...OPTS, link: false })).toEqual({ why: 'no_link' });
   });
@@ -135,7 +135,7 @@ describe('the order of the machines that may hold the data', () => {
     const b = candidate('b', { ...sparse, share: 0.96, cores: 4 });
     const c = candidate('c', { ...FULL, share: 0.5, createdAt: daysAgo(10) });
     expect(numbers([c, b, a, LEADER])).toEqual({ l: 1, a: 2, b: 3, c: 4 });
-    expect(ranked([c, b, a, LEADER]).c).toEqual({ number: 4, why: 'next', data: false });
+    expect(ranked([c, b, a, LEADER]).c).toEqual({ number: 4, why: 'next' });
     /* An established machine at 2 or 3 says how often it is there and what it is best or worst at. */
     expect(ranked([c, b, a, LEADER]).a!.why).toBe('always.slow_internet');
   });
@@ -165,7 +165,7 @@ describe('the order of the machines that may hold the data', () => {
   it('keeps a place for a pinned machine', () => {
     const a = candidate('a', { ...POINTS[90], createdAt: daysAgo(10) });
     const b = candidate('b', { ...POINTS[70], createdAt: daysAgo(10), pin: '2' });
-    expect(ranked([a, b, LEADER])).toMatchObject({ b: { number: 2, why: 'pinned', data: true }, a: { number: 3 } });
+    expect(ranked([a, b, LEADER])).toMatchObject({ b: { number: 2, why: 'pinned' }, a: { number: 3 } });
   });
 
   it('settles around a pin', () => {
@@ -178,14 +178,83 @@ describe('the order of the machines that may hold the data', () => {
 
   it('leaves out a machine that does not take the server', () => {
     const b = candidate('b', { pin: 'none' });
-    expect(ranked([candidate('a'), b, LEADER])).toMatchObject({ a: { number: 2 }, b: { number: null, why: 'out', data: false } });
+    expect(ranked([candidate('a'), b, LEADER])).toMatchObject({ a: { number: 2 }, b: { number: null, why: 'out' } });
     /* A copy that is kept out keeps its copy until the ranking hands it on. */
-    expect(ranked([candidate('a'), { ...b, role: 'data' }, LEADER]).b).toEqual({ number: null, why: 'out', data: true });
+    expect(ranked([candidate('a'), { ...b, role: 'data' }, LEADER]).b).toEqual({ number: null, why: 'out' });
   });
 
   it('says why a machine waits for its place', () => {
     const all = [candidate('a', { createdAt: hoursAgo(40) }), candidate('b', { createdAt: hoursAgo(30) }), candidate('c', { createdAt: hoursAgo(20) }), candidate('d', { createdAt: hoursAgo(10), role: 'data' }), LEADER];
-    expect(ranked(all)).toMatchObject({ a: { number: 2, why: 'new' }, b: { number: 3, why: 'new' }, c: { number: 4, why: 'next', data: false }, d: { number: 5, why: 'handing', data: true } });
+    expect(ranked(all)).toMatchObject({ a: { number: 2, why: 'new' }, b: { number: 3, why: 'new' }, c: { number: 4, why: 'next' }, d: { number: 5, why: 'handing' } });
+  });
+});
+
+describe('who holds a copy after a ranking', () => {
+  const HOUR = 3_600_000;
+  type Plan = Parameters<typeof planRoles>[0];
+  const at = (id: string, number: number) => ({ id, number });
+  const holds = (id: string, number: number | null, out = false) => ({ id, number, out });
+  const plan = (over: Partial<Plan>) =>
+    planRoles({ numbered: [], data: [], eligible: new Set(['A', 'B', 'C', 'D', 'E']), ready: new Set(), sync: null, handoverAt: null, now: NOW, ceo: false, ...over });
+  const NOTHING = { grant: [], retire: null, handover: false };
+
+  it('gives free seats at once', () => {
+    expect(plan({ numbered: [at('B', 3), at('A', 2), at('C', 4)] })).toEqual({ grant: ['A', 'B'], retire: null, handover: false });
+  });
+
+  it('fills the seat of a lost copy', () => {
+    expect(plan({ numbered: [at('A', 2), at('B', 3)], data: [holds('A', 2)] })).toEqual({ grant: ['B'], retire: null, handover: false });
+  });
+
+  it('hands a copy over, once a day or on the CEO\'s word', () => {
+    const over = { numbered: [at('A', 2), at('B', 3)], data: [holds('A', 2), holds('C', 4)], ready: new Set(['A', 'C']) };
+    expect(plan({ ...over, handoverAt: new Date(NOW.getTime() - 25 * HOUR) })).toEqual({ grant: ['B'], retire: null, handover: true });
+    expect(plan({ ...over, handoverAt: null })).toEqual({ grant: ['B'], retire: null, handover: true });
+    expect(plan({ ...over, handoverAt: new Date(NOW.getTime() - 23 * HOUR) })).toEqual(NOTHING);
+    expect(plan({ ...over, handoverAt: new Date(NOW.getTime() - 23 * HOUR), ceo: true })).toEqual({ grant: ['B'], retire: null, handover: true });
+  });
+
+  it('makes one copy at a time', () => {
+    const over = { numbered: [at('A', 2), at('B', 3)], data: [holds('A', 2), holds('C', 4)], ready: new Set(['C']) };
+    expect(plan(over)).toEqual(NOTHING);
+    expect(plan({ ...over, ceo: true })).toEqual(NOTHING);
+    expect(plan({ ...over, ready: new Set(['A', 'C']), ceo: true }).grant).toEqual(['B']);
+  });
+
+  it('waits for the copy being made', () => {
+    const over = { numbered: [at('B', 2), at('D', 3)], data: [holds('B', 2), holds('C', 4)] };
+    expect(plan({ ...over, ready: new Set(['C']) })).toEqual(NOTHING);
+    expect(plan({ ...over, ready: new Set(['B', 'C']) })).toEqual({ grant: ['D'], retire: null, handover: true });
+  });
+
+  it('retires only after the new copy is up to date', () => {
+    const over = { numbered: [at('A', 2), at('B', 3)], data: [holds('A', 2), holds('B', 3), holds('C', 4)] };
+    expect(plan({ ...over, ready: new Set(['A', 'C']) }).retire).toBeNull();
+    /* The one commits wait for is never the one that goes: the controller moves that first. */
+    expect(plan({ ...over, ready: new Set(['A', 'B', 'C']), sync: 'C' }).retire).toBeNull();
+    expect(plan({ ...over, ready: new Set(['A', 'B', 'C']), sync: 'A' })).toEqual({ grant: [], retire: 'C', handover: false });
+  });
+
+  it('keeps a copy that only stopped qualifying', () => {
+    const over = { numbered: [at('A', 2)], ready: new Set(['A', 'C']), sync: 'A' };
+    expect(plan({ ...over, data: [holds('A', 2), holds('C', null)] }).retire).toBeNull();
+    /* Only the CEO's "does not take the server" lowers the number of copies. */
+    expect(plan({ ...over, data: [holds('A', 2), holds('C', null, true)] }).retire).toBe('C');
+  });
+
+  it('keeps the only copy', () => {
+    expect(plan({ data: [holds('C', null, true)], ready: new Set(['C']) })).toEqual(NOTHING);
+  });
+
+  it('retires one a run', () => {
+    const data = [holds('A', 2), holds('B', 3), holds('C', 4), holds('E', null)];
+    const over = { numbered: [at('A', 2), at('B', 3)], data, ready: new Set(['A', 'B', 'C', 'E']), sync: 'A' };
+    expect(plan(over).retire).toBe('E');
+    expect(plan({ ...over, data: data.slice(0, 3).concat(holds('D', 5)) }).retire).toBe('D');
+  });
+
+  it('gives no data to a machine being wiped', () => {
+    expect(plan({ numbered: [at('A', 2), at('B', 3)], eligible: new Set(['A']) })).toEqual({ grant: ['A'], retire: null, handover: false });
   });
 });
 
@@ -193,8 +262,8 @@ const MACHINE_ID = 'a1b2c3d4'.repeat(4);
 const OWN = { remoteAddress: '127.0.0.1', headers: { 'x-hornhoof-via': 'keeper' } };
 const newKey = (): string => generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
 
-async function company() {
-  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
+async function company(env: NodeJS.ProcessEnv = {}) {
+  const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID, ...env });
   await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
@@ -224,9 +293,9 @@ describe('the ranking on the server', () => {
     await c.joined(c.mariaId, 1);
     await c.joined(c.ownerId, 5);
     /* The server's row, and the two that get a place among the first three; the fourth gets a place too. */
-    expect(await rank(c.ctx)).toEqual({ changed: 4 });
+    expect(await rank(c.ctx)).toEqual({ changed: 4, scored: true });
     expect(await c.places()).toEqual({ server: [1, 'server', 'data'], m1: [2, expect.any(String), 'data'], m3: [3, expect.any(String), 'data'], m2: [4, 'next', 'worker'] });
-    expect(await rank(c.ctx)).toEqual({ changed: 0 });
+    expect(await rank(c.ctx)).toEqual({ changed: 0, scored: false });
   });
 
   it('swaps two numbers without a clash', async () => {
@@ -239,7 +308,10 @@ describe('the ranking on the server', () => {
     /* Both hold a copy and measure the same. Then the second measures far more than the first, and passes it. */
     expect(a.hostname).toBe('m1');
     await c.db.update(machines).set({ cores: 8, linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100 }).where(eq(machines.hostname, 'm2'));
-    expect(await rank(c.ctx)).toEqual({ changed: 2 });
+    /* A run that does not score keeps the order, and only words anew why the second stands where it does. */
+    expect(await rank(c.ctx)).toEqual({ changed: 1, scored: false });
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'] });
+    expect(await rank(c.ctx, undefined, { rescore: true })).toEqual({ changed: 2, scored: true });
     expect(await c.places()).toMatchObject({ m2: [2, expect.any(String), 'data'], m1: [3, expect.any(String), 'data'], m3: [4, 'next', 'worker'] });
   });
 
@@ -248,12 +320,12 @@ describe('the ranking on the server', () => {
     const phone = await c.joined(c.ownerId, 2, { kind: 'phone' });
     /* One that never reported its memory is still being measured. */
     const stale = await c.joined(c.ownerId, 3, { memory: null });
-    expect(await rank(c.ctx)).toEqual({ changed: 1 });
+    expect(await rank(c.ctx)).toEqual({ changed: 1, scored: true });
     expect(await c.places()).toEqual({ server: [1, 'server', 'data'], m1: [null, null, 'worker'], m2: [null, null, 'worker'] });
     await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.networkId, MACHINE_ID));
     await c.db.update(machines).set({ kind: 'computer', reportAt: new Date() }).where(eq(machines.id, phone.id));
     await c.db.update(machines).set({ memory: 8 * GIB }).where(eq(machines.id, stale.id));
-    expect(await rank(c.ctx)).toEqual({ changed: 0 });
+    expect(await rank(c.ctx)).toEqual({ changed: 0, scored: false });
   });
 
   it('takes over the number of a machine that left with it', async () => {
@@ -339,9 +411,150 @@ describe('the ranking on the server', () => {
     ranking.start();
     await until(async () => (await c.places()).server?.[0] === 1);
     await c.joined(c.ownerId, 2);
-    ranking.now();
-    ranking.now();
-    ranking.now();
+    void ranking.now();
+    void ranking.now();
+    void ranking.now();
     await until(async () => (await c.places()).m1?.[0] === 2);
+  });
+  it('ends for whoever asked, and fails for them when the run fails', async () => {
+    const c = await company();
+    await c.joined(c.ownerId, 1);
+    await c.joined(c.ownerId, 2);
+    const ranking = new Ranking(c.ctx, { everyMs: 3_600_000 });
+    onTestFinished(() => ranking.stop());
+    ranking.start();
+    await ranking.now();
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'] });
+    /* The second now measures far better, which only a scoring sees. The database refuses the run that was to score:
+       the caller hears it, and the run after it scores in its place though nobody asks it to. */
+    await c.db.update(machines).set({ cores: 8, linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100 }).where(eq(machines.hostname, 'm2'));
+    const transaction = c.ctx.db.transaction;
+    c.ctx.db.transaction = (() => Promise.reject(new Error('the database is away'))) as typeof transaction;
+    await expect(ranking.now({ rescore: true })).rejects.toThrow('the database is away');
+    c.ctx.db.transaction = transaction;
+    await ranking.now();
+    expect(await c.places()).toMatchObject({ m2: [2, expect.any(String), 'data'], m1: [3, expect.any(String), 'data'] });
+  });
+
+  /* A week of being online so much of each day, for the share the score reads. */
+  const online = async (c: Awaited<ReturnType<typeof company>>, machineId: string, share: number) => {
+    for (let back = 0; back <= 8; back++) {
+      const day = new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+      await c.db.insert(machineOnline).values({ machineId, day, seconds: Math.round(86_400 * share) });
+    }
+  };
+  const HOUR = 3_600_000;
+
+  it('keeps its number while asleep', async () => {
+    const c = await company();
+    const a = await c.joined(c.ownerId, 1);
+    await rank(c.ctx);
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'] });
+    /* Its last report is thirty hours old, and the order is scored again. */
+    await c.db.update(machines).set({ reportAt: new Date(Date.now() - 30 * HOUR) }).where(eq(machines.id, a.id));
+    expect(await rank(c.ctx, undefined, { rescore: true })).toMatchObject({ scored: true });
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'] });
+  });
+
+  it('scores once a day, and at once when a machine joins', async () => {
+    const c = await company();
+    const t0 = new Date();
+    await c.joined(c.ownerId, 1);
+    await c.joined(c.ownerId, 2);
+    expect(await rank(c.ctx, t0)).toMatchObject({ scored: true });
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'] });
+    /* The second now measures far better than the first above it. */
+    await c.db.update(machines).set({ cores: 8, linkRttMs: 20, linkMbps: 100, internetRttMs: 20, internetMbps: 100 }).where(eq(machines.hostname, 'm2'));
+    expect((await rank(c.ctx, new Date(t0.getTime() + HOUR))).scored).toBe(false);
+    expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'] });
+    const day = new Date(t0.getTime() + 24 * HOUR);
+    expect((await rank(c.ctx, day)).scored).toBe(true);
+    expect(await c.places()).toMatchObject({ m2: [2, expect.any(String), 'data'], m1: [3, expect.any(String), 'data'] });
+    const [{ at }] = (await c.db.execute(sql`SELECT rescored_at AS at FROM net.ranking`) as unknown as { rows: { at: string }[] }).rows as [{ at: string }];
+    expect(new Date(at).getTime()).toBe(day.getTime());
+    /* A machine that joins is given its number by the next run, whatever the day. */
+    await c.joined(c.mariaId, 3);
+    expect(await rank(c.ctx, new Date(day.getTime() + HOUR))).toMatchObject({ scored: true });
+    expect((await c.places()).m3).toEqual([4, 'next', 'worker']);
+  });
+
+  it('frees the place and the pin of a machine that left, and clears the pin of the machine that leads', async () => {
+    const c = await company();
+    await rank(c.ctx);
+    const gone = await c.joined(c.ownerId, 1, { serverOrder: 2, serverPin: '2', revokedAt: new Date() });
+    await c.db.update(machines).set({ serverPin: '3' }).where(eq(machines.networkId, MACHINE_ID));
+    await c.joined(c.ownerId, 2);
+    expect(await rank(c.ctx)).toMatchObject({ scored: true });
+    expect((await c.db.select().from(machines).where(eq(machines.id, gone.id)))[0]).toMatchObject({ serverOrder: null, serverPin: null, serverWhy: null });
+    expect((await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0]).toMatchObject({ serverOrder: 1, serverPin: null });
+    expect((await c.places()).m2).toEqual([2, expect.any(String), 'data']);
+  });
+
+  it('hands a copy over, and retires the old one only once the new one is up to date', async () => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+    onTestFinished(() => rmSync(control, { recursive: true, force: true }));
+    const c = await company({ HORNHOOF_CONTROL_DIR: control });
+    const seen: string[] = [];
+    const catalog = { standby: '', slots: [] as { name: string; pid: number | null; walStatus: string | null; confirmed: string | null }[] };
+    c.ctx.replication = {
+      slots: async () => catalog.slots,
+      end: async () => undefined,
+      drop: async name => {
+        seen.push(`drop ${name}`);
+        catalog.slots = catalog.slots.filter(slot => slot.name !== name);
+      },
+      standby: async () => catalog.standby,
+    };
+    /* The name of a machine's copy starts with its own id. A and B hold the copies; C joined ten days ago too and is always there, where B is half the time. */
+    const copy = (n: string) => `copy_${n.repeat(16)}_1`;
+    const a = await c.joined(c.ownerId, 1, { networkId: '1'.repeat(32), role: 'data', serverOrder: 2, copyName: copy('1'), copyState: 'ready' });
+    const b = await c.joined(c.ownerId, 1, { networkId: '2'.repeat(32), role: 'data', serverOrder: 3, copyName: copy('2'), copyState: 'ready' });
+    const cc = await c.joined(c.ownerId, 1, { networkId: '3'.repeat(32) });
+    await online(c, a.id, 1);
+    await online(c, b.id, 0.5);
+    await online(c, cc.id, 1);
+    await c.db.insert(certificates).values({ serial: 'b1', machineId: b.id, until: new Date(Date.now() + 86_400_000) });
+    catalog.slots = [{ name: copy('2'), pid: null, walStatus: 'reserved', confirmed: '0/1' }];
+    const said = (copies: { name: string; state: 'sync' | 'pace' | 'behind' | 'silent' }[]) => writeKeeperState(control, { mode: 'lead', at: new Date().toISOString(), link: null, copies });
+    const rowOf = async (id: string) => (await c.db.select().from(machines).where(eq(machines.id, id)))[0]!;
+    const secrets = await c.db.select().from(peerSecrets);
+
+    said([{ name: copy('1'), state: 'sync' }, { name: copy('2'), state: 'pace' }]);
+    await rank(c.ctx, undefined, { rescore: true });
+    /* C takes the third place and gets the data; B stands at four and keeps its copy while it is handed over. */
+    expect(await rowOf(cc.id)).toMatchObject({ serverOrder: 3, role: 'data' });
+    expect(await rowOf(b.id)).toMatchObject({ serverOrder: 4, serverWhy: 'handing', role: 'data', uploadState: null });
+    const [{ at }] = (await c.db.execute(sql`SELECT handover_at AS at FROM net.ranking`) as unknown as { rows: { at: string | null }[] }).rows as [{ at: string | null }];
+    expect(at).not.toBeNull();
+    /* C's copy is still being made: nothing is retired. */
+    await c.db.update(machines).set({ copyName: copy('3'), copyState: 'making' }).where(eq(machines.id, cc.id));
+    said([{ name: copy('1'), state: 'sync' }, { name: copy('2'), state: 'pace' }, { name: copy('3'), state: 'behind' }]);
+    await rank(c.ctx);
+    expect([(await rowOf(b.id)).role, seen]).toEqual(['data', []]);
+    /* It is up to date when the run looks, and behind again by the time the run comes to cut: nothing is cut. */
+    const upToDate = () => said([{ name: copy('1'), state: 'sync' }, { name: copy('2'), state: 'pace' }, { name: copy('3'), state: 'pace' }]);
+    upToDate();
+    const finishKey = c.ctx.links.finishKey;
+    c.ctx.links.finishKey = async () => {
+      said([{ name: copy('1'), state: 'sync' }, { name: copy('2'), state: 'pace' }, { name: copy('3'), state: 'behind' }]);
+      return 'none';
+    };
+    await rank(c.ctx);
+    c.ctx.links.finishKey = finishKey;
+    expect([(await rowOf(b.id)).role, seen]).toEqual(['data', []]);
+    /* Up to date and staying so, but the keeper names B's copy the one commits wait for at the last look: nothing is cut. */
+    upToDate();
+    catalog.standby = `FIRST 1 ("${copy('2')}")`;
+    await rank(c.ctx);
+    expect([(await rowOf(b.id)).role, seen]).toEqual(['data', []]);
+    /* Commits wait for A's: B is cut from the leader's changes first, then told to give up what it holds. */
+    catalog.standby = `FIRST 1 ("${copy('1')}")`;
+    await rank(c.ctx);
+    expect(seen).toEqual([`drop ${copy('2')}`]);
+    expect(await rowOf(b.id)).toMatchObject({ role: 'worker', uploadState: 'waiting', dataLeftAt: null, serverOrder: 4 });
+    expect((await c.db.select().from(certificates).where(eq(certificates.serial, 'b1')))[0]!.revokedAt).not.toBeNull();
+    /* Its owner still sees the whole company: no key of the company changes. */
+    expect(await c.db.select().from(peerSecrets)).toEqual(secrets);
+    expect((await c.db.select().from(publicLinks))[0]!.nextKeyEnc).toBeNull();
   });
 });

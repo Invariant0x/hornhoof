@@ -7,7 +7,7 @@ import { decryptSecret } from '../src/crypto/secrets.js';
 import { certificates, companies, departments, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { activeRecovery } from '../src/modules/backups/recovery.js';
 import { rank } from '../src/modules/copies/order.js';
-import { CUT_TRIES_MS, cutReplication } from '../src/modules/copies/scope.js';
+import { CUT_TRIES_MS, cutReplication, leaveData } from '../src/modules/copies/scope.js';
 import type { CopySlot, Replication } from '../src/modules/copies/slots.js';
 import { peerSecret, revokedSerials } from '../src/modules/network/store.js';
 import { fakeRelay } from './fake-relay.js';
@@ -22,7 +22,7 @@ const GIB = 2 ** 30;
 
 /* The slots of the server's Postgres as a test sets them, and what was done to them, in order. */
 function fakeReplication(seen: string[], during: () => Promise<void> = async () => undefined) {
-  const state = { slots: [] as CopySlot[], stuck: false };
+  const state = { slots: [] as CopySlot[], stuck: false, standby: '' };
   const replication: Replication = {
     slots: async () => state.slots.map(slot => ({ ...slot })),
     end: async pid => {
@@ -36,6 +36,7 @@ function fakeReplication(seen: string[], during: () => Promise<void> = async () 
       seen.push(`drop ${name}`);
       state.slots = state.slots.filter(found => found.name !== name);
     },
+    standby: async () => state.standby,
   };
   return { state, replication };
 }
@@ -159,6 +160,28 @@ describe("a machine whose owner no longer sees the whole company", () => {
     const calls = c.keyChanges();
     expect((await c.patch()).statusCode).toBe(200);
     expect(c.keyChanges()).toBe(calls);
+  });
+
+  it('retires without changing keys', async () => {
+    const c = await company();
+    const before = { key: await c.keyOf(), secrets: await c.db.select().from(peerSecrets), calls: c.keyChanges() };
+    /* The ranking handed Maria's copy to another machine; she still sees the whole company. */
+    const now = new Date();
+    await c.db.transaction(tx => leaveData(c.app.ctx, tx, [c.d.id], now, { lost: false }));
+    expect(await c.rowOf(c.d.id)).toMatchObject({ role: 'worker', uploadState: 'waiting', dataLeftAt: null, serverOrder: 2, revokedAt: null });
+    expect(await revokedSerials(c.db)).toEqual([c.d.serial]);
+    expect((await c.linkRow()).nextKeyEnc).toBeNull();
+    expect({ key: await c.keyOf(), secrets: await c.db.select().from(peerSecrets), calls: c.keyChanges() }).toEqual(before);
+  });
+
+  it('scores the order after a lost scope', async () => {
+    const c = await company();
+    c.app.ctx.replication = fakeReplication(c.seen).replication;
+    const asked: object[] = [];
+    c.app.ctx.ranking.now = async (opts = {}) => void asked.push(opts);
+    expect((await c.patch()).statusCode).toBe(200);
+    await until(() => asked.length > 0);
+    expect(asked).toEqual([{ rescore: true }]);
   });
 
   it("refuses to take the server's scope", async () => {

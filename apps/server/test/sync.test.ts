@@ -141,6 +141,22 @@ describe('the sync controller', () => {
     expect(s.state.pulses).toBeLessThan(45);
   });
 
+  it('prefers a numbered copy to one being handed over', async () => {
+    const s = await stand();
+    /* R was ranked out and holds its copy until the new one is up to date: it has no number. Commits wait for it. */
+    const R = { machine: 'r', networkId: 'a1a1a1a1'.repeat(8), number: null, copyName: 'copy_a1a1a1a1a1a1a1a1_1', ready: true };
+    s.state.machines = [{ ...C, number: 3 }, R];
+    s.state.replication.push({ name: R.copyName, confirmed: '0/3000000', pid: 42, replyTime: 't0', syncState: 'sync' });
+    s.state.setting = R.copyName;
+    s.relay.syncs.set('acme', { state: 'on', copy: R.networkId, epoch: 4, generation: 1, at: 100 });
+    /* Both keep pace for half a minute. */
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 6, 1000);
+    expect(s.state.did.filter(what => what === 'clear' || what.startsWith('set '))).toEqual(['clear', `set ${C.copyName}`]);
+    /* Off was stored at the relay before the setting was cleared. */
+    expect(s.relay.calls.findIndex(call => call.includes('/sync'))).toBeGreaterThanOrEqual(0);
+    expect(s.state.setting).toBe(C.copyName);
+  });
+
   it('runs the barrier before W', async () => {
     const s = await stand();
     await s.looks(2);

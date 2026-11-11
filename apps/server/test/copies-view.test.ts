@@ -28,7 +28,7 @@ async function stand() {
   await saveLink(db, config, acme!.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: TUNNEL });
   await db.execute(sql`INSERT INTO net.pulse (at) VALUES (${NOW.toISOString()}::timestamptz) ON CONFLICT (id) DO UPDATE SET at = excluded.at`);
   const slots: Slot[] = [];
-  app.ctx.replication = { slots: async () => slots, end: async () => undefined, drop: async () => undefined };
+  app.ctx.replication = { slots: async () => slots, end: async () => undefined, drop: async () => undefined, standby: async () => '' };
   let n = 0;
   /* A machine that keeps a copy: its row, its slot read by a walsender, and a report that just came. */
   const copy = async (hostname: string, over: Partial<typeof machines.$inferInsert> = {}, walsender = true) => {
