@@ -16,7 +16,7 @@ const NEW_PASSWORD = 'a better horse battery';
 /* The worker looks for a restored server after this long without a leader, where a real one waits ten minutes. */
 const SURVIVOR_S = 40;
 
-type Row = { id: string; recovery: string | null; holders: string[] };
+type Row = { id: string; reason: string; recovery: string | null; holders: string[] };
 
 describe('the lab, backups', () => {
   let lab: Lab;
@@ -36,7 +36,7 @@ describe('the lab, backups', () => {
 
   /* The bundles the company's database records, newest first. */
   const bundles = async (server: LabMachine): Promise<Row[]> =>
-    JSON.parse((await sql(server, `SELECT coalesce(json_agg(json_build_object('id', id, 'recovery', recovery, 'holders', holders) ORDER BY made_at DESC), '[]') FROM net.backups`)) || '[]') as Row[];
+    JSON.parse((await sql(server, `SELECT coalesce(json_agg(json_build_object('id', id, 'reason', reason, 'recovery', recovery, 'holders', holders) ORDER BY made_at DESC), '[]') FROM net.backups`)) || '[]') as Row[];
   const heldBy = async (server: LabMachine, machine: string): Promise<string[]> => JSON.parse(await sql(server, `SELECT to_json(held_backups) FROM machines WHERE id = '${machine}'`)) as string[];
   /* A command in a service's container on a machine of the lab. */
   const inside = (machine: LabMachine, folder: string, service: string, cmd: string) => machine.exec(`cd ${folder} && docker compose exec -T ${service} sh -c ${quoted(cmd)}`);
@@ -89,10 +89,10 @@ describe('the lab, backups', () => {
     await log('3. the worker holds a bundle it cannot open, and the recovery file opens it');
 
     /* 4. After that bundle the company changes: a department is made and the owner's password changed. The owner
-       restores the bundle. */
+       restores the bundle, and leaves out what came after it; the lab of merges brings such work back. */
     await sql(m1, `INSERT INTO departments (company_id, name, role_code) SELECT id, 'Made later', 'LAT' FROM companies`);
     await sql(m1, `UPDATE people SET password_hash = ${literal(await hashPassword(NEW_PASSWORD))} WHERE is_owner`);
-    const restore = await http(m1, 'POST', `${server.url}/api/backups/${sealed.id}/restore`, { body: {} });
+    const restore = await http(m1, 'POST', `${server.url}/api/backups/${sealed.id}/restore`, { body: { bringBack: false } });
     expect(restore.status, restore.body).toBe(202);
     const status = async () => JSON.parse(ok(await inside(m1, '/root/hornhoof', 'keeper', 'cat /control/restore-status.json'), 'the status')) as { state: string; step: string; line: string; kept: string | null };
     const ended = await within(4, 'the restore ended', async () => {
@@ -107,12 +107,13 @@ describe('the lab, backups', () => {
     expect(await signIn(m1, server.url, PASSWORD)).toBe(401);
     expect(await signIn(m1, server.url, NEW_PASSWORD)).toBe(200);
     expect(await sql(m1, `SELECT count(*) FROM departments WHERE name = 'Made later'`)).toBe('0');
-    expect((await sql(m1, `SELECT datname FROM pg_database WHERE datname LIKE 'hornhoof_before_%'`)).split('\n')).toEqual([ended.kept]);
+    /* The database from before is kept until it is saved as a backup, and no other is. */
+    expect((await sql(m1, `SELECT datname FROM pg_database WHERE datname LIKE 'hornhoof_before_%'`)).split('\n').filter(Boolean).every(name => name === ended.kept)).toBe(true);
     expect(ok(await inside(m1, '/root/hornhoof', 'keeper', 'ls /control/restore-carry.json 2>/dev/null; ls /control/restore | grep -v incoming; true'), 'ls').trim()).toBe('');
     await within(2, "the worker's keeper names a leader", async () => (await worker.keeper()).leader);
     expect(ok(await inside(m2, worker.folder, 'keeper', 'ls /keeper/bundles'), 'ls')).toContain(`${sealed.id}.age`);
     const newer = await within(3, 'a newer bundle of the restored company is recorded and held by the worker', async () => {
-      const row = (await bundles(m1)).find(one => one.recovery === file.recipient && one.id !== sealed.id);
+      const row = (await bundles(m1)).find(one => one.reason !== 'fork' && one.recovery === file.recipient && one.id !== sealed.id);
       return row && (await heldBy(m1, worker.id)).includes(row.id) ? row : null;
     });
     await log('4. the company is restored from the bundle, and makes bundles again');
