@@ -38,6 +38,17 @@ describe('the rule of each table in a merge', () => {
     for (const table of Object.keys(BOOKKEEPING)) expect(tables.has(table)).toBe(true);
   });
 
+  it('never compares what the leader recomputes', async () => {
+    const { tables } = await facts();
+    const own = ['server_order', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state'];
+    expect(BOOKKEEPING.machines).toEqual(expect.arrayContaining(own));
+    /* A place the CEO pinned is his word, so two that differ are his to settle. */
+    expect(BOOKKEEPING.machines).not.toContain('server_pin');
+    for (const [table, columns] of Object.entries(BOOKKEEPING)) {
+      for (const column of columns) expect([table, column, tables.get(table)?.columns.some(found => found.name === column)]).toEqual([table, column, true]);
+    }
+  });
+
   it('gives every hidden table to the CEO or keeps it out', () => {
     for (const name of HIDDEN) {
       const rule = ruleOf(name);

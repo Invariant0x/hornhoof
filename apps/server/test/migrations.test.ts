@@ -750,3 +750,64 @@ describe('migration 0107, the merge records', () => {
     expect(await codeOf(db.execute(sql`insert into net.horizon (below) values (now())`))).toBe('23505');
   });
 });
+
+describe('migration 0108, the server order and the copies', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds the server order and the copy's columns", async () => {
+    const db = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(
+      expect.arrayContaining(['server_order', 'server_pin', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state']),
+    );
+    expect((await db.execute(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'public_links' and column_name = 'next_key_enc'`)).rows).toHaveLength(1);
+    let made = 0;
+    const machine = (column: string, value: string | number) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key, ${column}) values (gen_random_uuid(), gen_random_uuid(), 'm${made++}', ${typeof value === 'number' ? value : `'${value}'`})`));
+    /* One machine to a place, and a place is 1 or more. */
+    await machine('server_order', 2);
+    expect(await codeOf(machine('server_order', 2))).toBe('23505');
+    expect(await codeOf(machine('server_order', 0))).toBe('23514');
+    /* Any number of machines never take the server, one machine to a pinned place, and a pinned place is 2 or more. */
+    await machine('server_pin', 'none');
+    await machine('server_pin', 'none');
+    await machine('server_pin', '2');
+    expect(await codeOf(machine('server_pin', '2'))).toBe('23505');
+    expect(await codeOf(machine('server_pin', '1'))).toBe('23514');
+    expect(await codeOf(machine('server_pin', 'x'))).toBe('23514');
+    for (const state of ['making', 'remaking', 'ready', 'stopped']) await machine('copy_state', state);
+    for (const error of ['disk_full', 'apply', 'led', 'setup']) await machine('copy_error', error);
+    for (const state of ['waiting', 'received', 'kept']) await machine('upload_state', state);
+    await machine('copy_progress', 0);
+    await machine('copy_progress', 99);
+    expect(await codeOf(machine('copy_state', 'other'))).toBe('23514');
+    expect(await codeOf(machine('copy_error', 'other'))).toBe('23514');
+    expect(await codeOf(machine('upload_state', 'other'))).toBe('23514');
+    expect(await codeOf(machine('copy_progress', 100))).toBe('23514');
+  });
+
+  it('adds the pulse, fenced, and the sources of a merge a machine gives', async () => {
+    const db = await fullyMigrated();
+    const fenced = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'pulse'`);
+    expect(fenced.rows).toEqual([{ deferrable: true, deferred: true }]);
+    await db.execute(sql`insert into net.pulse (at) values (now())`);
+    expect(await codeOf(db.execute(sql`insert into net.pulse (at) values (now())`))).toBe('23505');
+    expect(await codeOf(db.execute(sql`insert into net.pulse (id, at) values (false, now())`))).toBe('23514');
+    const merge = (source: string, machine: string | null = null) => db.execute(sql`insert into net.merges (source, label, machine) values (${source}, 'a database', ${machine})`);
+    await merge('upload:hornhoof_upload_0f0f0f0f0f0f0f0f_20261111t090000', '0f0f0f0f-0000-4000-8000-00000000000a');
+    await merge('machine:0f0f0f0f-0000-4000-8000-00000000000a:1', '0f0f0f0f-0000-4000-8000-00000000000a');
+    await merge('kept:hornhoof_before_20261110_090000');
+    expect(await codeOf(merge('other:x'))).toBe('23514');
+  });
+});

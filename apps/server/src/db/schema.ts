@@ -229,6 +229,16 @@ export type LinkPath = (typeof LINK_PATHS)[number];
 /* Where a worker stands with the server's build: it has it downloaded, it installs it, or its install failed. */
 export const UPDATE_STATES = ['ready', 'installing', 'failed'] as const;
 export type UpdateState = (typeof UPDATE_STATES)[number];
+/* A copy of the company's database on a machine: being made, being made again beside the old one, following, or stopped
+   with a reason: its disk is full, a change did not fit, its database once led the company, or the company's settings
+   could not be written there. */
+export const COPY_STATES = ['making', 'remaking', 'ready', 'stopped'] as const;
+export type CopyState = (typeof COPY_STATES)[number];
+export const COPY_ERRORS = ['disk_full', 'apply', 'led', 'setup'] as const;
+export type CopyError = (typeof COPY_ERRORS)[number];
+/* What a machine that stopped holding the company's data still owes: its upload, then its wipe. */
+export const UPLOAD_STATES = ['waiting', 'received', 'kept'] as const;
+export type UploadState = (typeof UPLOAD_STATES)[number];
 
 export const machines = pgTable(
   'machines',
@@ -281,12 +291,42 @@ export const machines = pgTable(
     ageKey: text('age_key'),
     keepsBackups: boolean('keeps_backups').notNull().default(true),
     heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
+    /* Its place in taking the company server: 1 leads, none for a machine that may not hold the company's data.
+       serverPin: the place the CEO pinned, from 2, or 'none' for a machine that never takes the server. serverWhy: a
+       key the card turns into words. */
+    serverOrder: integer('server_order'),
+    serverPin: text('server_pin'),
+    serverWhy: text('server_why'),
+    /* What Docker gives the machine, from its keeper's report. */
+    memory: bigint('memory', { mode: 'number' }),
+    cores: integer('cores'),
+    /* Its copy of the company's database, as its keeper last reported it. copyAt: the server's pulse the copy holds.
+       copyName: the name of its subscription, its slot and its connection. copyOld: the attempt whose old database
+       waits for the server to merge it. */
+    copyState: text('copy_state', { enum: COPY_STATES }),
+    copyProgress: integer('copy_progress'),
+    copyError: text('copy_error', { enum: COPY_ERRORS }),
+    copyAt: timestamp('copy_at', { withTimezone: true }),
+    copyName: text('copy_name'),
+    copyOld: integer('copy_old'),
+    /* When it stopped holding the company's data, and how far the upload of what it held has come. */
+    dataLeftAt: timestamp('data_left_at', { withTimezone: true }),
+    uploadState: text('upload_state', { enum: UPLOAD_STATES }),
   },
   t => [
     unique('machines_person_key').on(t.personId, t.machineKey),
     check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
     check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
     check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
+    uniqueIndex('machines_server_order').on(t.serverOrder),
+    uniqueIndex('machines_server_pin').on(t.serverPin).where(sql`server_pin <> 'none'`),
+    check('machines_server_order_range', sql`server_order >= 1`),
+    /* The CASE, so a pin that is no number fails the check and not the cast. */
+    check('machines_server_pin_value', sql`server_pin = 'none' OR CASE WHEN server_pin ~ '^[1-9][0-9]{0,2}$' THEN server_pin::int >= 2 ELSE false END`),
+    check('machines_copy_progress_range', sql`copy_progress BETWEEN 0 AND 99`),
+    check('machines_copy_state', sql`copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped')`),
+    check('machines_copy_error', sql`copy_error IS NULL OR copy_error IN ('disk_full', 'apply', 'led', 'setup')`),
+    check('machines_upload_state', sql`upload_state IS NULL OR upload_state IN ('waiting', 'received', 'kept')`),
   ],
 );
 
@@ -1339,6 +1379,8 @@ export const publicLinks = pgTable('public_links', {
   url: text('url').notNull(),
   keyEnc: text('key_enc').notNull(),
   tunnelEnc: text('tunnel_enc').notNull(),
+  /* The key a change is under way to, sealed as keyEnc is. */
+  nextKeyEnc: text('next_key_enc'),
   createdAt: createdAt(),
 });
 

@@ -449,6 +449,14 @@ describe('the orchestrator reads and changes the database itself', () => {
     }
   });
 
+  it('stays out of the pulse', async () => {
+    const { app } = await company();
+    const client = await mcp(app, TOKEN);
+    const res = await call(client, 'database', { sql: 'SELECT * FROM net.pulse' });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/permission denied/);
+  });
+
   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
