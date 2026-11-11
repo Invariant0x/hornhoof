@@ -8,7 +8,7 @@ Setup offers the company a public link, like `https://acme.hornhoof.org`. As you
 
 - You can write another name, or take a long random one with "Random name".
 - Hornhoof tells you at once whether the name is free.
-- The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Share access.
+- The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Company settings.
 
 ## What changes once there is a link?
 
@@ -24,7 +24,7 @@ hornhoof.org only passes the traffic on and has no accounts of its own. A small 
 
 ## How do I change or remove the link?
 
-People who see the whole company find the link under Share access in the account menu. There they can:
+People who see the whole company find the link under Company settings in the account menu. There they can:
 
 - copy it;
 - move it to another name;

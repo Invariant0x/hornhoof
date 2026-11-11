@@ -10,6 +10,6 @@ Each workspace screen has its own address. Copy the address to share a departmen
 - [The orchestrator](orchestrator.md): what the main agent can do for you, also on the computer the server runs on, and what stays with people.
 - [Departments and employees](departments-and-employees.md): the department schema, hiring, an employee's window and terminal, switching agents off, and reviews at a gate.
 - [Tasks and turns](tasks-and-turns.md): how your words become tasks, which checks they pass, and what happens when an agent gets stuck.
-- [Repositories](repositories.md): how a department gets a git repository, and where its token goes.
+- [Repositories](repositories.md): why every department keeps its work in a git repository, how it gets one or has Hornhoof create it, and where its token goes.
 - [Tests and heavy work on free machines](free-machines.md): where tests run, which machines take them, and what happens when a machine goes away.
 - [Updates](updates.md): how a new version arrives, how to go back, and how to take back a public link after an update went back.
