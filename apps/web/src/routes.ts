@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type Route =
-  | { kind: 'map' | 'subscriptions' | 'improvements' | 'outbound' | 'versions' | 'profile' | 'settings' | 'about' | 'unavailable' }
+  | { kind: 'map' | 'subscriptions' | 'improvements' | 'outbound' | 'versions' | 'profile' | 'settings' | 'about' | 'theme' | 'unavailable' }
   | { kind: 'tasks'; id?: string; personId?: string }
   | { kind: 'people' | 'machines'; id?: string }
   | { kind: 'department'; id: string }
@@ -10,7 +10,7 @@ export type Route =
 const PATHS = {
   map: '', tasks: 'tasks', people: 'people', department: 'departments', subscriptions: 'subscriptions',
   machines: 'machines', improvements: 'improvements', outbound: 'outbound', versions: 'versions', profile: 'profile',
-  settings: 'settings', about: 'about', invite: 'invite', unavailable: 'not-found',
+  settings: 'settings', about: 'about', theme: 'theme', invite: 'invite', unavailable: 'not-found',
 } as const;
 const validId = (id: string): boolean => /^[A-Za-z0-9_-]+$/.test(id);
 const unavailable = (): Route => ({ kind: 'unavailable' });

@@ -102,8 +102,8 @@ describe('a theme template', () => {
     '@import "x"',
     '#fff\u0000',
     '#fff\n',
-    '‮#fff',
-    '#fff​',
+    '\u202e#fff',
+    '#fff\u200b',
   ])('refuses code in a colour: %j', value => {
     expect(refusal({ ...MINIMAL, colors: { bg: value } })).toEqual({ code: 'unsafe', key: 'colors.bg' });
   });

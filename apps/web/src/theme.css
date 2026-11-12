@@ -1,4 +1,6 @@
-/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. */
+/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. A theme sets
+   only these tokens: colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay
+   the same in every theme. src/theme-template.ts holds the same values for the samples it gives out. */
 :root {
   --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #A9B7C5;
   --ink: #0F1B27; --muted: #4C5A68;
@@ -10,6 +12,7 @@
   --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
   --f-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --f-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --cut-k: 1;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -32,6 +35,29 @@
   --red: #FF6B6B; --on-red: #2A0606;
   --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
   --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+/* Matrix: phosphor green on near black, square frames. Roles leave green so they stay apart. */
+:root[data-theme="matrix"] {
+  --bg: #050A06; --surface: #0A130D; --surface2: #101D14; --line: #1E3525; --line2: #4A7856;
+  --ink: #D4F7DC; --muted: #84B390;
+  --p-claude: #F08A66; --p-kimi: #639EFF; --p-glm: #8F97FF; --p-antigravity: #6EE08E;
+  --cyan: #00E05A; --cyan-ink: #66FF99; --amber: #E5B82E; --amber-ink: #F5CD56; --pink: #F25C9A; --pink-ink: #FF8AB8; --ok: #42DEC2;
+  --red: #FF5247; --on-red: #260402;
+  --idle: #1B3021; --dot: rgba(82, 224, 128, .16); --glow: rgba(0, 224, 90, .14);
+  --btn: #00E05A; --on-btn: #021C0B; --hud: rgba(8, 16, 11, .88); --shadow: rgba(0, 0, 0, .62);
+  --cut-k: 0;
+  color-scheme: dark;
+}
+/* Cyberpunk: deep violet night with neon cyan lines and links, a yellow main button and magenta attention. */
+:root[data-theme="cyberpunk"] {
+  --bg: #0B0720; --surface: #140D33; --surface2: #1C1342; --line: #33275E; --line2: #7E6BC4;
+  --ink: #F5F0FF; --muted: #B9AEE0;
+  --p-claude: #FF9A73; --p-kimi: #73A9FF; --p-glm: #A3A9FF; --p-antigravity: #6FE592;
+  --cyan: #00E5FF; --cyan-ink: #5CF0FF; --amber: #FF9E2C; --amber-ink: #FFB866; --pink: #FF2BD6; --pink-ink: #FF7AE5; --ok: #3DFFA8;
+  --red: #FF4766; --on-red: #1A0008;
+  --idle: #2A1F55; --dot: rgba(0, 229, 255, .14); --glow: rgba(255, 43, 214, .16);
+  --btn: #FCEE0A; --on-btn: #1A1400; --hud: rgba(17, 11, 43, .86); --shadow: rgba(0, 0, 0, .6);
   color-scheme: dark;
 }
 
@@ -62,7 +88,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
   position: relative;
   padding: 1px;
   background: var(--line);
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k)));
 }
 .edge > .edge-in { height: 100%; background: var(--surface); clip-path: inherit; }
 .edge.accent { background: var(--cyan); }
@@ -75,7 +101,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
   border: 0; cursor: pointer;
   background: var(--btn); color: var(--on-btn);
   font-family: var(--f-display); font-size: 14px; font-weight: 600;
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k)));
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
@@ -341,6 +367,16 @@ select:disabled { opacity: .55; }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* The themes two by two, so the longest name keeps its line in the narrow account menu. */
+.seg.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.seg.themes button:nth-child(odd) { margin-left: 0; }
+.seg.themes button:nth-child(n+3) { margin-top: -1px; }
+/* The custom theme template: what it is, whether one is on, and its three actions. The load button is a label around a
+   hidden file field, so the field's focus shows on the label. */
+.theme-template { display: grid; gap: 10px; }
+.theme-template > p { margin: 0; font-size: 13px; }
+.theme-template a.btn { text-decoration: none; }
+.theme-load:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .body { position: absolute; inset: 0; overflow: auto; }
 /* A page scrolls under the floating header, so a band in the page's own color stays at the top of what scrolls, as tall
    as the header and the gap above it: text never shows around the glass blocks. It takes no room from the page. */
@@ -1371,7 +1407,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tview .tv-in > svg { display: block; flex: none; }
 /* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
 .tview .tv-labs .dept-chip { position: absolute; }
-.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
@@ -1452,7 +1488,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tview .lgd-l li { display: flex; align-items: center; gap: 8px; }
 .tview .lgd-l svg { flex: none; width: 34px; height: 16px; overflow: visible; }
 .tview .tv-card { position: absolute; z-index: 12; width: 340px; filter: drop-shadow(0 14px 28px var(--shadow)); }
-.tview .tv-card-edge { --cut: 12px; padding: 1px; background: var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tview .tv-card-edge { --cut: 12px; padding: 1px; background: var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
 .tview .tv-card-in { position: relative; display: grid; gap: 10px; max-height: 470px; overflow: auto; padding: 14px 16px 16px; background: var(--surface); border-top: 2px solid var(--cyan); clip-path: inherit; }
 .tview .tv-card h4 { padding-right: 34px; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
 .tview .tv-card h4 b { color: var(--cyan-ink); }

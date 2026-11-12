@@ -62,7 +62,7 @@ describe('choosing a theme', () => {
     renderShell();
     const dialog = await openTemplateWindow(user, { account: 'Аккаунт', item: 'Свой шаблон…', title: 'Свой шаблон' });
     await user.upload(within(dialog).getByLabelText('Загрузить шаблон'), file(JSON.stringify(NEON)));
-    expect(await within(dialog).findByText('Включен ваш шаблон «Neon».')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Загружен ваш шаблон «Neon».')).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: 'Выгрузить шаблон' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Сбросить шаблон' })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Готово' }));
@@ -83,7 +83,7 @@ describe('a custom template', () => {
     expect(within(dialog).getByText('No template is loaded. A built-in theme is on.')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Reset template' })).not.toBeInTheDocument();
     await user.upload(within(dialog).getByLabelText('Load template'), file(JSON.stringify(NEON)));
-    expect(await within(dialog).findByText('Your template "Neon" is on.')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
     expect(root.dataset.theme).toBe('cyberpunk');
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#010203');
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
@@ -93,6 +93,18 @@ describe('a custom template', () => {
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('');
     await user.click(screen.getByRole('button', { name: 'Custom template' }));
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#010203');
+  });
+
+  it('opens at its own address like the other account windows, and Escape closes it back to the account button', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const dialog = await openTemplateWindow(user);
+    expect(location.pathname).toBe('/theme');
+    expect(dialog).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(location.pathname).toBe('/');
+    expect(screen.getByRole('button', { name: 'Account' })).toHaveFocus();
   });
 
   it('explains in plain words why a file was refused, and keeps the theme', async () => {
@@ -112,7 +124,7 @@ describe('a custom template', () => {
     await user.upload(load, file(' '.repeat(TEMPLATE_LIMIT + 1)));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('The file is too large. A template takes up to 64 KB.');
     await user.upload(load, file(JSON.stringify(NEON)));
-    expect(await within(dialog).findByText('Your template "Neon" is on.')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
     expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -167,7 +179,7 @@ describe('a custom template', () => {
     expect(root.dataset.theme).toBe('matrix');
     expect(within(dialog).getByRole('link', { name: 'Download template' })).toHaveAttribute('download', 'hornhoof-theme-matrix.json');
     await user.upload(within(dialog).getByLabelText('Load template'), file(JSON.stringify(NEON)));
-    expect(await within(dialog).findByText('Your template "Neon" is on.')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Custom template' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -1,4 +1,5 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
+import type { TemplateError } from '../theme-template';
 import type { EmployeeStatus, FailureKind } from '../types';
 import { plural } from './plural';
 
@@ -156,9 +157,39 @@ export const en = {
     theme: 'Theme',
     light: 'Light',
     dark: 'Dark',
+    matrix: 'Matrix',
+    cyberpunk: 'Cyberpunk',
+    custom: 'Custom template',
     language: 'Language',
     logOut: 'Log out',
     version: (v: string) => `Version ${v}`,
+  },
+  /* A theme template of a person's own, kept in this browser: loaded from a JSON file, downloaded as a sample, reset. */
+  themeTemplate: {
+    menu: 'Custom template…',
+    title: 'Custom template',
+    look: 'Look',
+    about: 'A theme template is kept in a JSON file. It changes only colors, fonts and corner cuts, and the layout stays the same. Download the theme that is on as a sample, change its values and load it back.',
+    loaded: (name: string) => (name ? `Your template "${name}" is loaded.` : 'Your template is loaded.'),
+    none: 'No template is loaded. A built-in theme is on.',
+    load: 'Load template',
+    download: 'Download template',
+    reset: 'Reset template',
+    errors: {
+      too_large: () => 'The file is too large. A template takes up to 64 KB.',
+      not_json: () => 'This file is not JSON. Download a template as a sample and change its values.',
+      not_template: () => 'This is not a Hornhoof theme template: it needs "format": "hornhoof-theme" and "version": 1. Download a template as a sample and change its values.',
+      unknown_key: (key: string) => `${key}: a template has no such field. It changes only colors, fonts and corner cuts.`,
+      not_object: (key: string) => `${key}: write it as a group of values in curly braces, as in the sample.`,
+      bad_base: () => 'base: name one of the built-in themes: light, dark, matrix or cyberpunk.',
+      bad_scheme: () => 'scheme: write light or dark.',
+      bad_name: () => 'name: write the name as text of up to 60 characters.',
+      unsafe: (key: string) => `${key}: this looks like code. Links such as url(), expressions, tags and control characters are not allowed.`,
+      bad_color: (key: string) => `${key}: this is not a color. Write it as #RRGGBB or rgba(0, 0, 0, 0.5).`,
+      bad_font: (key: string) => `${key}: write a list of up to 6 font names in Latin letters, digits, spaces and hyphens that ends with a common family such as sans-serif or monospace.`,
+      bad_cut: () => 'cut: the corner cut is a number from 0 to 1.5.',
+      read_failed: () => 'The file could not be read. Try again or pick another file.',
+    } satisfies Record<TemplateError['code'] | 'read_failed', (key: string) => string>,
   },
   map: {
     leaders: 'Company leaders',

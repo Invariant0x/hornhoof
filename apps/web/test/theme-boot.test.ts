@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { IndexHtmlTransformHook, Plugin } from 'vite';
-import { bundleThemeBoot, themeBoot } from '../theme-boot-plugin';
+import { bundleThemeBoot, themeBoot } from '../vite.config';
 import { COLOR_TOKENS } from '../src/theme-template';
 
 const root = document.documentElement;
