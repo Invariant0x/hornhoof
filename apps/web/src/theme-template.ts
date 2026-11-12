@@ -149,58 +149,85 @@ function isFontList(value: unknown): value is string[] {
   return value.every(known) && GENERIC.includes(value[value.length - 1] as string);
 }
 
-const fail = (code: TemplateError['code'], key?: string): Parsed => ({ ok: false, error: key === undefined ? { code } : { code, key } });
+const problem = (code: TemplateError['code'], key?: string): TemplateError => (key === undefined ? { code } : { code, key });
+const fail = (code: TemplateError['code']): Parsed => ({ ok: false, error: problem(code) });
 
-/* Reads one section of named values: every key known, every value safe and of its form. */
-function section<T>(raw: unknown, name: string, roles: readonly string[], valid: (value: unknown) => value is T, bad: TemplateError['code']): { values: Record<string, T> } | Parsed {
-  if (raw === undefined) return { values: {} };
-  if (!isObject(raw)) return fail('not_object', name);
-  const values: Record<string, T> = {};
-  for (const key of Object.keys(raw)) {
-    const value = raw[key];
-    if (!roles.includes(key)) return fail('unknown_key', `${name}.${key}`);
-    if (unsafe(value) || (Array.isArray(value) && value.some(unsafe))) return fail('unsafe', `${name}.${key}`);
-    if (!valid(value)) return fail(bad, `${name}.${key}`);
-    values[key] = Array.isArray(value) ? ([...value] as T) : value;
-  }
-  return { values };
+/* One value of a section: a known role, nothing that looks like code, and the form of its kind. */
+function checkValue(name: string, key: string, value: unknown, roles: readonly string[], valid: (value: unknown) => boolean, bad: TemplateError['code']): TemplateError | null {
+  const where = `${name}.${key}`;
+  if (!roles.includes(key)) return problem('unknown_key', where);
+  if (unsafe(value) || (Array.isArray(value) && value.some(unsafe))) return problem('unsafe', where);
+  return valid(value) ? null : problem(bad, where);
 }
 
-function readName(raw: unknown): string | Parsed {
-  if (raw === undefined) return '';
-  if (typeof raw !== 'string') return fail('bad_name');
-  if (unsafe(raw)) return fail('unsafe', 'name');
-  return raw.length > NAME_LIMIT ? fail('bad_name') : raw;
+/* A section of named values, such as colors: left out, or an object whose every value passes. */
+function checkSection(raw: unknown, name: string, roles: readonly string[], valid: (value: unknown) => boolean, bad: TemplateError['code']): TemplateError | null {
+  if (raw === undefined) return null;
+  if (!isObject(raw)) return problem('not_object', name);
+  for (const key of Object.keys(raw)) {
+    const found = checkValue(name, key, raw[key], roles, valid, bad);
+    if (found) return found;
+  }
+  return null;
+}
+
+function checkName(name: unknown): TemplateError | null {
+  if (name === undefined) return null;
+  if (typeof name !== 'string') return problem('bad_name');
+  if (unsafe(name)) return problem('unsafe', 'name');
+  return name.length > NAME_LIMIT ? problem('bad_name') : null;
 }
 
 const isCut = (raw: unknown): raw is number => typeof raw === 'number' && raw >= CUT_RANGE.min && raw <= CUT_RANGE.max;
+const isScheme = (raw: unknown): raw is Scheme => raw === 'light' || raw === 'dark';
+
+/* The checks of a template in the order a person reads it; the first that fails says what is wrong. */
+type Raw = Record<string, unknown>;
+const CHECKS: ((raw: Raw) => TemplateError | null)[] = [
+  raw => {
+    const extra = Object.keys(raw).find(key => !TOP_KEYS.includes(key));
+    return extra === undefined ? null : problem('unknown_key', extra);
+  },
+  raw => checkName(raw.name),
+  raw => (isBuiltinTheme(raw.base) ? null : problem('bad_base')),
+  raw => (raw.scheme === undefined || isScheme(raw.scheme) ? null : problem('bad_scheme')),
+  raw => checkSection(raw.colors, 'colors', Object.keys(COLOR_TOKENS), isColor, 'bad_color'),
+  raw => checkSection(raw.fonts, 'fonts', Object.keys(FONT_TOKENS), isFontList, 'bad_font'),
+  raw => (raw.cut === undefined || isCut(raw.cut) ? null : problem('bad_cut')),
+];
+
+const NOT_JSON = Symbol('not JSON');
+function readJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return NOT_JSON;
+  }
+}
+
+/* A copy of a section that passed its checks, so nothing outside keeps a hold on the template. */
+const copied = <T>(section: unknown): T => Object.fromEntries(Object.entries(isObject(section) ? section : {}).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value])) as T;
+
+/* The template of a file that passed every check. */
+function templateOf(raw: Raw): Template {
+  const template: Template = { name: typeof raw.name === 'string' ? raw.name : '', base: raw.base as BuiltinTheme, colors: copied(raw.colors), fonts: copied(raw.fonts) };
+  if (isScheme(raw.scheme)) template.scheme = raw.scheme;
+  if (isCut(raw.cut)) template.cut = raw.cut;
+  return template;
+}
 
 /* Reads a template file strictly: a value is taken only when it is known, safe and of its form, and the first one that is
    not names what is wrong. */
 export function parseTemplate(text: string): Parsed {
   if (text.length > TEMPLATE_LIMIT) return fail('too_large');
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return fail('not_json');
-  }
+  const raw = readJson(text);
+  if (raw === NOT_JSON) return fail('not_json');
   if (!isObject(raw) || raw.format !== FORMAT || raw.version !== VERSION) return fail('not_template');
-  const extra = Object.keys(raw).find(key => !TOP_KEYS.includes(key));
-  if (extra !== undefined) return fail('unknown_key', extra);
-  const name = readName(raw.name);
-  if (typeof name !== 'string') return name;
-  if (!isBuiltinTheme(raw.base)) return fail('bad_base');
-  if (raw.scheme !== undefined && raw.scheme !== 'light' && raw.scheme !== 'dark') return fail('bad_scheme');
-  const colors = section(raw.colors, 'colors', Object.keys(COLOR_TOKENS), isColor, 'bad_color');
-  if (!('values' in colors)) return colors;
-  const fonts = section(raw.fonts, 'fonts', Object.keys(FONT_TOKENS), isFontList, 'bad_font');
-  if (!('values' in fonts)) return fonts;
-  if (raw.cut !== undefined && !isCut(raw.cut)) return fail('bad_cut');
-  const template: Template = { name, base: raw.base, colors: colors.values, fonts: fonts.values };
-  if (raw.scheme !== undefined) template.scheme = raw.scheme;
-  if (raw.cut !== undefined) template.cut = raw.cut;
-  return { ok: true, template };
+  for (const check of CHECKS) {
+    const found = check(raw);
+    if (found) return { ok: false, error: found };
+  }
+  return { ok: true, template: templateOf(raw) };
 }
 
 /* A whole template of a built-in theme, every value written out, to start a custom one from. */
