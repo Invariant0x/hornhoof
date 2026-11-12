@@ -27,7 +27,7 @@ function page(routes: Record<string, unknown> = {}, language = 'en') {
   const calls = mockApi({
     'GET /api/org': [200, ORG],
     'GET /api/feedback': [200, { inbox: false }],
-    'POST /api/feedback/preview': (body: Body) => previewOf(body),
+    'POST /api/feedback/preview': (body: unknown) => previewOf(body as Body),
     'POST /api/feedback': [200, { sent: true }],
     ...(routes as Record<string, [number, unknown]>),
   });

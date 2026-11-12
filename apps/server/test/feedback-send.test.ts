@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, improvements, machines, people } from '../src/db/schema.js';
+import { agents, companies, departments, improvements, machines, people } from '../src/db/schema.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
 
@@ -86,8 +86,9 @@ describe('sending feedback to Hornhoof developers', () => {
   });
 
   it('lets anyone in the company send, not only who sees all of it', async () => {
-    const { app, ceo, relay, preview, send } = await installation();
-    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [] } });
+    const { app, db, acme, ceo, relay, preview, send } = await installation();
+    const [dev] = await db.insert(departments).values({ companyId: acme.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
     const idea = { kind: 'idea', title: 'Dark map', text: '' };
     const { digest } = (await preview(idea, dana)).json();
     expect((await send({ ...idea, digest }, dana)).statusCode).toBe(200);

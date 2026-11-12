@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { feedbackInbox } from '../src/db/schema.js';
+import { companies, departments, feedbackInbox } from '../src/db/schema.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -26,7 +26,7 @@ async function inbox(env: NodeJS.ProcessEnv = { FEEDBACK_INBOX: 'true' }) {
   let now = Date.parse('2026-11-12T12:00:00Z');
   app.ctx.clock = () => now;
   const later = (ms: number) => (now += ms);
-  const receive = (payload: unknown) => app.inject({ method: 'POST', url: '/api/feedback/inbound', payload: payload as object });
+  const receive = (payload: unknown) => app.inject({ method: 'POST', url: '/api/feedback/inbound', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
   const cards = async (token = ceo) => (await app.inject({ url: '/api/feedback/inbox', ...as(token) })).json().cards;
   return { app, db, relay, ceo, receive, cards, later };
 }
@@ -40,7 +40,7 @@ describe('the inbox of Hornhoof developers', () => {
   });
 
   it('takes a report without a session and lists it for people who see the whole company', async () => {
-    const { app, ceo, receive, cards } = await inbox();
+    const { app, db, ceo, receive, cards } = await inbox();
     expect((await app.inject({ url: '/api/feedback', ...as(ceo) })).json()).toEqual({ inbox: true });
     const taken = await receive(report());
     expect([taken.statusCode, taken.json()]).toEqual([202, { received: true }]);
@@ -61,12 +61,13 @@ describe('the inbox of Hornhoof developers', () => {
         issue: null,
       },
     ]);
-    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [] } });
+    const [dev] = await db.insert(departments).values({ companyId: (await db.select().from(companies))[0]!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
     expect((await app.inject({ url: '/api/feedback/inbox', ...as(dana) })).statusCode).toBe(403);
   });
 
   it('refuses a report of another shape and stores nothing of it', async () => {
-    const { db, receive } = await inbox();
+    const { app, db, receive } = await inbox();
     const wrong = [
       { ...report(), v: 2 },
       { ...report(), kind: 'complaint' },
@@ -80,6 +81,8 @@ describe('the inbox of Hornhoof developers', () => {
       'just text',
     ];
     for (const payload of wrong) expect((await receive(payload)).statusCode).toBe(400);
+    const plain = await app.inject({ method: 'POST', url: '/api/feedback/inbound', headers: { 'content-type': 'text/plain' }, payload: 'just text' });
+    expect(plain.statusCode).toBe(400);
     expect(await db.select().from(feedbackInbox)).toEqual([]);
   });
 
@@ -92,7 +95,7 @@ describe('the inbox of Hornhoof developers', () => {
 
   it('keeps what came as plain text, cleaned once more, without control characters', async () => {
     const { receive, cards } = await inbox();
-    await receive(report({ title: 'Click <script>alert(1)</script> [here](javascript:alert(1))', text: 'Key ghp_0123456789abcdefghijABCDEFGHIJ012345\u0007 and‮ mail ivan@acme.example\nnext line' }));
+    await receive(report({ title: 'Click <script>alert(1)</script> [here](javascript:alert(1))', text: 'Key ghp_0123456789abcdefghijABCDEFGHIJ012345\u0007 and\u202e mail ivan@acme.example\nnext line' }));
     const [card] = await cards();
     expect(card.title).toBe('Click <script>alert(1)</script> [here](javascript:alert(1))');
     expect(card.text).toBe('Key [secret] and mail [email]\nnext line');
@@ -107,7 +110,7 @@ describe('the inbox of Hornhoof developers', () => {
     await receive(report({ installation: installationId(2), title: 'Terminal froze after update 19', facts: { version: '0.18.11', platform: ['darwin arm64'], errorCode: null } }));
     later(1000);
     await receive(report({ kind: 'idea', title: 'Terminal froze after update 18' }));
-    const [idea, bug] = (await cards()).sort((a: { kind: string }, b: { kind: string }) => a.kind.localeCompare(b.kind));
+    const [bug, idea] = (await cards()).sort((a: { kind: string }, b: { kind: string }) => a.kind.localeCompare(b.kind));
     expect(bug).toMatchObject({ kind: 'bug', title: 'Terminal froze after update 18', signals: 3, installations: 2, versions: ['0.18.11', '0.18.9'], platforms: ['darwin arm64', 'linux x64'], firstAt: '2026-11-12T12:00:00.000Z', lastAt: '2026-11-12T12:00:02.000Z' });
     expect(idea).toMatchObject({ kind: 'idea', signals: 1, installations: 1 });
   });

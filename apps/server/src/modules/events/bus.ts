@@ -30,6 +30,8 @@ export type StreamMessage =
   | { type: 'notebook'; spot: Spot }
   /* What employees found to improve changed; it goes to people who see the whole company. */
   | { type: 'improvements'; spot: Spot }
+  /* The feedback inbox of Hornhoof's own installation changed; it goes to people who see the whole company. */
+  | { type: 'feedback'; spot: Spot }
   /* A department's list of work kept for later turns changed; its people fetch it again. */
   | { type: 'backlog'; spot: Spot }
   /* How full an agent's context is now, for the bar on the map, which everyone sees. */

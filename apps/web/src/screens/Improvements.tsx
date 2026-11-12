@@ -6,6 +6,7 @@ import { useOrg } from '../org';
 import { placeName } from '../tasks';
 import type { Improvement, ImprovementParts, Org } from '../types';
 import { Markdown } from '../ui/Markdown';
+import { Feedback } from './Feedback';
 
 function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
   const t = useT();
@@ -62,11 +63,14 @@ function Case({ parts }: { parts: ImprovementParts }) {
 }
 
 /* One thing to improve: what it is, who found it and how often, the orchestrator's word on it, and for one that waits,
-   taking it into work or setting it aside. One filed as one text shows that text. */
-function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | null; onChanged: () => void; onTask: (taskId: string) => void }) {
+   taking it into work or setting it aside. A finding about Hornhoof itself is sent to Hornhoof's developers instead, except
+   on Hornhoof's own installation (inbox), whose work it is. One filed as one text shows that text. */
+function Item({ item, org, inbox, onChanged, onTask }: { item: Improvement; org: Org | null; inbox: boolean; onChanged: () => void; onTask: (taskId: string) => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const [sending, setSending] = useState(false);
+  const elsewhere = item.scope === 'platform' && !inbox;
 
   async function decide(how: 'take' | 'dismiss') {
     setBusy(true);
@@ -87,8 +91,10 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
         <h3 id={`imp-${item.id}`}>{item.title}</h3>
         <p className="imp-meta">
           <span>{who}</span>
+          {item.scope === 'platform' && <span className="badge imp-platform">{t.improvements.platform}</span>}
           {item.seen > 1 && <span>{t.improvements.seen(item.seen)}</span>}
           {item.status === 'taken' && item.decidedBy && <span>{t.improvements.takenBy(item.decidedBy)}</span>}
+          {item.status === 'sent' && item.decidedBy && <span>{t.improvements.sentBy(item.decidedBy)}</span>}
         </p>
       </header>
       {item.parts ? (
@@ -106,15 +112,29 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
       <TaskLinks item={item} onTask={onTask} />
       {item.status === 'open' && (
         <div className="req-actions">
-          <button className="btn small" type="button" disabled={busy} onClick={() => void decide('take')}>
-            {t.improvements.take}
-          </button>
+          {elsewhere ? (
+            <button className="btn small" type="button" disabled={busy} onClick={() => setSending(true)}>
+              {t.improvements.send}
+            </button>
+          ) : (
+            <button className="btn small" type="button" disabled={busy} onClick={() => void decide('take')}>
+              {t.improvements.take}
+            </button>
+          )}
           <button className="btn small ghost" type="button" disabled={busy} onClick={() => void decide('dismiss')}>
             {t.improvements.dismiss}
           </button>
         </div>
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {sending && (
+        <Feedback
+          inbox={inbox}
+          start={{ kind: item.code ? 'bug' : 'improvement', title: item.title, text: item.text, improvement: item.id }}
+          onClose={() => setSending(false)}
+          onSent={onChanged}
+        />
+      )}
     </article>
   );
 }
@@ -125,19 +145,19 @@ function ofStatus(improvements: Improvement[] | undefined, status: Improvement['
   return improvements?.filter(item => item.status === status) ?? [];
 }
 
-export function Improvements({ improvements, failure, onChanged, onTask, onHome }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void; onTask: (taskId: string) => void; onHome?: () => void }) {
+export function Improvements({ improvements, failure, inbox, onChanged, onTask, onHome }: { improvements: Improvement[] | undefined; failure: unknown; inbox: boolean; onChanged: () => void; onTask: (taskId: string) => void; onHome?: () => void }) {
   const t = useT();
   const { org } = useOrg();
   const of = (status: Improvement['status']) => ofStatus(improvements, status);
   const list = (items: Improvement[]) => (
     <div className="imps">
       {items.map(i => (
-        <Item key={i.id} item={i} org={org} onChanged={onChanged} onTask={onTask} />
+        <Item key={i.id} item={i} org={org} inbox={inbox} onChanged={onChanged} onTask={onTask} />
       ))}
     </div>
   );
   const open = of('open');
-  const later = (['taken', 'done'] as const).filter(s => of(s).length);
+  const later = (['taken', 'done', 'sent'] as const).filter(s => of(s).length);
   const dismissed = of('dismissed');
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
 

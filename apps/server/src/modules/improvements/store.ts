@@ -2,12 +2,13 @@ import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, improvements, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
+import { agents, departments, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import type { Tx } from '../tasks/engine.js';
 
 export type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
+export type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];
 /* How many closed ones are listed; every one that waits or is in work is. */
 const CLOSED_LISTED = 200;
 const ACTIVE: readonly ImprovementStatus[] = ['open', 'taken'];
@@ -64,6 +65,8 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, 
     parts: i.parts ?? null,
     seen: i.seen,
     status: i.status,
+    scope: i.scope,
+    code: i.code,
     result: i.result,
     at: i.createdAt.toISOString(),
     updatedAt: i.updatedAt.toISOString(),
@@ -99,10 +102,19 @@ export async function moveImprovement(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: s
   return moved;
 }
 
-/* Planning may take an open improvement only in the run answering a person. A taken one keeps its original decision. */
-export async function takeForPlanning(db: Db | Tx, companyId: string, id: string, personId: string | null): Promise<void> {
-  const [current] = await db.select({ status: improvements.status }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
+/* A finding about Hornhoof itself goes into the work of Hornhoof's own installation alone. Elsewhere a person sends it to
+   Hornhoof's developers from Improvements, as no company's work can change Hornhoof. */
+export function requireOwnWork(improvement: { scope: ImprovementScope }, home: boolean): void {
+  if (improvement.scope === 'platform' && !home)
+    throw new ApiError(409, 'conflict', "This is about Hornhoof itself, so it goes to Hornhoof's developers: the CEO sends it from Improvements.", 'improvement_platform_elsewhere');
+}
+
+/* Planning may take an open improvement only in the run answering a person. A taken one keeps its original decision.
+   home: this is Hornhoof's own installation. */
+export async function takeForPlanning(db: Db | Tx, companyId: string, id: string, personId: string | null, home: boolean): Promise<void> {
+  const [current] = await db.select({ status: improvements.status, scope: improvements.scope }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
   if (!current) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+  requireOwnWork(current, home);
   if (current.status === 'taken') return;
   if (current.status !== 'open') throw new ApiError(409, 'conflict', `This improvement is ${current.status} already.`, 'improvement_decided');
   if (!personId) throw new ApiError(403, 'forbidden', "This run has no person's instruction to take an improvement.", 'improvement_not_requested');

@@ -24,6 +24,11 @@ describe('cleaning a report before it leaves', () => {
     for (const key of keys) expect(hidden(`The run failed with ${key} in its log.`)).toBe('The run failed with [secret] in its log.');
   });
 
+  it('hides a key too short to look like one by its prefix alone', () => {
+    for (const key of ['ghp_A1b2C3d4E5f6G7h8I9j0', 'github_pat_A1b2C3d4E5f6G7h8I9j0', 'sk-ant-A1b2C3d4E5f6G7h8', 'glpat-A1b2C3d4E5f6G7h8', 'xoxb-1234-5678-abcd'])
+      expect(hidden(`token ${key} leaked`), key).toBe('token [secret] leaked');
+  });
+
   it('hides what follows a bearer, a password or a key named in a setting, and keeps the name', () => {
     expect(hidden('Authorization: Bearer abc.DEF-123_456')).toBe('Authorization: Bearer [secret]');
     expect(hidden('password=hunter2 and then')).toBe('password=[secret] and then');

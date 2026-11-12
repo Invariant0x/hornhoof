@@ -35,8 +35,12 @@ export type Config = {
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
   templatesDir: string;
-  /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+  /* The service that hands out public links like acme.hornhoof.org and relays them to this server. It also passes the
+     feedback of every installation on to Hornhoof's developers. */
   relayUrl: string;
+  /* This is Hornhoof's own installation: it keeps the inbox the feedback of every installation comes to, turns its cards
+     into GitHub issues and takes findings about Hornhoof itself into its own work. Every other one sends them on. */
+  feedbackInbox: boolean;
   /* Where the Telegram Bot API answers; tests put a stand-in here. */
   telegramApiUrl: string;
   /* The tunnel container's host name: only requests from it may say they came in over https. */
@@ -86,6 +90,7 @@ const Env = z.object({
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+  FEEDBACK_INBOX: z.preprocess(unset, z.enum(['true', 'false'], { error: 'FEEDBACK_INBOX must be true or false.' }).optional()),
   TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
@@ -141,6 +146,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+    feedbackInbox: set.FEEDBACK_INBOX === 'true',
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,

@@ -67,11 +67,13 @@ import type { Db } from './db/client.js';
 
 import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
+import { openIssueOnGitHub, type IssueCreator } from './modules/feedback/github-issue.js';
+import { feedbackRoutes } from './modules/feedback/routes.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; createRepository?: RepositoryCreator; templates?: Templates };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; createRepository?: RepositoryCreator; createIssue?: IssueCreator; clock?: () => number; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -83,6 +85,10 @@ export type Ctx = Deps & {
   markCommit: CommitMarker;
   /* Creates a repository on a git host with a key the company saved. */
   createRepository: RepositoryCreator;
+  /* Opens an issue on GitHub with a key the company saved, for a card of the feedback inbox. */
+  createIssue: IssueCreator;
+  /* The time limits are counted on, which tests move. */
+  clock: () => number;
   log: FastifyBaseLogger;
   hub: NodeHub;
   bus: EventBus;
@@ -108,7 +114,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, createRepository: createOnGitHub(), ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, createRepository: createOnGitHub(), createIssue: openIssueOnGitHub(), clock: Date.now, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
@@ -170,6 +176,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   notebookRoutes(app, ctx);
   briefingRoutes(app, ctx);
   improvementRoutes(app, ctx);
+  feedbackRoutes(app, ctx);
   backlogRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);

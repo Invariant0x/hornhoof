@@ -270,7 +270,7 @@ export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: s
       .values({ companyId, number: last + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', mode: input.mode, messages, createdByAgentId: agentId })
       .returning();
     const planned = await insertPlanned(tx, companyId, { agentId }, turn!.id, items, input.improvement);
-    if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by));
+    if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by), ctx.config.feedbackInbox);
     const opened = await openNext(ctx, tx, companyId);
     return { turn: opened?.turn ?? turn!, planned, opened, taken };
   });
@@ -305,7 +305,7 @@ export async function addTasks(ctx: Ctx, by: By, number: number, items: PlanItem
     const taken = await takeBacklog(tx, companyId, backlog);
     const [kept] = said.length ? await tx.update(turns).set({ messages: [...turn.messages, ...said] }).where(eq(turns.id, turn.id)).returning() : [turn];
     const planned = await insertPlanned(tx, companyId, { agentId }, turn.id, placed, improvement);
-    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by));
+    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by), ctx.config.feedbackInbox);
     const started: Started[] = [];
     if (turn.status === 'open') for (const task of planned) {
       const s = await start(tx, task);

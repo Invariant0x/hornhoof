@@ -325,6 +325,7 @@ describe('improvements', () => {
     const versions = screen.getByRole('button', { name: 'Versions' });
     const profile = screen.getByRole('button', { name: 'Settings' });
     const companySettings = screen.getByRole('button', { name: 'Company settings' });
+    const feedback = screen.getByRole('button', { name: 'Feedback' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
     /* Before Improvements: the four themes, the custom template window, the two languages and Outbound. */
@@ -336,6 +337,8 @@ describe('improvements', () => {
     expect(profile).toHaveFocus();
     await user.tab();
     expect(companySettings).toHaveFocus();
+    await user.tab();
+    expect(feedback).toHaveFocus();
     await user.tab();
     expect(about).toHaveFocus();
     await user.tab();

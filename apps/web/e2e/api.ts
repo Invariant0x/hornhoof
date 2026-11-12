@@ -57,7 +57,7 @@ export const detail = (task: TaskLine): TaskDetail => ({
 const IMPROVEMENT: Improvement = {
   id: 'i1', title: 'Check card numbers before sending them', text: 'The card form sends numbers the bank turns down.', seen: 2, status: 'taken',
   result: 'Made a task for it.', at: '2026-10-30T08:00:00.000Z', updatedAt: '2026-10-30T09:00:00.000Z', agent: { id: 'b1', name: 'Bruno' },
-  department: DEV, decidedBy: 'Ivan', tasks: [{ id: 't3', number: 3, title: 'Checkout step 3' }], parts: null,
+  department: DEV, decidedBy: 'Ivan', tasks: [{ id: 't3', number: 3, title: 'Checkout step 3' }], parts: null, scope: 'company', code: null,
 };
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
