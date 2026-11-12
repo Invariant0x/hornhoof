@@ -77,7 +77,7 @@ export type PeerLinkOptions = {
 
 const sameSerials = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
-function readHeldCrl(dir: string): HeldCrl | null {
+export function readHeldCrl(dir: string): HeldCrl | null {
   try {
     const parsed = HeldCrl.safeParse(JSON.parse(readFileSync(join(dir, CRL_FILE), 'utf8')));
     return parsed.success ? parsed.data : null;

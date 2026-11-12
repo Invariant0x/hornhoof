@@ -1,11 +1,12 @@
 import { eq } from 'drizzle-orm';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { authority, certificates, companies, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { REPLICA_FILE } from '../src/modules/keeper/become.js';
+import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
 import { followFromHere, seedView } from '../src/modules/keeper/seed-view.js';
 import { PEERS_FILE } from '../src/modules/keeper/worker.js';
 import { createTestSql, TEST_SECRET } from './helpers.js';
@@ -72,6 +73,24 @@ describe('the view a machine that led builds from its own database', () => {
     expect(statSync(join(dir, PEERS_FILE)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(join(controlDir, REPLICA_FILE), 'utf8'))).toEqual({ since: '2026-11-11T12:00:00.000Z' });
     expect(statSync(join(controlDir, REPLICA_FILE)).mode & 0o777).toBe(0o644);
+  });
+
+  it('hands on the list of revoked certificates the keeper holds', async () => {
+    const d = await database();
+    const [dir, controlDir] = [mkdtempSync(join(tmpdir(), 'hh-seed-keeper-')), mkdtempSync(join(tmpdir(), 'hh-seed-control-'))];
+    onTestFinished(() => void [dir, controlDir].forEach(folder => rmSync(folder, { recursive: true, force: true })));
+    /* As the keeper that led kept it, signed by the app while it led. */
+    writeFileSync(join(dir, CRL_FILE), JSON.stringify({ serials: ['0a'], crlPem: 'the signed list' }));
+    await followFromHere({ dir, controlDir, sql: d.sql, machineId: A, secret: SECRET });
+    /* A keeper that follows opens its door to the other machines only with a signed list. With no leader in reach
+       none would come, and nobody could ask this machine anything: whether it took the server, or where it stands. */
+    expect(JSON.parse(readFileSync(join(dir, PEERS_FILE), 'utf8'))).toEqual({ ...(await seedView(d.sql, A, SECRET)), crlPem: 'the signed list' });
+    /* A machine that took the server and gave it back never led: the list it has is the one in the view it kept
+       while it followed. */
+    rmSync(join(dir, CRL_FILE));
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'kept', crlPem: 'the list of before' }));
+    await followFromHere({ dir, controlDir, sql: d.sql, machineId: A, secret: SECRET });
+    expect(JSON.parse(readFileSync(join(dir, PEERS_FILE), 'utf8'))).toEqual({ ...(await seedView(d.sql, A, SECRET)), crlPem: 'the list of before' });
   });
 
   it('names no link while a secret of it is missing', async () => {

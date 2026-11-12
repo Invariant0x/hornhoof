@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -7,6 +8,7 @@ import type { DataMachine, WorkerLink, WorkerView } from '../network/join.js';
 import { writeReplicaMarker } from './become.js';
 import type { Sql } from './lease-store.js';
 import { writePrivately } from './machine-keys.js';
+import { readHeldCrl } from './peer-link.js';
 import { PEERS_FILE } from './worker.js';
 
 const VisitSecret = z.object({ name: z.string(), key: z.string() });
@@ -45,10 +47,25 @@ export async function seedView(sql: Sql, machineId: string, secret: Buffer): Pro
   return { machine: me.id, role: me.role, authorityPem: authority?.pem ?? null, revoked: revoked.map(row => row.serial), data, link: await linkOf(sql, secret), build: null, go: null, copy: null };
 }
 
+/* The signed list in the view this machine kept while it followed before, as one that took the server and never led
+   holds no other; none when there is no such view. */
+function listBefore(path: string): string | null {
+  try {
+    const kept = (JSON.parse(readFileSync(path, 'utf8')) as { crlPem?: unknown }).crlPem;
+    return typeof kept === 'string' && kept ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
 /* A machine that led follows another from here on: its keeper writes down the network as its own database knew it,
    which the keeper that follows starts from, and the mark of a machine that keeps a copy, which its updater and its
    app read too. The keeper then ends, and starts again as one that follows. */
 export async function followFromHere(o: { dir: string; controlDir: string; sql: Sql; machineId: string; secret: Buffer; now?: () => number }): Promise<void> {
-  writePrivately(join(o.dir, PEERS_FILE), JSON.stringify(await seedView(o.sql, o.machineId, o.secret)));
+  /* With the list of revoked certificates this keeper held while it led: a keeper that follows opens its door to the
+     other machines only with a signed list, and gets a new one only from a leader. With none in reach, as when a
+     switch was given up or the leader stopped, nobody could ask this machine where it stands. */
+  const crlPem = readHeldCrl(o.dir)?.crlPem ?? listBefore(join(o.dir, PEERS_FILE));
+  writePrivately(join(o.dir, PEERS_FILE), JSON.stringify({ ...(await seedView(o.sql, o.machineId, o.secret)), ...(crlPem ? { crlPem } : {}) }));
   writeReplicaMarker(o.controlDir, o.now?.() ?? Date.now());
 }
