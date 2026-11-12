@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { agentHidden, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { limiter } from '../../auth/limit.js';
 import { requireCompanyPerson, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -39,11 +40,13 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
   const sentBy = limiter({ max: SENT_PER_HOUR, windowMs: HOUR });
 
-  /* The finding a report is sent from: one about Hornhoof itself that still waits, on an installation that sends them on. */
+  /* The finding a report is sent from: one about Hornhoof itself that still waits, on an installation that sends them on,
+     filed by an agent the person may see, as for taking it. */
   async function findingFor(me: Person, id: string | undefined) {
     if (!id) return null;
     const [found] = await db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
     if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+    if (!seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
     if (found.scope !== 'platform' || config.feedbackInbox) throw new ApiError(409, 'conflict', 'This finding is about the work of this company, so it stays here.', 'improvement_not_platform');
     if (found.status !== 'open') throw new ApiError(409, 'conflict', `This improvement is ${found.status} already.`, 'improvement_decided');
     return found;

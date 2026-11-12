@@ -4,7 +4,8 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { issueOf, openIssueOnGitHub } from '../src/modules/feedback/github-issue.js';
 import { listenIn } from '../../../test-support/ports.mjs';
-import { as, setUpCompany, testApp } from './helpers.js';
+import { companies, departments } from '../src/db/schema.js';
+import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 /* A card of the inbox becomes an issue in invariant0x/hornhoof with one press, against a GitHub of the test's own on this
    machine that answers with GitHub's own example of the answer to creating an issue (github/rest-api-description 1.1.4,
@@ -135,6 +136,18 @@ describe('turning an inbox card into an issue', () => {
     const twice = await issue(froze.id);
     expect([twice.statusCode, twice.json().error.reason]).toEqual([409, 'feedback_issued']);
     expect(hub.seen).toHaveLength(1);
+  });
+
+  it('is for people who see the whole company: anyone else is refused, and GitHub is asked nothing', async () => {
+    const { app, ceo, hub, card, saveKey } = await inbox();
+    await saveKey('invariant0x');
+    const froze = await card('Terminal froze');
+    const [dev] = await app.ctx.db.insert(departments).values({ companyId: (await app.ctx.db.select().from(companies))[0]!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
+    const refused = await app.inject({ method: 'POST', url: `/api/feedback/inbox/${froze.id}/issue`, ...as(dana) });
+    expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'company_scope_only']);
+    expect(hub.seen).toEqual([]);
+    expect((await app.inject({ url: '/api/feedback/inbox', ...as(ceo) })).json().cards[0].issue).toBeNull();
   });
 
   it('opens one issue when two people press at once', async () => {
