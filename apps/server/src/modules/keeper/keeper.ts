@@ -715,6 +715,8 @@ export class Keeper {
         },
       },
       helloMore: () => this.helloMore(),
+      /* A machine that led gives what its database held to the keeper that leads now. */
+      leds: { put: async (peer, id, body) => (this.backups ? this.backups.takeLed(peer, id, body) : 404) },
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));

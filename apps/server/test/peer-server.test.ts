@@ -349,6 +349,10 @@ describe('routeOf', () => {
     ['a beat from a worker', asked('POST', '/peer/beat'), 'peer', 'worker', db, refused(403)],
     ['a beat through the app door', asked('POST', '/peer/beat'), 'app', 'data', db, refused(403)],
     ['an ask for the next term', asked('POST', '/peer/promise'), 'peer', 'data', db, { to: 'switch', method: 'POST', path: '/peer/promise' }],
+    ['the bundle of a database that led', asked('PUT', `/peer/led/${INVOCATION}`), 'peer', 'data', db, { to: 'led', id: INVOCATION }],
+    ['such a bundle from a worker', asked('PUT', `/peer/led/${INVOCATION}`), 'peer', 'worker', db, refused(403)],
+    ['such a bundle through the app door', asked('PUT', `/peer/led/${INVOCATION}`), 'app', 'data', db, refused(403)],
+    ['such a bundle under no id', asked('PUT', '/peer/led/x'), 'peer', 'data', db, refused(404)],
     ['an ask for the next term from a worker', asked('POST', '/peer/promise'), 'peer', 'worker', db, refused(403)],
   ] as const)('%s', (_, headers, kind, role, here, route) => {
     expect(routeOf(headers, kind, role, here)).toEqual(route);

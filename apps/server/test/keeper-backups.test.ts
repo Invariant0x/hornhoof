@@ -2,18 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js';
-import { bundleRows } from '../src/modules/backups/records.js';
+import { certificates } from '../src/db/schema.js';
+import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
 import { FORK_KEEP_MS, REPORT_MAX, REPORTED_BUNDLES } from '../src/modules/backups/types.js';
 import { BackupKeeper, BUNDLE_EVERY_MS, DUMP_GAP_MS, DUMP_LIFE_MS, type Ask } from '../src/modules/keeper/backups.js';
 import { bundleSecrets } from '../src/modules/keeper/keeper.js';
 import { saveLink } from '../src/modules/link/link.js';
+import { issueCertificate } from '../src/modules/network/authority.js';
+import { authorityOf } from '../src/modules/network/store.js';
+import type { Peer } from '../src/net/peer-server.js';
 import { until } from './helpers-basic.js';
-import { backupCompany, OWN } from './helpers-backups.js';
+import { backupCompany, machineKey, OWN } from './helpers-backups.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -414,6 +419,38 @@ describe('the keeper of backups', () => {
     expect(s.wanted()).not.toBeNull();
     expect(s.wanted()).not.toBe(second);
     void file;
+  });
+
+  it('takes the bundle of a database that led from the machine that sealed it', async () => {
+    const s = await stand();
+    await s.keeper.round();
+    const authority = (await authorityOf(s.db, s.config))!;
+    /* B holds the data and led before: its keeper sealed what its database held, signed with its own certificate. */
+    const b = await s.worker('studio', { role: 'data' });
+    const bKey = machineKey();
+    const issued = await issueCertificate(authority, { machineId: b, role: 'data', signKey: bKey.publicPem });
+    await s.db.insert(certificates).values({ serial: issued.serial, machineId: b, until: issued.until });
+    const held = { machine: b, role: 'data' as const, certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() };
+    const peer = (machine: string): Peer => ({ machine, role: 'data', serial: issued.serial, until: issued.until, address: '127.0.0.1' });
+    const led = await s.head({ key: bKey, held, reason: 'fork' });
+    /* From another machine's certificate it is refused, and nothing of it stays. */
+    const c = await s.worker('laptop', { role: 'data' });
+    expect(await s.keeper.takeLed(peer(c), led.id, Readable.from([led.travels()]))).toBe(403);
+    expect(s.keeper.store().has(led.id)).toBe(false);
+    /* From the machine that signed it: stored, and recorded with the app under that machine's name. */
+    expect(await s.keeper.takeLed(peer(b), led.id, Readable.from([led.travels()]))).toBe(201);
+    expect([s.keeper.store().has(led.id), (await bundleRow(s.db, led.id))?.id]).toEqual([true, led.id]);
+    /* Sent again, it is there already. */
+    expect(await s.keeper.takeLed(peer(b), led.id, Readable.from([led.travels()]))).toBe(200);
+    /* A bundle that is no fork, or one cut short, is not taken. */
+    const timer = await s.head({ key: bKey, held });
+    expect(await s.keeper.takeLed(peer(b), timer.id, Readable.from([timer.travels()]))).toBe(403);
+    const cut = await s.head({ key: bKey, held, reason: 'fork' });
+    expect(await s.keeper.takeLed(peer(b), cut.id, Readable.from([cut.travels().subarray(0, 600)]))).toBe(400);
+    expect([s.keeper.store().has(timer.id), s.keeper.store().has(cut.id)]).toEqual([false, false]);
+    /* It stays through the rounds that keep only what is still needed. */
+    await s.keeper.round();
+    expect(s.keeper.store().has(led.id)).toBe(true);
   });
 
   it('makes nothing while it does not lead', async () => {

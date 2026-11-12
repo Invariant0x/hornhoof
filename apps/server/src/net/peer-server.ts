@@ -3,7 +3,7 @@ import http2 from 'node:http2';
 import type { Http2SecureServer, Http2Session, IncomingHttpHeaders, ServerHttp2Session, ServerHttp2Stream } from 'node:http2';
 import type net from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { PassThrough, type Duplex } from 'node:stream';
+import { PassThrough, type Duplex, type Readable } from 'node:stream';
 import tls from 'node:tls';
 import type { PeerBackups } from '../modules/keeper/backups.js';
 import type { PeerUploads } from '../modules/keeper/uploads.js';
@@ -14,7 +14,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat', promise: '/peer/promise' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat', promise: '/peer/promise', led: '/peer/led/' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -39,6 +39,9 @@ export type PeerServerOptions = {
   /* What answers the keeper of another data machine: about a planned switch of the server, about an update of the
      machine that leads, and to its beat; without it, nothing does. */
   switches?: PeerSwitches;
+  /* What takes the bundle a machine that led sealed of its own database, and says how its record went; without it,
+     none is taken. */
+  leds?: { put(peer: Peer, id: string, body: Readable): Promise<number> };
   log: (line: string) => void;
   now?: () => Date;
   sweepMs?: number;
@@ -49,7 +52,7 @@ export type PeerSwitches = { handle(peer: Peer, method: 'GET' | 'POST', path: st
 type Kind = 'peer' | 'app';
 type Route =
   | { to: 'hello' } | { to: 'app' } | { to: 'db'; db: Target } | { to: 'bundle'; id: string; put: boolean } | { to: 'upload'; id: string; length: number | null }
-  | { to: 'switch'; method: 'GET' | 'POST'; path: string } | { to: 'refused'; status: 403 | 404 };
+  | { to: 'switch'; method: 'GET' | 'POST'; path: string } | { to: 'led'; id: string } | { to: 'refused'; status: 403 | 404 };
 type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number) => void; reject: (err: Error) => void };
 
 const SWEEP_MS = 5000;
@@ -80,6 +83,10 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if (method === 'PUT' && path.startsWith(PEER_PATHS.upload) && UUID.test(path.slice(PEER_PATHS.upload.length))) {
     const length = /^\d{1,15}$/.test(String(headers['content-length'])) ? Number(headers['content-length']) : null;
     return { to: 'upload', id: path.slice(PEER_PATHS.upload.length), length };
+  }
+  /* What a machine that led gives of its own database comes from a machine that holds the data, on the peer door alone. */
+  if (method === 'PUT' && path.startsWith(PEER_PATHS.led) && UUID.test(path.slice(PEER_PATHS.led.length))) {
+    return kind === 'peer' && role === 'data' ? { to: 'led', id: path.slice(PEER_PATHS.led.length) } : { to: 'refused', status: 403 };
   }
   /* A planned switch is between the keepers of machines that hold the data, on the peer door alone. */
   if ((method === 'GET' || method === 'POST') && path.startsWith(PEER_PATHS.switch)) {
@@ -357,6 +364,7 @@ export class PeerServer {
     if (route.to === 'bundle') return route.put ? void this.takeBundle(stream, peer, route.id) : this.giveBundle(stream, peer, route.id);
     if (route.to === 'upload') return void this.takeUpload(stream, peer, route.id, route.length);
     if (route.to === 'switch') return void this.answerSwitch(stream, peer, route.method, route.path);
+    if (route.to === 'led') return void this.takeLed(stream, peer, route.id);
     answerEmpty(stream, route.status);
   }
 
@@ -409,6 +417,19 @@ export class PeerServer {
     stream.pipe(body);
     stream.once('close', () => body.destroy());
     const status = this.opts.backups ? await this.opts.backups.put(peer, id, body).catch(() => 400 as const) : 404;
+    stream.unpipe(body);
+    body.destroy();
+    answerEmpty(stream, status);
+    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+  }
+
+  /* The bundle of a database that led, taken as the bundle above is; the answer is how its record went. */
+  private async takeLed(stream: ServerHttp2Stream, peer: Peer, id: string): Promise<void> {
+    const body = new PassThrough();
+    body.on('error', ignore);
+    stream.pipe(body);
+    stream.once('close', () => body.destroy());
+    const status = this.opts.leds ? await this.opts.leds.put(peer, id, body).catch(() => 400) : 404;
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);

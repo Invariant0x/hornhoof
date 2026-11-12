@@ -5,7 +5,7 @@ import type { Client, TunnelSettings } from '../link/tunnel.js';
 import { TunnelKeeper } from '../link/tunnel.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import { PeerDoor } from '../../net/peer-door.js';
-import { PeerServer } from '../../net/peer-server.js';
+import { PeerServer, type PeerServerOptions } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import type { PeerBackups } from './backups.js';
@@ -68,6 +68,8 @@ export type PeerLinkOptions = {
   uploads?: PeerUploads;
   /* What answers another data machine's keeper about a planned switch of the server, and its beats. */
   switches?: PeerSwitches;
+  /* What takes the bundle a machine that led sealed of its own database. */
+  leds?: PeerServerOptions['leds'];
   /* What the hello says besides who this machine is: its term, the copy its commits wait for, and a move under way. */
   helloMore?: () => Record<string, unknown>;
   log: (line: string) => void;
@@ -223,6 +225,7 @@ export class PeerLink {
       backups: this.opts.backups,
       uploads: this.opts.uploads,
       switches: this.opts.switches,
+      leds: this.opts.leds,
       log: this.opts.log,
     });
     this.server = server;

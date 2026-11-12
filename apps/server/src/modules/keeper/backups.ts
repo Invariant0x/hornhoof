@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { Peer } from '../../net/peer-server.js';
 import { UUID } from '../../net/proxy.js';
-import { checkHead, sealBundle, type BundleReason, type BundleSecrets } from '../backups/bundle.js';
+import { BundleRefused, checkHead, sealBundle, type BundleReason, type BundleSecrets } from '../backups/bundle.js';
 import { BundleStore } from '../backups/store.js';
 import { FORK_KEEP_MS, type MakerView } from '../backups/types.js';
 import type { HeldCertificate } from './certificate.js';
@@ -160,6 +160,42 @@ export class BackupKeeper {
         }
       },
     };
+  }
+
+  /* A machine that holds the data and led before gives what its database held, sealed as a fork and signed with its
+     own certificate. It is taken only from that very machine, and recorded with the app under its name; the status
+     says how that went. */
+  async takeLed(peer: Peer, id: string, body: Readable): Promise<number> {
+    const view = this.last;
+    const held = this.opts.held();
+    if (!view || !held || peer.role !== 'data') {
+      body.destroy();
+      return 403;
+    }
+    let head = this.bundles.list().find(bundle => bundle.id === id)?.head;
+    if (!head) {
+      let refused = false;
+      try {
+        head = (await this.bundles.take(
+          body,
+          said => {
+            const manifest = checkHead(said, { authorityPem: held.authorityPem, company: view.company });
+            refused = manifest.signer !== peer.machine || manifest.reason !== 'fork';
+            if (refused) throw new BundleRefused('role', 'This bundle is not a fork its sender signed.');
+            return manifest;
+          },
+          { id },
+        )).head;
+      } catch {
+        body.destroy();
+        return refused ? 403 : 400;
+      }
+    } else body.destroy();
+    const recorded = await this.opts.ask('POST', '/api/network/backups', { head, from: peer.machine }, this.stopping.signal).catch(() => null);
+    if (recorded?.status === 200 || recorded?.status === 201) return recorded.status;
+    /* The app would not have it: nothing of it stays here. */
+    if (recorded && recorded.status >= 400 && recorded.status < 500) this.bundles.remove(id);
+    return recorded?.status ?? 503;
   }
 
   private now(): number {
