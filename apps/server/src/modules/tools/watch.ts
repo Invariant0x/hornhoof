@@ -66,7 +66,9 @@ function tally<T>(items: { key: string; value: T; agent: string; example?: strin
 const lineOf = (text: string, what: string) => text.split('\n').find(l => l.includes(what))?.trim().slice(0, TAIL) ?? '';
 
 /* A message to the one above the sender on the map gives a result back along their line, kept with the message; one to
-   anybody else, a peer or an employee below, gives nothing back. told lets the map know once the message is in. */
+   anybody else, a peer or an employee below, gives nothing back. It hands no task in, not even the one it is about: the
+   sender's turn may go on with that task, and a task is handed in by its own move. told lets the map know once the
+   message is in. */
 function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
   const gave = { back: false };
   const withMessage: WithEvent = async (tx, stored) => {

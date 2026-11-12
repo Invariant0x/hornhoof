@@ -62,10 +62,10 @@ export function underLiveRoot(f: Facts, taskId: string | null): boolean {
   return !root || !OVER.includes(root.status);
 }
 
-/* The turn that gave the line's latest result back, while it still runs, is not new work on what it gave back: on the task
-   it handed in, or on anything when it gave back a message without one. */
+/* The turn that handed a task in along the line, while it still runs, is not new work on that task. A message gives no
+   task back: its turn goes on with its work, and the line turns yellow once that ends. */
 function givenBack(line: Line | undefined, jobId: string, taskId: string | null): boolean {
-  return !!line?.sourceJobId && line.sourceJobId === jobId && (line.sourceTaskId === null || line.sourceTaskId === taskId);
+  return !!line?.sourceTaskId && line.sourceTaskId === taskId && line.sourceJobId === jobId;
 }
 
 const topOf = (parents: ReadonlyMap<string, string | null>, departmentId: string | null) => (departmentId ? (parents.get(departmentId) ?? departmentId) : null);
@@ -130,6 +130,10 @@ export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }):
 
 export type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJobId: string | null; sourceTaskId: string | null; returnedAt: Date };
 
+/* What a return keeps off the line while its turn runs: the task it handed in. A message hands none in, so the task the
+   turn handed in before it stays off. */
+const handedIn = (r: MapReturn) => (r.sourceTaskId ? { sourceJobId: r.sourceJobId, sourceTaskId: r.sourceTaskId } : {});
+
 /* A result came back along the line in the given cycle. Only a line from an agent to the one right above it takes one.
    The same source again changes nothing, and neither does one older than the line's latest, by cycle and then by time. */
 export async function recordMapReturn(tx: Tx, r: MapReturn): Promise<void> {
@@ -140,7 +144,7 @@ export async function recordMapReturn(tx: Tx, r: MapReturn): Promise<void> {
   if (row.returnedEpoch === r.workEpoch && row.returnedAt && row.returnedAt.getTime() > r.returnedAt.getTime()) return;
   await tx
     .update(mapReturns)
-    .set({ returnedEpoch: r.workEpoch, returnedAt: r.returnedAt, sourceKey: r.sourceKey, sourceJobId: r.sourceJobId, sourceTaskId: r.sourceTaskId })
+    .set({ returnedEpoch: r.workEpoch, returnedAt: r.returnedAt, sourceKey: r.sourceKey, ...handedIn(r) })
     .where(lineWhere(r));
 }
 
