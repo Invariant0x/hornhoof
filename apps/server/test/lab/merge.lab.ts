@@ -1,11 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Lab, type LabMachine } from './lab.js';
-import { http, installServer, ok, PASSWORD, quoted, setUp, signIn, sql, within, type Server } from './steps.js';
+import { bundleAfter as bundleOn, bundles as bundlesOn, http, installServer, PASSWORD, restored as restoredOn, setUp, signIn, sql, within, type Server } from './steps.js';
 
 /* One scenario on a lab computer, with nothing standing in for a part of Hornhoof: the company is restored from a
    backup, and what it did after that backup comes back from the database the restore set aside, which is then saved
    and removed; a second restore leaves such work out. */
-type Bundle = { id: string; reason: string; recovery: string | null; dumpedAt: string };
 
 describe('the lab, merges', () => {
   let lab: Lab;
@@ -21,34 +20,13 @@ describe('the lab, merges', () => {
     if (!process.env.HH_LAB_KEEP) await lab?.stop();
   });
 
-  const bundles = async (): Promise<Bundle[]> =>
-    JSON.parse((await sql(m1, `SELECT coalesce(json_agg(json_build_object('id', id, 'reason', reason, 'recovery', recovery, 'dumpedAt', dumped_at) ORDER BY made_at DESC), '[]') FROM net.backups`)) || '[]') as Bundle[];
   const kept = async (): Promise<string[]> => (await sql(m1, `SELECT datname FROM pg_database WHERE datname LIKE 'hornhoof_before_%'`)).split('\n').filter(Boolean);
   const merges = async (): Promise<{ source: string; status: string; error: string | null }[]> =>
     JSON.parse((await sql(m1, `SELECT coalesce(json_agg(json_build_object('source', source, 'status', status, 'error', error) ORDER BY created_at), '[]') FROM net.merges`)) || '[]') as { source: string; status: string; error: string | null }[];
-  const inside = (service: string, cmd: string) => m1.exec(`cd /root/hornhoof && docker compose exec -T ${service} sh -c ${quoted(cmd)}`);
+  const bundles = () => bundlesOn(m1);
+  const restored = (server: Server, id: string, bringBack: boolean) => restoredOn(server, id, bringBack);
+  const bundleAfter = (since: Date, recipient: string) => bundleOn(m1, since, recipient);
   const log = async (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
-  /* The restore as the updater says it went. */
-  const restored = async (server: Server, id: string, bringBack: boolean) => {
-    /* A backup is restored from a machine that says it holds it, which the server's keeper says in its next report. */
-    await within(3, 'the server reports that it holds the backup', async () => (await sql(m1, `SELECT count(*) FROM machines WHERE '${id}' = ANY(held_backups)`)) !== '0');
-    expect(await signIn(m1, server.url, PASSWORD)).toBe(200);
-    const asked = await http(m1, 'POST', `${server.url}/api/backups/${id}/restore`, { body: { bringBack } });
-    expect(asked.status, asked.body).toBe(202);
-    const attempt = asked.json<{ attempt: string }>().attempt;
-    const status = async () => JSON.parse(ok(await inside('keeper', 'cat /control/restore-status.json'), 'the status')) as { attempt: string; state: string; step: string; line: string; kept: string | null; dumpedAt?: string };
-    const ended = await within(4, 'the restore ended', async () => {
-      const said = await status().catch(() => null);
-      return said && said.attempt === attempt && said.state !== 'running' ? said : null;
-    });
-    expect(ended, ended.line).toMatchObject({ state: 'done', step: 'start' });
-    await within(1, 'the restored company answers', async () => (await http(m1, 'GET', `${server.url}/api/health`)).status === 200);
-    return ended;
-  };
-  /* A bundle of the database in use made after this moment, which the recovery file opens. */
-  const bundleAfter = async (since: Date, recipient: string) =>
-    within(3, 'a bundle of the company as it is now is recorded', async () => (await bundles()).find(row => row.reason !== 'fork' && row.recovery === recipient && new Date(row.dumpedAt) > since));
-
   it('brings back what came after a restore, saves the database from before and removes it, and leaves it out when told to', async () => {
     /* 1. A server, set up, with a plan for its orchestrator so that he can take a task, a department and a task. */
     const server: Server = await installServer(m1);
