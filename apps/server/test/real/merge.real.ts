@@ -293,7 +293,7 @@ describe('a merge on real Postgres', () => {
     expect((await run<{ said: string }>(live, `SELECT convert_from(bytes, 'UTF8') AS said FROM attachments ORDER BY size`)).map(row => row.said)).toEqual(['only there', 'the same on both']);
     /* The CEO takes the other side's title: a pick's own transaction, on the app's pool with its limits. */
     const [conflict] = await run<{ id: string }>(live, 'SELECT id FROM net.merge_conflicts WHERE merge = $1', [merge.id]);
-    const ctx = { db, bus: { publish: () => undefined } } as unknown as Parameters<typeof pick>[0];
+    const ctx = { db, bus: { publish: () => undefined }, applyParked: async () => undefined, log: { warn: () => undefined } } as unknown as Parameters<typeof pick>[0];
     expect(await pick(ctx, { kind: 'ceo', personId: OWNER }, { ids: [conflict!.id] }, 'there')).toMatchObject({ settled: 1, there: 1, refused: [] });
     expect(await titles(live)).toEqual(['Kept title', 'Two']);
     expect(await run(live, 'SELECT picked, picked_by FROM net.merge_conflicts WHERE id = $1', [conflict!.id])).toEqual([{ picked: 'there', picked_by: `person:${OWNER}` }]);

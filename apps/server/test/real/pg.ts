@@ -120,13 +120,32 @@ function composeDb(): { image: string; command: string[] } {
   return { image: compose.services.db.image, command: compose.services.db.command.slice(1) };
 }
 
+/* The image of one processor among those compose's image names, by its own digest. A Docker that keeps one image
+   under a name cannot hold a second processor's under the same digest, and refuses to pull it ("cannot overwrite
+   digest"): each processor's image is run by the digest of its own, which the registry is asked for once. */
+const imagesFor = new Map<string, Promise<string>>();
+function imageFor(image: string, platform: Platform): Promise<string> {
+  const known = imagesFor.get(platform);
+  if (known) return known;
+  const found = (async () => {
+    const listed = JSON.parse(await run('docker', ['buildx', 'imagetools', 'inspect', image, '--format', '{{json .Manifest}}'])) as { manifests?: { digest: string; platform?: { os: string; architecture: string } }[] };
+    const [os, architecture] = platform.split('/');
+    const one = listed.manifests?.find(manifest => manifest.platform?.os === os && manifest.platform.architecture === architecture);
+    if (!one) throw new Error(`${image} has no image for ${platform}.`);
+    return `${image.split(/[:@]/)[0]!}@${one.digest}`;
+  })();
+  imagesFor.set(platform, found);
+  return found;
+}
+
 /* A Postgres server of its own, in a container of that name on that Docker network, with a database hornhoof owned by
    the user hornhoof as compose makes it, published on this computer alone. platform: the processor it runs for, the
    computer's own when none is named. */
 export async function realCluster(opts: { network: string; name: string; platform?: Platform }): Promise<RealCluster> {
-  const { image, command } = composeDb();
+  const { image: named, command } = composeDb();
   const password = randomBytes(16).toString('hex');
   const platform = opts.platform ? ['--platform', opts.platform] : [];
+  const image = opts.platform ? await imageFor(named, opts.platform) : named;
   await run('docker', ['run', '--detach', '--name', opts.name, '--network', opts.network, ...platform, '-e', 'POSTGRES_USER=hornhoof', '-e', 'POSTGRES_DB=hornhoof', '-e', 'POSTGRES_PASSWORD', '-p', '127.0.0.1::5432', image, ...command], {
     env: { POSTGRES_PASSWORD: password },
   });
