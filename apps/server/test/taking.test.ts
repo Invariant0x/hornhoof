@@ -271,7 +271,11 @@ async function promoter(over: Partial<Taking> = {}, more: Partial<PromoterOption
   const { state, subscription } = subscriptionOf();
   state.enabled = false;
   const id = randomUUID();
-  const said = { registered: false, answer: null as { machine: string; nonce: string } | 'echo' | null, now: 1_000_000, exits: 0, appLeads: false };
+  const said = {
+    registered: false, answer: null as { machine: string; nonce: string } | 'echo' | null, now: 1_000_000, exits: 0, appLeads: false,
+    /* The company's name at hornhoof.org, for a keeper that took over by itself. */
+    name: null as { state: 'held' | 'empty'; mine: boolean; generation: number } | null,
+  };
   const did: string[] = [];
   const lines: string[] = [];
   const nonces: string[] = [];
@@ -283,6 +287,7 @@ async function promoter(over: Partial<Taking> = {}, more: Partial<PromoterOption
   const it = new Promoter({
     dir, controlDir, sql, machine: { networkId: B },
     registered: async () => said.registered,
+    name: async () => said.name,
     probe: async nonce => {
       nonces.push(nonce);
       return said.answer === 'echo' ? { machine: B, nonce } : said.answer;
@@ -341,6 +346,56 @@ describe('a keeper that is taking the server over', () => {
     expect([p.taking(), p.it.leads(), p.said.exits]).toEqual([null, true, 0]);
     expect(p.lines).toEqual([`This machine leads the company now, under term ${TERM.number + 1}.`]);
     expect(p.state.did).toEqual([]);
+  });
+
+  it('promotes after a takeover with no slots', async () => {
+    /* The copy decided by itself: the leader was gone, and the name was free at generation 7. */
+    const heard = 1_700_000_000_000;
+    const p = await promoter({ kind: 'takeover', w: null, copies: null, generation: 7, heard, reach: '2026-11-11T11:59:58.000Z', full: true, deadline: 1_000_000 + 30_000 }, { promote: undefined });
+    const [mine, old, third] = [randomUUID(), randomUUID(), randomUUID()];
+    for (const [id, networkId] of [[mine, B], [old, A], [third, C]]) {
+      await p.sql.query(`INSERT INTO machines (id, company_id, person_id, machine_key, hostname, role, network_id) VALUES ($1, $2, $2, $3, 'm', 'data', $4)`, [id, randomUUID(), `key-${networkId}`, networkId]);
+    }
+    /* The name is its own client's at exactly the generation after the one its window saw. */
+    p.said.name = { state: 'held', mine: true, generation: 8 };
+    p.said.answer = 'echo';
+    await p.looks(6);
+    expect([p.taking()?.phase, p.it.leads(), p.did]).toEqual(['promoted', true, ['tunnel start']]);
+    expect(p.taking()?.slots).toEqual({});
+    const rows = (await p.sql.query<{ kind: string; from: string; to: string; term: string; slots: object; applied: string; heard: Date; reach: Date; reason: string }>(
+      `SELECT kind, from_machine_id::text AS "from", to_machine_id::text AS "to", term_number::text AS term, slots, applied, heard_at AS heard, reach, reason FROM net.handovers`)).rows;
+    expect(rows).toEqual([{ kind: 'takeover', from: old, to: mine, term: String(TERM.number), slots: {}, applied: '0/0', heard: new Date(heard), reach: new Date('2026-11-11T11:59:58.000Z'), reason: 'disk_full' }]);
+    /* No slot was made for anyone: every other machine makes its copy again after an unplanned switch. */
+    expect((await p.sql.query('SELECT 1 FROM pg_replication_slots')).rows).toEqual([]);
+    expect(await termOf(p.sql)).toMatchObject({ number: TERM.number + 1, machine: B });
+  });
+
+  it('gives a takeover up when anyone registered since its window', async () => {
+    const foreign = [
+      { state: 'held' as const, mine: false, generation: 8 }, { state: 'empty' as const, mine: false, generation: 8 }, { state: 'held' as const, mine: true, generation: 9 },
+    ];
+    for (const name of foreign) {
+      const p = await promoter({ kind: 'takeover', w: null, copies: null, generation: 7 });
+      p.said.name = name;
+      p.said.answer = 'echo';
+      await p.looks(4);
+      expect([p.taking()?.phase, p.taking()?.why, p.said.exits, p.state.did, p.it.leads()], JSON.stringify(name)).toEqual(['aborted', 'no_link', 1, ['enable'], false]);
+      expect(p.did).toEqual(expect.arrayContaining(['tunnel stop']));
+      expect(p.did.some(step => step.startsWith('promote'))).toBe(false);
+      expect((await termOf(p.sql))?.machine).not.toBe(B);
+    }
+    /* Still free at the generation its window saw, or its own client not there yet: it goes on trying. */
+    for (const name of [{ state: 'empty' as const, mine: false, generation: 7 }, { state: 'held' as const, mine: false, generation: 7 }, null]) {
+      const p = await promoter({ kind: 'takeover', w: null, copies: null, generation: 7 });
+      p.said.name = name;
+      await p.looks(4);
+      expect([p.taking()?.phase, p.did], JSON.stringify(name)).toEqual(['go', ['tunnel start']]);
+    }
+    /* The CEO's choice goes the same way. */
+    const chosen = await promoter({ kind: 'ceo', w: null, copies: null, generation: 7 });
+    chosen.said.name = { state: 'held', mine: false, generation: 8 };
+    await chosen.looks(2);
+    expect(chosen.taking()?.phase).toBe('aborted');
   });
 
   it('looks often only while it takes the server', async () => {

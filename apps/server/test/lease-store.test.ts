@@ -228,6 +228,24 @@ describe('the lease the keeper holds in the database', () => {
     expect((await s.leaseRow()).sync).toBe('alone');
   });
 
+  it('takes the term it is given', async () => {
+    const s = await store();
+    /* A keeper that comes back in leads under the term its copy promised it: exactly that one, in the state and the lease. */
+    const given = { number: 9, machine: 'machine-a', split: false };
+    expect(await s.lease.take('normal', FAR, 'relay_off', given)).toEqual(given);
+    expect(await s.leaseRow()).toEqual({ term_number: '9', term_machine: 'machine-a', kind: 'normal', sync: 'relay_off', ended: false });
+    expect((await s.run.query(`SELECT term_number::text, term_machine FROM net_local.state`)).rows).toEqual([{ term_number: '9', term_machine: 'machine-a' }]);
+    expect(await s.writes()).toBe('committed');
+    /* A term that is not above the one the database stands under, or of another machine, throws and changes nothing:
+       the lease that stood stands on. */
+    for (const term of [{ ...given, number: 9 }, { ...given, number: 3 }, { ...given, number: 12, machine: 'machine-b' }, { ...given, number: 12, split: true }]) {
+      await expect(s.lease.take('normal', FAR, 'relay_off', term), JSON.stringify(term)).rejects.toThrow(/term/);
+      expect(await s.leaseRow()).toMatchObject({ term_number: '9', ended: false });
+    }
+    /* With none given, the next one above it. */
+    expect(await s.lease.take('normal', FAR)).toEqual({ number: 10, machine: 'machine-a', split: false });
+  });
+
   it('prunes only what every copy holds', async () => {
     const s = await store('a1b2c3d4'.repeat(4));
     await s.lease.take('normal', FAR, 'copy');

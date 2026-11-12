@@ -10,8 +10,10 @@ export type Sql = { query<R = Record<string, unknown>>(text: string, params?: un
 /* The lease as the database holds it. The keeper alone writes it: the app and the agents only stand on it, through
    net.assert_lease, and have no right to these tables. */
 export type LeaseStore = {
-  /* Ends what was held, then a new term above every one this database has seen, in this machine's name. */
-  take(kind: LeaseKind, until: Date, sync?: LeaseSync): Promise<Term>;
+  /* Ends what was held, then a new term above every one this database has seen, in this machine's name. term: the
+     term to take, when the keeper was promised one: exactly it, and nothing changes when it is not this machine's or
+     not above every term this database has seen. */
+  take(kind: LeaseKind, until: Date, sync?: LeaseSync, term?: Term): Promise<Term>;
   /* False when the lease is no longer that term's or has ended: a lease that lapsed is never brought back, only taken anew. */
   renew(term: Term, kind: LeaseKind, until: Date, endSessions: boolean, sync?: LeaseSync): Promise<boolean>;
   fence(): Promise<void>;
@@ -29,8 +31,14 @@ export type LeaseStore = {
 
 export const PRUNE_BATCH = 10_000;
 
-const TAKE = `WITH next AS (
-    SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0) + 1 AS number
+/* The highest term this database has seen, 0 for one that saw none. */
+const SEEN_TERM = `SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0)::int AS number`;
+
+/* $5: the term's number when one is given, which is taken only while it is above every term seen; else the next. */
+const TAKE = `WITH seen AS (
+    SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0) AS number
+  ), next AS (
+    SELECT COALESCE($5::bigint, seen.number + 1) AS number FROM seen WHERE $5::bigint IS NULL OR $5::bigint > seen.number
   ), st AS (
     INSERT INTO net_local.state (term_number, term_machine, term_split, machine, cluster)
     SELECT next.number, $1, false, $1, (SELECT system_identifier::text FROM pg_control_system()) FROM next
@@ -142,10 +150,16 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     await endSessions();
   };
   return {
-    async take(kind, until, sync = 'alone') {
+    async take(kind, until, sync = 'alone', term) {
+      if (term) {
+        /* Looked at before anything ends, so a term that cannot be taken leaves the lease as it stands. */
+        const seen = (await sql.query<{ number: number }>(SEEN_TERM)).rows[0]!.number;
+        if (term.machine !== opts.machineId || term.split || term.number <= seen) throw new Error(`the term ${term.number} of ${term.machine} cannot be taken here: this database stands under term ${seen}`);
+      }
       await fence();
-      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until, sync]);
-      return { number: rows[0]!.number, machine: opts.machineId, split: false };
+      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until, sync, term?.number ?? null]);
+      if (!rows[0]) throw new Error(`the term ${String(term?.number)} is not above every term this database has seen`);
+      return { number: rows[0].number, machine: opts.machineId, split: false };
     },
     async renew(term, kind, until, ending, sync) {
       const { rows } = await sql.query(RENEW, [term.number, term.machine, term.split, kind, until, sync ?? null]);

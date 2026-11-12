@@ -171,6 +171,20 @@ describe('taking the server over', () => {
     expect(nextTakeStep(take({ taking: told(), registered: true, probed: true }))).toEqual({ do: 'promote' });
   });
 
+  it('gives a takeover up at once when another holds the name', () => {
+    /* Someone registered the company's name since this copy's window saw it free: it never promotes on that. */
+    for (const kind of ['takeover', 'ceo'] as const) {
+      expect(nextTakeStep(take({ taking: told({ kind }), foreign: true }))).toEqual({ do: 'abort', why: 'no_link' });
+      expect(nextTakeStep(take({ taking: told({ kind }), foreign: true, registered: true, probed: true }))).toEqual({ do: 'abort', why: 'no_link' });
+      expect(nextTakeStep(take({ taking: told({ kind }) }))).toEqual({ do: 'register' });
+      /* Its term written, it promotes whatever the name says now. */
+      expect(nextTakeStep(take({ taking: told({ kind }), foreign: true, termWritten: true }))).toEqual({ do: 'promote' });
+    }
+    /* A planned switch goes by the old leader's word, as before. */
+    expect(nextTakeStep(take({ taking: told({ kind: 'planned' }), foreign: true }))).toEqual({ do: 'register' });
+    expect(nextTakeStep(take({ taking: told(), foreign: true }))).toEqual({ do: 'register' });
+  });
+
   it('never promotes after the deadline unless the term is written', () => {
     expect(nextTakeStep(take({ taking: told(), now: DEADLINE, registered: true, probed: true }))).toEqual({ do: 'abort', why: 'no_link' });
     expect(nextTakeStep(take({ taking: told(), now: DEADLINE + 60_000 }))).toEqual({ do: 'abort', why: 'no_link' });

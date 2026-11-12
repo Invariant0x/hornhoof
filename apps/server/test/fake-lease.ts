@@ -24,7 +24,7 @@ export function fakeLease(opts: Options = {}): LeaseStore & { calls: { method: s
     calls,
     problemsAre: lines => { problems = lines; },
     othersHold: now => { others = now; },
-    take: (kind, until, sync?: LeaseSync) => said('take', [kind, until, sync], opts.take ? opts.take(kind) : Promise.resolve({ number: ++taken, machine: 'machine-a', split: false })),
+    take: (kind, until, sync?: LeaseSync, term?: Term) => said('take', term ? [kind, until, sync, term] : [kind, until, sync], opts.take ? opts.take(kind) : term ? Promise.resolve((taken = term.number, term)) : Promise.resolve({ number: ++taken, machine: 'machine-a', split: false })),
     renew: (term, kind, until, endSessions, sync?: LeaseSync) => said('renew', [term, kind, until, endSessions, sync], opts.renew ? opts.renew() : Promise.resolve(true)),
     fence: () => said('fence', [], Promise.resolve()),
     endSessions: () => said('endSessions', [], Promise.resolve(0)),

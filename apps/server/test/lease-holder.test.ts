@@ -288,3 +288,119 @@ describe('the lease the keeper holds', () => {
     expect(takes()).toBe(before + 1);
   });
 });
+
+describe('a lease that takes a proof', () => {
+  /* A holder that is told whether a proof is needed, which one it has, why its lease must end, and what lets it take one. */
+  function proving() {
+    const lease = fakeLease();
+    let now = T0;
+    const lines: string[] = [];
+    const ended: number[] = [];
+    const said = {
+      needed: true as boolean | null, proof: null as Clocks | null, ended: null as string | null,
+      entry: null as { sent: Clocks; term: { number: number; machine: string; split: boolean } } | null, cleared: 0,
+    };
+    const h = new LeaseHolder({
+      lease, updaterBusy: () => false, now: () => now, log: line => lines.push(line), onEnd: () => void ended.push(now.wall),
+      proofs: { needed: () => said.needed, proof: () => said.proof, ended: () => said.ended, entry: () => said.entry, clear: () => void (said.cleared += 1) },
+    });
+    const after = (ms: number) => void (now = { wall: now.wall + ms, mono: now.mono + ms });
+    const count = (method: string) => lease.calls.filter(call => call.method === method).length;
+    return { h, lease, lines, ended, said, after, count, now: () => now };
+  }
+
+  it('takes nothing before it knows whether a proof is needed', async () => {
+    const p = proving();
+    p.said.needed = null;
+    await p.h.tick();
+    expect(p.count('take')).toBe(0);
+    /* With none needed it leads as a machine that keeps the data alone: a term of its own at once, a renewal each tick. */
+    p.said.needed = false;
+    await p.h.tick();
+    p.after(1000);
+    await p.h.tick();
+    expect([p.count('take'), p.count('renew'), p.said.cleared]).toEqual([1, 1, 1]);
+  });
+
+  it('takes a lease only on what lets it come back in, under that term', async () => {
+    const p = proving();
+    for (let ticks = 0; ticks < 3; ticks++) {
+      await p.h.tick();
+      p.after(1000);
+    }
+    expect(p.count('take')).toBe(0);
+    const sent = { wall: p.now().wall - 400, mono: p.now().mono - 400 };
+    p.said.entry = { sent, term: { number: 8, machine: 'machine-a', split: false } };
+    await p.h.tick();
+    /* The term its copy promised, counted from when the ask went out; the proofs from before are forgotten. */
+    expect(p.lease.calls.find(call => call.method === 'take')!.args).toEqual(['normal', new Date(sent.wall + LEASE_MS), 'alone', { number: 8, machine: 'machine-a', split: false }]);
+    expect([p.h.term()?.number, p.said.cleared]).toEqual([8, 1]);
+  });
+
+  it('renews only on a proof sent after its last renewal, and fences ten seconds after the last', async () => {
+    const p = proving();
+    p.said.needed = false;
+    await p.h.tick();
+    await p.h.look();
+    p.said.needed = true;
+    /* No proof: no renewal. */
+    p.after(1000);
+    await p.h.tick();
+    expect(p.count('renew')).toBe(0);
+    /* A proof sent half a second ago: the lease stands ten seconds from then. */
+    p.after(1000);
+    const proof = { wall: p.now().wall - 500, mono: p.now().mono - 500 };
+    p.said.proof = proof;
+    await p.h.tick();
+    expect(p.lease.calls.at(-1)).toMatchObject({ method: 'renew', args: [{ number: 1 }, 'normal', new Date(proof.wall + LEASE_MS), false, 'alone'] });
+    /* The same proof again gives nothing new. */
+    p.after(1000);
+    await p.h.tick();
+    expect(p.count('renew')).toBe(1);
+    expect(p.h.mode()).toBe('lead');
+    /* Ten seconds after it was sent, with no newer one, the lease ends. */
+    for (let s = 0; s < 9 && p.ended.length === 0; s++) {
+      p.after(1000);
+      await p.h.tick();
+    }
+    expect([p.ended.length, p.count('fence'), p.h.mode(), p.lines.at(-1)]).toEqual([1, 1, 'read', expect.stringContaining('The lease ended (no renewal for 10 s)')]);
+    expect(p.ended[0]! - proof.wall).toBeGreaterThanOrEqual(LEASE_MS);
+    expect(p.ended[0]! - proof.wall).toBeLessThan(LEASE_MS + 1000);
+  });
+
+  it('ends its lease at once on a sign that another machine leads', async () => {
+    const p = proving();
+    p.said.needed = false;
+    await p.h.tick();
+    await p.h.look();
+    p.said.needed = true;
+    p.after(1000);
+    p.said.proof = p.now();
+    p.said.ended = 'another machine answers at the link';
+    await p.h.tick();
+    expect([p.count('fence'), p.ended.length, p.h.mode(), p.h.term()]).toEqual([1, 1, 'read', null]);
+    expect(p.lines.at(-1)).toContain('The lease ended (another machine answers at the link)');
+    /* Holding none, the sign ends nothing more. */
+    p.after(1000);
+    await p.h.tick();
+    expect(p.count('fence')).toBe(1);
+  });
+
+  it('says when its disk is full, and ends its lease although the fence cannot be written', async () => {
+    const full = Object.assign(new Error('could not extend file: No space left on device'), { code: '53100' });
+    const lease = fakeLease({ renew: () => Promise.reject(full) });
+    let now = T0;
+    const ended: number[] = [];
+    const h = new LeaseHolder({ lease, updaterBusy: () => false, now: () => now, log: () => undefined, onEnd: () => void ended.push(now.wall) });
+    const after = (ms: number) => void (now = { wall: now.wall + ms, mono: now.mono + ms });
+    await h.tick();
+    expect(h.full()).toBe(false);
+    lease.fence = () => Promise.reject(full);
+    for (let s = 0; s < 11 && ended.length === 0; s++) {
+      after(1000);
+      await h.tick();
+    }
+    /* Ten seconds of renewals that could not be written: the lease is over, and whoever asks hears why. */
+    expect([ended.length, h.mode(), h.full()]).toEqual([1, 'read', true]);
+  });
+});

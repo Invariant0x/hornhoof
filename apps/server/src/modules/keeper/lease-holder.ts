@@ -20,6 +20,19 @@ export type LeaseHolderOptions = {
   /* Whether the keeper hands the server over to another machine now: it ended its lease itself, and while this holds
      none is taken or renewed. */
   hold?: () => boolean;
+  /* What a lease goes by once another machine holds a copy that finished. needed: whether one does, null while that
+     cannot be told yet, and then nothing is taken. proof: when the newest proof was sent. ended: why the lease must
+     end now. entry: what lets this keeper take a lease when it holds none, with the term to take. clear: called at
+     each take. Without it, and while none is needed, a lease is taken and renewed as on a machine that keeps the data
+     alone. */
+  proofs?: { needed(): boolean | null; proof(): Clocks | null; ended(): string | null; entry(): { sent: Clocks; term: Term } | null; clear(): void };
+};
+
+/* What Postgres says when its disk is full. */
+const DISK_FULL = '53100';
+const isDiskFull = (err: unknown): boolean => {
+  const coded = err as { code?: unknown; cause?: { code?: unknown } } | null;
+  return coded?.code === DISK_FULL || coded?.cause?.code === DISK_FULL;
 };
 
 const PRUNE_EVERY_MS = 60_000;
@@ -39,6 +52,8 @@ export class LeaseHolder {
   private problems: string[] | null = null;
   private prunedAt: number | null = null;
   private othersHold = false;
+  /* The last write of the lease failed for a full disk. */
+  private diskFull = false;
   /* The last line of each kind, so that a trouble that goes on is said once. */
   private readonly said = new Map<string, string>();
   private readonly now: () => Clocks;
@@ -70,6 +85,11 @@ export class LeaseHolder {
     return { term: this.held.term, kind: this.held.kind, until: this.held.sent.wall + LEASE_MS };
   }
 
+  /* Whether the last write of the lease failed for a full disk. */
+  full(): boolean {
+    return this.diskFull;
+  }
+
   /* The term of the last lease this keeper held, standing or not. */
   lastTerm(): Term | null {
     return this.held?.term ?? this.termHeld;
@@ -88,7 +108,17 @@ export class LeaseHolder {
       return;
     }
     const now = this.now();
-    const step = nextLeaseStep({ now, last: this.last, held: this.held, maintenance: this.maintenance });
+    const needed = this.opts.proofs ? this.opts.proofs.needed() : false;
+    /* Whether a proof is needed is not known yet: nothing is taken on a guess. */
+    if (needed === null && this.held === null) {
+      this.last = now;
+      return;
+    }
+    const proofs = needed === false ? null : this.opts.proofs!;
+    const step = nextLeaseStep({
+      now, last: this.last, held: this.held, maintenance: this.maintenance,
+      ...(proofs ? { proof: proofs.proof(), ended: this.held ? proofs.ended() : null, entry: this.held ? undefined : proofs.entry() } : {}),
+    });
     this.last = now;
     await this.take(lease, step);
     await this.prune(lease, now);
@@ -122,20 +152,29 @@ export class LeaseHolder {
 
   private async takeTerm(lease: LeaseStore, step: Extract<LeaseStep, { do: 'take' }>, flag: LeaseSync): Promise<void> {
     try {
-      const term = await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS), flag);
+      const term = step.term ? await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS), flag, step.term) : await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS), flag);
       this.held = { term, kind: step.kind, sent: step.sent };
       this.termHeld = term;
+      this.diskFull = false;
+      /* What was proved before this take proves nothing of the new lease. */
+      this.opts.proofs?.clear();
       this.sayOnce('take', '');
       this.opts.log(`This machine leads under term ${term.number}.`);
     } catch (err) {
+      this.diskFull = isDiskFull(err);
       this.sayOnce('take', `Could not take a lease: ${messageOf(err)}.`);
     }
   }
 
   private async renew(lease: LeaseStore, step: Extract<LeaseStep, { do: 'renew' }>, flag: LeaseSync): Promise<void> {
     const held = this.held!;
-    const renewed = await lease.renew(held.term, step.kind, new Date(step.sent.wall + LEASE_MS), step.endSessions, flag).catch(() => false);
-    if (renewed) this.held = { term: held.term, kind: step.kind, sent: step.sent };
+    const renewed = await lease.renew(held.term, step.kind, new Date(step.sent.wall + LEASE_MS), step.endSessions, flag).catch((err: unknown) => {
+      this.diskFull = isDiskFull(err);
+      return false;
+    });
+    if (!renewed) return;
+    this.held = { term: held.term, kind: step.kind, sent: step.sent };
+    this.diskFull = false;
   }
 
   private async fence(lease: LeaseStore, why: string): Promise<void> {
@@ -143,7 +182,9 @@ export class LeaseHolder {
     this.opts.log(`The lease ended (${why}): ${ENDED}.`);
     this.opts.onEnd?.();
     /* A fence that cannot be written ends nothing early, and nothing late either: the lease it would end has lapsed. */
-    await lease.fence().catch(() => undefined);
+    await lease.fence().catch((err: unknown) => {
+      if (isDiskFull(err)) this.diskFull = true;
+    });
   }
 
   private async prune(lease: LeaseStore, now: Clocks): Promise<void> {

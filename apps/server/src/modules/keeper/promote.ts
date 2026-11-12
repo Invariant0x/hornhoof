@@ -83,15 +83,22 @@ export async function makeSlots(sql: Sql, names: string[]): Promise<void> {
 
 /* The record of a planned switch, under the switch's id, and the end of the request it answers, in one commit. A
    record of that id already there counts as done, and a request made since stays. */
-export async function recordHandover(sql: Sql, h: { id: string; from: string; term: Term; applied: string; to: string; at: Date; slots: Record<string, string> }): Promise<void> {
+export type Handover = {
+  id: string; from: string; term: Term; applied: string; to: string; at: Date; slots: Record<string, string>;
+  /* A planned switch when left out. For a takeover and the CEO's choice: when the old leader was last heard, how far
+     the new leader's own changes reached, and why the old leader stopped, when it said so. */
+  kind?: 'planned' | 'takeover' | 'ceo'; heardAt?: Date | null; reach?: Date | null; reason?: 'disk_full' | null;
+};
+
+export async function recordHandover(sql: Sql, h: Handover): Promise<void> {
   await sql.query(
     `WITH made AS (
-       INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots)
-       VALUES ($1::uuid, $2::uuid, $3::bigint, $4, $5, $6::uuid, $7::timestamptz, $8::jsonb)
+       INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots, kind, heard_at, reach, reason)
+       VALUES ($1::uuid, $2::uuid, $3::bigint, $4, $5, $6::uuid, $7::timestamptz, $8::jsonb, $9, $10::timestamptz, $11::timestamptz, $12)
        ON CONFLICT (id) DO NOTHING RETURNING id
      )
      DELETE FROM net.move WHERE request = $1::uuid AND EXISTS (SELECT 1 FROM made)`,
-    [h.id, h.from, h.term.number, h.term.machine, h.applied, h.to, h.at.toISOString(), JSON.stringify(h.slots)],
+    [h.id, h.from, h.term.number, h.term.machine, h.applied, h.to, h.at.toISOString(), JSON.stringify(h.slots), h.kind ?? 'planned', h.heardAt?.toISOString() ?? null, h.reach?.toISOString() ?? null, h.reason ?? null],
   );
 }
 

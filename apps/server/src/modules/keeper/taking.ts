@@ -33,6 +33,11 @@ const TakingShape = z.object({
   copies: z.array(z.string()).nullable(),
   slots: z.record(z.string(), z.string()).nullable(),
   why: z.literal('no_link').nullable(),
+  kind: z.enum(['planned', 'takeover', 'ceo']).optional(),
+  heard: z.number().nullable().optional(),
+  reach: z.string().nullable().optional(),
+  full: z.boolean().optional(),
+  generation: z.number().int().min(0).optional(),
 });
 
 const LSN = /^[0-9A-F]{1,8}\/[0-9A-F]{1,8}$/;
@@ -284,6 +289,10 @@ export type PromoterOptions = {
   machine: { networkId: string };
   /* Whether hornhoof.org names this keeper's own link client for the company's name now. */
   registered: () => Promise<boolean>;
+  /* The company's name at hornhoof.org as it stands now: held or free, whether its last registration was this
+     keeper's own client's, and at which generation; null when it cannot be told. A keeper that took over by itself
+     goes by it: its own registration counts only at the generation right after the one its window saw free. */
+  name?: () => Promise<{ state: 'held' | 'empty'; mine: boolean; generation: number } | null>;
   /* A request through the company's link for the proof of the lease, with a nonce of this keeper's. */
   probe: (nonce: string) => Promise<{ machine: string; nonce: string } | null>;
   tunnel: { start(): void; stop(): Promise<void> };
@@ -393,8 +402,8 @@ export class Promoter {
     }
     if (taking.phase === 'promoted') this.promoted = true;
     const termWritten = taking.phase === 'go' ? await ownTerm(opts.sql, taking, opts.machine.networkId) : false;
-    const registered = taking.phase === 'go' && !termWritten ? await opts.registered().catch(() => false) : false;
-    const step = nextTakeStep({ now: this.now(), taking, termWritten, registered, probed: this.probed, appLeads: opts.appLeads() });
+    const { registered, foreign } = taking.phase === 'go' && !termWritten ? await this.named(taking) : { registered: false, foreign: false };
+    const step = nextTakeStep({ now: this.now(), taking, termWritten, registered, probed: this.probed, appLeads: opts.appLeads(), foreign });
     /* The link's client runs from the first look that goes on, also in a keeper that started again and finds the name
        its own already, or its database promoted. */
     if (taking.phase === 'promoted' || step.do === 'register' || step.do === 'probe' || step.do === 'promote') this.register();
@@ -412,6 +421,21 @@ export class Promoter {
       return;
     }
     forgetTaking(opts.dir);
+  }
+
+  /* Whether the company's name is this keeper's now, and for a takeover whether anyone else registered it since the
+     window the copy decided on: its own client at exactly the next generation is its own registration; another
+     client's at any later generation, or its own at a later one still, means someone registered in between. */
+  private async named(taking: Taking): Promise<{ registered: boolean; foreign: boolean }> {
+    const { opts } = this;
+    if ((taking.kind ?? 'planned') === 'planned' || taking.generation === undefined || !opts.name) return { registered: await opts.registered().catch(() => false), foreign: false };
+    const name = await opts.name().catch(() => null);
+    if (!name) return { registered: false, foreign: false };
+    const next = taking.generation + 1;
+    return {
+      registered: name.state === 'held' && name.mine && name.generation === next,
+      foreign: name.generation > next || (name.generation > taking.generation && !name.mine),
+    };
   }
 
   private register(): void {
@@ -446,6 +470,7 @@ export class Promoter {
      named after the attempt following the machine's last copy, so no old subscription of that machine attaches to it. */
   private async promotion(taking: Taking): Promise<Record<string, string>> {
     const { sql, machine } = this.opts;
+    if ((taking.kind ?? 'planned') !== 'planned') return this.takeover(taking);
     if (taking.w === null) throw new Error('what it wrote down names no end of the old leader\'s log');
     await writeTerm(sql, { above: taking.term.number, machine: machine.networkId });
     await dropSubscriptions(sql);
@@ -462,6 +487,34 @@ export class Promoter {
     await makeSlots(sql, Object.values(slots));
     await recordHandover(sql, { id: taking.switch, from: old.id, term: taking.term, applied: taking.w, to: mine.id, at: new Date(this.now()), slots });
     return slots;
+  }
+
+  /* The promotion after a takeover, or after the CEO chose this copy: as a planned one, but nobody stopped the old
+     leader, so how far this copy read its log is asked of the copy itself and written down before its subscription
+     goes; and no slot is made, since every other machine makes its copy again after an unplanned switch. */
+  private async takeover(taking: Taking): Promise<Record<string, string>> {
+    const { sql, machine, dir } = this.opts;
+    let applied = taking.w;
+    if (applied === null) {
+      const [read] = (await sql.query<{ lsn: string | null }>(
+        `SELECT pg_replication_origin_progress('pg_' || s.oid, true)::text AS lsn FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() ORDER BY s.oid LIMIT 1`)).rows;
+      applied = read?.lsn ?? '0/0';
+      writeTaking(dir, { ...taking, w: applied });
+    }
+    await writeTerm(sql, { above: taking.term.number, machine: machine.networkId });
+    await dropSubscriptions(sql);
+    await raiseSequences(sql);
+    await ensurePublication(sql);
+    const { rows } = await sql.query<{ id: string; networkId: string }>(
+      'SELECT id::text AS id, network_id AS "networkId" FROM public.machines WHERE network_id = ANY($1::text[]) AND revoked_at IS NULL', [[machine.networkId, taking.from.networkId]]);
+    const mine = rows.find(row => row.networkId === machine.networkId);
+    const old = rows.find(row => row.networkId === taking.from.networkId);
+    if (!mine || !old) throw new Error(`${mine ? 'the machine that led' : 'this machine'} has no row here`);
+    await recordHandover(sql, {
+      id: taking.switch, from: old.id, term: taking.term, applied, to: mine.id, at: new Date(this.now()), slots: {},
+      kind: taking.kind, heardAt: taking.heard == null ? null : new Date(taking.heard), reach: taking.reach ? new Date(taking.reach) : null, reason: taking.full ? 'disk_full' : null,
+    });
+    return {};
   }
 
   /* The name did not come, or the old leader called the switch off: the link's client stops, the subscription follows

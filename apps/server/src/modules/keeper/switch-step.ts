@@ -118,12 +118,18 @@ export function nextHandStep(s: HandSample): HandAction {
 
 /* What the keeper that takes the server wrote down. from: the machine that offered, as its link named it leader then,
    with the name it goes by; go, abort and state are taken from it alone. slots: the slots it made at promotion. */
+/* kind: a planned switch when left out; a takeover by the copy that held every confirmed change, or the CEO's choice
+   of a copy to go on from. For those two: heard, when the old leader's last beat came, by the wall clock; reach, how
+   far this copy's changes reached; full, whether that last beat said the leader's disk is full; generation, the
+   route's generation at which its window saw the name free. */
 export type Taking = {
   switch: string; from: { networkId: string; hostname?: string }; term: Term; at: number; deadline: number;
   phase: 'offered' | 'go' | 'promoted' | 'aborted'; w: string | null; copies: string[] | null; slots: Record<string, string> | null; why: 'no_link' | null;
+  kind?: 'planned' | 'takeover' | 'ceo'; heard?: number | null; reach?: string | null; full?: boolean; generation?: number;
 };
 
-export type TakeSample = { now: number; taking: Taking | null; termWritten: boolean; registered: boolean; probed: boolean; appLeads: boolean };
+/* foreign: for a takeover, another registration of the company's name was seen since the window this copy decided on. */
+export type TakeSample = { now: number; taking: Taking | null; termWritten: boolean; registered: boolean; probed: boolean; appLeads: boolean; foreign?: boolean };
 
 export type TakeAction =
   | { do: 'none' } | { do: 'expire' } | { do: 'register' } | { do: 'probe' } | { do: 'promote' }
@@ -139,6 +145,8 @@ export function nextTakeStep(s: TakeSample): TakeAction {
       return now >= taking.deadline ? { do: 'expire' } : NONE;
     case 'go':
       if (s.termWritten) return { do: 'promote' };
+      /* A copy that takes over by itself never promotes once anyone registered the name since its window. */
+      if ((taking.kind ?? 'planned') !== 'planned' && s.foreign) return { do: 'abort', why: 'no_link' };
       if (now >= taking.deadline) return { do: 'abort', why: 'no_link' };
       if (!s.registered) return { do: 'register' };
       return s.probed ? { do: 'promote' } : { do: 'probe' };

@@ -63,5 +63,18 @@ describe('the steps of a promotion', () => {
     await recordHandover(d.sql, { ...handover, applied: '0/9999999' });
     expect((await d.sql.query<{ applied: string }>('SELECT applied FROM net.handovers')).rows).toEqual([{ applied: '0/3000000' }]);
     expect((await d.sql.query('SELECT 1 FROM net.move')).rows).toHaveLength(1);
+    /* One that says nothing of its kind was planned. */
+    expect((await d.sql.query('SELECT kind, heard_at, reach, reason FROM net.handovers')).rows).toEqual([{ kind: 'planned', heard_at: null, reach: null, reason: null }]);
+  });
+
+  it('records a takeover', async () => {
+    const d = await database();
+    const [from, to] = [randomUUID(), randomUUID()];
+    const [heardAt, reach] = [new Date('2026-11-11T12:00:00Z'), new Date('2026-11-11T11:59:58Z')];
+    const takeover = { id: randomUUID(), from, term: { number: 7, machine: A, split: false }, applied: '0/3000000', to, at: new Date('2026-11-11T12:00:40Z'), slots: {} };
+    await recordHandover(d.sql, { ...takeover, kind: 'takeover', heardAt, reach, reason: 'disk_full' });
+    await recordHandover(d.sql, { ...takeover, id: randomUUID(), kind: 'ceo', heardAt: null, reach });
+    const rows = (await d.sql.query<{ kind: string; heard_at: Date | null; reach: Date | null; reason: string | null; slots: object }>('SELECT kind, heard_at, reach, reason, slots FROM net.handovers ORDER BY kind DESC')).rows;
+    expect(rows).toEqual([{ kind: 'takeover', heard_at: heardAt, reach, reason: 'disk_full', slots: {} }, { kind: 'ceo', heard_at: null, reach, reason: null, slots: {} }]);
   });
 });
