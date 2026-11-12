@@ -110,7 +110,7 @@ it('propagates a failed count instead of returning an invented zero', async () =
   const failure = new Error('Count database unavailable');
   const select = vi.spyOn(c.db, 'select').mockImplementation(() => { throw failure; });
   onTestFinished(() => select.mockRestore());
-  const viewer = { full: true, personId: randomUUID(), access: { whole: true, departments: new Set<string>(), teams: new Set<string>() }, plans: new Set<string>(), agents: new Set<string>() };
+  const viewer = { full: true, personId: randomUUID(), access: { whole: true, departments: new Set<string>(), teams: new Set<string>() }, plans: new Set<string>(), agents: new Set<string>(), own: new Set<string>(), apart: new Set<string>() };
   await expect(turnCounts(c.db, c.turn, viewer, c.dev.id)).rejects.toBe(failure);
 });
 

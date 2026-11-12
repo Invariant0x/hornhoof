@@ -42,7 +42,7 @@ describe('immutable echelon finding provenance', () => {
     await submit(f.ctx, f.author.id, f.task.id, code);
     await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, reviewedCommit: HEAD, comment: 'Fixing the boundary.', issues: [{ ...issue, blocking: true }] });
     const task = await loadTask(f.db, f.task.id);
-    const viewer: AgentViewer = { full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!]), teams: new Set() }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]) };
+    const viewer: AgentViewer = { full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!]), teams: new Set() }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]), own: new Set(), apart: new Set() };
     const shown = await detailFor(f.ctx, viewer, task);
     expect(findings(shown)).toMatchObject({ uniqueReported: 1, uniqueConfirmed: 0, review: { reported: 1, confirmed: 0 }, issues: [] });
     expect(JSON.stringify(findings(shown))).not.toContain(issue.harm);
@@ -54,7 +54,7 @@ describe('immutable echelon finding provenance', () => {
     await submit(f.ctx, f.author.id, f.task.id, code);
     await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, reviewedCommit: HEAD, comment: 'Fixing the boundary.', issues: [{ ...issue, blocking: true }] });
     const task = await loadTask(f.db, f.task.id);
-    const owning = (department: string): AgentViewer => ({ full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!, department]), teams: new Set(), owns: new Set([department]) }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]) });
+    const owning = (department: string): AgentViewer => ({ full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!, department]), teams: new Set(), owns: new Set([department]) }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]), own: new Set(), apart: new Set() });
     const whole = findings(await f.detail());
     const shown = await detailFor(f.ctx, owning(task.departmentId!), task);
     expect(findings(shown)).toEqual(whole);

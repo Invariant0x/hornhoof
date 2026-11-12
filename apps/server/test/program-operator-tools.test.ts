@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_PICTURE_BYTES, PROGRAM_OPERATOR_ROLE, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { agentEvents, agents, attachments, jobs, people, programOperatorCases, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, jobs, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
@@ -15,7 +15,7 @@ import * as screenRenderer from '../src/modules/program-operator/screen.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { operatorCompany } from './program-operator-company.js';
 
-type Caller = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker'; roleKey: string | null };
+type Caller = { id: string; companyId: string; agentId: string; agentKind: AgentKind; roleKey: string | null };
 const SECRET = 'sk-live-0123456789abcdef-???';
 
 /* An employee of Development with its program on a node, and the orchestrator, the head of Operations and the program operator,
