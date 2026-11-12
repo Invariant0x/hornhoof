@@ -111,6 +111,7 @@ export class SyncController {
   private memory: SyncMemory = { w: null, posting: false, flag: null, checkpointed: false, blocked: false };
   private stored: SyncRecord | null = null;
   private route: { client: string; generation: number } | null = null;
+  private made: number | null = null;
   private routeAt = -Infinity;
   private timer: NodeJS.Timeout | null = null;
   private working: Promise<void> | null = null;
@@ -196,6 +197,13 @@ export class SyncController {
     return this.route?.generation ?? null;
   }
 
+  /* The generation at which this keeper's own client last held the company's route, also once it holds it no more:
+     hornhoof.org names nobody for a name that is free, so a keeper that comes back to it knows its own registration
+     only by this. None until it saw its client hold the route. */
+  lastHeld(): number | null {
+    return this.made;
+  }
+
   /* One look at a time. A look that fails changes nothing, the flag included, and is said once an outage. */
   look(): Promise<void> {
     if (this.stopped) return Promise.resolve();
@@ -242,6 +250,7 @@ export class SyncController {
     }
     this.stored = route.sync;
     this.route = route.state === 'held' && route.client === link.client ? { client: link.client, generation: route.generation } : null;
+    if (this.route) this.made = this.route.generation;
   }
 
   private async sample(): Promise<SyncSample> {

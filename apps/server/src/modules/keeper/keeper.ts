@@ -402,6 +402,7 @@ export class Keeper {
             return looked;
           },
           client: () => this.ownLink()?.client ?? null,
+          made: () => this.sync?.lastHeld() ?? null,
           tunnel: { start: () => void (this.entryTunnel = true), stop: () => void (this.entryTunnel = false), runs: () => this.entryTunnel },
           flag: () => (this.sync ? this.sync.flag() !== null : true),
           clientOf: networkId => {

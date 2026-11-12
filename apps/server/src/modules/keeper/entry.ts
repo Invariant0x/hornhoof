@@ -28,6 +28,9 @@ export type ReentryOptions = {
   poll: () => Promise<Poll>;
   /* The id of this keeper's own link client; null while the company has no link. */
   client: () => string | null;
+  /* The registration at which this keeper's own client held the company's name while it led, as it last saw; none
+     when it never saw that. */
+  made?: () => number | null;
   /* The keeper's link client, which registers the company's name. */
   tunnel: { start(): void; stop(): void; runs(): boolean };
   /* Whether the sync controller has a flag to lead under. */
@@ -151,7 +154,15 @@ export class Reentry {
     const client = opts.client();
     const poll = client ? await opts.poll() : null;
     this.window = nextWindow(this.window, poll, false);
-    if (poll?.route.known) this.route = { state: poll.route.state, client: poll.route.client, generation: poll.route.generation, sent: poll.sent };
+    if (poll?.route.known) {
+      const { state, generation } = poll.route;
+      /* hornhoof.org names the client that holds the name, and nobody once the name is free. Who made the
+         registration a free name stands at is then what this keeper knows itself: its own client, when that held the
+         name at this very registration, or whoever it saw holding it there a look ago. A name that is free at any
+         other registration is nobody's it knows, and it takes nothing by it. */
+      const maker = poll.route.client ?? (generation === opts.made?.() ? client : this.route?.generation === generation ? this.route.client : null);
+      this.route = { state, client: maker, generation, sent: poll.sent };
+    }
     /* A look that does not know its own link client cannot tell its own registration from another machine's: it
        decides nothing by the name, and what it saw of it before is looked at again once the link is known. */
     const route = client ? this.route : null;

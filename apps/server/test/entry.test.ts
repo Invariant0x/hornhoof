@@ -18,7 +18,7 @@ const clocks = (mono: number): Clocks => ({ wall: 1_000_000 + mono, mono });
    by set by the test: the clock, the route, the relay's health, what B said, and its sync controller's flag. */
 function keeper() {
   const said = {
-    now: 0, needed: true as boolean | null, idle: false, own: TERM as Term | null, b: B as string | null, flag: false, client: CLIENT as string | null, runs: false,
+    now: 0, needed: true as boolean | null, idle: false, own: TERM as Term | null, b: B as string | null, flag: false, client: CLIENT as string | null, runs: false, made: null as number | null,
     route: { state: 'held', client: CLIENT, generation: 7 } as { state: 'held' | 'empty'; client: string | null; generation: number } | 'unknown' | 'none',
     health: { up: true, relayStarted: 100 }, promise: null as Beat['stance'] | 'silent' | null, followFails: false,
   };
@@ -45,6 +45,7 @@ function keeper() {
       return { sent: clocks(said.now), replied: said.now, route, health: said.health };
     },
     client: () => said.client,
+    made: () => said.made,
     tunnel: { start: () => void ((said.runs = true), did.push('tunnel start')), stop: () => void ((said.runs = false), did.push('tunnel stop')), runs: () => said.runs },
     flag: () => said.flag,
     follow: async () => {
@@ -138,6 +139,36 @@ describe('the way back to leading', () => {
     k.said.flag = true;
     await k.seconds(1);
     expect(k.it.entry()).toEqual({ sent: clocks(k.said.now), term: NEXT });
+  });
+
+  it('knows who registered a free name, for which hornhoof.org names nobody', async () => {
+    /* hornhoof.org names the client that holds a name, and nobody once the name is free. This keeper's own client
+       held the name at 7 while it led: a free name at 7 is its own to take again. */
+    const k = keeper();
+    k.said.made = 7;
+    k.said.route = { state: 'empty', client: null, generation: 7 };
+    await k.seconds(24);
+    expect(k.did).toEqual([]);
+    await k.seconds(2);
+    expect(k.did).toEqual(['tunnel start']);
+    k.said.route = { state: 'held', client: CLIENT, generation: 8 };
+    k.said.flag = true;
+    await k.seconds(1);
+    expect(k.it.entry()).toEqual({ sent: clocks(k.said.now), term: NEXT });
+
+    /* What it saw itself counts the same: its own client held the name at 7 a look ago. */
+    const seen = keeper();
+    await seen.seconds(1);
+    seen.said.route = { state: 'empty', client: null, generation: 7 };
+    await seen.seconds(26);
+    expect(seen.did).toEqual(['tunnel start']);
+
+    /* A free name at a generation it never held may be anyone's: it takes nothing. */
+    const late = keeper();
+    late.said.made = 7;
+    late.said.route = { state: 'empty', client: null, generation: 9 };
+    await late.seconds(40);
+    expect([late.did, late.it.entry()]).toEqual([[], null]);
   });
 
   it('takes no proof from its own route at another generation', async () => {

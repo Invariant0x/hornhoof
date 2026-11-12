@@ -276,6 +276,20 @@ describe('the sync controller', () => {
     expect(s.controller.copies()[0]!.state).not.toBe('silent');
   });
 
+  it("remembers the registration its own client held the name at, once the name is free", async () => {
+    const s = await stand();
+    expect(s.controller.lastHeld()).toBeNull();
+    await s.looks(2);
+    expect([s.controller.generation(), s.controller.lastHeld()]).toEqual([1, 1]);
+    /* The name goes free: hornhoof.org names nobody for it then, and this is how the keeper still knows it was its own. */
+    s.relay.drop('acme');
+    await s.looks(2);
+    expect([s.controller.generation(), s.controller.lastHeld()]).toEqual([null, 1]);
+    s.relay.register('acme', CLIENT);
+    await s.looks(2);
+    expect([s.controller.generation(), s.controller.lastHeld()]).toEqual([2, 2]);
+  });
+
   it("samples the move's target", async () => {
     const s = await stand();
     const D = { machine: 'd', networkId: 'd0d0d0d0'.repeat(8), number: 3, copyName: 'copy_d0d0d0d0d0d0d0d0_1', ready: true };
