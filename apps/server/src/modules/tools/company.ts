@@ -1,5 +1,6 @@
 import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { accessOf } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, nodes, people, subscriptions, teams } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
@@ -11,15 +12,31 @@ import { servesWholeCompany } from './staff.js';
 
 const repositoryOf = (d: { repoUrl: string | null; repoBranch: string | null }) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main' } : null);
 
+/* The people an agent may take orders from: those who see the whole company, and those who run departments, each with the
+   departments they run in full. Someone given only a sub-unit or a product runs no department, so is not one of them. */
+async function leadersOf(db: Db, companyId: string, depts: (typeof departments.$inferSelect)[]) {
+  const rows = await db
+    .select({ id: people.id, name: people.name, title: people.title, scopeKind: people.scopeKind })
+    .from(people)
+    .where(and(eq(people.companyId, companyId), ne(people.status, 'disabled'), eq(people.isAgent, false)))
+    .orderBy(asc(people.createdAt));
+  const leaders: { name: string; title: string; runs?: string[] }[] = [];
+  for (const p of rows) {
+    if (p.scopeKind === 'company') leaders.push({ name: p.name, title: p.title });
+    else {
+      const owns = (await accessOf(db, p)).owns ?? new Set<string>();
+      const runs = depts.filter(d => owns.has(d.id)).map(deptName);
+      if (runs.length) leaders.push({ name: p.name, title: p.title, runs });
+    }
+  }
+  return leaders;
+}
+
 /* What the company tool shows an agent: names and roles, never emails or keys. */
 export async function companyView(db: Db, templates: Templates, companyId: string) {
   const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-  const leaders = await db
-    .select({ name: people.name, title: people.title })
-    .from(people)
-    .where(and(eq(people.companyId, companyId), eq(people.scopeKind, 'company'), ne(people.status, 'disabled')))
-    .orderBy(asc(people.createdAt));
   const depts = await db.select().from(departments).where(eq(departments.companyId, companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
+  const leaders = await leadersOf(db, companyId, depts);
   const owners = new Map((await db.select({ id: people.id, scopeKind: people.scopeKind }).from(people)).map(p => [p.id, p.scopeKind]));
   const subs = await db.select().from(subscriptions).where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt)));
   /* What each plan's machines are signed in to: agents get the tier, never the address. */

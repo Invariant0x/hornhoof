@@ -2,7 +2,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, subscriptions } from '../../db/schema.js';
+import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf, onAgent } from '../conversation/queue.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { agentProgramState, signInTurn } from './silent.js';
@@ -51,6 +51,8 @@ export async function programRestartStatus(ctx: Ctx, companyId: string, agentId:
 }
 
 export async function restartProgram(ctx: Ctx, companyId: string, agentId: string): Promise<{ ok: boolean; text: string }> {
+  const [target] = await ctx.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
+  if (target?.kind === 'assistant') return { ok: false, text: "This is a person's own assistant, not an employee of the company: only its owner restarts it." };
   const checked = await onAgent(ctx, agentId, async (): Promise<Check> => {
     const check = await taskRestart(ctx, companyId, agentId, Date.now());
     if (!check.ready) return check;

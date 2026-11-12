@@ -113,7 +113,7 @@ describe('install.sh', () => {
     expect(runs[0]).toContain(`--label hornhoof.subscription=${SUB_A}`);
     expect(r.calls).toContain(`stdin ${SERVER} ${SUB_A} machine node-key-mmmmmmmmmmmmmmmm`);
     expect(r.calls.filter(c => c.startsWith('docker exec -it'))).toEqual([]);
-    expect(r.out).not.toContain('Signing in');
+    expect(r.out).not.toContain('Signing in to');
     expect(r.out).toMatch(/Test runs, no plan: ready/);
     expect(r.out).toContain('To run agents here too, add one of your plans to this machine in Hornhoof under Subscriptions.');
   });

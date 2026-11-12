@@ -9,7 +9,7 @@ const LangText = z.object({ en: z.string(), ru: z.string() });
 const Party = z.object({
   kind: z.enum(['person', 'agent', 'hornhoof']), id: z.string().nullable(), name: z.string(),
   role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
-  agentKind: z.enum(['orchestrator', 'head', 'worker']).optional(),
+  agentKind: z.enum(['orchestrator', 'head', 'worker', 'assistant']).optional(),
 });
 /* channel: the way a person's message came when not from the agent's window. assistant: the person's assistant that wrote it
    for them. */

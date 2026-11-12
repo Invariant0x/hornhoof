@@ -289,7 +289,7 @@ type EditPanel = { edit: PersonEdit | null; me: Me; org: Org | null; people: Per
 
 function AssistantPanel({ edit, me, org, people, onUpdated, onSaved, onClose }: EditPanel & { edit: PersonEdit }) {
   if (!looksAfter(me, edit.person, people)) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
-  return <AssistantCard key={edit.person.id} person={edit.person} manages={rightsOn(me, edit.person).manageable} rename={renames(me, edit.person)} onChanged={onUpdated} onSaved={onSaved} onClose={onClose} />;
+  return <AssistantCard key={edit.person.id} me={me} person={edit.person} manages={rightsOn(me, edit.person).manageable} rename={renames(me, edit.person)} onChanged={onUpdated} onSaved={onSaved} onClose={onClose} />;
 }
 
 function PersonEditPanel(props: EditPanel) {

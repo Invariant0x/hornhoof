@@ -5,6 +5,73 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.15] - 2026-11-12
+
+Moving the map no longer selects the words on it.
+
+### Fixed
+
+- A press, a drag or a double click on the map or the tree no longer marks a card's words, so a browser's translator
+  or search does not pop up over them.
+
+## [0.18.14] - 2026-11-12
+
+A personal assistant can now have an agent of its own that thinks for it on a plan its owner picks, and that agent can
+ask the assistant's program for the program's own skills.
+
+### Added
+
+- On the assistant's card in People, its owner picks one of their own personal plans, and the assistant gets its own
+  agent on it. Only the owner sees that agent and writes to it, in its window or through the assistant; it takes no
+  tasks, is not on the map, and the orchestrator does not change it.
+- A message from the assistant without an agent goes to its own agent, which reads the program's words as they are and
+  keeps its conversation between messages. `GET /api/assistant/me` says which agent that is and whether it can answer now.
+- The assistant's card takes a skills address. The assistant's own agent asks the program for its skills there with a
+  signed call, and reads the answer.
+- For an AvaClone assistant with an events or skills address, Copy for the assistant adds the signing secret, which the
+  program checks Hornhoof's calls with.
+- A general skill for an assistant's own agent: answer only with the words for the owner, and leave code work to the
+  company's agents.
+
+### Fixed
+
+- The orchestrator's database tool can no longer change an assistant's settings, key or events: it only reads them.
+
+## [0.18.13] - 2026-11-12
+
+An employee now knows who runs its department when that person writes to it, the installer shows each step and what to
+do in it, and the page of a plan leads its owner from the install command to working agents.
+
+### Added
+
+- The installer for a computer runs in four numbered steps, each with one plain sentence of what happens, and ends with
+  a Done line that names the computer and its plans. Before the node image it says the first download can take 10 to 20
+  minutes, and the download shows its progress. Before each sign-in a framed block says what to do, how to paste in that
+  window, and to sign in in one place only.
+- A personal plan that does not work yet shows its owner the steps to agents working on it: run the command, the
+  computer connects, sign in, ready. The passed steps are ticked, and the current one says what to do now.
+- An agent's terminal has Paste in its right-click menu.
+
+### Changed
+
+- On Windows the installer keeps the window from freezing at a click, so a right-click pastes the sign-in code, opens
+  the sign-in page in the Windows browser by itself, shows a clear Restart needed banner, and a window that would close
+  by itself waits for Enter first.
+
+### Fixed
+
+- A head took a person given its department for an outsider and asked the CEO before doing what they asked: a message
+  from an agent's window carried only the person's name, and the company list agents read showed only people who see
+  the whole company. Each message to an employee now says what the person is to it, the company list names everyone
+  who runs a department, and the heads' and the orchestrator's rules say to do what such a person asks inside it. The
+  approvals panel no longer says that access to a department does not make someone run it.
+- Ctrl+V in an agent's terminal on Windows and Linux typed ^V into the program instead of pasting.
+- A department's pipeline report answers where the database may only be read, instead of failing on a snapshot it could
+  not keep.
+- An agent left work to a background helper, ended its answer, and asked the person to write again: Hornhoof's tools
+  stop when the answer ends, so the helper lost them halfway. Every agent's rules now say to finish work that uses
+  Hornhoof's tools inside the answer.
+
 ## [0.18.12] - 2026-11-12
 
 Everyone given a department now runs it in full, as its responsible person does, and a department may have many such

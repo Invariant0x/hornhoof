@@ -5,6 +5,8 @@ import type { Limits, PlanStatus, SubView } from '../types';
 
 export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
 export const MAIN_WINDOWS = ['five_hour', 'seven_day'];
+/* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
+export const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
 const until = (w: Limits['windows'][number]) => w.resetsAt ? Date.parse(w.resetsAt) : Infinity;
 const snapshotAt = (s: Pick<SubView, 'limitsUpdatedAt'>, now: number) => s.limitsUpdatedAt === undefined ? new Date(now) : s.limitsUpdatedAt;
 

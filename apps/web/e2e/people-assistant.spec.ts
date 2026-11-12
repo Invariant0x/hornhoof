@@ -9,7 +9,7 @@ const WHOLE = { whole: true, departments: [], teams: [] };
 const NONE = { whole: false, departments: [], teams: [] };
 const AVA: PersonView = {
   id: 'h1', name: 'Ava', email: null, title: 'Personal assistant', status: 'active', isOwner: false, access: NONE,
-  assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', key: null },
+  assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', skillsUrl: null, key: null, agent: null },
 };
 /* The CEO, a person with a long name, and her assistant, with a key made already. */
 const PEOPLE: PersonView[] = [

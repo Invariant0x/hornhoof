@@ -34,7 +34,7 @@ describe("an assistant's key", () => {
     const me = await asAssistant(c, key, '/api/assistant/me');
     expect(me.statusCode).toBe(200);
     expect(me.json()).toEqual({
-      assistant: { id, name: 'Ava of olga', title: '', program: 'avaclone' },
+      assistant: { id, name: 'Ava of olga', title: '', program: 'avaclone', agentId: null, agentReady: false },
       owner: {
         id: c.ids.olga, name: 'Olga', title: '', ceo: false, ceoDelegate: false, wholeCompany: false,
         departments: [{ id: c.dev.id, name: 'Development' }], teams: [], responsibleFor: [{ id: c.dev.id, name: 'Development' }],

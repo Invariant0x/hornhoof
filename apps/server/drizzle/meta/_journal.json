@@ -715,6 +715,13 @@
       "when": 1794448160078,
       "tag": "0102_assistant_hermes",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1794494241292,
+      "tag": "0103_assistant_agent",
+      "breakpoints": true
     }
   ]
 }

@@ -55,7 +55,16 @@ export type PersonView = {
 
 export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'hermes', 'other'] as const;
 export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
-export type AssistantView = { owner: { id: string; name: string }; program: AssistantProgram; eventsUrl: string | null; key: { createdAt: string } | null };
+/* skillsUrl: where the assistant's own agent asks the program for its skills. agent: the agent that thinks for the assistant,
+   and the plan it thinks on; null until its owner picks a plan. */
+export type AssistantView = {
+  owner: { id: string; name: string };
+  program: AssistantProgram;
+  eventsUrl: string | null;
+  skillsUrl: string | null;
+  key: { createdAt: string } | null;
+  agent: { id: string; plan: string | null } | null;
+};
 
 /* What a person reaches: the whole company, or departments and teams, in the order of the map. */
 export type AccessView = { whole: boolean; departments: { id: string; name: string }[]; teams: { id: string; name: string; departmentId: string }[] };
@@ -275,7 +284,7 @@ export type RestartCause = 'server' | 'update' | 'machine' | 'container' | 'prog
 export type AgentCardView = {
   id: string;
   currentTask: { id: string; number: number; title: string } | null;
-  kind: 'orchestrator' | 'head' | 'worker';
+  kind: 'orchestrator' | 'head' | 'worker' | 'assistant';
   name: string;
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
@@ -347,7 +356,7 @@ export type MessageParty = {
   name: string;
   role: Lang | null;
   department: { id: string; name: Lang } | null;
-  agentKind?: 'orchestrator' | 'head' | 'worker';
+  agentKind?: 'orchestrator' | 'head' | 'worker' | 'assistant';
 };
 
 /* One line of an agent's conversation, as the server keeps it. message: who a message came from and went to, and whether
@@ -381,7 +390,7 @@ export type StreamMessage =
   | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
 
 export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
-export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
+export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker' | 'assistant'; role: Lang | null };
 export type TaskPlace = { id: string; name: string } | null;
 
 /* A task as lists show it, with its required current route. */

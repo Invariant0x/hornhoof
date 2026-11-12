@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, TURN_MODES, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, TURN_MODES, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, turnForNewTask, updateTask, verdict, type Moved, type Task } from './engine.js';
@@ -37,7 +37,7 @@ import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 
-export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
+export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind };
 type Agent = typeof agents.$inferSelect;
 type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } };
 

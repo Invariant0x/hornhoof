@@ -76,7 +76,7 @@ export function telegramRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/agents/:id/telegram', async req => {
     const { me, agent } = await agentFor(ctx, req);
     await requireBotKeeper(ctx.db, me, agent);
-    if (agent.kind === 'worker') throw new ApiError(409, 'conflict', 'Only department heads and the orchestrator have a Telegram bot.', 'telegram_heads_only');
+    if (agent.kind === 'worker' || agent.kind === 'assistant') throw new ApiError(409, 'conflict', 'Only department heads and the orchestrator have a Telegram bot.', 'telegram_heads_only');
     const { token } = TokenBody.parse(req.body);
     const bot = await botOf(ctx, token);
     await keepBot(ctx, me, agent, token, bot);

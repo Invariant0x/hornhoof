@@ -385,7 +385,7 @@ select:disabled { opacity: .55; }
 
 /* Map */
 .map {
-  position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none;
+  position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
   background-size: 22px 22px;
 }
@@ -646,6 +646,17 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
+/* The steps from adding a personal plan to its agents working, down the card so their words wrap on a phone: a numbered
+   box joined by a line, ticked once passed, filled at the current step with what to do now, dimmed after it. */
+.plan-steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: plan-step; }
+.plan-steps li { position: relative; display: grid; gap: 4px; min-width: 0; min-height: 20px; padding-inline-start: 30px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; counter-increment: plan-step; }
+.plan-steps li::before { content: counter(plan-step); position: absolute; inset-inline-start: 0; top: 0; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--line2); background: var(--surface); font-family: var(--f-display); font-size: 12px; font-weight: 600; line-height: 1; }
+.plan-steps li:not(:last-child)::after { content: ''; position: absolute; inset-inline-start: 10px; top: 22px; bottom: -4px; width: 1px; background: var(--line2); }
+.plan-steps li.done, .plan-steps li.now { color: var(--ink); }
+.plan-steps li.done::before { content: '\2713'; border-color: var(--ok); color: var(--ok); }
+.plan-steps li.now::before { border-color: var(--btn); background: var(--btn); color: var(--on-btn); box-shadow: 0 0 0 3px var(--glow); }
+.plan-steps li.now > span:first-child { font-weight: 600; }
+.plan-steps li p { margin: 0; }
 .key-form { max-width: 640px; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
@@ -1460,7 +1471,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 
 .tview { position: absolute; top: 68px; left: 16px; right: 16px; bottom: 76px; background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
 .tview .tv-empty { margin: 32px; padding: 12px 16px; width: fit-content; color: var(--muted); }
-.tview .tv-scroll { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+.tview .tv-scroll { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .tview .tv-scroll:active { cursor: grabbing; }
 .tview .tv-in { display: flex; width: max-content; transform-origin: 0 0; }
 .tview .tv-labs { position: relative; z-index: 3; flex: none; background: linear-gradient(to right, var(--bg) calc(100% - 12px), transparent); }

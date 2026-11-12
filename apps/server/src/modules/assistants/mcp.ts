@@ -3,10 +3,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requireAssistant } from '../../auth/assistant.js';
+import { assistantOfAgent, requireAssistant } from '../../auth/assistant.js';
 import type { Person } from '../../auth/session.js';
-import { refusal } from '../../errors.js';
+import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
+import { callSkill } from './skills.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -28,18 +29,18 @@ async function answer(call: () => Promise<unknown>) {
   }
 }
 
-/* The assistant API as tools, for this assistant's owner as they are now. gone: the asker went, so a long poll ends. */
-function toolsFor(ctx: Ctx, me: Person, gone: AbortSignal): McpServer {
-  const server = new McpServer({ name: 'hornhoof', version: ctx.config.version }, { instructions: INSTRUCTIONS });
+/* The assistant API as tools, for this assistant's owner as they are now. gone: the asker went, so a long poll ends.
+   self: the assistant's own agent when it is the one asking, which never writes to itself. */
+function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>, gone: AbortSignal, self?: string): McpServer {
   server.registerTool(
     'who_am_i',
     { description: "Who you are in Hornhoof, the person you act for (your owner), what your owner is in the company, and the company's name." },
-    () => answer(() => whoAmI(ctx, me)),
+    () => answer(async () => whoAmI(ctx, await actor())),
   );
   server.registerTool(
     'list_agents',
     { description: "The company's agents you may write to now, with their ids, roles and departments: the same agents your owner may write to." },
-    () => answer(() => agentsFor(ctx, me)),
+    () => answer(async () => agentsFor(ctx, await actor())),
   );
   server.registerTool(
     'send_message',
@@ -54,6 +55,8 @@ function toolsFor(ctx: Ctx, me: Person, gone: AbortSignal): McpServer {
     },
     args =>
       answer(async () => {
+        if (self && (!args.agentId || args.agentId === self)) throw new ApiError(400, 'validation', 'This is your own conversation: name an agent from list_agents.');
+        const me = await actor();
         const next = await lastSeqOf(ctx.db, me.assistant!.id);
         return { ...(await writeFor(ctx, me, args)), next };
       }),
@@ -69,12 +72,12 @@ function toolsFor(ctx: Ctx, me: Person, gone: AbortSignal): McpServer {
         wait: EventsQuery.shape.wait.describe('When nothing is new yet, wait up to this many seconds for something, 0 to 50. 0 answers at once.'),
       },
     },
-    (args, extra) => answer(() => eventsFor(ctx, me, args, AbortSignal.any([gone, extra.signal]))),
+    (args, extra) => answer(async () => eventsFor(ctx, await actor(), args, AbortSignal.any([gone, extra.signal]))),
   );
   server.registerTool(
     'list_requests',
     { description: 'The requests that wait for your owner now, oldest first: questions, choices, approvals and stuck work. Ask your owner, then give their answer with answer_request.' },
-    () => answer(() => requestsFor(ctx, me)),
+    () => answer(async () => requestsFor(ctx, await actor())),
   );
   server.registerTool(
     'answer_request',
@@ -91,7 +94,30 @@ function toolsFor(ctx: Ctx, me: Person, gone: AbortSignal): McpServer {
         retry: z.boolean().optional().describe('For stuck work: true to try again.'),
       },
     },
-    ({ requestId, ...body }) => answer(() => answerFor(ctx, me, { id: requestId }, body)),
+    ({ requestId, ...body }) => answer(async () => answerFor(ctx, await actor(), { id: requestId }, body)),
+  );
+  return server;
+}
+
+/* What an assistant's own agent works with: its owner's assistant tools, and the program's skills. */
+export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string }): McpServer {
+  let actor: Promise<Person> | undefined;
+  const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
+  registerTools(server, ctx, () => (actor ??= assistantOfAgent(ctx.db, job.agentId)), new AbortController().signal, job.agentId);
+  server.registerTool(
+    'persona_call',
+    {
+      description:
+        "Runs one of the assistant program's own skills, such as a reminder, a file or a search, by its name with its arguments, as the message lists them, and gives the program's answer. It may take up to 120 seconds.",
+      inputSchema: {
+        name: z.string().trim().min(1).max(200).describe("The skill's name, as the message lists it."),
+        arguments: z.record(z.string(), z.unknown()).default({}).describe("The skill's arguments, as the message describes them."),
+      },
+    },
+    async (args, extra) => {
+      const done = await callSkill(ctx, job, args, extra.signal);
+      return { content: [{ type: 'text' as const, text: done.text }], ...(done.ok ? {} : { isError: true }) };
+    },
   );
   return server;
 }
@@ -102,7 +128,7 @@ export function assistantMcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/assistant/mcp', async (req, reply) => {
     const me = await requireAssistant(req, ctx.db);
     const gone = new AbortController();
-    const server = toolsFor(ctx, me, gone.signal);
+    const server = registerTools(new McpServer({ name: 'hornhoof', version: ctx.config.version }, { instructions: INSTRUCTIONS }), ctx, async () => me, gone.signal);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

@@ -76,7 +76,7 @@ export function addressed(text: string, message: MessageEnvelope): string {
 export type Standing = { owner: boolean; delegate: boolean; department: boolean | null };
 
 /* What the person is in the company, in one sentence. */
-function whoIs(author: { name: string }, standing: Standing): string {
+export function whoIs(author: { name: string }, standing: Standing): string {
   const is = [standing.owner && "the company's owner (the CEO)", standing.delegate && "the CEO's delegate", standing.department && 'responsible for your department'].filter(Boolean);
   return is.length
     ? `${author.name} is ${is.join(' and ')}.`

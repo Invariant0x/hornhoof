@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot, type Spot } from '../../auth/access.js';
 import { agentChanges, agents, companies, teams } from '../../db/schema.js';
@@ -42,10 +42,11 @@ async function planOf(ctx: Pick<Ctx, 'templates'>, tx: Tx, agent: Agent, fresh: 
 }
 
 /* Everyone of the company who waits for a plan takes one of these new ones by the rules of a hire, under the company's
-   lock, so two servers place no one twice. One switched off takes no work, so it stays as it is, as the operator does. */
+   lock, so two servers place no one twice. One switched off takes no work, so it stays as it is, as the operator does.
+   An assistant's own agent thinks only on the plan its owner picks. */
 async function placeOn(ctx: Pick<Ctx, 'templates'>, tx: Tx, companyId: string, fresh: ReadonlySet<string>): Promise<Agent[]> {
   await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
-  const waiting = await tx.select().from(agents).where(and(eq(agents.companyId, companyId), isNull(agents.subscriptionId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  const waiting = await tx.select().from(agents).where(and(eq(agents.companyId, companyId), ne(agents.kind, 'assistant'), isNull(agents.subscriptionId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!waiting.length) return [];
   const off = await keptOff(tx, waiting.map(a => a.id));
   /* Employees of one place share what may serve them. */

@@ -1,0 +1,227 @@
+import { createHmac } from 'node:crypto';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { and, eq } from 'drizzle-orm';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { canViewAgent } from '../src/auth/agent-view.js';
+import { personColumns } from '../src/auth/session.js';
+import { agents, people, subscriptions } from '../src/db/schema.js';
+import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
+import { liveAgent } from '../src/modules/tasks/engine.js';
+import { checkedWaitTarget } from '../src/modules/tasks/wait-target.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+
+const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
+const codeOf = (command: string) => command.split('--join ')[1]!;
+
+/* Ivan the CEO with his own Claude plan on his machine, and Olga, who sees the whole company, with a plan of her own on no
+   machine yet. */
+async function company() {
+  const { app, db } = await testApp();
+  const url = await listen(app);
+  const ceo = await setUpCompany(app);
+  const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
+  const plan = (connected.subscriptions as { id: string }[])[0]!.id;
+  const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: codeOf(connected.command), ...MACHINE } })).json().nodes as { key: string }[];
+  const node = await connectNode(url, joined[0]!.key);
+  node.send(hello);
+  const [owner] = await db.select(personColumns).from(people).where(eq(people.isOwner, true));
+  const olgaSession = await invitePerson(app, ceo, { name: 'Olga', email: 'olga@acme.com', access: { whole: true } });
+  const [olga] = await db.select(personColumns).from(people).where(eq(people.email, 'olga@acme.com'));
+  const [olgaPlan] = await db.insert(subscriptions).values({ companyId: owner!.companyId, provider: 'claude', kind: 'personal', label: 'Olga plan', status: 'ready', ownerPersonId: olga!.id }).returning();
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  return { app, db, ceo, node, plan, owner: owner!, olgaSession, olga: olga!, olgaPlan: olgaPlan!.id, orchestrator: orchestrator! };
+}
+
+type Company = Awaited<ReturnType<typeof company>>;
+
+const bearer = (key: string) => ({ headers: { authorization: `Bearer ${key}` } });
+
+/* An assistant of this person, set up by whoever's session this is, with its key and signing secret. */
+async function assistantOf(c: Company, session: string, ownerId: string, name = 'Ava') {
+  const { id } = (await c.app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name, owner: ownerId, program: 'avaclone' }, ...as(session) })).json().person;
+  const { key, signingSecret } = (await c.app.inject({ method: 'POST', url: `/api/people/${id}/key`, ...as(session) })).json();
+  return { id: id as string, key: key as string, secret: signingSecret as string };
+}
+
+const pick = (c: Company, session: string, assistantId: string, plan: string | null) =>
+  c.app.inject({ method: 'PATCH', url: `/api/people/${assistantId}/assistant`, payload: { plan }, ...as(session) });
+const me = async (c: Company, key: string) => (await c.app.inject({ url: '/api/assistant/me', ...bearer(key) })).json();
+const write = (c: Company, key: string, payload: object) => c.app.inject({ method: 'POST', url: '/api/assistant/messages', ...bearer(key), payload });
+const ownAgent = async (c: Company, assistantId: string) => {
+  const [row] = await c.db.select().from(agents).where(and(eq(agents.kind, 'assistant'), eq(agents.name, (await c.db.select({ name: people.name }).from(people).where(eq(people.id, assistantId)))[0]!.name)));
+  return row!;
+};
+
+type Run = { type: 'job.run'; jobId: string; prompt: string; instructions: string | null; toolToken: string | null };
+
+/* The turn the node gets with these words in it, past any other. */
+async function runWith(node: FakeNode, words: string): Promise<Run> {
+  for (;;) {
+    const message = (await node.next()) as unknown as Run;
+    if (message.type === 'job.run' && message.prompt.includes(words)) return message;
+  }
+}
+
+/* The CEO's assistant on his plan, its own agent ready, and the turn its first message started. */
+async function talking(c: Company, words = 'Who writes to me today?') {
+  const ava = await assistantOf(c, c.ceo, c.owner.id);
+  expect((await pick(c, c.ceo, ava.id, c.plan)).statusCode).toBe(200);
+  await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
+  const sent = await write(c, ava.key, { text: words });
+  expect(sent.statusCode).toBe(202);
+  return { ava, agent: await ownAgent(c, ava.id), message: sent.json().message as { id: string; agentId: string }, run: await runWith(c.node, words) };
+}
+
+describe("an assistant's own agent", () => {
+  it("runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named", async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    expect((await me(c, ava.key)).assistant).toMatchObject({ agentId: null, agentReady: false });
+    expect((await write(c, ava.key, { text: 'Hello' })).statusCode).toBe(409);
+    const picked = await pick(c, c.ceo, ava.id, c.plan);
+    expect(picked.statusCode).toBe(200);
+    const agent = await ownAgent(c, ava.id);
+    expect(agent).toMatchObject({ kind: 'assistant', name: 'Ava', departmentId: null, subscriptionId: c.plan, removedAt: null });
+    expect(picked.json().person.assistant).toMatchObject({ agent: { id: agent.id, plan: c.plan }, skillsUrl: null });
+    await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
+    expect((await me(c, ava.key)).assistant.agentId).toBe(agent.id);
+    const sent = await write(c, ava.key, { text: 'Who writes to me today?' });
+    expect(sent.statusCode).toBe(202);
+    expect(sent.json().message.agentId).toBe(agent.id);
+    const run = await runWith(c.node, 'Who writes to me today?');
+    expect(run.prompt).not.toContain('through the assistant');
+    expect(run.instructions).toContain("You are Ava, the personal assistant of Ivan at Acme.");
+    expect(run.instructions).not.toContain('department');
+  });
+
+  it('runs only on a personal plan of its owner, which its owner alone picks, and waits with none', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.ceo, c.olga.id);
+    expect((await pick(c, c.ceo, ava.id, c.olgaPlan)).json().error.reason).toBe('assistant_plan_owner_only');
+    expect((await pick(c, c.olgaSession, ava.id, c.plan)).json().error.reason).toBe('assistant_plan_invalid');
+    expect(await c.db.select().from(agents).where(eq(agents.kind, 'assistant'))).toEqual([]);
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    expect((await pick(c, c.olgaSession, ava.id, null)).statusCode).toBe(200);
+    const agent = await ownAgent(c, ava.id);
+    expect(agent.subscriptionId).toBeNull();
+    expect((await me(c, ava.key)).assistant).toEqual(expect.objectContaining({ agentId: agent.id, agentReady: false }));
+    expect((await write(c, ava.key, { text: 'Hello' })).json().error.reason).toBe('agent_not_ready');
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    expect(await c.db.select().from(agents).where(eq(agents.kind, 'assistant'))).toHaveLength(1);
+  });
+
+  it('is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.olgaSession, c.olga.id);
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    const agent = await ownAgent(c, ava.id);
+    expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.olgaSession) })).statusCode).toBe(200);
+    expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.ceo) })).statusCode).toBe(403);
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${agent.id}/messages`, payload: { text: 'Hi' }, ...as(c.ceo) })).statusCode).toBe(403);
+    expect((await c.app.inject({ url: '/api/org', ...as(c.ceo) })).body).not.toContain(agent.id);
+    expect(await canViewAgent(c.db, { ...c.olga, via: c.orchestrator.id }, agent)).toBe(false);
+    const max = await assistantOf(c, c.ceo, c.owner.id, 'Max');
+    const listed = (await c.app.inject({ url: '/api/assistant/agents', ...bearer(max.key) })).json().agents.map((a: { id: string }) => a.id);
+    expect(listed).not.toContain(agent.id);
+    expect((await write(c, max.key, { agentId: agent.id, text: 'Hi' })).statusCode).toBe(403);
+  });
+
+  it("is the CEO's own when the CEO owns it, still out of the orchestrator's reach", async () => {
+    const c = await company();
+    const { agent } = await talking(c);
+    expect(await canViewAgent(c.db, c.owner, agent)).toBe(true);
+    expect(await canViewAgent(c.db, { ...c.owner, via: c.orchestrator.id }, agent)).toBe(false);
+    expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.olgaSession) })).statusCode).toBe(403);
+  });
+
+  it("works with its owner's assistant tools, not with the company's", async () => {
+    const c = await company();
+    const { run } = await talking(c);
+    const client = await mcp(c.app, run.toolToken!);
+    const names = (await client.listTools()).tools.map(t => t.name).sort();
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'who_am_i']);
+  });
+});
+
+describe("an assistant's own agent, for the company", () => {
+  it("is changed on its assistant's card, not as an employee: its own card neither edits nor removes it", async () => {
+    const c = await company();
+    const { agent } = await talking(c);
+    const card = await c.app.inject({ url: `/api/agents/${agent.id}`, ...as(c.ceo) });
+    expect(card.statusCode).toBe(200);
+    expect(card.json()).toMatchObject({ id: agent.id, kind: 'assistant', name: 'Ava' });
+    const edit = await c.app.inject({ method: 'PATCH', url: `/api/agents/${agent.id}`, payload: { name: 'Eve' }, ...as(c.ceo) });
+    expect(edit.json().error.reason).toBe('assistant_agent_card');
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/agents/${agent.id}`, ...as(c.ceo) })).json().error.reason).toBe('assistant_agent_card');
+    expect((await ownAgent(c, (await c.db.select().from(people).where(eq(people.name, 'Ava')))[0]!.id)).name).toBe('Ava');
+  });
+
+  it('is no employee: no task takes it or waits for it, and no plan comes to it by itself', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.olgaSession, c.olga.id);
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    const agent = await ownAgent(c, ava.id);
+    await expect(liveAgent(c.db, c.owner.companyId, agent.id)).rejects.toThrow(/no employee/);
+    await expect(checkedWaitTarget(c.app.ctx, c.owner.companyId, c.orchestrator.id, { kind: 'employee', employee: agent.id } as never)).rejects.toThrow(/cannot take work/);
+    expect((await pick(c, c.olgaSession, ava.id, null)).statusCode).toBe(200);
+    await placeWaiting(c.app.ctx, c.owner.companyId, [c.plan, c.olgaPlan]);
+    expect((await ownAgent(c, ava.id)).subscriptionId).toBeNull();
+  });
+});
+
+describe('persona_call', () => {
+  /* The assistant's program at a local address, which answers each call with this. */
+  async function program(answer: object, status = 200) {
+    const calls: { headers: IncomingHttpHeaders; body: string }[] = [];
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => (body += chunk));
+      req.on('end', () => {
+        calls.push({ headers: req.headers, body });
+        res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(answer));
+      });
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    onTestFinished(() => new Promise<void>(done => server.close(() => done())));
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/skills`, calls };
+  }
+
+  const said = (result: unknown) => (result as { content: { text: string }[]; isError?: boolean });
+
+  it("asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer", async () => {
+    const c = await company();
+    const { ava, message, run } = await talking(c);
+    const at = await program({ ok: true, text: 'Reminder set for 9:00.', data: { id: 7 } });
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { skillsUrl: at.url }, ...as(c.ceo) })).statusCode).toBe(200);
+    const client = await mcp(c.app, run.toolToken!);
+    const result = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: { at: '9:00' } } }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]!.text).toContain('Reminder set for 9:00.');
+    expect(result.content[0]!.text).toContain('{"id":7}');
+    expect(at.calls).toHaveLength(1);
+    const [call] = at.calls;
+    expect(JSON.parse(call!.body)).toEqual({ messageId: message.id, name: 'remind', arguments: { at: '9:00' } });
+    const stamp = call!.headers['x-hornhoof-timestamp'] as string;
+    expect(Math.abs(Number(stamp) - Date.now() / 1000)).toBeLessThan(60);
+    expect(call!.headers['x-hornhoof-signature']).toBe(`sha256=${createHmac('sha256', ava.secret).update(`${stamp}.${call!.body}`).digest('hex')}`);
+  });
+
+  it("says so when the assistant has no skills address, or the program refuses, and never follows a redirect", async () => {
+    const c = await company();
+    const { ava, run } = await talking(c);
+    const client = await mcp(c.app, run.toolToken!);
+    const none = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
+    expect(none.isError).toBe(true);
+    expect(none.content[0]!.text).toContain('no skills address');
+    const refusing = await program({ ok: false, text: 'No such skill.' });
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { skillsUrl: refusing.url }, ...as(c.ceo) });
+    const refused = said(await client.callTool({ name: 'persona_call', arguments: { name: 'fly', arguments: {} } }));
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('No such skill.');
+    const moving = await program({}, 302);
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { skillsUrl: moving.url }, ...as(c.ceo) });
+    expect(said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } })).isError).toBe(true);
+  });
+});

@@ -2,7 +2,7 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { assistants, departments, people, personAccess, teams, type AssistantProgram } from '../../db/schema.js';
+import { agents, assistants, departments, people, personAccess, teams, type AssistantProgram } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 
 export const WHOLE_COMPANY = 'Whole company';
@@ -24,7 +24,15 @@ export type PersonView = {
   assistant: AssistantView | null;
 };
 
-export type AssistantView = { owner: { id: string; name: string }; program: AssistantProgram; eventsUrl: string | null; key: { createdAt: string } | null };
+/* agent: the assistant's own agent and the plan it thinks on, once its owner picked one. */
+export type AssistantView = {
+  owner: { id: string; name: string };
+  program: AssistantProgram;
+  eventsUrl: string | null;
+  skillsUrl: string | null;
+  agent: { id: string; plan: string | null } | null;
+  key: { createdAt: string } | null;
+};
 
 const owners = alias(people, 'owners');
 
@@ -32,12 +40,18 @@ const owners = alias(people, 'owners');
 async function assistantViews(db: Db, ids: string[]): Promise<Map<string, AssistantView>> {
   if (!ids.length) return new Map();
   const rows = await db
-    .select({ id: people.id, ownerId: owners.id, ownerName: owners.name, program: assistants.program, eventsUrl: assistants.eventsUrl, keyCreatedAt: assistants.keyCreatedAt })
+    .select({ id: people.id, ownerId: owners.id, ownerName: owners.name, program: assistants.program, eventsUrl: assistants.eventsUrl, skillsUrl: assistants.skillsUrl, agentId: agents.id, plan: agents.subscriptionId, keyCreatedAt: assistants.keyCreatedAt })
     .from(people)
     .innerJoin(owners, eq(owners.id, people.assistantOf))
     .innerJoin(assistants, eq(assistants.personId, people.id))
+    .leftJoin(agents, eq(agents.id, assistants.agentId))
     .where(inArray(people.id, ids));
-  return new Map(rows.map(r => [r.id, { owner: { id: r.ownerId, name: r.ownerName }, program: r.program, eventsUrl: r.eventsUrl, key: r.keyCreatedAt ? { createdAt: r.keyCreatedAt.toISOString() } : null }]));
+  return new Map(
+    rows.map(r => [
+      r.id,
+      { owner: { id: r.ownerId, name: r.ownerName }, program: r.program, eventsUrl: r.eventsUrl, skillsUrl: r.skillsUrl, agent: r.agentId ? { id: r.agentId, plan: r.plan } : null, key: r.keyCreatedAt ? { createdAt: r.keyCreatedAt.toISOString() } : null },
+    ]),
+  );
 }
 
 /* Listed places come in the order the map shows departments and teams. */

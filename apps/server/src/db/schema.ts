@@ -127,7 +127,8 @@ export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
 
 /* What an assistant runs as and how it is reached: its program, the address Hornhoof wakes it at, and its key, kept only as
    a hash, with the secret its wakes are signed with, encrypted with the server's secret. Both are shown once, and come and
-   go together. */
+   go together. Its own agent, once its owner picked a plan for it, thinks for it in a terminal of its own, and asks the
+   program for the program's skills at the skills address. */
 export const assistants = pgTable(
   'assistants',
   {
@@ -135,6 +136,8 @@ export const assistants = pgTable(
     companyId: companyId(),
     program: text('program', { enum: ASSISTANT_PROGRAMS }).notNull(),
     eventsUrl: text('events_url'),
+    skillsUrl: text('skills_url'),
+    agentId: uuid('agent_id').references((): AnyPgColumn => agents.id),
     keyHash: text('key_hash').unique(),
     keyCreatedAt: timestamp('key_created_at', { withTimezone: true }),
     wakeSecretEnc: text('wake_secret_enc'),
@@ -488,7 +491,8 @@ export const agents = pgTable(
   {
     id: id(),
     companyId: companyId(),
-    kind: text('kind', { enum: ['orchestrator', 'head', 'worker'] }).notNull(),
+    /* An assistant's own agent belongs to the assistant's owner alone, outside every department. */
+    kind: text('kind', { enum: ['orchestrator', 'head', 'worker', 'assistant'] }).notNull(),
     name: text('name').notNull(),
     model: text('model').notNull(),
     departmentId: uuid('department_id').references(() => departments.id),
@@ -527,6 +531,8 @@ export const agents = pgTable(
     uniqueIndex('agents_one_orchestrator').on(t.companyId).where(sql`kind = 'orchestrator' AND removed_at IS NULL`),
   ],
 );
+
+export type AgentKind = (typeof agents.$inferSelect)['kind'];
 
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };

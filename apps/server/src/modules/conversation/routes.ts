@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
+import { accessOf } from '../../auth/access.js';
 import { maskEvent, viewerOf } from '../../auth/agent-view.js';
 import { agents, companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -13,7 +14,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, type Standing } from './prompt.js';
+import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -27,14 +28,16 @@ const MessageBody = z
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
 export type TelegramOrigin = { bot: string; chat: number; update: number };
-/* The message of the person's assistant this is, by the id the assistant was given for it. */
-export type AssistantOrigin = { message: string };
+/* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
+   agent, which thinks for it. */
+export type AssistantOrigin = { message: string; own?: boolean };
 
 /* The words of the person's assistant, which the agent takes as the person's own and answers in its window for the
-   assistant to read. */
+   assistant to read. The assistant's own agent takes them as they are: its rules say what they carry. */
 function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, origin: AssistantOrigin, standing: Standing) {
   const assistant = { id: me.assistant.id, name: me.assistant.name, message: origin.message };
-  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
+  const prompt = origin.own ? text : `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`;
+  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
 }
 
 type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing };
@@ -48,15 +51,19 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   if (telegram && standing) {
     return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
   }
-  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
+  /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
+  const who = standing && standing.department !== null ? `\n\n${whoIs(me, standing)}` : '';
+  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}${who}`, createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin };
 
-/* What the person is to this agent, said with words that came through Telegram, where no window shows who wrote. */
+/* What the person is to this agent: the company's owner, the CEO's delegate, and whether they run its department, as
+   everyone given it does. */
 async function standingOf(ctx: Ctx, me: Person, agent: AgentRow): Promise<Standing> {
-  const [department] = agent.departmentId ? await ctx.db.select({ owner: departments.ownerPersonId }).from(departments).where(eq(departments.id, agent.departmentId)) : [];
-  return { owner: me.isOwner, delegate: me.isCeoDelegate, department: department ? department.owner === me.id : null };
+  const [department] = agent.departmentId ? await ctx.db.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId)) : [];
+  const runs = department ? (await accessOf(ctx.db, me)).owns?.has(department.parentId ?? department.id) === true : null;
+  return { owner: me.isOwner, delegate: me.isCeoDelegate, department: runs };
 }
 
 /* A person's words to an agent, from its window, through its Telegram bot or by the person's assistant, under that person's
@@ -71,7 +78,7 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   }
   /* Pictures alone read as their names wherever the words of a message show. */
   const words = input.text || pictures.map(p => p.name).join(', ');
-  const standing = input.telegram || input.assistant ? await standingOf(ctx, me, agent) : undefined;
+  const standing = me.via ? undefined : await standingOf(ctx, me, agent);
   const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing });
   const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
   ctx.bus.publish(me.companyId, {

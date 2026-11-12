@@ -122,11 +122,19 @@ export async function keepSnapshot(tx: Tx, turn: Turn, log?: FastifyBaseLogger):
   }
 }
 
+/* A closed turn as it was kept, or rebuilt from its events and kept the first time someone reads it. The read answers even
+   where the database refuses the write, as on a copy that may only read: the snapshot is then kept at a later read. */
 async function snapshotOf(db: Reader, turn: Turn): Promise<Source> {
   const [kept] = await db.select({ facts: turnSnapshots.facts, source: turnSnapshots.source }).from(turnSnapshots).where(eq(turnSnapshots.turnId, turn.id));
   if (kept) return kept;
   const facts = await turnFacts(db, turn, turn.closedAt ?? new Date());
-  await db.insert(turnSnapshots).values({ turnId: turn.id, companyId: turn.companyId, source: 'rebuilt', facts }).onConflictDoNothing();
+  try {
+    await db.transaction(async inner => {
+      await inner.insert(turnSnapshots).values({ turnId: turn.id, companyId: turn.companyId, source: 'rebuilt', facts }).onConflictDoNothing();
+    });
+  } catch {
+    /* Not kept this time; the facts are the same either way. */
+  }
   return { facts, source: 'rebuilt' };
 }
 

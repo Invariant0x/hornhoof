@@ -148,6 +148,10 @@ vi.mock('@xterm/xterm', () => ({
       if (this.keyHandler && !this.keyHandler(event)) return event;
       if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'c' || event.key === 'C' || event.code === 'KeyC')) {
         this.type('\x03');
+      } else if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'v' || event.key === 'V' || event.code === 'KeyV')) {
+        /* As xterm does: Ctrl+V is the control key ^V, and the browser pastes nothing. */
+        event.preventDefault();
+        this.type('\x16');
       } else if (event.key === 'Escape') {
         this.type('\x1b');
       }
@@ -191,6 +195,10 @@ vi.mock('@xterm/xterm', () => ({
     }
     type(data: string) {
       for (const fn of this.onKeys) fn(data);
+    }
+    /* What xterm's paste hands on when the program asked for no bracketed paste. */
+    paste(data: string) {
+      this.type(data);
     }
     resized(cols: number, rows: number) {
       this.cols = cols;
@@ -918,6 +926,60 @@ describe("an agent's live terminal in its window", () => {
     await user.click(screen.getByRole('button', { name: 'Копировать' }));
     expect(copied).toEqual(['русский текст']);
     localStorage.removeItem('hh-lang');
+  });
+
+  it('pastes with Ctrl+V on Windows and Linux through the browser, and leaves Ctrl+V to the program on a Mac', async () => {
+    const platform = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform');
+    open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    try {
+      for (const os of ['Win32', 'Linux x86_64']) {
+        Object.defineProperty(navigator, 'platform', { configurable: true, value: os });
+        /* The browser pastes into xterm, which hands the text on as typed; no ^V reaches the program. */
+        const event = term.pressKey({ key: 'v', code: 'KeyV', ctrlKey: true });
+        expect(event.defaultPrevented).toBe(false);
+        expect(ws.sent).toEqual([]);
+      }
+      Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' });
+      term.pressKey({ key: 'v', code: 'KeyV', ctrlKey: true });
+      expect(ws.sent).toEqual([{ type: 'input', data: '\x16' }]);
+    } finally {
+      delete (navigator as { platform?: string }).platform;
+      if (platform) Object.defineProperty(Navigator.prototype, 'platform', platform);
+    }
+  });
+
+  it('pastes from the right-click menu in English and Russian, what the clipboard holds going to the program as typed', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(() => Promise.resolve()), readText: vi.fn(() => Promise.resolve('code#state')) },
+    });
+    open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    fireEvent.contextMenu(term.element);
+    await user.click(screen.getByRole('button', { name: 'Paste' }));
+    await waitFor(() => expect(ws.sent).toEqual([{ type: 'input', data: 'code#state' }]));
+    expect(screen.queryByRole('button', { name: 'Paste' })).not.toBeInTheDocument();
+
+    cleanup();
+    terms.length = 0;
+    FakeSocket.all = [];
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      open();
+      const wsRu = await socket();
+      wsRu.opened();
+      fireEvent.contextMenu(terms[0]!.element);
+      await user.click(screen.getByRole('button', { name: 'Вставить' }));
+      await waitFor(() => expect(wsRu.sent).toEqual([{ type: 'input', data: 'code#state' }]));
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('gives the terminal dark scrollbar scheme, right cushion and sends the exact visible column count in resize', async () => {

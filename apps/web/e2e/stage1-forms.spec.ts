@@ -27,7 +27,7 @@ const PEOPLE: PersonView[] = [
   { id: 'p3', name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', status: 'invited', isOwner: false, access: WHOLE },
   {
     id: 'h1', name: 'Ava', email: null, title: 'Personal assistant', status: 'active', isOwner: false, access: { whole: false, departments: [], teams: [] },
-    assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', key: { createdAt: '2026-11-11T10:00:00.000Z' } },
+    assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', skillsUrl: null, key: { createdAt: '2026-11-11T10:00:00.000Z' }, agent: null },
   },
 ];
 const KEY = `hha_${'K7x-Qp'.repeat(7)}a`;

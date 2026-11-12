@@ -70,7 +70,7 @@ function withRisk(state: Route['state'], agentId: string, risk: TaskChange['risk
 
 async function requireAvailableOwner(ctx: Ctx, task: Task, ownerId: string): Promise<void> {
   const [owner] = await ctx.db.select().from(agents).where(and(eq(agents.id, ownerId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-  if (!owner?.subscriptionId || owner.departmentId !== task.departmentId || (owner.productId && owner.productId !== task.productId)) throw refuse(403, 'task_not_yours', 'The new owner must be available in this task scope.');
+  if (!owner?.subscriptionId || owner.kind === 'assistant' || owner.departmentId !== task.departmentId || (owner.productId && owner.productId !== task.productId)) throw refuse(403, 'task_not_yours', 'The new owner must be available in this task scope.');
 }
 
 async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], ownerId: string, executor: TaskChange['executor']): Promise<{ state: Route['state']; set: Partial<Task> }> {

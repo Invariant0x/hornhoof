@@ -4,7 +4,7 @@ import { routeSnapshots } from './echelons-store.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
@@ -21,7 +21,7 @@ export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'ki
     ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id));
 }
 
-export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
+export type AgentRef = { id: string; name: string; kind: AgentKind; role: Lang | null };
 type Place = { id: string; name: string } | null;
 export type TaskLine = {
   echelons: EchelonsSnapshot;
