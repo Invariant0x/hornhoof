@@ -17,8 +17,10 @@ import { ownAddresses } from './addresses.js';
 import type { HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { MachineIdentity, type Published } from './identity.js';
+import { PEER_PATHS } from '../../net/peer-server.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
+import { Beats, type Beat } from './beats.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
 import { RECOVERY_LINK } from '../backups/types.js';
@@ -62,6 +64,8 @@ export type KeeperOptions = {
   lease: LeaseStore | null;
   now?: () => Clocks;
   pruneEveryMs?: number;
+  /* How often it tells the other machines that keep data where it stands; each second unless a test says otherwise. */
+  beatEveryMs?: number;
   /* For how long a door holds a request while the app is away, and the pause between its tries. 0: it answers at once. */
   holdMs?: number;
   holdEveryMs?: number;
@@ -118,7 +122,7 @@ export type OwnLink = { name: string; key: string; client: string; url: string }
 
 /* What hands the server over for this keeper, made with what the keeper gives it. While it holds, the keeper takes no
    lease, says it does not lead, and keeps its front door shut and its link's client stopped. */
-export type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean };
+export type HandingPart = { start(): Promise<void>; stop(): Promise<void>; holds(): boolean; to?(): { machine: string; networkId: string } | null };
 export type HandingParts = {
   front: { close(): Promise<void>; open(): void };
   tunnel: { start(): void; stop(): Promise<void> };
@@ -262,6 +266,7 @@ export class Keeper {
   private readonly taker: TakingPart | null;
   private readonly hander: HandingPart | null;
   private readonly updater: UpdatingPart | null;
+  private readonly beating: Beats;
   /* The front door, and where it listens, so that a switch may shut it and open it again. */
   private frontDoor: http.Server | null = null;
   private frontAt: { port: number; host: string } | null = null;
@@ -327,6 +332,14 @@ export class Keeper {
           updating: () => updaterRunning(opts.config.controlDir) || (this.updater?.busy() ?? false),
         })
       : null;
+    this.beating = new Beats({
+      self: () => this.beat(),
+      peers: () => this.otherData(),
+      ask: (networkId, method, path, body, timeoutMs) => this.links?.ask(networkId, method, path, body, timeoutMs) ?? Promise.resolve(null),
+      now: opts.now,
+      everyMs: opts.beatEveryMs,
+      log: opts.log,
+    });
     this.holder = new LeaseHolder({
       lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log,
       sync: this.sync ?? undefined,
@@ -387,6 +400,48 @@ export class Keeper {
   /* The term this machine holds, while its lease stands. */
   term(): Term | null {
     return this.hander?.holds() ? null : this.holder.term();
+  }
+
+  /* What this keeper and the other machines that keep data told each other last. */
+  beats(): Beats {
+    return this.beating;
+  }
+
+  /* The other live machines that keep the company's data, as the app named them last. */
+  private otherData(): { machine: string; networkId: string }[] {
+    const own = this.opts.config.machineId;
+    return (this.peers?.current()?.data ?? []).filter(machine => machine.networkId !== own).map(({ machine, networkId }) => ({ machine, networkId }));
+  }
+
+  /* The copy the relay's record names as the one commits wait for, at the generation this keeper's own client holds
+     the route at; none while it names none, or was stored at another generation. */
+  private syncNamed(): string | null {
+    const record = this.sync?.record();
+    return record?.state === 'on' && record.copy && record.generation === this.sync?.generation() ? record.copy : null;
+  }
+
+  /* Where this keeper stands, as it tells the other machines that keep data each second: handing the server over,
+     taking it, leading under its lease, or holding none. */
+  private beat(): Beat {
+    const own = this.peers?.current()?.data.find(machine => machine.networkId === this.opts.config.machineId);
+    const to = this.hander?.to?.() ?? null;
+    const lease = this.hander?.holds() ? null : this.holder.standing();
+    const stance: Beat['stance'] = to
+      ? { kind: 'handing', to: to.networkId }
+      : this.taking
+        ? { kind: 'attempting' }
+        : lease
+          ? { kind: 'lead', term: lease.term, lease: lease.kind, sync: this.syncNamed(), until: lease.until }
+          : { kind: 'idle', term: this.holder.lastTerm() };
+    return { machine: this.opts.config.machineId ?? '', host: this.opts.hostname ?? own?.hostname ?? '', stance, number: own?.number ?? null, reach: new Date().toISOString(), ready: true, full: false };
+  }
+
+  /* What its hello says besides who it is: the term it leads under, the machine its commits wait for, and the machine
+     a planned switch hands the server to. */
+  private helloMore(): Record<string, unknown> {
+    const named = this.syncNamed();
+    const data = this.peers?.current()?.data ?? [];
+    return { term: this.term(), sync: (named && data.find(machine => machine.networkId === named)?.machine) ?? null, moving: this.hander?.to?.()?.machine ?? null };
   }
 
   /* The front door takes nobody new, and what is on its way gets a moment to end. */
@@ -507,6 +562,7 @@ export class Keeper {
     if (this.takingTimer) clearInterval(this.takingTimer);
     this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = null;
     this.stopped = true;
+    this.beating.stop();
     await this.taker?.stop();
     await this.hander?.stop();
     await this.updater?.stop();
@@ -536,8 +592,16 @@ export class Keeper {
       peerClientFor: this.opts.peerClientFor,
       backups: this.peerBackups(),
       uploads: this.uploads().peer(),
-      /* A switch is answered to a data machine of the company, by the id its keeper runs under. */
-      switches: this.taker ? { handle: async (peer, method, path, body) => this.taker!.handle(await this.networkIdOf(peer.machine), method, path, body) } : undefined,
+      /* A beat is answered by the keeper itself. A switch is answered to a data machine of the company, by the id its
+         keeper runs under, where this keeper takes part in one. */
+      switches: {
+        handle: async (peer, method, path, body) => {
+          if (path === PEER_PATHS.beat) return this.beating.handle(peer, body) as { status: number; body: object };
+          if (!this.taker) return { status: 404, body: { ok: false } };
+          return this.taker.handle(await this.networkIdOf(peer.machine), method, path, body);
+        },
+      },
+      helloMore: () => this.helloMore(),
       log,
     });
     await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
@@ -558,6 +622,7 @@ export class Keeper {
       ...this.opts.copies,
     });
     this.links.start();
+    this.beating.start();
   }
 
   /* The name the machine of that network id goes by; none for one this database does not hold. */

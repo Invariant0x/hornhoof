@@ -1,4 +1,4 @@
-import type { LeaseSync, Term } from '../../db/net.js';
+import type { LeaseKind, LeaseSync, Term } from '../../db/net.js';
 import type { LeaseStore } from './lease-store.js';
 import { LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
 import type { Mode } from './state.js';
@@ -31,6 +31,8 @@ const clocksNow = (): Clocks => ({ wall: Date.now(), mono: performance.now() });
    changes nothing here, so a lease nobody could renew lapses by itself. */
 export class LeaseHolder {
   private held: Held | null = null;
+  /* The last term this keeper held a lease under in this run; none before its first. */
+  private termHeld: Term | null = null;
   private last: Clocks | null = null;
   private maintenance = false;
   /* What the last look at the fences found. Null until the first look: nothing is known to hold yet. */
@@ -60,6 +62,17 @@ export class LeaseHolder {
   /* The term this machine leads or migrates under, while its lease stands. */
   term(): Term | null {
     return this.held && leaseValid(this.held, this.now()) ? this.held.term : null;
+  }
+
+  /* The lease that stands now: its term, its kind, and when it ends by the wall clock; none while none stands. */
+  standing(): { term: Term; kind: LeaseKind; until: number } | null {
+    if (!this.held || !leaseValid(this.held, this.now())) return null;
+    return { term: this.held.term, kind: this.held.kind, until: this.held.sent.wall + LEASE_MS };
+  }
+
+  /* The term of the last lease this keeper held, standing or not. */
+  lastTerm(): Term | null {
+    return this.held?.term ?? this.termHeld;
   }
 
   async tick(): Promise<void> {
@@ -111,6 +124,7 @@ export class LeaseHolder {
     try {
       const term = await lease.take(step.kind, new Date(step.sent.wall + LEASE_MS), flag);
       this.held = { term, kind: step.kind, sent: step.sent };
+      this.termHeld = term;
       this.sayOnce('take', '');
       this.opts.log(`This machine leads under term ${term.number}.`);
     } catch (err) {

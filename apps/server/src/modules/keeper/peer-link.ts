@@ -33,7 +33,7 @@ const Answer = z.object({
   crlPem: z.string().nullable(),
   link: z.object({ name: z.string(), appSecret: z.string(), dataSecret: z.string().optional(), visitorKey: z.string().optional() }).nullable(),
   /* The machines that keep data and the doors to open to them, which an app of the build before does not say. */
-  data: z.array(z.object({ machine: z.string(), networkId: z.string(), addresses: z.array(z.string()), peerPort: z.number().nullable() })).default([]),
+  data: z.array(z.object({ machine: z.string(), networkId: z.string(), addresses: z.array(z.string()), peerPort: z.number().nullable(), hostname: z.string().nullish(), number: z.number().nullish() })).default([]),
   doors: z.array(z.string()).default([]),
   /* The machines that stopped holding the data and owe what they held, and how large that may be. */
   uploads: z.array(z.object({ machine: z.string(), networkId: z.string().regex(NETWORK_ID), max: z.number().min(0), unpackMax: z.number().min(0) })).default([]),
@@ -66,8 +66,10 @@ export type PeerLinkOptions = {
   backups?: PeerBackups;
   /* What takes the uploads of machines that stopped holding the data; none are taken when left out. */
   uploads?: PeerUploads;
-  /* What answers another data machine's keeper about a planned switch of the server. */
+  /* What answers another data machine's keeper about a planned switch of the server, and its beats. */
   switches?: PeerSwitches;
+  /* What the hello says besides who this machine is: its term, the copy its commits wait for, and a move under way. */
+  helloMore?: () => Record<string, unknown>;
   log: (line: string) => void;
 };
 
@@ -238,7 +240,7 @@ export class PeerLink {
 
   private hello(): Record<string, unknown> {
     const held = this.opts.identity.certificate() as HeldCertificate;
-    return { machine: held.machine, role: held.role, lead: this.opts.mode() === 'lead', commit: this.opts.commit };
+    return { machine: held.machine, role: held.role, lead: this.opts.mode() === 'lead', commit: this.opts.commit, ...this.opts.helloMore?.() };
   }
 
   /* A second frpc of the keeper offers the two doors through hornhoof.org, while the app leads and the company has a

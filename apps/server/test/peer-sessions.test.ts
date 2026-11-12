@@ -14,7 +14,7 @@ import { issueCertificate, makeAuthority, makeCrl, type Authority } from '../src
 import { LeaderDoor } from '../src/net/leader-door.js';
 import { PeerDoor } from '../src/net/peer-door.js';
 import { PeerServer, type Peer, type PeerSwitches } from '../src/net/peer-server.js';
-import { PeerSessions, type DialTarget, type PeerSessionsOptions } from '../src/net/peer-sessions.js';
+import { highestLead, PeerSessions, type DialTarget, type Hello, type PeerSessionsOptions } from '../src/net/peer-sessions.js';
 import { until } from './helpers.js';
 
 const COMPANY = '0f0f0f0f-0000-4000-8000-00000000000a';
@@ -80,7 +80,7 @@ async function standUp(as: { id?: string; role?: MachineRole; backups?: PeerBack
     revoked: () => state.revoked,
     door,
     db: as.db ?? null,
-    hello: (peer: Peer) => (state.hellos++, { machine: server.id, role: server.role, lead: state.lead, commit: 'c0ffee', asked: peer.machine }),
+    hello: (peer: Peer) => (state.hellos++, { machine: server.id, role: server.role, lead: state.lead, commit: 'c0ffee', asked: peer.machine, term: { number: 7, machine: SERVER_NETWORK_ID, split: false }, sync: OTHER_ID, moving: null }),
     backups: as.backups,
     switches: as.switches,
     log: line => lines.push(line),
@@ -156,7 +156,7 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state()).toEqual({ path: null, directFails: false, refused: false });
     sessions.use([stand.target()]);
     await until(() => sessions.leader() !== null);
-    expect(sessions.leader()).toEqual({ machine: SERVER_ID, path: 'direct', hello: { machine: SERVER_ID, role: 'data', lead: true, commit: 'c0ffee', seen: '127.0.0.1' } });
+    expect(sessions.leader()).toEqual({ machine: SERVER_ID, path: 'direct', hello: { machine: SERVER_ID, role: 'data', lead: true, commit: 'c0ffee', seen: '127.0.0.1', term: { number: 7, machine: SERVER_NETWORK_ID, split: false }, sync: OTHER_ID, moving: null } });
     expect(sessions.seen()).toEqual(['127.0.0.1']);
     expect(sessions.state()).toEqual({ path: 'direct', directFails: false, refused: false });
   });
@@ -354,6 +354,28 @@ describe("a worker's sessions to the company's data machines", () => {
     await until(() => sessions.leader() !== null);
     stand.state.lead = false;
     await until(() => sessions.leader() === null);
+  });
+
+  it('takes the leader with the highest term', async () => {
+    const hello = (machine: string, lead: boolean, term: Hello['term']): { hello: Hello } => ({ hello: { machine, role: 'data', lead, commit: 'c0ffee', seen: '127.0.0.1', term } });
+    const a = hello(SERVER_ID, true, { number: 3, machine: 'a'.repeat(32), split: false });
+    const b = hello(OTHER_ID, true, { number: 4, machine: 'b'.repeat(32), split: false });
+    expect(highestLead([a, b])).toBe(b);
+    expect(highestLead([b, a])).toBe(b);
+    /* One that names no term, as a keeper from before terms were said, counts below every term. */
+    expect(highestLead([a, hello(OTHER_ID, true, undefined)])).toBe(a);
+    expect(highestLead([hello(OTHER_ID, true, null), a])).toBe(a);
+    /* At the same number, the machine decides; one that does not lead is nobody's leader. */
+    const c = hello(WORKER_ID, true, { number: 4, machine: 'c'.repeat(32), split: false });
+    expect(highestLead([b, c])).toBe(c);
+    expect(highestLead([hello(OTHER_ID, false, { number: 9, machine: 'b'.repeat(32), split: false }), a])).toBe(a);
+    expect(highestLead([hello(OTHER_ID, false, null)])).toBeUndefined();
+    /* The hello's words on the term, the copy commits wait for and a move under way come through as they were said. */
+    const stand = await standUp();
+    const sessions = stand.sessionsWith();
+    sessions.use([stand.target()]);
+    await until(() => sessions.leader() !== null);
+    expect(sessions.leader()!.hello).toMatchObject({ term: { number: 7, machine: SERVER_NETWORK_ID, split: false }, sync: OTHER_ID, moving: null });
   });
 
   it('loses the leader when its session ends', async () => {

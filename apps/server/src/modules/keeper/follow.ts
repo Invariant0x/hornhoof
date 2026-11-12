@@ -5,6 +5,7 @@ import { PEER_PATHS, PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
+import { Beats, type Beat } from './beats.js';
 import { CopyMaker, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
 import type { FollowConfig } from './follow-config.js';
@@ -60,6 +61,8 @@ export type FollowKeeperOptions = {
   taker?: Partial<TakerOptions>;
   /* What a test changes in how this machine waits for an update of the machine that leads. */
   updating?: Partial<CopyUpdatingOptions>;
+  /* How often it tells the other machines that keep data where it stands; each second unless a test says otherwise. */
+  beatEveryMs?: number;
   /* Ends this keeper, so that it starts again as another kind; the process ends unless a test says otherwise. */
   exit?: () => void;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
@@ -84,6 +87,7 @@ export class FollowKeeper {
   private readonly door: DbDoor;
   private readonly taker: Taker;
   private readonly updating: CopyUpdating;
+  private readonly beating: Beats;
   private readonly copySql: Closable;
   private ports: Promise<{ data: number; app: number }> = new Promise(() => {});
   private server: PeerServer | null = null;
@@ -159,6 +163,13 @@ export class FollowKeeper {
       log,
       ...opts.taker,
     });
+    this.beating = new Beats({
+      self: () => this.beat(),
+      peers: () => (this.view?.data ?? []).filter(machine => machine.networkId !== config.machineId).map(({ machine, networkId }) => ({ machine, networkId })),
+      ask: (networkId, method, path, body, timeoutMs) => this.worker.parts().link.ask(networkId, method, path, body, timeoutMs),
+      everyMs: opts.beatEveryMs,
+      log,
+    });
     this.peerDoor = new PeerDoor({ app: opts.app });
     this.door = new DbDoor({
       connect: () => this.worker.parts().link.connectDb(),
@@ -177,6 +188,7 @@ export class FollowKeeper {
     this.timer = setInterval(() => this.look(), this.opts.everyMs ?? EVERY_MS);
     this.timer.unref();
     this.look();
+    this.beating.start();
     return { front, door };
   }
 
@@ -202,12 +214,30 @@ export class FollowKeeper {
     }
   }
 
+  /* What this keeper and the other machines that keep data told each other last. */
+  beats(): Beats {
+    return this.beating;
+  }
+
+  /* Where this keeper stands, as it tells the other machines that keep data each second: it follows, or, once it took
+     the go of a switch, it is taking the server. */
+  private beat(): Beat {
+    const { machineId } = this.opts.config;
+    const own = this.view?.data.find(machine => machine.networkId === machineId);
+    const copy = this.maker.report();
+    return {
+      machine: machineId, host: own?.hostname ?? '', stance: this.taker.going() ? { kind: 'attempting' } : { kind: 'follow', term: null },
+      number: own?.number ?? null, reach: copy?.at ?? null, ready: copy?.state === 'ready', full: false,
+    };
+  }
+
   status(): WorkerStatus & { copy: CopyReport | null } {
     return { ...this.worker.status(), copy: this.maker.report() };
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.beating.stop();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.working;
@@ -248,6 +278,7 @@ export class FollowKeeper {
       switches: {
         handle: async (peer, method, path, body) => {
           const from = this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '';
+          if (path === PEER_PATHS.beat) return this.beating.handle(peer, body) as { status: number; body: object };
           return path === PEER_PATHS.updating ? this.updating.handle(from, body) : this.taker.handle(from, method, path, body);
         },
       },

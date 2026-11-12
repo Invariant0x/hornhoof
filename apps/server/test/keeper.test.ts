@@ -342,6 +342,8 @@ describe('the keeper', () => {
     await new Promise(resolve => setTimeout(resolve, 150));
     expect(lease.calls.filter(call => call.method === 'take')).toEqual([]);
     expect([wordIn(k.dir), k.keeper.mode()]).toEqual(['off', 'read']);
+    /* It tells the other machines that keep data that it is taking the server. */
+    expect(k.keeper.beats().own().stance).toEqual({ kind: 'attempting' });
     await expect(send(front, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
     /* The link's door answers who this machine is, which its own nonce is checked by. */
     const proof = await send(k.link, { path: `/api/network/lease?nonce=${'n'.repeat(22)}` });
@@ -352,6 +354,7 @@ describe('the keeper', () => {
     expect(lease.calls.filter(call => call.method === 'take')).toHaveLength(1);
     await until(async () => (await send(front, { path: '/' }).catch(() => null))?.status === 200);
     expect(k.keeper.mode()).toBe('lead');
+    expect(k.keeper.beats().own().stance).toMatchObject({ kind: 'lead', term: { number: 1 }, lease: 'normal', sync: null });
   });
 
   it('holds while it hands the server over', async () => {
@@ -359,7 +362,8 @@ describe('the keeper', () => {
     const said = { holds: false };
     type Parts = Parameters<NonNullable<KeeperOptions['handing']>>[0];
     const given: Parts[] = [];
-    const handing: KeeperOptions['handing'] = parts => (given.push(parts), { start: async () => undefined, stop: async () => undefined, holds: () => said.holds });
+    const target = { machine: '0f0f0f0f-0000-4000-8000-00000000000b', networkId: 'b0'.repeat(16) };
+    const handing: KeeperOptions['handing'] = parts => (given.push(parts), { start: async () => undefined, stop: async () => undefined, holds: () => said.holds, to: () => (said.holds ? target : null) });
     const front = await appIsDown();
     const k = await keeperOn(await echoHeaders(), { lease, handing, everyMs: 20, ports: { front: front.port, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 } });
     const parts = given[0]!;
@@ -373,6 +377,8 @@ describe('the keeper', () => {
     await expect(send(front, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
     await until(() => wordIn(k.dir) === 'read');
     expect([k.keeper.mode(), parts.leads(), parts.term(), count('fence')]).toEqual(['read', false, null, 1]);
+    /* It tells the other machines that keep data which one the server goes to. */
+    expect(k.keeper.beats().own().stance).toEqual({ kind: 'handing', to: target.networkId });
     const renewed = count('renew');
     await new Promise(resolve => setTimeout(resolve, 150));
     expect([count('take'), count('renew') - renewed]).toEqual([1, 0]);

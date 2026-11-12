@@ -126,9 +126,13 @@ export class Hander {
   private waitingSaidAt: number | null = null;
   private unfindableSaid = false;
   private phase: Handing['phase'] | null;
+  /* The machine this keeper hands the server to, while a switch is written down. */
+  private target: Handing['to'] | null;
 
   constructor(private readonly opts: HanderOptions) {
-    this.phase = readHanding(opts.dir, opts.log)?.phase ?? null;
+    const handing = readHanding(opts.dir, opts.log);
+    this.phase = handing?.phase ?? null;
+    this.target = handing?.to ?? null;
   }
 
   private now(): number {
@@ -154,6 +158,11 @@ export class Hander {
     return this.phase === 'stopped' || this.phase === 'go' || this.phase === 'followed';
   }
 
+  /* The machine the server goes to, while this keeper holds for the switch. */
+  to(): { machine: string; networkId: string } | null {
+    return this.holds() && this.target ? { machine: this.target.machine, networkId: this.target.networkId } : null;
+  }
+
   /* One look at a time; a look that fails changes nothing, and is said once an outage. */
   look(): Promise<void> {
     if (this.stopped || this.done) return Promise.resolve();
@@ -172,17 +181,20 @@ export class Hander {
   private keep(handing: Handing): Handing {
     writeHanding(this.opts.dir, handing);
     this.phase = handing.phase;
+    this.target = handing.to;
     return handing;
   }
 
   private forget(): void {
     rmSync(join(this.opts.dir, HANDING_FILE), { force: true });
     this.phase = null;
+    this.target = null;
   }
 
   private async lookOnce(): Promise<void> {
     const handing = readHanding(this.opts.dir, this.opts.log);
     this.phase = handing?.phase ?? null;
+    this.target = handing?.to ?? null;
     const move = handing ? null : await this.move();
     const sample = await this.sample(handing, move);
     await this.act(nextHandStep(sample), handing, move);

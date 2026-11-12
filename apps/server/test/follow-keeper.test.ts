@@ -205,6 +205,26 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect(f.cluster.run.length).toBe(steps);
   });
 
+  it('beats as a copy', async () => {
+    const dir = folder();
+    const c = await company({ dir, beatEveryMs: 20 });
+    const f = await follower(c, { beatEveryMs: 20 });
+    await until(() => f.keeper.status().leader !== null);
+    /* The leader hears where the copy stands: it follows, and its copy is not whole yet. */
+    await until(() => c.keeper.beats().last(f.config.machineId) !== null);
+    expect(c.keeper.beats().last(f.config.machineId)!.beat).toMatchObject({ machine: f.config.machineId, stance: { kind: 'follow', term: null }, ready: false, full: false });
+    /* And the copy hears the leader, by its answers. */
+    await until(() => f.keeper.beats().answer(HOST_ID) !== null);
+    expect(f.keeper.beats().last(HOST_ID)!.beat).toMatchObject({ machine: HOST_ID, stance: { kind: 'lead' }, ready: true });
+    /* It answers a beat of the leader's with its own, and takes none that names another machine than the one that sent it. */
+    const ports = await f.keeper.peerPorts();
+    const leads = { machine: HOST_ID, host: 'debian', stance: { kind: 'idle', term: null }, number: 1, reach: null, ready: true, full: false };
+    const [status, own] = await askingAt(ports.data, dir)('POST', '/peer/beat', leads);
+    expect([status, own]).toMatchObject([200, { machine: f.config.machineId, stance: { kind: 'follow' } }]);
+    expect(await askingAt(ports.data, f.config.dir)('POST', '/peer/beat', leads)).toEqual([403, { ok: false }]);
+    expect(f.keeper.beats().last(HOST_ID)!.beat.stance.kind).not.toBe('attempting');
+  });
+
   it('waits for the update', async () => {
     const dir = folder();
     const c = await company({ dir });

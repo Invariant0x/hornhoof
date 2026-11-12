@@ -53,7 +53,23 @@ const LOOPBACK = '127.0.0.1';
 const NO_LEADER = 'No leader of the company is in reach.';
 const NO_SESSION = 'No session to that machine.';
 
-const HelloBody = z.object({ machine: z.string(), role: z.enum(MACHINE_ROLES), lead: z.boolean(), commit: z.string(), seen: z.string() });
+/* term: the term a leading keeper leads under. sync: the machine its commits wait for, when the relay's record names
+   one. moving: the machine a planned switch hands the server to, while it does. A keeper from before these says none. */
+const HelloBody = z.object({
+  machine: z.string(), role: z.enum(MACHINE_ROLES), lead: z.boolean(), commit: z.string(), seen: z.string(),
+  term: z.object({ number: z.number().int(), machine: z.string(), split: z.boolean() }).nullish(),
+  sync: z.string().nullish(),
+  moving: z.string().nullish(),
+});
+
+/* Of the machines whose hello says they lead, the one that leads under the highest term, by its number and then its
+   machine; a hello that names no term counts below every term. */
+export function highestLead<T extends { hello: Hello }>(said: T[]): T | undefined {
+  const above = (a: Hello['term'], b: Hello['term']): boolean => Boolean(a) && (!b || a!.number > b.number || (a!.number === b.number && a!.machine > b.machine));
+  let best: T | undefined;
+  for (const one of said) if (one.hello.lead && (!best || above(one.hello.term, best.hello.term))) best = one;
+  return best;
+}
 
 /* asking: a hello is on its way. pinged: the last ping was answered. */
 type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; asking: boolean; pinged: boolean };
@@ -265,7 +281,8 @@ export class PeerSessions {
   }
 
   private leading(): Kept | undefined {
-    return this.kept.find(kept => kept.session?.hello.lead);
+    const best = highestLead(this.kept.flatMap(kept => (kept.session ? [{ kept, hello: kept.session.hello }] : [])));
+    return best?.kept;
   }
 
   private end(kept: Kept): void {

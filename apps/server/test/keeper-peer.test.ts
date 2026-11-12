@@ -432,6 +432,69 @@ describe('the peer link in the keeper', () => {
     expect(await said(port)).toBe('closed');
   });
 
+  it('beats as the leader', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    const copyNetworkId = `99bb2233${'2'.repeat(24)}`;
+    const key = ed25519();
+    /* A lease store that can be told to take no term, and a clock the test moves. */
+    const able = { take: true };
+    const skew = { ms: 0 };
+    const lease = fakeLease({ take: () => (able.take ? Promise.resolve({ number: 4, machine: MACHINE_ID, split: false }) : Promise.reject(new Error('the database is down'))) });
+    const { keeper } = await keeperBeside(c, target, folder(), {
+      lease, beatEveryMs: 20, now: () => ({ wall: Date.now() + skew.ms, mono: performance.now() + skew.ms }),
+      copies: { doorHost: '127.0.0.1', allowed: async () => ['127.0.0.1'], everyMs: 20, sessions: { everyMs: 20, helloMs: 20 } },
+    });
+    await until(() => keeper.certificate() !== null && keeper.mode() === 'lead');
+    const authority = (await authorityOf(c.db, c.config))!;
+    const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'copy-1', hostname: 'mac', role: 'data', networkId: copyNetworkId, signKey: key.publicPem }).returning();
+    const issued = await issueCertificate(authority, { machineId: row!.id, role: 'data', signKey: key.publicPem });
+    await c.db.insert(certificates).values({ serial: issued.serial, machineId: row!.id, until: issued.until });
+    const door = new PeerDoor({ app: target });
+    await door.start();
+    onTestFinished(() => door.stop());
+    /* The copy's keeper, as far as beats go: it keeps each one it gets and answers with its own. */
+    const follows = { machine: copyNetworkId, host: 'mac', stance: { kind: 'follow', term: null }, number: 2, reach: null, ready: false, full: false };
+    const heard: { from: string; path: string; body: { machine: string; host: string; stance: { kind: string; term?: unknown; lease?: string; sync?: unknown; until?: number }; ready: boolean; full: boolean; reach: string | null } }[] = [];
+    const crlPem = await makeCrl(authority, []);
+    const peers = new PeerServer({
+      held: () => ({ machine: row!.id, role: 'data', certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() }), key,
+      crl: () => crlPem, revoked: () => new Set<string>(), door, db: null,
+      hello: () => ({ machine: row!.id, role: 'data', lead: false, commit: 'c0ffee' }), log: ignore,
+      switches: { handle: async (peer, _method, path, body) => (heard.push({ from: peer.machine, path, body: body as (typeof heard)[number]['body'] }), { status: 200, body: follows }) },
+    });
+    onTestFinished(() => peers.close());
+    const peerPort = await peers.listen(0, 'peer', '127.0.0.1');
+    await c.db.update(machines).set({ addresses: ['127.0.0.1'], peerPort }).where(eq(machines.id, row!.id));
+
+    /* It tells the copy each second that it leads, under which term and until when, and that commits wait for no copy. */
+    await until(() => heard.some(beat => beat.body.stance.kind === 'lead'));
+    const [own] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
+    const beat = heard.find(one => one.body.stance.kind === 'lead')!;
+    expect([beat.from, beat.path]).toEqual([own!.id, '/peer/beat']);
+    expect(beat.body).toMatchObject({ machine: MACHINE_ID, stance: { kind: 'lead', term: { number: 4, machine: MACHINE_ID, split: false }, lease: 'normal', sync: null }, ready: true, full: false });
+    expect(beat.body.stance.until).toBeGreaterThan(Date.now());
+    expect(Number.isNaN(Date.parse(beat.body.reach ?? ''))).toBe(false);
+    /* Its hello names its term to whoever asks. */
+    const hello = async () => {
+      const stream = sessionOf((await keeper.peerPorts()).peer, { id: row!.id, key, certPem: issued.certPem, serial: issued.serial, authorityPem: authority.certPem }).request({ ':method': 'GET', ':path': '/peer/hello' });
+      let text = '';
+      for await (const chunk of stream) text += String(chunk);
+      return JSON.parse(text) as { lead: boolean; term: unknown; sync: unknown; moving: unknown };
+    };
+    expect(await hello()).toMatchObject({ lead: true, term: { number: 4, machine: MACHINE_ID, split: false }, sync: null, moving: null });
+    /* The copy's answers are kept as what it said last. */
+    await until(() => keeper.beats().answer(copyNetworkId) !== null);
+    expect(keeper.beats().last(copyNetworkId)?.beat).toEqual(follows);
+
+    /* Its lease ends and none can be taken: it goes on beating, as a keeper that would lead and holds no lease. */
+    able.take = false;
+    skew.ms = 60_000;
+    await until(() => heard.at(-1)?.body.stance.kind === 'idle');
+    expect(heard.at(-1)!.body.stance).toEqual({ kind: 'idle', term: { number: 4, machine: MACHINE_ID, split: false } });
+    expect(await hello()).toMatchObject({ lead: false, term: null });
+  });
+
   /* The leader's Postgres as far as the sync controller asks it, with one copy listed or none. */
   function syncCatalog(copy: { machine: string; networkId: string } | null) {
     const state = { setting: null as string | null, pulses: 0, listed: copy !== null };
