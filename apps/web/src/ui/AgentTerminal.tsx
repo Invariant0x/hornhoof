@@ -4,7 +4,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
 import { usePictureDrop } from './MessagePictures';
-import { fitTerminal, observeTerminalFit } from './terminal-fit';
+import { fitTerminal, measureGlyphsExactly, observeTerminalFit } from './terminal-fit';
 import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights } from './terminal-input';
 import { uploadTerminalPictures } from './terminal-pictures';
 import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
@@ -722,6 +722,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     termRef.current = term;
     const container = box.current!;
     term.open(container);
+    measureGlyphsExactly(term);
     keepSelecting(term);
     attachTerminalScroll(term);
     bindClipboard(term);
