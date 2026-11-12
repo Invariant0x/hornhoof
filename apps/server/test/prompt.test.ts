@@ -79,6 +79,18 @@ describe('orchestrator instructions', () => {
     expect(carried).not.toContain('Operations is always ticked');
   });
 
+  it('knows a new department comes with the people of its template, and without them only when asked', () => {
+    for (const rule of [/new department comes with the people of its template/i, /staff false only when/i]) {
+      expect(ability('orch-company')).toMatch(rule);
+    }
+  });
+
+  it('knows a waiting employee takes a new subscription itself, unless a person took its own off by hand', () => {
+    for (const rule of [/employee waiting for a subscription takes a new one by itself/i, /runs the role's level/i, /do not assign it to each of them by hand/i, /took off by hand keeps waiting/i]) {
+      expect(ability('orch-staff')).toMatch(rule);
+    }
+  });
+
   it('performs authorized screen actions through the corresponding abilities and checks the resulting record', () => {
     for (const words of ['build_structure', 'hire', 'change_employee', 'message_employee', 'answer_request', 'update_task', 'view', 'database']) {
       expect(carried).toContain(words);

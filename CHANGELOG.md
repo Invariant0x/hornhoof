@@ -5,6 +5,44 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.9] - 2026-11-11
+
+A ready-made company comes with every department staffed and starts working once its subscription is on. Every department
+keeps its work in a repository, so an earlier version of a letter or a text can be brought back. The company map draws
+lines that go together as one road and stays where the person put it, and an agent's window opens its terminal at once
+and takes a file of any kind.
+
+### Added
+
+- A company template creates its departments with their whole staff: each employee has a role, skills and the model its
+  level asks for. Those with no subscription yet wait for one. A department the orchestrator builds comes with the people
+  of its template, and a product added later gets the people its department keeps one of for each product.
+- A subscription that is added, or starts to work, takes the employees and the orchestrator that wait for one. One whose
+  subscription a person took off by hand stays as it is, and so does one switched off.
+- Every department keeps its work in a repository: letters, texts, layouts and tables go in as files, as code does. The
+  orchestrator offers one to the CEO or the department's owner and creates it with their word. With a GitHub key saved,
+  he creates a department's first repository himself and says where.
+- Company settings and a department's Repositories keep the GitHub key repositories are created with: one for the company,
+  and one of a department's own that goes first for it. The key is kept encrypted and shown only by its last four
+  characters.
+- A person can pass an agent a file of any kind, up to 10 MB, by drag, paste or the button, in the chat and in the
+  terminal. A file that is no picture downloads under its name.
+
+### Changed
+
+- Lines on the company map that run side by side join into one road and leave it at a fork marked with a dot. A block's
+  corner is its grip with nothing drawn on it: the pointer turns into the move cursor there.
+- The company map moves only when the person moves it or presses Fit, and opens where they left it after a reload.
+- Every agent's window has a Terminal button, and in the terminal a Chat button, from the moment it opens. The terminal
+  shows a loader while it opens, and says why in plain words when it cannot show, as when the agent's program is asleep.
+- Share access is now called Company settings.
+
+### Fixed
+
+- An agent's terminal could keep the size it first opened with on a machine short of memory, so its lines were cut on the
+  right. It now takes the size of its window as soon as it draws.
+- The work for assistants stops and starts again cleanly when a server gets and loses the lead.
+
 ## [0.18.8] - 2026-11-11
 
 A person can connect their own assistant, a program such as AvaClone or OpenClaw, which does for them in the company all

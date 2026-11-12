@@ -12,6 +12,7 @@ import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
 import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
+import { hostsOf } from '../departments/repo-hosts.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Channel, type Endpoint } from '../events/bus.js';
 import { workingSeen } from '../events/stream-view.js';
@@ -111,6 +112,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     /* Only people who see the whole company and a department's owner set its repositories, so only they read where they are. */
     const repositoryOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.parentId ?? d.id) ? repoView(d) : null);
+    /* And the key of the git host Hornhoof creates its repositories with, never the key itself. */
+    const hosts = await hostsOf(db, me.companyId);
+    const repoHostOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.id) ? hosts(d.id) : null);
     const [open] = await db.select({ id: turns.id, companyId: turns.companyId, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };
@@ -254,6 +258,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p), repository: repositoryOf(p) })),
           current: currentOf(d.id),
           repository: repositoryOf(d),
+          repoHost: repoHostOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly, turnkey: t.turnkey })),

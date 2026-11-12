@@ -250,6 +250,20 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(applied!.personId).toBeNull();
   });
 
+  it('builds a department with the people of its template, and one without them only when told so', async () => {
+    const { app, db } = await company();
+    const client = await mcp(app, TOKEN);
+    expect((await call(client, 'build_structure', { items: [{ template: 'design', note: '' }] })).isError).toBeFalsy();
+    expect((await call(client, 'build_structure', { items: [{ template: 'finance', note: '', staff: false }] })).isError).toBeFalsy();
+    const [design] = await db.select().from(departments).where(eq(departments.templateKey, 'design'));
+    const [finance] = await db.select().from(departments).where(eq(departments.templateKey, 'finance'));
+    const roster = app.ctx.templates.roster('design').filter(r => r.inDefault).map(r => r.id);
+    const people = await db.select().from(agents).where(and(eq(agents.departmentId, design!.id), isNull(agents.teamId)));
+    expect(people.map(a => a.roleKey).sort()).toEqual(roster.sort());
+    expect(people.every(a => a.skills.length > 0)).toBe(true);
+    expect(await db.select().from(agents).where(eq(agents.departmentId, finance!.id))).toEqual([]);
+  });
+
   it('is asked to put what an employee asks a person into plain words, and its words show with the request', async () => {
     const { app, db, ceo, orchestrator, bruno, task, running } = await company();
     await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));

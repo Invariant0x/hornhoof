@@ -208,7 +208,7 @@ describe('Backups in Settings', () => {
   });
 });
 
-describe('Settings in the account menu', () => {
+describe('Company settings in the account menu', () => {
   afterEach(() => localStorage.clear());
 
   it('opens for people who see the whole company', async () => {

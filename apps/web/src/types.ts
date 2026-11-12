@@ -176,6 +176,8 @@ export type Department = {
   /* What it works on now, for people who reach it. */
   current?: { id: string; number: number; title: string } | null;
   repository?: Repository | null;
+  /* The GitHub key its repositories are created with, for the people who set them; none when no key is saved. */
+  repoHost?: RepoHost | null;
   /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
   ownerPersonId?: string | null;
   /* Whether it works in the company's turns or all the time, and the tasks of the open turn it has done out of all it has, as
@@ -203,6 +205,11 @@ export type ApprovalPolicyView = {
 
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
 export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null };
+
+/* A GitHub key Hornhoof creates repositories with: the user or organization they go to, and only the key's last four. */
+export type RepoKey = { provider: 'github'; owner: string; tokenLast4: string };
+/* The key a department's repositories are created with: its own, else the company's. */
+export type RepoHost = RepoKey & { own: boolean };
 
 /* What a department or a product keeps for its agents: its way of working and its repositories. connected: the one its
    agents get cloned, as its repository settings name it. */

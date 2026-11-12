@@ -14,10 +14,12 @@ export function canvasSpace(width: number, left: number, right: number): { left:
 /* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
 export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
 
-/* Dragging and zooming a world inside box. ready changes once box is on the page, so the wheel finds it. */
-export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown, limits: { min: number; max: number }) {
-  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1, smooth: false });
+/* Dragging and zooming a world inside box. ready changes once box is on the page, so the wheel finds it. start: the view it
+   opens at. touched tells whether the person has dragged or zoomed it since. */
+export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown, limits: { min: number; max: number }, start?: View) {
+  const [view, setView] = useState<View>(start ?? { x: 0, y: 0, k: 1, smooth: false });
   const drag = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
+  const byHand = useRef(false);
   /* How far the last press moved, so the click that ends a drag opens nothing. */
   const lastMoved = useRef(0);
   const { min, max } = limits;
@@ -25,6 +27,7 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
   const zoomAt = useCallback(
     (factor: number, px?: number, py?: number) => {
       const el = box.current;
+      byHand.current = true;
       setView(v => {
         const k = Math.min(max, Math.max(min, v.k * factor));
         const cx = px ?? (el ? el.clientWidth / 2 : 0);
@@ -60,6 +63,7 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
       const moved = d.moved + Math.abs(dx) + Math.abs(dy);
       if (d.moved <= DRAG_PX && moved > DRAG_PX) e.currentTarget.setPointerCapture?.(e.pointerId);
       drag.current = { ...d, x: e.clientX, y: e.clientY, moved };
+      if (dx || dy) byHand.current = true;
       setView(v => ({ ...v, x: v.x + dx, y: v.y + dy, smooth: false }));
     },
     onPointerUp() {
@@ -73,7 +77,8 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
   };
 
   const dragged = useCallback(() => lastMoved.current > DRAG_PX, []);
-  return { view, setView, zoomAt, handlers, dragged };
+  const touched = useCallback(() => byHand.current, []);
+  return { view, setView, zoomAt, handlers, dragged, touched };
 }
 
 /* Zoom out, the scale, zoom in and Fit, bottom left as in the prototype. */

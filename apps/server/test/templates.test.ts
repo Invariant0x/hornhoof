@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -108,6 +108,23 @@ describe('templates', () => {
     expect(paragraph).toMatch(/weigh them as you weigh that person's words in your window/);
     expect(paragraph).toMatch(/goes back to the assistant as plain text/);
     expect(paragraph).not.toMatch(/exception|never change|never hire/);
+  });
+
+  it("keeps every department's work as files in a repository of its own, which the orchestrator creates itself with a saved key, or offers", () => {
+    const resources = body('orch-resources');
+    expect(resources).toMatch(/Every department keeps at least one repository of its own/);
+    expect(resources).toMatch(/letters, texts, layouts and tables/);
+    expect(resources).toMatch(/any earlier version/);
+    expect(resources).toMatch(/keeps none and a key is saved for it, create its first repository yourself with create_repository[\s\S]*then tell the CEO or the department's owner[\s\S]*its address/);
+    expect(resources).toMatch(/no key[\s\S]*offer one to the CEO or the department's owner[\s\S]*why[\s\S]*what it takes/);
+    expect(resources).toMatch(/A second repository[\s\S]*only with their word/);
+    expect(resources).not.toMatch(/never create one without their word/i);
+    expect(body('orch-company')).toMatch(/hands in a document in place of a commit only until it has one/);
+    for (const id of ['hh-lead-tasks', 'hh-task-flow']) expect(body(id), id).toMatch(/letters, texts, layouts and tables/);
+    expect(body('hh-lead-tasks')).toMatch(/a document only while the department keeps none/);
+    expect(body('hh-task-flow')).toMatch(/only while your department keeps no repository/);
+    expect(body('hh-head')).toMatch(/keeps no repository[\s\S]*"tell_orchestrator"/);
+    for (const id of ['orch-resources', 'orch-company', 'hh-lead-tasks', 'hh-task-flow', 'hh-head']) expect(body(id), id).not.toMatch(/[—ё]/);
   });
 
   it('keeps task tools, waits, evidence and communication available without a role workflow', () => {
@@ -378,6 +395,12 @@ describe('templates', () => {
           expect(role!.department, `${template.key}: ${line.role} in ${dept.template}`).toBe(dept.template);
         }
       }
+    }
+  });
+
+  it('counts the members of the turnkey teams of each department as its templates have them, for the card of a company template', () => {
+    for (const dept of DEPARTMENT_TEMPLATES) {
+      expect(dept.teamMembers, dept.key).toBe(templates.teamsOf(dept.key).reduce((n, t) => n + t.members.reduce((m, line) => m + line.count, 0), 0));
     }
   });
 

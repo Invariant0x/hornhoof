@@ -172,10 +172,10 @@ describe('work tree words', () => {
     expect(ru.window.controlDenied).toBe('Управлять программой агента может только владелец его подписки. Попросите владельца или напишите обычное сообщение.');
     expect(en.window.messageDenied).toBe('You cannot write to this agent. Ask someone who has access to its department.');
     expect(ru.window.messageDenied).toBe('Вы не можете писать этому агенту. Попросите того, у кого есть доступ к его отделу.');
-    expect(en.window.pictureUploading).toBe('Uploading the picture...');
-    expect(ru.window.pictureUploading).toBe('Картинка загружается...');
-    expect(en.window.pictureUploaded).toBe('The picture path is in the terminal. Press Enter to send it.');
-    expect(ru.window.pictureUploaded).toBe('Путь к картинке вставлен в терминал. Нажмите Enter для отправки.');
+    expect(en.window.pictureUploading).toBe('Uploading the file...');
+    expect(ru.window.pictureUploading).toBe('Файл загружается...');
+    expect(en.window.pictureUploaded).toBe('The file path is in the terminal. Press Enter to send it.');
+    expect(ru.window.pictureUploaded).toBe('Путь к файлу вставлен в терминал. Нажмите Enter для отправки.');
   });
 
   it('names the notebook saving state in English and Russian', () => {

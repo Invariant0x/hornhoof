@@ -76,7 +76,7 @@ export const companies = pgTable('companies', {
   name: text('name').notNull(),
   /* What the orchestrator learned about the company, saved when the CEO creates the structure. */
   brief: text('brief').notNull().default(''),
-  /* The ready-made template the CEO started from, so the orchestrator's greeting can offer to staff it. Null when the CEO started empty. */
+  /* The ready-made template the CEO started from, so the orchestrator's greeting knows it. Null when the CEO started empty. */
   template: text('template', { enum: COMPANY_TEMPLATE_KEYS }),
   singleton: boolean('singleton').notNull().default(true).unique(),
   /* Task and turn numbers the company gave before their rows were removed by hand: new ones go on after them, so a branch
@@ -288,6 +288,30 @@ export const departments = pgTable('departments', {
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
 }, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
+
+/* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
+   shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
+   department may keep one of its own, which goes first for it and its products. */
+export const repoHosts = pgTable(
+  'repo_hosts',
+  {
+    id: id(),
+    companyId: companyId(),
+    /* None: the whole company's. */
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['github'] }).notNull().default('github'),
+    owner: text('owner').notNull(),
+    tokenEnc: text('token_enc').notNull(),
+    tokenLast4: text('token_last4').notNull(),
+    updatedBy: uuid('updated_by').references(() => people.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [
+    uniqueIndex('repo_hosts_company').on(t.companyId).where(sql`${t.departmentId} IS NULL`),
+    uniqueIndex('repo_hosts_department').on(t.departmentId),
+    check('repo_hosts_provider', sql`${t.provider} IN ('github')`),
+  ],
+);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */

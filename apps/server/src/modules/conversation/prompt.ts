@@ -8,8 +8,13 @@ export const ORCHESTRATOR_INSTRUCTIONS =
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
 
-/* The greeting when the CEO started from a ready-made template: its departments already exist, so skip the interview
-   and the structure card and go to staffing. */
+/* The greeting when the CEO started from a ready-made template that brought its people: the company is complete, so
+   what is left is a subscription for whoever still waits for one, not hiring. */
+export const FIRST_TURN_STAFFED =
+  'The CEO set the company up from a ready-made template, and it came complete: its departments already have their people, with their roles and skills. Greet the CEO by name, say in one line that the company is ready and that you can change its departments and people any time, and call "company" to see them. An employee whose provider is null waits for a subscription: if any do, say that connecting a subscription under Subscriptions, and the machine it runs on, is all that is left, and that they start on it by themselves. Do not offer to hire people and do not propose a structure or staff card; the company is already staffed.';
+
+/* The greeting for a company started from a template before templates brought their people: its departments already
+   exist, so skip the interview and the structure card and go to staffing. */
 export const FIRST_TURN_TEMPLATE =
   'The CEO set the company up from a ready-made template, so its departments already exist. Greet the CEO by name, say in one line that the company started from a template and that you can change its departments any time, call "company" to see them, and offer to staff them one at a time, beginning with the first that has nobody yet. Do not propose a structure card; the departments are already there.';
 

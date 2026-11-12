@@ -217,10 +217,13 @@ vi.mock('../src/ui/terminal-fit', async importOriginal => {
 /* The browser tells of a new size of the terminal's box; jsdom has no layout, so a test says when. */
 class FakeResizeObserver {
   static all: FakeResizeObserver[] = [];
+  targets: Element[] = [];
   constructor(private fn: () => void) {
     FakeResizeObserver.all.push(this);
   }
-  observe() {}
+  observe(target: Element) {
+    this.targets.push(target);
+  }
   disconnect() {}
   resized() {
     this.fn();
@@ -522,11 +525,14 @@ describe("an agent's live terminal in its window", () => {
     await waitFor(() => expect(FakeSocket.all).toHaveLength(2));
   });
 
-  it('shows the log when the node cannot show a terminal', async () => {
+  it('says why when the node cannot show a terminal, with the chat one click away', async () => {
+    const user = userEvent.setup();
     open();
     (await socket()).ended(4404, 'no_terminal');
+    expect(await screen.findByRole('status', { name: 'Terminal' })).toHaveTextContent(/is asleep now\. It wakes up when someone writes to the agent/);
+    await user.click(screen.getByRole('button', { name: 'Chat' }));
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument();
+    expect(FakeSocket.all).toHaveLength(1);
   });
 
   it('connects again when the machine went away for a moment, and starts the screen over', async () => {
@@ -583,6 +589,7 @@ describe("an agent's live terminal in its window", () => {
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
+    localStorage.setItem('hh-agent-view', 'chat');
     view();
     expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
   });
@@ -597,6 +604,7 @@ describe("an agent's live terminal in its window", () => {
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
+    localStorage.setItem('hh-agent-view', 'chat');
     view();
     expect(await screen.findByText(/were left unsent in the program's input/)).toBeInTheDocument();
     expect(screen.getByText(says)).toBeInTheDocument();
@@ -809,11 +817,12 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([]);
   });
 
-  it('keeps the log for agents whose node shows no terminal', async () => {
+  it('opens no terminal for an agent whose node shows none, and says why, with the chat one click away', async () => {
     open(false);
-    expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
+    expect(await screen.findByText(/is asleep now/)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent(/is asleep now/);
     expect(FakeSocket.all).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: 'Chat' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
   });
 
   it('copies selected text on selection, Cmd+C, Ctrl+Shift+C and Ctrl+C without sending ^C or Escape to the program, and keeps Ctrl+C without selection', async () => {
@@ -942,6 +951,46 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([{ type: 'resize', cols: 47, rows: 35 }]);
   });
 
+  it('sends fewer columns to the session when its own box gets narrower with no change of the browser window, and more when it widens back', async () => {
+    /* A side panel or a card beside the terminal takes room from its box alone: the browser window keeps its size. */
+    const { container } = open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    const box = container.querySelector<HTMLElement>('.t-xterm')!;
+    const viewport = term.element.querySelector<HTMLElement>('.xterm-viewport')!;
+    const scrollArea = document.createElement('div');
+    scrollArea.className = 'xterm-scroll-area';
+    viewport.appendChild(scrollArea);
+    term.element.style.padding = '6px 8px 4px 10px';
+    Object.assign(term._core, {
+      _charSizeService: { width: 7.201171875, height: 14 },
+      _renderService: { dimensions: { css: { cell: { width: 7.2, height: 14 } } }, clear() {} },
+    });
+    const wide = (width: number) => {
+      const rect = (w: number, h: number) => () => ({ x: 0, y: 0, left: 0, top: 0, right: w, bottom: h, width: w, height: h, toJSON: () => ({}) });
+      box.getBoundingClientRect = rect(width, 500);
+      viewport.getBoundingClientRect = rect(width, 500);
+      scrollArea.getBoundingClientRect = rect(width - 15, 1200);
+      /* Only what watches the terminal's own box hears of it. */
+      for (const ro of FakeResizeObserver.all) if (ro.targets.includes(box)) ro.resized();
+    };
+    const windowResized = vi.fn();
+    window.addEventListener('resize', windowResized);
+
+    /* (1000 - 18 - 15) / 7.201171875 = 134 columns; (820 - 18 - 15) / 7.201171875 = 109. */
+    wide(1000);
+    wide(820);
+    wide(1000);
+    window.removeEventListener('resize', windowResized);
+    expect(windowResized).not.toHaveBeenCalled();
+    expect(ws.sent).toEqual([
+      { type: 'resize', cols: 134, rows: 35 },
+      { type: 'resize', cols: 109, rows: 35 },
+      { type: 'resize', cols: 134, rows: 35 },
+    ]);
+  });
+
   it('lets a person write messages without control of the program, and silently drops automatic terminal reports', async () => {
     const { container } = open();
     const ws = await socket();
@@ -1003,7 +1052,7 @@ describe('pictures directly in the live terminal', () => {
     act(() => ws.opened(false, true));
     fireEvent.paste(container.querySelector<HTMLElement>('.t-xterm')!, copied([png()]));
     await waitFor(() => expect(pictureUploads(calls)).toHaveLength(1));
-    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
+    expect(await screen.findByText('The file path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
     expect(ws.sent).toEqual([{ type: 'input', data: "'/home/agent/screen.png' " }]);
     expect(pictureUploads(calls)).toHaveLength(1);
   });
@@ -1015,7 +1064,7 @@ describe('pictures directly in the live terminal', () => {
     const ws = await socket();
     act(() => ws.opened(false, true));
     fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
-    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toBeInTheDocument();
+    expect(await screen.findByText('The file path is in the terminal. Press Enter to send it.')).toBeInTheDocument();
     expect(ws.sent).toEqual([{ type: 'input', data: 'screen.png: hh-fetch message p1' }]);
     expect(pictureUploads(calls)).toHaveLength(1);
   });

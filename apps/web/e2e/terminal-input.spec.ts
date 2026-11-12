@@ -15,11 +15,11 @@ type Options = {
 const COPY = {
   en: {
     members: 'Members', control: "Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.",
-    uploading: 'Uploading the picture...', uploaded: 'The picture path is in the terminal. Press Enter to send it.', denied: 'This picture is too big, even made smaller. A picture is at most 3 MB.',
+    uploading: 'Uploading the file...', uploaded: 'The file path is in the terminal. Press Enter to send it.', denied: 'This file is too big. A file is at most 10 MB.',
   },
   ru: {
     members: 'Сотрудники', control: 'Управлять программой агента может только владелец его подписки. Попросите владельца или напишите обычное сообщение.',
-    uploading: 'Картинка загружается...', uploaded: 'Путь к картинке вставлен в терминал. Нажмите Enter для отправки.', denied: 'Картинка слишком большая, даже если ее уменьшить. Предел для картинки 3 МБ.',
+    uploading: 'Файл загружается...', uploaded: 'Путь к файлу вставлен в терминал. Нажмите Enter для отправки.', denied: 'Файл слишком большой. Предел для файла 10 МБ.',
   },
 };
 
@@ -51,7 +51,7 @@ async function openTerminal(page: Page, options: Options) {
     const status = options.pictureStatus ?? 201;
     const body = status === 201
       ? options.legacyPicture ? { id: 'p1', name: 'screen.png' } : { id: 'p1', name: 'screen.png', insert: "'/home/agent/screen.png' " }
-      : { error: { code: 'validation', message: 'Picture is too large.', reason: 'picture_too_big' } };
+      : { error: { code: 'validation', message: 'A file is at most 10 MB.', reason: 'file_too_big' } };
     await route.fulfill({ status, json: body });
   });
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {

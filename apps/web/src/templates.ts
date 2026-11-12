@@ -1,17 +1,17 @@
 import type { TemplateKey } from './types';
 
 /* The department templates in card order, as the server has them; kept here so the browser does not load the protocol's validators. */
-export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: 'turns' | 'continuous' }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous' },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns' },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns' },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns' },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns' },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns' },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns' },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns' },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns' },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns' },
+export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: 'turns' | 'continuous'; teamMembers: number }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous', teamMembers: 1 },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns', teamMembers: 2 },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
 ];
 
 export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab' | 'home';
@@ -19,7 +19,8 @@ export type CompanyTemplateDept = { template: TemplateKey; name?: string; produc
 export type CompanyTemplate = { key: CompanyTemplateKey; departments: readonly CompanyTemplateDept[] };
 
 /* The ready-made companies on the first screen, the same as the server's COMPANY_TEMPLATES (a test keeps them equal). The
-   card draws its mini scheme from the departments and their products, and shows the headcount from the staff counts. */
+   card draws its mini scheme from the departments and their products, and shows the headcount from the staff counts and
+   the members of each department's turnkey teams. */
 export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'project',

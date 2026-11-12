@@ -55,11 +55,11 @@ describe("the program operator's plan", () => {
     expect(change).toMatchObject({ personId: null, byOrchestrator: false, before: null, after: key });
   });
 
-  it('is the only one who gets it: the others of Operations keep what they had', async () => {
+  it('is not the only one who gets it: the others of Operations that wait take it too, as any employee does', async () => {
     const c = await company();
-    await addKey(c);
+    const key = await addKey(c);
     const others = await c.db.select().from(agents).where(and(eq(agents.departmentId, c.ops.id), isNull(agents.removedAt)));
-    expect(others.filter(a => a.roleKey !== 'OPS-PROGRAM').map(a => a.subscriptionId)).toEqual([null, null, null]);
+    expect(others.filter(a => a.roleKey !== 'OPS-PROGRAM').map(a => a.subscriptionId)).toEqual([key, key, key]);
   });
 
   it('gets a plan that still waits for its machine', async () => {

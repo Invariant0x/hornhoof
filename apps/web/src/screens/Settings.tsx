@@ -6,6 +6,7 @@ import type { Me, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { CompanyRepoHost } from '../ui/RepoHost';
 import { useDialogClose } from '../ui/use-dialog-close';
 import { Backups } from './Backups';
 
@@ -25,8 +26,8 @@ function Encryption({ tls }: { tls: TlsView | null }) {
 }
 
 /* The company's settings, for people who see the whole company: its public link at hornhoof.org, which they copy, move
-   to another name or remove, and for the CEO alone its backups. A company with no link starts on a long random name, as
-   link names are public. */
+   to another name or remove, the GitHub key Hornhoof creates repositories with, and for the CEO alone its backups. A
+   company with no link starts on a long random name, as link names are public. */
 export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -126,6 +127,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
           </section>
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+        <CompanyRepoHost />
         {me.person.isOwner && <Backups />}
       </div>
     </div>

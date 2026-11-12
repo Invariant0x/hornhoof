@@ -216,20 +216,32 @@ const appliedLines = (t: Messages, applied: Applied): string[] => [
   ...(applied.hired ?? []).map(h => t.window.hiredLine(h.name)),
 ];
 
-/* The switch between the chat and the live terminal names and draws what it opens. */
-function WindowToolbar({ t, terminal, state, hasTerminal, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; hasTerminal: boolean; stop(): void; onToggle(): void }) {
-  const label = terminal ? t.window.showChat : t.window.showTerminal;
+/* The switch between the chat and the terminal names and draws what it opens, in every window and at every width. */
+function WindowToolbar({ t, terminal, state, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; stop(): void; onToggle(): void }) {
   return (
     <>
       {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
-      {hasTerminal && (
-        <button type="button" aria-label={label} title={label} onClick={onToggle}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d={terminal ? CHAT_ICON : TERMINAL_ICON} />
-          </svg>
-        </button>
-      )}
+      <WordButton label={terminal ? t.window.showChat : t.window.showTerminal} icon={terminal ? CHAT_ICON : TERMINAL_ICON} onClick={onToggle} both />
     </>
+  );
+}
+
+/* The terminal view until the agent's state comes, and of an agent whose terminal cannot show now: a program that sleeps
+   wakes when someone writes. */
+function TerminalPlace({ t, state, program }: { t: Messages; state: OrchestratorState | null; program: string }) {
+  return (
+    <div className="t-term">
+      <div className="t-load" role="status" aria-label={t.window.showTerminal}>
+        {state ? (
+          <p>{state.ready && !state.busy ? t.window.noTerminal.asleep(program) : t.window.noTerminal.away}</p>
+        ) : (
+          <>
+            <span className="spinner" aria-hidden="true" />
+            <span>{t.window.opening(program)}</span>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -285,7 +297,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [failure, setFailure] = useState<unknown>(null);
   /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
-  /* The chat shows unless the person chose the terminal and the node shows one. */
+  /* The chat shows unless the person chose the terminal. */
   const [view, toggleView] = useAgentView();
   const [noTerminal, setNoTerminal] = useState(false);
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
@@ -458,7 +470,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
-  const terminal = hasTerminal && view === 'terminal';
+  const terminal = view === 'terminal';
+  /* The map already knows an employee's program, before its card comes. */
+  const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
+  const program = provider ? PROGRAM_NAMES[provider] : 'Claude';
+  /* The terminal opens as soon as the agent's state says it can, without waiting for the card. */
+  const opens = terminal && state !== null;
   /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
   const dragging = usePictureDrop(box, known && !terminal, state?.ready ?? false, pictures.add);
 
@@ -643,8 +660,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   ];
 
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} hasTerminal={hasTerminal} stop={stop} onToggle={toggleView} />}>
-      {!known && (
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} stop={stop} onToggle={toggleView} />}>
+      {terminal && state === null && failure === null && <TerminalPlace t={t} state={null} program={program} />}
+      {!known && !opens && !(terminal && failure === null) && (
         <div className="t-log" aria-busy="true">
           {failure !== null && (
             <p className="alert" role="alert">
@@ -653,8 +671,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           )}
         </div>
       )}
-      {known && terminal && (
-        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
+      {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} />}
+      {opens && !hasTerminal && <TerminalPlace t={t} state={state} program={program} />}
+      {opens && !known && failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(t, failure)}
+        </p>
       )}
       {known && terminal && hasCards && (
         <div className="t-cards">
@@ -711,7 +733,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
             void send();
           }}
         >
-          <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.notPicture} />
+          <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.asFile} />
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>

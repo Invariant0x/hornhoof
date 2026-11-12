@@ -169,6 +169,9 @@ export async function sendFile(db: Db, reply: FastifyReply, found: { id: string;
     .send(Readable.from(pieces(found.id, found.length)));
 }
 
+/* A file's name as a header carries it: every character past plain letters and digits encoded. */
+const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+
 const IdParams = z.object({ id: z.uuid() });
 const SendQuery = z.object({ task: z.string().optional(), name: z.string().optional() });
 const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) });
@@ -241,7 +244,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (ref.startsWith('operator-case:')) return sendCasePicture(reply, await agentCasePicture(db, job, ref, file));
     if (ref === MESSAGE_FILES) {
       const picture = await messagePicture(db, job, file);
-      if (!picture) throw new ApiError(404, 'not_found', `You have no picture ${file}. A picture goes only to the agent it was sent to.`, 'attachment_unknown');
+      if (!picture) throw new ApiError(404, 'not_found', `You have no picture or file ${file}. One goes only to the agent it was sent to.`, 'attachment_unknown');
       return sendFile(db, reply, picture);
     }
     const task = await taskByRef(ctx, job.companyId, ref);
@@ -259,7 +262,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* People see a picture of a request they read with its work, or of an open one that is theirs to answer; one a person
-     sends an agent, when they see that agent. */
+     sends an agent, when they see that agent. A file that is no picture downloads under its name instead of showing. */
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
@@ -268,7 +271,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
-      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
+      .select({ name: attachments.name, mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
       .from(attachments)
       .innerJoin(agents, eq(agents.id, attachments.agentId))
       .leftJoin(requests, eq(requests.id, attachments.requestId))
@@ -278,6 +281,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
       throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
     }
+    if (!found.mediaType.startsWith('image/')) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'")

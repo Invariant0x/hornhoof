@@ -1,5 +1,6 @@
 import { workingTurns } from './hub-turns';
 import { peopleLayout, rowCenters, wirePeople, type PeopleLayout, type PersonChip, type PersonRoute } from './map-people';
+import { joinRoads, roadForks, type Way } from './map-roads';
 import { departmentPeople, wholeCompanyPeople } from './org';
 import type { Org } from './types';
 import { orthoRoute, type Rect } from './ui/ortho';
@@ -83,6 +84,8 @@ export type MapArrangement = {
   people: PeopleLayout;
   /* Every block, for the grips that move them and for what Fit shows. */
   blocks: Block[];
+  /* Where the roads fork, for a dot like the one where a trace turns. */
+  forks: Point[];
 };
 
 const pointAt = ([x, y]: Point): Rect => ({ x, y, w: 0, h: 0 });
@@ -152,11 +155,10 @@ export function arrangeMap(org: Org, placed: Placed = {}): MapArrangement {
   const others = (...ends: string[]) => all.filter(b => !ends.includes(b.key)).map(b => b.rect);
   const movedOthers = (...ends: string[]) => all.filter(b => !ends.includes(b.key) && !samePlace(b.rect, b.home)).map(b => b.rect);
 
-  const arrangedDepts: ArrangedDept[] = org.departments.map((d, i) => {
+  const deptWays: Way[] = org.departments.map((_, i) => {
     const spot = spots[i]!, { key, rect, home } = depts[i]!;
     const kept = !hubMoved && samePlace(rect, home) && !crossesAny(spot.path, movedOthers(HUB_KEY, key));
-    const path = kept ? spot.path : orthoRoute(pointAt(middle), rect, others(HUB_KEY, key));
-    return { id: d.id, ...rect, path, via: kept && path.length > 2 ? path[2]! : null };
+    return { pts: kept ? spot.path : orthoRoute(pointAt(middle), rect, others(HUB_KEY, key)), fixed: kept, ends: [null, rect] };
   });
 
   /* The people who stay in the row keep its bus; the way down from it starts above the hub, or as near above it as the row
@@ -175,13 +177,30 @@ export function arrangeMap(org: Org, placed: Placed = {}): MapArrangement {
     arrangedBus = { lines: [across, ...xs.filter(x => x !== lo && x !== hi).map((x): Point[] => [under(x), [x, bus]])], drop, via: join };
     fromHub = [...drop].reverse();
   }
-  const arrangedTop: TopPerson[] = tops.map(t => {
+  const topWays = tops.map(t => {
     const apart = !samePlace(t.rect, t.home), x = t.rect.x + CHIP_W / 2;
-    const path = apart ? orthoRoute(pointAt(middle), t.rect, others(HUB_KEY, t.key)) : tidy([...fromHub, [x, bus], under(x)]);
-    return { id: t.id, ...t.rect, path, apart };
+    const way: Way = apart ? { pts: orthoRoute(pointAt(middle), t.rect, others(HUB_KEY, t.key)), ends: [null, t.rect] } : { pts: tidy([...fromHub, [x, bus], under(x)]), fixed: true };
+    return { t, apart, way };
   });
+  const shown = Object.keys(placed).length ? movedPeople(base, chips, chipById, deptById, others, movedOthers) : base;
 
-  const people = Object.keys(placed).length ? movedPeople(base, chips, chipById, deptById, others, movedOthers) : base;
+  /* Lines that run side by side join into roads: the traces from the hub and the people's row keep their place where the map
+     places them, and the lines of people and of what was moved come onto them or onto each other. */
+  const busWays: Way[] = arrangedBus ? [...arrangedBus.lines, arrangedBus.drop].map(pts => ({ pts, fixed: true })) : [];
+  const routeWays: Way[] = shown.routes.map(r => ({ pts: r.pts, ends: [deptById.get(r.deptId)!.rect, chipById.get(r.personId)!.rect] }));
+  const blocks = all.map(b => b.rect);
+  const roads = joinRoads([...deptWays, ...topWays.map(w => w.way), ...busWays, ...routeWays], blocks);
+  const deptRoads = roads.splice(0, deptWays.length), topRoads = roads.splice(0, topWays.length), routeRoads = roads.slice(busWays.length);
+
+  const arrangedDepts: ArrangedDept[] = org.departments.map((d, i) => {
+    const path = deptRoads[i]!;
+    return { id: d.id, ...depts[i]!.rect, path, via: deptWays[i]!.fixed && path.length > 2 ? path[2]! : null };
+  });
+  const arrangedTop: TopPerson[] = topWays.map(({ t, apart }, i) => ({ id: t.id, ...t.rect, path: topRoads[i]!, apart }));
+  const joined = routeRoads.some((pts, i) => pts !== routeWays[i]!.pts);
+  const routes = joined ? shown.routes.map((r, i) => ({ ...r, pts: routeRoads[i]! })) : shown.routes;
+  const people = joined ? { chips: shown.chips, routes, ...wirePeople(routes, shown.chips) } : shown;
+  const drawn = [...deptRoads, ...topWays.flatMap((w, i) => (w.apart ? [topRoads[i]!] : [])), ...busWays.map(w => w.pts), ...routes.map(r => r.pts)];
   return {
     hub,
     depts: arrangedDepts,
@@ -189,6 +208,7 @@ export function arrangeMap(org: Org, placed: Placed = {}): MapArrangement {
     bus: arrangedBus,
     people,
     blocks: all.map(({ key, rect }) => ({ key, rect })),
+    forks: roadForks(drawn, blocks),
   };
 }
 

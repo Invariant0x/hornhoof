@@ -93,6 +93,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   telegram_bots: rows('access'),
   /* An assistant's key is a way in from outside, under its owner's rights. */
   assistants: rows('access'),
+  /* The key of a git host is a way out to an account of the company's. */
+  repo_hosts: rows('access'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
 

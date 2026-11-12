@@ -3082,6 +3082,8 @@ export class TerminalHost {
     await history.open();
     if (!open()) return;
     view.child.stdout?.on('data', (chunk: Buffer) => {
+      /* The client draws, so it is there: a size that could not reach it before goes now. */
+      if (!view.tty) void this.fit(view.key);
       const text = view.decoder.write(chunk);
       history.saw(text);
       show(text);
@@ -3175,7 +3177,11 @@ export class TerminalHost {
   private async sizeView(termId: string, view: View, size: Size): Promise<void> {
     view.shown = size;
     const tty = await this.ttyOf(termId, view);
-    if (!tty) return;
+    /* Its client is not there yet, as on a machine short of memory: the size has not reached it, and goes once it draws. */
+    if (!tty) {
+      if (view.shown === size) view.shown = view.applied;
+      return;
+    }
     await this.applyNewest(tty, view);
     const last = view.shown;
     await this.clientSized(tty, last);

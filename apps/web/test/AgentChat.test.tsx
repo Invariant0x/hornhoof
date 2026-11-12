@@ -79,12 +79,53 @@ describe("an agent's window opens as a chat", () => {
     vi.restoreAllMocks();
   });
 
-  it('shows the chat alone, with no switch, when the node has no terminal', async () => {
-    localStorage.setItem('hh-agent-view', 'terminal');
+  it('names the terminal in a word beside its icon for an agent with no live terminal, and says there that its program sleeps until someone writes', async () => {
+    const user = userEvent.setup();
     open();
     expect(await screen.findByRole('log', { name: 'Conversation' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument();
+    const toTerminal = screen.getByRole('button', { name: 'Terminal' });
+    expect(toTerminal).toHaveTextContent('Terminal');
+    expect(toTerminal.querySelector('svg')).toBeInTheDocument();
+    await user.click(toTerminal);
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent(/^The \w+ program of this agent is asleep now\. It wakes up when someone writes to the agent, and its terminal shows here then\.$/);
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    const toChat = screen.getByRole('button', { name: 'Chat' });
+    expect(toChat).toHaveTextContent('Chat');
+    await user.click(toChat);
+    expect(screen.getByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+  });
+
+  it('opens the terminal the person chose last even when the agent has none live, and says why in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    localStorage.setItem('hh-agent-view', 'terminal');
+    open();
+    const asleep = /^Программа \w+ этого агента сейчас спит\. Она проснется, когда агенту напишут, и тогда здесь появится ее терминал\.$/;
+    expect(await screen.findByText(asleep)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Терминал' })).toHaveTextContent(asleep);
+    expect(screen.getByRole('button', { name: 'Чат' })).toHaveTextContent('Чат');
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+  });
+
+  it('shows the switch and the terminal opening at once, and opens the terminal as its state comes, without waiting for the card', async () => {
+    localStorage.setItem('hh-agent-view', 'terminal');
+    const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, provider: 'codex' as const } : e)) })) };
+    let comes: (answer: [number, unknown]) => void = () => {};
+    const state = new Promise<[number, unknown]>(resolve => (comes = resolve));
+    mockApi({ 'GET /api/agents/b1': () => new Promise(() => {}), 'GET /api/agents/b1/events?after=0': () => state });
+    render(<LanguageProvider><AgentWindow me={ME} org={org} agentId="b1" onClose={() => {}} /></LanguageProvider>);
+    expect(screen.getByRole('button', { name: 'Chat' })).toHaveTextContent('Chat');
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent('Opening the Codex terminal…');
+    await act(async () => comes([200, { events: [], state: WITH_TERMINAL }]));
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+  });
+
+  it('says the terminal cannot be shown here when the agent works on a machine that does not show it', async () => {
+    const user = userEvent.setup();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: BUSY }] });
+    await user.click(await screen.findByRole('button', { name: 'Terminal' }));
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent("This agent's terminal cannot be shown here now. What it says is in the chat.");
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   });
 });
 

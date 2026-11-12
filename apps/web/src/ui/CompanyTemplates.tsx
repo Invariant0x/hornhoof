@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { useT, type Messages } from '../i18n';
-import { COMPANY_TEMPLATES, type CompanyTemplate, type CompanyTemplateDept, type CompanyTemplateKey } from '../templates';
+import { COMPANY_TEMPLATES, TEMPLATES, type CompanyTemplate, type CompanyTemplateDept, type CompanyTemplateKey } from '../templates';
 
 export type Pick = CompanyTemplateKey | 'empty';
 
-const headcount = (t: CompanyTemplate) => t.departments.reduce((n, d) => n + d.staff.reduce((s, line) => s + line.count, 0), 0);
+/* Everyone the company comes with: each department's staff and the members of its turnkey teams. */
+const headcount = (t: CompanyTemplate) =>
+  t.departments.reduce((n, d) => n + d.staff.reduce((s, line) => s + line.count, 0) + (TEMPLATES.find(x => x.key === d.template)?.teamMembers ?? 0), 0);
 const deptName = (t: Messages, dept: CompanyTemplateDept) => dept.name ?? t.templates[dept.template].name;
 
 /* One box size everywhere, and departments wrap after four instead of shrinking, so a big company reads at the same

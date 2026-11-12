@@ -86,11 +86,13 @@ import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
 import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
+import { createOnGitHub } from './modules/departments/github-create.js';
+import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; templates?: Templates };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; createRepository?: RepositoryCreator; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -101,6 +103,8 @@ export type Ctx = Deps & {
   startedAt: Date;
   readCommit: CommitReader;
   markCommit: CommitMarker;
+  /* Creates a repository on a git host with a key the company saved. */
+  createRepository: RepositoryCreator;
   log: FastifyBaseLogger;
   hub: NodeHub;
   bus: EventBus;
@@ -183,7 +187,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, createRepository: createOnGitHub(), ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.mode = new AppMode({ dir: deps.config.controlDir, fromKeeper: deps.config.keeper, log: line => app.log.info(line) });
   ctx.hub = new NodeHub({
@@ -236,11 +240,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
      nodes go, so a message it is taking reaches its agent first. */
   ctx.mode.whenLead(() => ctx.telegram.start(), () => ctx.telegram.stop());
   app.addHook('preClose', async () => ctx.telegram.stop());
-  /* What Hornhoof does for assistants writes what it collects, so it starts when this app first leads. It runs on
-     from then until the app closes: a pass that finds the app no longer leading writes nothing, since the fence
-     refuses it. */
-  let assistantsRun = false;
-  ctx.mode.whenLead(() => (assistantsRun ? undefined : ((assistantsRun = true), ctx.assistants.start())), () => undefined);
+  /* What Hornhoof does for assistants writes what it collects, so it runs only while this app leads, as the heads' bots
+     do. */
+  ctx.mode.whenLead(() => ctx.assistants.start(), () => ctx.assistants.stop());
   app.addHook('preClose', async () => ctx.assistants.stop());
   /* A database that was restored takes over who may get in now before this app serves anybody on it: the first thing
      it does when it first leads. Until that has gone through, every request but for its health is turned away as

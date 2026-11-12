@@ -49,7 +49,9 @@ const worldOf = async (el: Locator) => el.evaluate((e: HTMLElement) => ({ x: par
 const scaleOf = async (page: Page) => Number(/scale\(([^)]+)\)/.exec(await page.locator('.world').evaluate((e: HTMLElement) => e.style.transform))![1]);
 const lines = async (page: Page) =>
   page.locator('.wires path.tr').evaluateAll(paths => paths.map(p => ({ d: p.getAttribute('d')!, person: p.getAttribute('data-person') })));
-const pointsOf = (d: string) => d.slice(2).split(' L ').map(p => p.split(' ').map(Number) as [number, number]);
+/* A line's points, run after run: a stretch another line already draws is left out of it. */
+const runsOf = (d: string) => d.split('M ').filter(Boolean).map(run => run.trim().split(' L ').map(p => p.split(' ').map(Number) as [number, number]));
+const pointsOf = (d: string) => runsOf(d).flat();
 const square = (pts: [number, number][]) => pts.slice(1).every((q, i) => q[0] === pts[i]![0] || q[1] === pts[i]![1]);
 const onEdge = ([x, y]: [number, number], r: { x: number; y: number; w: number; h: number }) =>
   ((Math.abs(x - r.x) < 0.01 || Math.abs(x - r.x - r.w) < 0.01) && y >= r.y && y <= r.y + r.h) || ((Math.abs(y - r.y) < 0.01 || Math.abs(y - r.y - r.h) < 0.01) && x >= r.x && x <= r.x + r.w);
@@ -74,13 +76,13 @@ test.describe('arranging the company map', () => {
     const world = await page.locator('.world').getAttribute('style');
     const k = await scaleOf(page);
 
-    /* The grip stands just outside the card's corner and is 44 px to touch on the screen. */
+    /* The grip stands over the card's corner, its middle on it, and is 44 px to touch on the screen. */
     const grip = page.getByRole('button', { name: 'Move Oleg Tikhonov' });
     const g = await box(grip), card = await box(oleg);
     expect(Math.round(g.width)).toBe(44);
     expect(Math.round(g.height)).toBe(44);
-    expect(Math.abs(g.x + g.width - card.x)).toBeLessThan(1);
-    expect(Math.abs(g.y + g.height - card.y)).toBeLessThan(1);
+    expect(Math.abs(g.x + g.width / 2 - card.x)).toBeLessThan(1);
+    expect(Math.abs(g.y + g.height / 2 - card.y)).toBeLessThan(1);
 
     await page.mouse.move(g.x + g.width - 8, g.y + g.height - 8);
     await page.mouse.down();
@@ -98,10 +100,10 @@ test.describe('arranging the company map', () => {
 
     /* Every line runs across and down only, and Oleg's lines end on the edge of his card. */
     const drawn = await lines(page);
-    for (const { d } of drawn) expect(square(pointsOf(d)), d).toBe(true);
+    for (const { d } of drawn) expect(runsOf(d).every(square), d).toBe(true);
     const own = drawn.filter(l => l.person === OLEG);
     expect(own.length).toBeGreaterThan(0);
-    expect(own.some(l => [pointsOf(l.d)[0]!, pointsOf(l.d).at(-1)!].some(p => onEdge(p, after)))).toBe(true);
+    expect(own.some(l => runsOf(l.d).some(run => [run[0]!, run.at(-1)!].some(p => onEdge(p, after))))).toBe(true);
 
     /* It stays where it was put on the next visit. */
     await page.reload();
@@ -136,7 +138,7 @@ test.describe('arranging the company map', () => {
     expect(Math.abs(after.y - before.y - 420 / k)).toBeLessThanOrEqual(1);
     await expect.poll(() => kept.blocks[`dept:${SALES}`]).toEqual({ x: after.x, y: after.y });
     const moved = pointsOf((await trace.getAttribute('d'))!);
-    expect(square(moved)).toBe(true);
+    expect(runsOf((await trace.getAttribute('d'))!).every(square)).toBe(true);
     expect(onEdge(moved.at(-1)!, after)).toBe(true);
 
     await page.getByRole('button', { name: 'Put back as it was' }).click();

@@ -22,6 +22,7 @@ import { failOpenJobs } from '../nodes/messages.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { onlineIn, subView, subViews } from './views.js';
+import { tryPlaceWaiting } from './waiting.js';
 
 const Target = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('orchestrator') }),
@@ -198,13 +199,14 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       return sub!.id;
     });
     if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore, id);
+    await tryPlaceWaiting(ctx, me.companyId, [id]);
     await tryPlaceOperator(ctx, me.companyId);
 
     reply.code(201);
     return { subscription: await subView(db, online, id, me) };
   });
 
-  /* A person connects their own plans. They serve wherever the person works, so there is nothing to place.
+  /* A person connects their own plans. They serve wherever the person works, and whoever there waits for a plan takes one.
      One subscription per plan: one still waiting for its machine goes into the new command instead of a second one. A
      plan that runs on a machine goes to another one only by that machine's own command, which works there alone. */
   app.post('/api/subscriptions/connect', async (req, reply) => {
@@ -216,6 +218,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       return { ids, removedNodes, command: await createInstallCommand(tx, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
     for (const id of removedNodes) hub.close(id, 4001);
+    await tryPlaceWaiting(ctx, me.companyId, ids);
     await tryPlaceOperator(ctx, me.companyId);
     const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
     reply.code(201);

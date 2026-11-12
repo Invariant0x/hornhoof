@@ -10,12 +10,15 @@ import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
+import { hireEmployee } from '../departments/hire.js';
+import { companyRoster, templateTeams } from '../departments/roster.js';
 import { saveLink } from '../link/link.js';
 import type { Bound } from '../link/relay.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 import { ensureOperations } from '../operations/ensure.js';
+import { placeableSubscriptions, spotIn } from '../tools/staff.js';
 import { isSetupCode, setupNeeded } from './code.js';
 
 const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
@@ -39,7 +42,8 @@ const SetupBody = z.object({
   ]),
   /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
   link: LinkBody.optional(),
-  /* A ready-made company to start from, which creates its departments right away; left out, the company starts empty. */
+  /* A ready-made company to start from, whose departments come right away with their people; left out, the company starts
+     empty. */
   template: z.enum(COMPANY_TEMPLATE_KEYS).optional(),
 });
 const CodeQuery = z.object({ code: z.string().max(200).default('') });
@@ -94,25 +98,32 @@ async function orchestratorSubscription(
   return { subscriptionId: null, code: null };
 }
 
-/* A ready-made company starts with its departments and their products, so the CEO sees the scheme at once; the
-   orchestrator offers to staff them in its greeting. It brings no people, so no subscription is needed. */
-async function templateDepartments(tx: Tx, companyId: string, template: SetupInput['body']['template']): Promise<void> {
+/* A ready-made company starts with its template's departments, their products and their people, so it works once a
+   subscription is on. Each employee takes the first plan here that may serve it, as a hire does, or waits for one. */
+async function templateDepartments(ctx: Ctx, tx: Tx, companyId: string, personId: string, template: SetupInput['body']['template']): Promise<void> {
   const chosen = COMPANY_TEMPLATES.find(t => t.key === template);
   if (!chosen) return;
+  const by = { personId, byOrchestrator: false };
   let position = 0;
   for (const dept of chosen.departments) {
     const roleCode = roleCodeOf(dept.template);
     const [row] = await tx
       .insert(departments)
       .values({ companyId, templateKey: dept.template, workMode: defaultDepartmentWorkMode(dept.template), name: dept.name ?? null, roleCode, position: position++ })
-      .returning({ id: departments.id });
+      .returning();
     for (const product of dept.products ?? []) {
       await tx.insert(departments).values({ companyId, name: product, parentId: row!.id, roleCode, position: position++ });
     }
+    /* Its people by the company template, and the turnkey teams of its department template, as the orchestrator
+       builds a department with its people. */
+    const serving = await placeableSubscriptions({ db: tx }, companyId, spotIn(row!));
+    const lines = [...companyRoster(ctx, dept.staff, serving), ...(await templateTeams(ctx, tx, row!, serving))];
+    for (const line of lines) await hireEmployee(ctx, tx, { companyId, departmentId: row!.id }, line, by);
   }
 }
 
-async function createCompany(tx: Tx, config: Config, { body, passwordHash, bound }: SetupInput) {
+async function createCompany(ctx: Ctx, tx: Tx, { body, passwordHash, bound }: SetupInput) {
+  const { config } = ctx;
   const [company] = await tx.insert(companies).values({ name: body.companyName, template: body.template ?? null }).returning();
   const [person] = await tx.insert(people).values({
     companyId: company!.id,
@@ -132,7 +143,7 @@ async function createCompany(tx: Tx, config: Config, { body, passwordHash, bound
     model: orchestratorModel(body.orchestrator),
     subscriptionId,
   });
-  await templateDepartments(tx, company!.id, body.template);
+  await templateDepartments(ctx, tx, company!.id, person!.id, body.template);
   if (bound) await saveLink(tx, config, company!.id, bound);
   return { company: company!, person: person!, code };
 }
@@ -142,7 +153,7 @@ type Made = Awaited<ReturnType<typeof createCompany>>;
 /* A company that was not made lets go of the link it took, or the name stays taken at the relay. */
 async function madeOrLinkLetGo(ctx: Ctx, input: SetupInput): Promise<Made> {
   try {
-    return await ctx.db.transaction(tx => createCompany(tx, ctx.config, input));
+    return await ctx.db.transaction(tx => createCompany(ctx, tx, input));
   } catch (err) {
     if (input.bound) await ctx.links.letGo(input.bound.name, input.bound.key);
     if (isUniqueViolation(err)) throw alreadySetUp();

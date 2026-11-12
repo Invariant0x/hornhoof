@@ -215,3 +215,53 @@ describe('a wake at the events address', () => {
     expect(address.wakes).toHaveLength(1);
   });
 });
+
+describe('the work for assistants, stopped and started again as a server gets and loses the lead', () => {
+  it('lets its long polls go at a stop, sends nothing while stopped, and carries events and wakes again after a new start', async () => {
+    const c = await company();
+    const service = c.app.ctx.assistants;
+    /* A long poll here waits until it hears an event or is let go, never for a time. */
+    let waiting = 0;
+    service.pause = (_ms, signal) => {
+      waiting += 1;
+      return new Promise<void>(done => signal.addEventListener('abort', () => done(), { once: true }));
+    };
+    const address = await standIn([]);
+    const ava = await assistantOf(c, c.owner.id, 'Ava', address.url);
+    const task = await aTask(c);
+    const question = (text: string) => ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text, topic: 'task' });
+    const texts = (events: Event[]) => events.map(e => (e.data.request as { text: string }).text);
+
+    await question('Which region first?');
+    await until(() => address.wakes.length === 1);
+    const [first] = await eventsOf(c, ava.key);
+    const letGo = read(c, ava.key, first!.seq, 50);
+    await until(() => waiting === 1);
+    await service.stop();
+    expect((await letGo).json()).toEqual({ events: [], next: first!.seq });
+
+    /* While stopped, a new request is told to nobody and wakes nobody; a long poll waits for the next start. */
+    await question('Which city then?');
+    service.collect(c.acme.id);
+    const meanwhile = read(c, ava.key, first!.seq, 50);
+    await until(() => waiting === 2);
+    /* A moment for anything that would still go, so that it shows here; nothing does. */
+    await new Promise(done => setTimeout(done, 100));
+    expect(await eventsOf(c, ava.key, first!.seq)).toEqual([]);
+    expect(address.wakes).toHaveLength(1);
+
+    await service.start();
+    const heard = (await meanwhile).json();
+    expect(texts(heard.events)).toEqual(['Which city then?']);
+    await until(() => address.wakes.length === 2);
+    expect(JSON.parse(address.wakes[1]!.body)).toEqual({ type: 'wake', after: heard.events[0].seq - 1 });
+
+    const next = read(c, ava.key, heard.next, 50);
+    await until(() => waiting === 3);
+    await question('Which shop first?');
+    const later = (await next).json();
+    expect(texts(later.events)).toEqual(['Which shop first?']);
+    await until(() => address.wakes.length === 3);
+    expect(JSON.parse(address.wakes[2]!.body)).toEqual({ type: 'wake', after: later.events[0].seq - 1 });
+  });
+});
