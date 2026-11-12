@@ -186,6 +186,8 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
       and(
         eq(jobs.kind, 'conversation'),
         eq(jobs.status, 'running'),
+        /* A person's assistant is theirs to watch, not Operations'. */
+        ne(agents.kind, 'assistant'),
         or(ne(jobs.prompt, ''), isNotNull(jobs.taskId), isNotNull(jobs.createdBy)),
         or(isNull(jobs.nodeId), eq(nodes.status, 'ready')),
       ),

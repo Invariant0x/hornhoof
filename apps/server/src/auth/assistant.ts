@@ -18,13 +18,24 @@ const badKey = () =>
 export async function requireAssistant(req: FastifyRequest, db: Db): Promise<Person> {
   const key = BEARER.exec(req.headers.authorization ?? '')?.[1];
   if (!key) throw badKey();
-  const [row] = await db
-    .select({ id: people.id, name: people.name, companyId: people.companyId, status: people.status, ownerId: people.assistantOf })
-    .from(assistants)
-    .innerJoin(people, eq(people.id, assistants.personId))
-    .where(and(eq(assistants.keyHash, hashToken(key)), eq(people.isAgent, true)));
+  const [row] = await db.select(assistantColumns).from(assistants).innerJoin(people, eq(people.id, assistants.personId)).where(and(eq(assistants.keyHash, hashToken(key)), eq(people.isAgent, true)));
   if (!row?.ownerId || row.status !== 'active') throw badKey();
-  const [owner] = await db.select(personColumns).from(people).where(and(eq(people.id, row.ownerId), eq(people.companyId, row.companyId), eq(people.isAgent, false)));
+  return actingFor(db, row);
+}
+
+const assistantColumns = { id: people.id, name: people.name, companyId: people.companyId, status: people.status, ownerId: people.assistantOf };
+
+/* The owner of the assistant whose own agent this is, as they are now, marked as acting through it: the agent's tools act
+   for them as the assistant's key does. */
+export async function assistantOfAgent(db: Db, agentId: string): Promise<Person> {
+  const [row] = await db.select(assistantColumns).from(assistants).innerJoin(people, eq(people.id, assistants.personId)).where(eq(assistants.agentId, agentId));
+  if (!row?.ownerId || row.status !== 'active') throw new ApiError(403, 'forbidden', 'This assistant is switched off, so its agent can do nothing for its owner.', 'assistant_not_allowed');
+  return actingFor(db, row);
+}
+
+/* The assistant's owner, active and of its company, with the assistant they act through. */
+async function actingFor(db: Db, row: { id: string; name: string; companyId: string; ownerId: string | null }): Promise<Person> {
+  const [owner] = await db.select(personColumns).from(people).where(and(eq(people.id, row.ownerId!), eq(people.companyId, row.companyId), eq(people.isAgent, false)));
   if (!owner || owner.status !== 'active') {
     throw new ApiError(403, 'forbidden', 'The person this assistant belongs to is switched off or gone, so it can do nothing for them.', 'assistant_owner_inactive');
   }

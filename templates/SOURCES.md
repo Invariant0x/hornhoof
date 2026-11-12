@@ -160,6 +160,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/fin-spreadsheet-audit.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/model-builder/skills/audit-xls/SKILL.md | Hornhoof |
 | `skills/fin-variance-analysis.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance; anthropics/financial-services plugins/agent-plugins/month-end-closer/skills/variance-commentary/SKILL.md | Hornhoof |
 | `skills/fin-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-assistant.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-ask-dont-guess.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
 | `skills/hh-check-work.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-break-down.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md; wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md; addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md | Hornhoof |

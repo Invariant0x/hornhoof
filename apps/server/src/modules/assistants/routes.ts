@@ -2,21 +2,23 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { accessOf, agentSpot } from '../../auth/access.js';
-import { canViewAgent, seesAgent, viewerOf } from '../../auth/agent-view.js';
+import { accessOf } from '../../auth/access.js';
+import { canViewAgent, placeOf, seesAgent, viewerOf } from '../../auth/agent-view.js';
 import { requireAssistant, wholeCompany } from '../../auth/assistant.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import { agents, assistants, companies, departments, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { AgentRow } from '../agents/find.js';
+import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
 
-export const MessageBody = z.object({ agentId: z.uuid(), text: z.string().trim().min(1).max(20_000) }).strict();
+/* With no agent named, the words go to the assistant's own agent. */
+export const MessageBody = z.object({ agentId: z.uuid().optional(), text: z.string().trim().min(1).max(20_000) }).strict();
 /* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
 export const LONGEST_WAIT_S = 50;
 export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
@@ -27,7 +29,7 @@ const IdParams = z.object({ id: z.uuid() });
 async function writable(ctx: Ctx, me: Person): Promise<AgentRow[]> {
   const viewer = await viewerOf(ctx.db, me);
   const all = await ctx.db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt))).orderBy(agents.createdAt);
-  const open = await Promise.all(all.map(async a => seesAgent(viewer, { subscriptionId: a.subscriptionId, spot: await agentSpot(ctx.db, a) })));
+  const open = await Promise.all(all.map(async a => seesAgent(viewer, await placeOf(ctx.db, a))));
   return all.filter((_, i) => open[i]);
 }
 
@@ -41,16 +43,23 @@ async function writableAgent(ctx: Ctx, me: Person, id: string): Promise<AgentRow
   return agent;
 }
 
-/* Who the assistant and its owner are, and what the owner is in the company, in plain fields. */
+/* The assistant's own agent, if its owner picked a plan for it once. */
+export async function ownAgentOf(ctx: Pick<Ctx, 'db'>, assistantId: string): Promise<string | null> {
+  const [row] = await ctx.db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistantId));
+  return row?.agentId ?? null;
+}
+
+/* Who the assistant and its owner are, and what the owner is in the company, in plain fields. The assistant's own agent,
+   and whether it can answer now. */
 export async function whoAmI(ctx: Ctx, me: Person) {
   const { db } = ctx;
-  const [helper] = await db.select({ name: people.name, title: people.title, program: assistants.program }).from(people).innerJoin(assistants, eq(assistants.personId, people.id)).where(eq(people.id, me.assistant!.id));
+  const [helper] = await db.select({ name: people.name, title: people.title, program: assistants.program, agentId: assistants.agentId }).from(people).innerJoin(assistants, eq(assistants.personId, people.id)).where(eq(people.id, me.assistant!.id));
   const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
   const view = await personView(db, me);
   const owns = [...((await accessOf(db, me)).owns ?? [])];
   const named = owns.length ? (await db.select().from(departments).where(eq(departments.companyId, me.companyId))).filter(d => owns.includes(d.id)) : [];
   return {
-    assistant: { id: me.assistant!.id, name: helper!.name, title: helper!.title, program: helper!.program },
+    assistant: { id: me.assistant!.id, name: helper!.name, title: helper!.title, program: helper!.program, agentId: helper!.agentId, agentReady: helper!.agentId ? (await agentState(ctx, helper!.agentId)).ready : false },
     owner: {
       id: me.id, name: me.name, title: me.title, ceo: me.isOwner, ceoDelegate: actsAsCeo(me) && !me.isOwner, wholeCompany: wholeCompany(me),
       departments: view.access.departments, teams: view.access.teams.map(t => ({ id: t.id, name: t.name, departmentId: t.departmentId })),
@@ -78,7 +87,9 @@ export async function agentsFor(ctx: Ctx, me: Person) {
 
 export async function writeFor(ctx: Ctx, me: Person, body: unknown) {
   const { agentId, text } = MessageBody.parse(body);
-  const agent = await writableAgent(ctx, me, agentId);
+  const own = agentId ?? (await ownAgentOf(ctx, me.assistant!.id));
+  if (!own) throw new ApiError(409, 'conflict', "This assistant has no agent of its own yet: its owner picks a plan for it on the assistant's card in People.", 'agent_not_ready');
+  const agent = await writableAgent(ctx, me, own);
   const id = await sendForOwner(ctx, me, agent, text);
   return { message: { id, agentId: agent.id } };
 }

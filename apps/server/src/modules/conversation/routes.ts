@@ -29,14 +29,16 @@ const MessageBody = z
 /* Where a person's message came from when not from the agent's window: the bot it came through, the chat its answer goes
    back to and the update it was. */
 export type TelegramOrigin = { bot: string; chat: number; update: number };
-/* The message of the person's assistant this is, by the id the assistant was given for it. */
-export type AssistantOrigin = { message: string };
+/* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
+   agent, which thinks for it. */
+export type AssistantOrigin = { message: string; own?: boolean };
 
 /* The words of the person's assistant, which the agent takes as the person's own and answers in its window for the
-   assistant to read. */
+   assistant to read. The assistant's own agent takes them as they are: its rules say what they carry. */
 function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, origin: AssistantOrigin, standing: Standing) {
   const assistant = { id: me.assistant.id, name: me.assistant.name, message: origin.message };
-  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
+  const prompt = origin.own ? text : `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`;
+  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
 }
 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */

@@ -1,6 +1,6 @@
 {
-  "id": "14e7a113-4a17-40a2-8f00-03f0f8e46591",
-  "prevId": "1669e0bb-a4d9-40c3-af20-cd12e537e79f",
+  "id": "1669e0bb-a4d9-40c3-af20-cd12e537e79f",
+  "prevId": "1593c29b-8318-4fc9-b0ee-e3c5562b93dc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2853,123 +2853,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.machine_online": {
-      "name": "machine_online",
-      "schema": "",
-      "columns": {
-        "machine_id": {
-          "name": "machine_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "day": {
-          "name": "day",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "seconds": {
-          "name": "seconds",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "machine_online_machine_id_machines_id_fk": {
-          "name": "machine_online_machine_id_machines_id_fk",
-          "tableFrom": "machine_online",
-          "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "machine_online_machine_id_day_pk": {
-          "name": "machine_online_machine_id_day_pk",
-          "columns": [
-            "machine_id",
-            "day"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "machine_online_seconds": {
-          "name": "machine_online_seconds",
-          "value": "seconds BETWEEN 0 AND 86400"
-        }
-      },
-      "isRLSEnabled": true
-    },
-    "public.machine_tickets": {
-      "name": "machine_tickets",
-      "schema": "",
-      "columns": {
-        "ticket_hash": {
-          "name": "ticket_hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "machine_id": {
-          "name": "machine_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "used_at": {
-          "name": "used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "machine_tickets_machine_id_machines_id_fk": {
-          "name": "machine_tickets_machine_id_machines_id_fk",
-          "tableFrom": "machine_tickets",
-          "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
-    },
     "public.machines": {
       "name": "machines",
       "schema": "",
@@ -3106,74 +2989,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "addresses": {
-          "name": "addresses",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "direct_fails": {
-          "name": "direct_fails",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "renew_at": {
-          "name": "renew_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "update_commit": {
-          "name": "update_commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "update_state": {
-          "name": "update_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "go_commit": {
-          "name": "go_commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "go_at": {
-          "name": "go_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failed_commit": {
-          "name": "failed_commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failed_at": {
-          "name": "failed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owner_pin": {
-          "name": "owner_pin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -3228,14 +3043,6 @@
         "machines_role": {
           "name": "machines_role",
           "value": "role IS NULL OR role IN ('data', 'worker')"
-        },
-        "machines_path": {
-          "name": "machines_path",
-          "value": "path IS NULL OR path IN ('direct', 'relay')"
-        },
-        "machines_update_state": {
-          "name": "machines_update_state",
-          "value": "update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')"
         }
       },
       "isRLSEnabled": false
@@ -4263,13 +4070,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "core": {
-          "name": "core",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {
@@ -7815,7 +7615,7 @@
       "checkConstraints": {
         "peer_secrets_kind": {
           "name": "peer_secrets_kind",
-          "value": "kind IN ('data', 'app', 'visit')"
+          "value": "kind IN ('data', 'app')"
         }
       },
       "isRLSEnabled": true
@@ -8329,100 +8129,6 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
-    },
-    "public.person_keys": {
-      "name": "person_keys",
-      "schema": "",
-      "columns": {
-        "person_id": {
-          "name": "person_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "public_key": {
-          "name": "public_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "wrapped": {
-          "name": "wrapped",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "salt": {
-          "name": "salt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "iv": {
-          "name": "iv",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "iterations": {
-          "name": "iterations",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "person_keys_person_id_people_id_fk": {
-          "name": "person_keys_person_id_people_id_fk",
-          "tableFrom": "person_keys",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "person_keys_company_id_companies_id_fk": {
-          "name": "person_keys_company_id_companies_id_fk",
-          "tableFrom": "person_keys",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "person_keys_iterations": {
-          "name": "person_keys_iterations",
-          "value": "iterations >= 600000"
-        }
-      },
-      "isRLSEnabled": true
     },
     "public.plan_credentials": {
       "name": "plan_credentials",

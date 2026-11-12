@@ -161,7 +161,11 @@ async function mayEdit(ctx: Ctx, me: Person, agent: AgentRow): Promise<boolean> 
   return canReach({ ...(await accessOf(db, me)), teams: new Set() }, await agentSpot(db, agent));
 }
 
+/* An assistant's own agent changes on the assistant's card in People, and goes with the assistant. */
+const assistantCard = () => new ApiError(409, 'conflict', "An assistant's own agent changes on the assistant's card in People, and goes with the assistant.", 'assistant_agent_card');
+
 async function requireEditor(ctx: Ctx, me: Person, agent: AgentRow): Promise<void> {
+  if (agent.kind === 'assistant') throw assistantCard();
   if (!(await mayEdit(ctx, me, agent))) throw new ApiError(403, 'forbidden', "Only people with access to this employee's department or the whole company can change it.", 'not_your_department');
 }
 
@@ -284,7 +288,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
 }
 
 /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
-async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): Promise<void> {
+export async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): Promise<void> {
   if (agent.subscriptionId) await releaseLeftProgram(ctx, agent.id, agent.subscriptionId);
   if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
   await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
@@ -510,6 +514,7 @@ async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise
    The whole company removes any, a department's owner those of their department. */
 async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: FastifyReply) {
   const { db } = ctx;
+  if (found.kind === 'assistant') throw assistantCard();
   await requireDepartmentChanger(db, me, found.departmentId);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {

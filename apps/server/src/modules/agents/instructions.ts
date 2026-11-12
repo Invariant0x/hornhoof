@@ -1,7 +1,8 @@
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
 import { eq, inArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
-import { companies, departments, type agents } from '../../db/schema.js';
+import { assistants, companies, departments, people, type agents } from '../../db/schema.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
@@ -157,12 +158,20 @@ export const ORCHESTRATOR_SKILLS = [
   'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
 ] as const;
 
+/* An assistant's own agent's skills: it works in no department and leads nobody, so none of an employee's. */
+export const ASSISTANT_SKILLS = ['hh-assistant'] as const;
+
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
 export function orchestratorSteady(t: Templates, assignment?: string): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
-  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false }, assignmentPart(assignment)];
+  return steadyOf(t, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_SKILLS, assignment);
+}
+
+/* A standing role, the assignment, then fixed skills as an employee's go. */
+function steadyOf(t: Templates, base: string, ids: readonly string[], assignment?: string): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
+  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: base, overridden: false, templateChanged: false }, assignmentPart(assignment)];
   const kept = parts.map(p => p.text);
   const skills: SkillFile[] = [];
-  for (const id of ORCHESTRATOR_SKILLS) {
+  for (const id of ids) {
     const skill = t.skills.get(id);
     if (!skill) continue;
     const text = skillBlock(id, skill.title.en, skill.body);
@@ -211,6 +220,22 @@ async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, ag
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
 }
 
+/* An assistant's own agent: whose assistant it is and where, then the assistant's skills. */
+async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files: boolean): Promise<Rendered> {
+  const owners = alias(people, 'owners');
+  const [who] = await ctx.db
+    .select({ name: people.name, owner: owners.name, company: companies.name })
+    .from(assistants)
+    .innerJoin(people, eq(people.id, assistants.personId))
+    .innerJoin(owners, eq(owners.id, people.assistantOf))
+    .innerJoin(companies, eq(companies.id, assistants.companyId))
+    .where(eq(assistants.agentId, agent.id));
+  const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.`;
+  const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base);
+  const said = files ? steady.text : steady.whole;
+  return { parts: steady.parts, raw: steady.parts.map(p => p.text).join('\n\n'), text: said, hash: textHash(said), skills: files ? steady.skills : [], whole: steady.whole };
+}
+
 async function headDepartment(db: Ctx['db'], agent: AgentRow): Promise<typeof departments.$inferSelect | undefined> {
   if (agent.kind !== 'head' || !agent.departmentId) return undefined;
   const [dept] = await db.select().from(departments).where(eq(departments.id, agent.departmentId));
@@ -235,6 +260,7 @@ async function appendDepartmentNotebook(
    the text, which the hash covers then. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files = true): Promise<Rendered> {
   if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent, files);
+  if (agent.kind === 'assistant') return assistantInstructionsOf(ctx, agent, files);
   const rendered = forNode(renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent)), files);
   const dept = await headDepartment(ctx.db, agent);
   return dept ? appendDepartmentNotebook(ctx.db, rendered, dept, files) : rendered;

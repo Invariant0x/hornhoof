@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
-import { agents, departments, subscriptions } from '../db/schema.js';
+import { agents, assistants, departments, people, subscriptions } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import type { MessageEnvelope, MessageParty } from '../modules/events/parties.js';
 import type { EventView } from '../modules/events/store.js';
@@ -14,18 +14,24 @@ import type { Person } from './session.js';
    things stay with each plan's owner even there: typing into an agent's terminal, which works with that owner's sign-in on
    their machine, and the plan's secrets (keys, sign-ins, codes), which no view of an agent carries. Anyone else, and the
    owner outside their department, sees an agent only on a plan of their own in a place they reach: neither alone is
-   enough. This is the one rule; every route that shows an agent or its work asks it here.
-   plans: the person's own live plans. agents: the employees that passes for now, empty for a full view. */
+   enough. An assistant's own agent is apart from all of that: its owner alone sees it, as nobody else talks to their
+   assistant, not the CEO and not the orchestrator. This is the one rule; every route that shows an agent or its work asks
+   it here.
+   plans: the person's own live plans. agents: the employees that passes for now, empty for a full view. own: the agents of
+   the person's own assistants. apart: every other assistant's agent of the company, which even a full view leaves out. */
 export type AgentViewer = {
   full: boolean;
   personId: string;
   access: Access;
   plans: ReadonlySet<string>;
   agents: ReadonlySet<string>;
+  own: ReadonlySet<string>;
+  apart: ReadonlySet<string>;
 };
 
-/* Where the agent works and the plan it runs on. A terminal passes the plan its program really lives on. */
-export type AgentPlace = { subscriptionId: string | null; spot: Spot };
+/* Where the agent works and the plan it runs on. A terminal passes the plan its program really lives on. assistant: the
+   agent's id, when it is an assistant's own. */
+export type AgentPlace = { subscriptionId: string | null; spot: Spot; assistant?: string };
 
 /* Whether the place is in a department this person owns. */
 export function ownsPlace(viewer: Pick<AgentViewer, 'access'>, spot: Spot): boolean {
@@ -34,19 +40,34 @@ export function ownsPlace(viewer: Pick<AgentViewer, 'access'>, spot: Spot): bool
 }
 
 export function seesAgent(viewer: AgentViewer, agent: AgentPlace): boolean {
+  if (agent.assistant) return viewer.own.has(agent.assistant);
   if (viewer.full || ownsPlace(viewer, agent.spot)) return true;
   return agent.subscriptionId !== null && viewer.plans.has(agent.subscriptionId) && canReach(viewer.access, agent.spot);
 }
 
 /* The same answer for an agent already named in a task, a message or a line; nobody sees one that is not named. */
 export function seesAgentId(viewer: AgentViewer, id: string | null | undefined): boolean {
+  if (id && viewer.apart.has(id)) return false;
   if (viewer.full) return true;
   return Boolean(id) && viewer.agents.has(id!);
 }
 
+/* The company's assistants' own agents, split into this person's and the rest. A call from inside has none of its own. */
+async function assistantAgentsOf(db: Db, me: Person): Promise<{ own: Set<string>; apart: Set<string> }> {
+  const rows = await db
+    .select({ id: agents.id, ownerId: people.assistantOf })
+    .from(agents)
+    .leftJoin(assistants, eq(assistants.agentId, agents.id))
+    .leftJoin(people, eq(people.id, assistants.personId))
+    .where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'assistant')));
+  const mine = (row: { ownerId: string | null }) => !me.via && row.ownerId === me.id;
+  return { own: new Set(rows.filter(mine).map(r => r.id)), apart: new Set(rows.filter(r => !mine(r)).map(r => r.id)) };
+}
+
 export async function viewerOf(db: Db, me: Person): Promise<AgentViewer> {
   const access = await accessOf(db, me);
-  if (me.via || actsAsCeo(me)) return { full: true, personId: me.id, access, plans: new Set(), agents: new Set() };
+  const { own, apart } = await assistantAgentsOf(db, me);
+  if (me.via || actsAsCeo(me)) return { full: true, personId: me.id, access, plans: new Set(), agents: own, own, apart };
   const plans = new Set(
     (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.companyId, me.companyId), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)))).map(p => p.id),
   );
@@ -55,15 +76,22 @@ export async function viewerOf(db: Db, me: Person): Promise<AgentViewer> {
   /* Every agent of an owned department, of its products and of its sub-units, placed there or in a sub-unit itself. */
   const units = access.owns?.size ? [...access.owns, ...(await db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, [...access.owns]))).map(d => d.id)] : [];
   const owned = units.length ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), inArray(agents.departmentId, units))) : [];
-  return { full: false, personId: me.id, access, plans, agents: new Set([...seen.flat(), ...owned.map(a => a.id)]) };
+  return { full: false, personId: me.id, access, plans, agents: new Set([...seen.flat(), ...owned.map(a => a.id), ...own]), own, apart };
 }
 
-type AgentRow = Pick<typeof agents.$inferSelect, 'companyId' | 'subscriptionId' | 'departmentId' | 'productId' | 'teamId'>;
+type AgentRow = Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'companyId' | 'subscriptionId' | 'departmentId' | 'productId' | 'teamId'>;
+
+/* An agent's place as the rule reads it. */
+export const placeOf = async (db: Db, agent: AgentRow, planId: string | null = agent.subscriptionId): Promise<AgentPlace> => ({
+  subscriptionId: planId,
+  spot: await agentSpot(db, agent),
+  ...(agent.kind === 'assistant' ? { assistant: agent.id } : {}),
+});
 
 /* Whether this person sees this agent now. planId: the plan to judge by, when its program runs on another than its card's. */
 export async function canViewAgent(db: Db, me: Person, agent: AgentRow, planId: string | null = agent.subscriptionId): Promise<boolean> {
   if (agent.companyId !== me.companyId) return false;
-  return seesAgent(await viewerOf(db, me), { subscriptionId: planId, spot: await agentSpot(db, agent) });
+  return seesAgent(await viewerOf(db, me), await placeOf(db, agent, planId));
 }
 
 export const agentHidden = () => new ApiError(403, 'forbidden', 'This employee is not on a plan of yours in a department you have, nor in a department you own.', 'agent_hidden');

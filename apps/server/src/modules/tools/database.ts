@@ -28,6 +28,8 @@ const PEOPLE = 'People and what they reach change only through invite_person, ch
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
 const TESTS = 'Whole-suite runs on free machines and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
 const HARNESS = 'Hornhoof keeps where a test harness stands itself and builds it by itself: test_harness shows it, and the tool only reads it.';
+const ASSISTANTS = "An assistant, its key and the addresses Hornhoof reaches it at change only on the People screen, by a person who may set it up.";
+const ASSISTANT_READS = 'Hornhoof keeps what an assistant reads and the answers it waits for itself: the tool only reads it.';
 /* What the orchestrator may not do with a table, in the words he acts on. */
 const RULES: Record<string, string> = {
   people: PEOPLE,
@@ -46,12 +48,16 @@ const RULES: Record<string, string> = {
   harness_products: HARNESS,
   departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",
   agents:
-    "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, and a head stays in its department.",
+    "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, a head stays in its department, and an assistant's own agent belongs to its owner.",
   jobs: 'Hornhoof starts the turns: the tool changes only their status, error and finished_at.',
   requests: DECISIONS,
   proposals: DECISIONS,
   agent_events: DECISIONS,
   task_events: DECISIONS,
+  assistants: ASSISTANTS,
+  assistant_events: ASSISTANT_READS,
+  assistant_replies: ASSISTANT_READS,
+  assistant_requests: ASSISTANT_READS,
 };
 const secretsOf = (table: string) => {
   const columns = SECRET[table];

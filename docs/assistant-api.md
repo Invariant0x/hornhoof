@@ -6,7 +6,7 @@ This document is the whole contract. A program built from it alone works with Ho
 
 ## How an assistant comes to be
 
-In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"), never with the signing secret. For OpenClaw and Hermes Agent the window also shows the settings that connect the program, ready to copy into its file: see "Connecting OpenClaw" and "Connecting Hermes Agent".
+In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they may also give its skills address, and its owner may pick the plan its own agent thinks on: see "The assistant's own agent". On the card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"). For an AvaClone assistant whose card has an events or a skills address, a last line "Secret: <signing secret>" (in Russian "Секрет:") follows, as the program checks Hornhoof's calls with it; for any other program the text never has the signing secret. For OpenClaw and Hermes Agent the window also shows the settings that connect the program, ready to copy into its file: see "Connecting OpenClaw" and "Connecting Hermes Agent".
 
 * The owner may set up their own assistant. A person who may edit people in People may set one up for anyone. Only the CEO sets up the assistant of the CEO or the CEO delegate, besides the delegate for their own.
 * "Replace" makes a new key and a new signing secret. The ones before stop working at once.
@@ -25,6 +25,17 @@ An assistant acts with its owner's rights as they are at the moment of each call
 * While its owner is switched off or gone, every call is refused with `403 assistant_owner_inactive`.
 
 Everything an assistant does is recorded as done by its owner through the assistant. The agent's window marks its messages with the assistant's name, and an answered request records both.
+
+## The assistant's own agent
+
+An assistant may have an agent of its own in Hornhoof that thinks for it. A program such as AvaClone keeps its persona, its memory and its chat with the owner, and sends the owner's words to this agent to answer.
+
+* Only the owner picks the plan the agent thinks on, on the assistant's card in People, and only one of the owner's own personal plans. The first plan picked makes the agent; another plan moves it there. With "No plan" it stays without one and cannot answer.
+* Only the owner sees the agent and writes to it, in its window or through the assistant. Nobody else does, the CEO included, and the orchestrator does not change it. It is not an employee: it has no department or role, takes no tasks and is not counted on the map.
+* Its card in Hornhoof cannot be edited, reset or removed (`409 assistant_agent_card`). Its plan changes on the assistant's card.
+* It reads a message exactly as the program sends it, with nothing added. So each message carries all the agent needs: the persona, the facts about the owner and the words to answer. It keeps its conversation from one message to the next.
+* Its answer is the text for the owner, in the `reply` and `reply_end` events of the message, as for any agent.
+* In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. It asks the program for the program's own skills with `persona_call`: see "Skills".
 
 ## Calls
 
@@ -59,7 +70,7 @@ An error answers with a status and this body:
 | 403 | `decision_not_allowed` | The owner does not take this decision. |
 | 404 | `agent_unknown` | There is no such agent in the company, or it was removed. |
 | 404 | `request_unknown` | There is no such request in the company. |
-| 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on. Try again later. |
+| 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
 | 400 | `task_invalid` | The answer does not fit the request: see "Answer a request". |
 
@@ -69,7 +80,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 
 ```json
 {
-  "assistant": { "id": "…", "name": "Ava", "title": "", "program": "avaclone" },
+  "assistant": { "id": "…", "name": "Ava", "title": "", "program": "avaclone", "agentId": "…", "agentReady": true },
   "owner": {
     "id": "…", "name": "Olga", "title": "Head of development",
     "ceo": false, "ceoDelegate": false, "wholeCompany": false,
@@ -83,6 +94,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 ```
 
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
+* `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
 * `departments` and `teams` are the places the owner was given access to. `responsibleFor` lists the departments the owner is responsible for.
 * `telegram` is the owner's Telegram as it is in People now: `username` without the `@`, in lower case, and `id`, the account's number, typed in People or learned once one of the company's Telegram bots met the owner. Each is `null` while unknown, and both are always there. A program that serves several people binds the key to exactly one of them by this, so that nobody else acts with the owner's rights through it. It changes when the owner's Telegram changes, so read it again, for example when the program starts.
@@ -100,7 +112,7 @@ The agents the assistant may write to now, in the order they were hired.
 }
 ```
 
-`kind` is `orchestrator`, `head` or `worker`. `role` and `department` are given in English and Russian, or are `null`.
+`kind` is `orchestrator`, `head`, `worker` or `assistant`, the own agent of one of the owner's assistants. `role` and `department` are given in English and Russian, or are `null`.
 
 ### POST /api/assistant/messages
 
@@ -110,6 +122,7 @@ Writes to an agent for the owner, as the owner would in the agent's window.
 { "agentId": "…", "text": "How are the leads this week?" }
 ```
 
+* `agentId`: the agent to write to. Without it, the message goes to the assistant's own agent; while there is none, the call answers `409 agent_not_ready`.
 * `text`: 1 to 20000 characters after spaces at both ends are trimmed. No other field is allowed.
 * Answers `202` with the message's id. The agent's answer comes later, as events with that id.
 
@@ -236,6 +249,32 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 * `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
 * A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
 * `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
+* The assistant's own agent has these tools inside Hornhoof, with one more, `persona_call` (`name`, `arguments`): see "Skills". The address `/api/assistant/mcp` does not offer it.
+
+## Skills
+
+When the assistant's card has a skills address, the assistant's own agent asks the program to do what only the program can do, for example to look at the owner's calendar, with the tool `persona_call`. The program tells the agent which skills there are and what they take, in its messages; Hornhoof does not check the names. Hornhoof sends each call as this POST and holds the tool call until the answer:
+
+```
+POST <skills address>
+Content-Type: application/json
+X-Hornhoof-Timestamp: 1763000000
+X-Hornhoof-Signature: sha256=<64 hex characters>
+
+{"messageId":"d41e…","name":"calendar_today","arguments":{}}
+```
+
+* `messageId` is the message of `POST /api/assistant/messages` whose answer the agent is working on, or `null` when it was not answering one, for example when its owner wrote in its window.
+* `X-Hornhoof-Timestamp` is the time of the call in whole seconds. `X-Hornhoof-Signature` is `sha256=` and the HMAC-SHA256 of the timestamp, a dot and the exact body bytes, under the signing secret as a UTF-8 string, in lowercase hex. Check it against the raw body, before parsing it, with a comparison in constant time, and drop a call whose signature does not match or whose timestamp is more than 5 minutes from the program's clock.
+* Answer with a 2xx status and this JSON, within 120 seconds and at most 100 KB:
+
+```json
+{ "ok": true, "text": "Two meetings today: 11:00 with Oleg, 15:30 with the bank.", "data": { "meetings": 2 } }
+```
+
+* The agent reads `text`, followed by `data` as JSON when there is `data`. With `ok` false, it reads `text` as a failure of the skill.
+* Any other status, a redirect, no answer within 120 seconds, a bigger answer or a body without `ok` and `text` is a failure the agent reads in words. Hornhoof does not try a call again; the agent decides.
+* The skills address is an `http` or `https` address of at most 500 characters. Use `https` unless the program runs on the same machine or network as Hornhoof.
 
 ## Wake
 
@@ -382,6 +421,8 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 | End of an answer after its turn | 30 seconds with no turn going on from it |
 | Wake | 10 seconds to answer, 12 tries, pauses from 1 second doubling to 5 minutes |
 | Events address | `http` or `https`, at most 500 characters |
+| Skills address | `http` or `https`, at most 500 characters |
+| Skill call | 120 seconds to answer, at most 100 KB |
 | Key and signing secret | `hha_` and `hhs_`, each followed by 43 base64url characters |
 
 ## Example session

@@ -203,6 +203,9 @@ export type ErrorReason =
   | 'assistant_has_owner_rights'
   | 'assistant_key_invalid'
   | 'assistant_owner_inactive'
+  | 'assistant_plan_owner_only'
+  | 'assistant_plan_invalid'
+  | 'assistant_agent_card'
   | 'assistant_not_allowed'
   | 'assistant_agent_refused';
 

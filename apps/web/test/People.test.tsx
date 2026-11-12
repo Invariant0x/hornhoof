@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
+import { AgentWindowContext } from '../src/screens/AgentWindowContext';
 import { People } from '../src/screens/People';
-import type { Me, PersonView } from '../src/types';
-import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE } from './api-mock';
+import type { Me, PersonView, SubView } from '../src/types';
+import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
 
@@ -419,7 +420,7 @@ describe('a person\'s Telegram in the edit form', () => {
 describe("a person's assistant", () => {
   const AVA: PersonView = {
     id: 'h1', name: 'Ava', email: null, title: '', status: 'active', isOwner: false, access: { whole: false, departments: [], teams: [] },
-    assistant: { owner: { id: 'p2', name: 'Maria' }, program: 'avaclone', eventsUrl: null, key: null },
+    assistant: { owner: { id: 'p2', name: 'Maria' }, program: 'avaclone', eventsUrl: null, skillsUrl: null, key: null, agent: null },
   };
   const KEYED: PersonView = { ...AVA, assistant: { ...AVA.assistant!, key: { createdAt: '2026-11-11T10:00:00.000Z' } } };
   /* Sasha, active, sees only the Social team. */
@@ -503,6 +504,102 @@ describe("a person's assistant", () => {
   });
 
   it.each([
+    ['en', 'Edit Ava', 'Create key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY\nSecret: hhs_SECRET'],
+    ['ru', 'Изменить Ava', 'Создать ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY\nСекрет: hhs_SECRET'],
+  ])('adds the signing secret to the text for an AvaClone assistant that has an address to be called at, in %s', async (language, edit, create, button, text) => {
+    localStorage.setItem('hh-lang', language);
+    const called: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, skillsUrl: 'https://ava.example.com/skills' } };
+    mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: called }] });
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: edit }));
+    await user.click(screen.getByRole('button', { name: create }));
+    await user.click(await screen.findByRole('button', { name: button }));
+    expect(copied).toEqual([text]);
+    localStorage.clear();
+  });
+
+  it('keeps the signing secret out of the text for another program, even with an events address', async () => {
+    const claw: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, program: 'other', eventsUrl: 'https://ava.example.com/h' } };
+    mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: claw }] });
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    await user.click(screen.getByRole('button', { name: 'Create key' }));
+    await user.click(await screen.findByRole('button', { name: 'Copy for the assistant' }));
+    expect(copied).toEqual(['Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY']);
+  });
+
+  describe('its own agent', () => {
+    const MARIA: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', email: 'maria@acme.com', isOwner: false } };
+    const PLANS: SubView[] = [
+      SUBS[0]!,
+      { ...SUBS[0]!, id: 's-maria', label: 'Claude', owner: { id: 'p2', name: 'Maria' } },
+      { ...SUBS[3]!, owner: { id: 'p2', name: 'Maria' } },
+    ];
+
+    it("lets its owner pick the plan it thinks on, among the owner's own plans only", async () => {
+      const calls = mockApi({ ...lists([...PEOPLE, AVA]), 'GET /api/subscriptions': [200, { subscriptions: PLANS }], 'PATCH /api/people/h1/assistant': [200, { person: AVA }] });
+      const user = userEvent.setup();
+      render(<People me={MARIA} />);
+      await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+      const plan = await screen.findByLabelText('Plan it thinks on');
+      expect(within(plan).getAllByRole('option').map(o => o.getAttribute('value'))).toEqual(['', 's-maria']);
+      expect(screen.queryByRole('button', { name: 'Open its agent' })).not.toBeInTheDocument();
+      await user.selectOptions(plan, 's-maria');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      expect(calls.find(c => c.method === 'PATCH')!.body).toEqual({ program: 'avaclone', eventsUrl: null, skillsUrl: null, plan: 's-maria' });
+    });
+
+    it('sends no plan when the owner left it as it was, and opens the agent from the card', async () => {
+      const thinking: PersonView = { ...AVA, assistant: { ...AVA.assistant!, agent: { id: 'a9', plan: 's-maria' } } };
+      const calls = mockApi({ ...lists([...PEOPLE, thinking]), 'GET /api/subscriptions': [200, { subscriptions: PLANS }], 'PATCH /api/people/h1/assistant': [200, { person: thinking }] });
+      const user = userEvent.setup();
+      const open = vi.fn();
+      render(<AgentWindowContext.Provider value={open}><People me={MARIA} /></AgentWindowContext.Provider>);
+      await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+      expect(await screen.findByLabelText('Plan it thinks on')).toHaveValue('s-maria');
+      await user.click(screen.getByRole('button', { name: 'Open its agent' }));
+      expect(open).toHaveBeenCalledWith('a9');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      expect(calls.find(c => c.method === 'PATCH')!.body).toEqual({ program: 'avaclone', eventsUrl: null, skillsUrl: null });
+    });
+
+    it('says the owner has no plan of their own yet', async () => {
+      mockApi({ ...lists([...PEOPLE, AVA]), 'GET /api/subscriptions': [200, { subscriptions: [SUBS[0]!] }] });
+      const user = userEvent.setup();
+      render(<People me={MARIA} />);
+      await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+      expect(await screen.findByText(/You have no plan of your own yet/)).toBeInTheDocument();
+    });
+
+    it('is not shown to someone who looks after the assistant but is not its owner', async () => {
+      const calls = mockApi(lists([...PEOPLE, AVA]));
+      const user = userEvent.setup();
+      render(<People me={ME} />);
+      await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+      expect(screen.getByLabelText('Program')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Plan it thinks on')).not.toBeInTheDocument();
+      expect(calls.some(c => c.path === '/api/subscriptions')).toBe(false);
+    });
+
+    it('is offered in Russian', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      mockApi({ ...lists([...PEOPLE, AVA]), 'GET /api/subscriptions': [200, { subscriptions: PLANS }] });
+      const user = userEvent.setup();
+      render(<LanguageProvider><People me={MARIA} /></LanguageProvider>);
+      await user.click(await screen.findByRole('button', { name: 'Изменить Ava' }));
+      expect(await screen.findByLabelText('На какой подписке думает')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Адрес умений/)).toBeInTheDocument();
+      localStorage.clear();
+    });
+  });
+
+  it.each([
     ['en', 'Edit Ava', 'Create key', 'Settings for OpenClaw', 'Add these lines to ~/.openclaw/openclaw.json', 'Copy settings'],
     ['ru', 'Изменить Ava', 'Создать ключ', 'Настройки для OpenClaw', 'Добавьте эти строки в ~/.openclaw/openclaw.json', 'Скопировать настройки'],
   ])('shows the settings that connect OpenClaw with a new key, and copies them whole, in %s', async (language, edit, create, heading, where, button) => {
@@ -563,10 +660,11 @@ describe("a person's assistant", () => {
     await user.type(screen.getByLabelText('Title'), 'Helper');
     await user.selectOptions(screen.getByLabelText('Program'), 'Other');
     await user.type(screen.getByLabelText(/Events address/), 'https://ava.example.com/h');
+    await user.type(screen.getByLabelText(/Skills address/), 'https://ava.example.com/skills');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(calls.filter(c => c.method === 'PATCH')).toEqual([
       { method: 'PATCH', path: '/api/people/h1', body: { title: 'Helper' } },
-      { method: 'PATCH', path: '/api/people/h1/assistant', body: { program: 'other', eventsUrl: 'https://ava.example.com/h' } },
+      { method: 'PATCH', path: '/api/people/h1/assistant', body: { program: 'other', eventsUrl: 'https://ava.example.com/h', skillsUrl: 'https://ava.example.com/skills' } },
     ]);
     expect(await within(rowOf('Ava')).findByText('Helper')).toBeInTheDocument();
   });

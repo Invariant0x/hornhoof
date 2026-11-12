@@ -592,12 +592,13 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toContain('does not let Hornhoof');
   });
 
-  it("keeps people, their access, an employee's kind, role and skills, a head's department and turns' tokens out of its hands, and says why", async () => {
+  it("keeps people, their access, an employee's kind, role and skills, a head's department, turns' tokens and assistants out of its hands, and says why", async () => {
     const { app, db, orchestrator, hana, bruno, dev, running } = await company();
     const client = await mcp(app, TOKEN);
     const [ivan] = await db.select().from(people);
     const [design] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'design', roleCode: 'DES' }).returning();
     await running(hana.id, 'tool-token-head-0123456789abcdef0123');
+    const [ava] = await db.insert(agents).values({ companyId: bruno.companyId, kind: 'assistant', name: 'Ava', model: '' }).returning();
     const refused: [string, RegExp][] = [
       [`UPDATE people SET scope_kind = 'company', is_owner = true`, /change_person/],
       [`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ('${ivan!.companyId}', 'Eve', 'eve@test', 'active', 'company')`, /change_person/],
@@ -627,6 +628,14 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
       [`UPDATE agents SET node_id = NULL WHERE id = '${bruno.id}'`, /change_employee/],
+      [`UPDATE agents SET name = 'Ivy' WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
+      [`UPDATE agents SET removed_at = now() WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
+      [`UPDATE assistants SET events_url = 'https://evil.test/'`, /People screen/],
+      [`UPDATE assistants SET key_hash = 'forged'`, /key_hash/],
+      ['SELECT key_hash FROM assistants', /key_hash/],
+      ['SELECT wake_secret_enc FROM assistants', /wake_secret_enc/],
+      ['DELETE FROM assistant_events', /only reads/],
+      ['UPDATE assistant_replies SET answered = true', /only reads/],
     ];
     for (const [sql, why] of refused) {
       const res = await call(client, 'database', { sql });

@@ -96,6 +96,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const companyAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
     /* Everything below shows only the agents this person sees, with their work. */
     const allAgents = companyAgents.filter(a => seesAgentId(viewer, a.id));
+    /* The company's employees: a person's own assistant is no one's but theirs. */
+    const employees = allAgents.filter(a => a.kind !== 'assistant');
     const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
@@ -234,7 +236,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         subscription: orchestrator.subscriptionId ? await subView(db, onlineIn(hub, ctx.config), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
-      agents: { total: allAgents.length, working: await workingSeen(db, me.companyId, viewer) },
+      agents: { total: employees.length, working: await workingSeen(db, me.companyId, viewer) },
       turn: turn ?? null,
       people: nextToCeo.map(p =>
         p.scopeKind === 'company'

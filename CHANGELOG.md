@@ -5,6 +5,29 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.14] - 2026-11-12
+
+A personal assistant can now have an agent of its own that thinks for it on a plan its owner picks, and that agent can
+ask the assistant's program for the program's own skills.
+
+### Added
+
+- On the assistant's card in People, its owner picks one of their own personal plans, and the assistant gets its own
+  agent on it. Only the owner sees that agent and writes to it, in its window or through the assistant; it takes no
+  tasks, is not on the map, and the orchestrator does not change it.
+- A message from the assistant without an agent goes to its own agent, which reads the program's words as they are and
+  keeps its conversation between messages. `GET /api/assistant/me` says which agent that is and whether it can answer now.
+- The assistant's card takes a skills address. The assistant's own agent asks the program for its skills there with a
+  signed call, and reads the answer.
+- For an AvaClone assistant with an events or skills address, Copy for the assistant adds the signing secret, which the
+  program checks Hornhoof's calls with.
+- A general skill for an assistant's own agent: answer only with the words for the owner, and leave code work to the
+  company's agents.
+
+### Fixed
+
+- The orchestrator's database tool can no longer change an assistant's settings, key or events: it only reads them.
+
 ## [0.18.13] - 2026-11-12
 
 An employee now knows who runs its department when that person writes to it, the installer shows each step and what to

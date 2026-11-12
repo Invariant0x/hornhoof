@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -7,13 +7,15 @@ import { personColumns, requireCompanyScope, requirePerson, type Person } from '
 import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
-import { ASSISTANT_PROGRAMS, assistants, people } from '../../db/schema.js';
+import { agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { afterPlanMove } from '../agents/routes.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
 import { settingsFor } from './programs.js';
 
-/* Where Hornhoof wakes the assistant: a web address of the program, which the people who set it up chose. */
+/* Where Hornhoof wakes the assistant, and where its own agent asks the program for its skills: web addresses of the
+   program, which the people who set it up chose. */
 const EventsUrl = z.url({ protocol: /^https?$/ }).max(500).nullable();
 const NewAssistant = z
   .object({
@@ -24,7 +26,7 @@ const NewAssistant = z
     eventsUrl: EventsUrl.optional(),
   })
   .strict();
-const AssistantPatch = z.object({ program: z.enum(ASSISTANT_PROGRAMS).optional(), eventsUrl: EventsUrl.optional() }).strict();
+const AssistantPatch = z.object({ program: z.enum(ASSISTANT_PROGRAMS).optional(), eventsUrl: EventsUrl.optional(), skillsUrl: EventsUrl.optional(), plan: z.uuid().nullable().optional() }).strict();
 const IdParams = z.object({ id: z.uuid() });
 
 /* A key and a signing secret: 32 random bytes each, with a prefix that tells them apart in a program's settings. */
@@ -55,7 +57,7 @@ async function ownerFor(db: Db, me: Person, id: string): Promise<Person> {
 }
 
 /* The assistant a route names, with its owner, for someone who may set it up. */
-async function managedAssistant(db: Db, me: Person, id: string): Promise<Person> {
+async function managedAssistant(db: Db, me: Person, id: string): Promise<Person & { assistantOf: string | null }> {
   const [row] = await db.select({ ...personColumns, assistantOf: people.assistantOf }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
   if (!row) throw unknownPerson();
   if (!row.assistantOf) throw new ApiError(409, 'conflict', 'This person is not an assistant.', 'not_an_assistant');
@@ -64,7 +66,36 @@ async function managedAssistant(db: Db, me: Person, id: string): Promise<Person>
   return row;
 }
 
-/* Adding an assistant on the People screen, changing how it is reached, and its key: made, made again or taken back. */
+/* The plan the assistant's own agent thinks on: a personal plan of its owner, which only its owner picks, as it is their
+   sign-in that works for it. The first plan makes the agent; none leaves it waiting with nothing to run on. */
+async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'id' | 'name' | 'companyId'> & { assistantOf: string | null }, planId: string | null): Promise<void> {
+  const { db } = ctx;
+  if (assistant.assistantOf !== me.id) throw new ApiError(403, 'forbidden', "Only the assistant's owner picks the plan its agent thinks on.", 'assistant_plan_owner_only');
+  if (planId) {
+    const [plan] = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(and(eq(subscriptions.id, planId), eq(subscriptions.companyId, me.companyId), eq(subscriptions.kind, 'personal'), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)));
+    if (!plan) throw new ApiError(409, 'conflict', "An assistant's agent thinks only on a personal plan of its owner.", 'assistant_plan_invalid');
+  }
+  const [{ agentId } = { agentId: null }] = await db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistant.id));
+  if (!agentId) {
+    if (!planId) return;
+    await db.transaction(async tx => {
+      const [agent] = await tx.insert(agents).values({ companyId: me.companyId, kind: 'assistant', name: assistant.name, model: '', subscriptionId: planId, createdBy: me.id }).returning({ id: agents.id });
+      await tx.update(assistants).set({ agentId: agent!.id }).where(eq(assistants.personId, assistant.id));
+    });
+  } else {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+    if (agent!.subscriptionId === planId) return;
+    await db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, agentId));
+    await afterPlanMove(ctx, agent!, { ...agent!, subscriptionId: planId });
+  }
+  ctx.bus.accessChanged(me.companyId);
+}
+
+/* Adding an assistant on the People screen, changing how it is reached, the plan its own agent thinks on, and its key:
+   made, made again or taken back. */
 export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -89,8 +120,9 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/people/:id/assistant', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const body = AssistantPatch.parse(req.body);
+    const { plan, ...body } = AssistantPatch.parse(req.body);
     const person = await managedAssistant(db, me, id);
+    if (plan !== undefined) await putOnPlan(ctx, me, person, plan);
     if (Object.keys(body).length) await db.update(assistants).set(body).where(eq(assistants.personId, id));
     return { person: await personView(db, person) };
   });

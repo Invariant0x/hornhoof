@@ -29,6 +29,7 @@ import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
 import { registerOutboundControlTools, registerOutboundTools } from '../outbound/extension.js';
+import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
@@ -183,7 +184,10 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
     const job = await jobOf(ctx, req).catch((err: unknown) => {
       throw reading && bears && err instanceof ApiError && err.reason === 'tool_token_invalid' ? paused() : err;
     });
-    const server = toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
+    /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
+       machine that only reads it waits, as its tools keep what they do. */
+    if (reading && job.agentKind === 'assistant') throw paused();
+    const server = job.agentKind === 'assistant' ? assistantAgentTools(ctx, job) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

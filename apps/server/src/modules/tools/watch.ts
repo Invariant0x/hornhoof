@@ -127,7 +127,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it.",
       },
       async () => {
-        const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
+        const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
         const ids = staff.map(a => a.id);
         if (!ids.length) return json([]);
         const names = await deptNames();
@@ -336,7 +336,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     return d ? (d.parentId ?? d.id) : null;
   };
   const inReach = async (me: Agent, target: Agent) =>
-    target.kind !== 'orchestrator' && (anywhere || (await topOf(target.departmentId)) === (await topOf(me.departmentId)));
+    target.kind !== 'orchestrator' && target.kind !== 'assistant' && (anywhere || (await topOf(target.departmentId)) === (await topOf(me.departmentId)));
   /* Whoever wrote to me last, the orchestrator too, gets one answer wherever it works: an answer in my window reaches only
      people, so an agent's question is answered with a message or not at all. Notices Hornhoof passes on ask nothing. */
   const owesAnswer = async (me: Agent, target: Agent): Promise<boolean> => {

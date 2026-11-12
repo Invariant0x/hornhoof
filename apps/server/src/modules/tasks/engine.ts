@@ -361,10 +361,10 @@ export type NewTask = {
   small?: boolean;
 };
 
-/* A live employee or orchestrator of the company. */
+/* A live employee or orchestrator of the company. An assistant's own agent is its owner's, not the company's. */
 export async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
-  if (!agent || (companyId && agent.companyId !== companyId)) throw refuse(400, 'task_invalid', `There is no employee ${id}.`);
+  if (!agent || agent.kind === 'assistant' || (companyId && agent.companyId !== companyId)) throw refuse(400, 'task_invalid', `There is no employee ${id}.`);
   return agent;
 }
 

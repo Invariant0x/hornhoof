@@ -45,6 +45,7 @@ export const SECRET: Record<string, string[]> = {
   departments: ['repo_token_enc', 'repo_token_revision'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
+  assistants: ['key_hash', 'wake_secret_enc'],
   requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
   proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
 };
@@ -63,6 +64,7 @@ const READ_ONLY = [
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
+  'assistants', 'assistant_events', 'assistant_replies', 'assistant_requests',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
@@ -147,8 +149,9 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
    exceptions. People, their access, subscriptions, machines and repositories only change through the tools the CEO alone
    may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
    subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
-   forged or swapped. A call may take 5 seconds before its commit, and the only thing of the fence it reaches is the check
-   right before that commit. */
+   forged or swapped. An assistant and its own agent are their owner's: neither changes here, nor what the assistant reads,
+   so no key is forged and no answer goes elsewhere. A call may take 5 seconds before its commit, and the only thing of
+   the fence it reaches is the check right before that commit. */
 export const grantsFor = role(
   ['RESET statement_timeout', "SET transaction_timeout = '5s'"],
   name =>
@@ -173,6 +176,18 @@ ${readVisible(READ_ONLY, name)}
     CREATE TRIGGER "${name}_head_stays" BEFORE UPDATE OF department_id ON agents FOR EACH ROW
       WHEN (OLD.kind = 'head' AND OLD.department_id IS DISTINCT FROM NEW.department_id AND current_user = '${name}')
       EXECUTE FUNCTION hornhoof_head_stays()
+  $trigger$;
+  EXECUTE $trigger$
+    CREATE OR REPLACE FUNCTION hornhoof_assistant_kept() RETURNS trigger LANGUAGE plpgsql AS $body$
+    BEGIN
+      RAISE EXCEPTION 'permission denied for table agents: an assistant''s own agent belongs to its owner' USING ERRCODE = 'insufficient_privilege';
+    END $body$
+  $trigger$;
+  DROP TRIGGER IF EXISTS "${name}_assistant_kept" ON agents;
+  EXECUTE $trigger$
+    CREATE TRIGGER "${name}_assistant_kept" BEFORE UPDATE ON agents FOR EACH ROW
+      WHEN (OLD.kind = 'assistant' AND current_user = '${name}')
+      EXECUTE FUNCTION hornhoof_assistant_kept()
   $trigger$;`,
 );
 
