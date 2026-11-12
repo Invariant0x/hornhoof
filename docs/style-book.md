@@ -233,7 +233,7 @@ The focus of `.btn` is set in `theme.css:81`. It has not been checked on a pictu
 | `.status.active`, `.status.ready` | Good: `--ok` | `screens/Machines.tsx`, `screens/Subscriptions.tsx` |
 | `.status.invited`, `.status.needs_login`, `.status.needs_setup`, `.status.waiting_machine`, `.status.limit` | Wait or act: `--amber-ink` | `screens/People.tsx`, `screens/Subscriptions.tsx` |
 | `.status.offline`, `.status.builtin_offline` | Off: `--muted` | `screens/Subscriptions.tsx` |
-| `.badge` | Small mark, `--pink-ink`; `.badge.lead` `--btn` fill; `.badge.old` `--amber-ink` | `screens/Machines.tsx`, `screens/People.tsx` |
+| `.badge` | Small mark, `--pink-ink`; `.badge.lead` `--btn` fill; `.badge.old` and `.badge.head` `--amber-ink`; `.badge.required` `--cyan-ink` | `screens/Machines.tsx`, `screens/People.tsx`, `ui/StaffCard.tsx` |
 | `.alert` | Message with a 3 px `--pink` line on the start side, on `--surface2` | `ui/AgentCard.tsx`, `screens/People.tsx` |
 | `.warn-line` | Warning on its own line with its sign, a 3 px `--amber` line on the start side, `--amber-ink` text | `ui/StaffCard.tsx` |
 | `.busy-swap` | The words of a main button and what it says while it works, the hidden one keeping the button's width; the button has `aria-busy` | `ui/BusyLabel.tsx` |

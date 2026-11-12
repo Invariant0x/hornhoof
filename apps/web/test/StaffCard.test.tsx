@@ -5,7 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import type { Roster, StaffLine } from '../src/types';
 import { StaffCard } from '../src/ui/StaffCard';
 import { mockApi, ROSTER } from './api-mock';
-import { decl } from './css';
+import { decl, RULES } from './css';
 
 const DEPT = { id: 'd2', name: 'Development' };
 
@@ -129,7 +129,12 @@ describe('StaffCard', () => {
       expect(box).toBeDisabled();
       await user.click(box);
       expect(box).toBeChecked();
-      expect(within(box.closest('label')!).getByText('Required role')).toBeInTheDocument();
+      const required = within(box.closest('label')!).getByText('Required role');
+      expect(required).toHaveClass('badge');
+      /* It looks like the other badges: no rule of another block reaches its classes, as the request card's .req once did. */
+      const own = [...required.classList].filter(name => name !== 'badge');
+      const foreign = RULES.flatMap(r => r.selectors).filter(sel => own.some(name => new RegExp(`\\.${name}(?![\\w-])`).test(sel)) && !/\.badge\./.test(sel));
+      expect(foreign).toEqual([]);
       expect(screen.getByRole('combobox', { name: 'Subscription for Program operator' })).toBeEnabled();
       await user.click(screen.getByRole('button', { name: 'Hire (2)' }));
       await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { people: { role: string }[] }).people.map(p => p.role)).toContain('OPS-PROGRAM'));

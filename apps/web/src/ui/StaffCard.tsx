@@ -81,7 +81,7 @@ function StaffPersonBadges({ r, language, t }: { r: Row; language: Language; t: 
   return (
     <>
       {kind === 'head' && <span className="badge head">{t.dept.head}</span>}
-      {required && <span className="badge req">{t.staff.required}</span>}
+      {required && <span className="badge required">{t.staff.required}</span>}
       {r.line.name && <small>{r.role.title[language]}</small>}
       {holder && <small>{t.staff.present(holder)}</small>}
     </>

@@ -258,6 +258,17 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
   return [...new Set([ranked[0]!.id, ranked.at(-1)!.id, ...rtl.slice(0, 1)])];
 }
 
+/* A picture of the whole form for Design. A form taller than the window is shot whole: the window grows in height only, so
+   nothing moves sideways, the form stands in its middle clear of the bar on top, and the window goes back after it. */
+async function shoot(page: Page, form: Locator, path: string) {
+  const size = page.viewportSize()!;
+  const room = Math.ceil((await form.boundingBox())!.height) + 240;
+  if (room > size.height) await page.setViewportSize({ width: size.width, height: room });
+  await form.evaluate(e => e.scrollIntoView({ block: 'center' }));
+  await form.screenshot({ path, animations: 'disabled' });
+  if (room > size.height) await page.setViewportSize(size);
+}
+
 function keep(info: TestInfo, name: string, body: unknown) {
   const path = info.outputPath(name);
   mkdirSync(dirname(path), { recursive: true });
@@ -291,7 +302,7 @@ test('every form of stage 1 keeps its layout in each theme, on the longest and t
         expect(lowest.ratio, `${language} ${width} ${form.name} ${choice} ${lowest.what}`).toBeGreaterThanOrEqual(4.5);
         expect(await heights(found, width === 1440), `${language} ${width} ${form.name} ${choice}`).toEqual([]);
         expect(await noSideScroll(page), `${language} ${width} ${form.name} ${choice}: no sideways scroll`).toBe(true);
-        await found.screenshot({ path: info.outputPath(`${browserName}/${language}-${width}-${form.name}-${choice}.png`), animations: 'disabled' });
+        await shoot(page, found, info.outputPath(`${browserName}/${language}-${width}-${form.name}-${choice}.png`));
       }
     }
   }
