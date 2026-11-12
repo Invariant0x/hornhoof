@@ -8,7 +8,7 @@ import { ApiError } from '../../errors.js';
 import { notAMachine } from '../network/join.js';
 import { authorityOf, findThisMachine, networkMachine } from '../network/store.js';
 import { keeperAsker } from '../network/via.js';
-import { BundleRefused, checkHead, MAX_HEAD } from './bundle.js';
+import { BundleRefused, checkHead, MAX_HEAD, type Manifest } from './bundle.js';
 import { namedBundles, pickHolders } from './holders.js';
 import { activeRecovery, makeRecoveryFile } from './recovery.js';
 import { bundleRow, bundleRows, recordBundle } from './records.js';
@@ -24,7 +24,10 @@ const LISTED = 10;
 /* A machine that reported within this is online, as its card says. */
 const ONLINE_MS = 2 * 60_000;
 
-const RecordBody = z.object({ head: z.string().min(2).max(MAX_HEAD) });
+/* from: the machine the server's own keeper took the bundle from, when it is not its own: a machine that holds the
+   data and led before gives what its database held. */
+const RecordBody = z.object({ head: z.string().min(2).max(MAX_HEAD), from: z.uuid().optional() });
+const ViewQuery = z.object({ as: z.literal('maker').optional() });
 const BundleParams = z.object({ id: z.uuid() });
 /* A recovery file is a comment line and one line of JSON. */
 const MAX_RECOVERY_FILE = 16 * 1024;
@@ -107,22 +110,43 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   }
 
+  /* A fork another machine sealed of its own database. True when it was recorded now, false when it was there. */
+  async function recordFrom(from: string, mine: string | null, head: string, manifest: Manifest): Promise<boolean> {
+    if (manifest.reason !== 'fork') throw new ApiError(400, 'validation', 'Only the bundle of a database that led is recorded for another machine.', 'bundle_refused');
+    const row = await networkMachine(db, from);
+    const [certificate] = await db.select({ serial: certificates.serial }).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, from), isNull(certificates.revokedAt)));
+    if (!row || row.role !== 'data' || from === mine || manifest.signer !== from || !certificate) throw new ApiError(403, 'forbidden', 'This bundle was not signed by that machine with a certificate that stands.');
+    if (Math.abs(Date.now() - Date.parse(manifest.madeAt)) > RECORD_WITHIN_MS) throw new ApiError(400, 'validation', 'This bundle was not made today.', 'bundle_time');
+    if (await bundleRow(db, manifest.id)) return false;
+    const holders = manifest.recovery ? await pickHolders(db, { size: manifest.size, keep: [] }) : [];
+    return recordBundle(db, { ...manifest, head, holders });
+  }
+
   /* The answer to the server's own keeper may carry a recovery identity, which lives in memory alone: this route logs
      neither the request nor the answer. */
   app.get('/api/network/backups', { logLevel: 'silent' }, async req => {
     const who = await requireKeeper(req);
     leads();
-    return who.own ? makerView() : holderView(who.machine);
+    if (who.own) return makerView();
+    /* The keeper of another machine that holds the data seals what its own database held while it led: it hears whom
+       the company's backups are sealed to, and nothing of what the leader's keeper alone acts on. */
+    if (ViewQuery.safeParse(req.query).data?.as === 'maker' && (await networkMachine(db, who.machine))?.role === 'data') {
+      const { company, recipients, recovery } = await makerView();
+      return { company, recipients, recovery, last: null, holders: {}, wanted: [], order: null, fork: null } satisfies MakerView;
+    }
+    return holderView(who.machine);
   });
 
   /* The server's own keeper records a bundle it made. Its head must hold against the company's authority, and its signer
      must be this very machine, with a certificate of it that still stands: no worker records a bundle, and a restore
-     later checks a bundle against this record. */
+     later checks a bundle against this record. The one bundle it records for another machine is a fork that a machine
+     which holds the data sealed of its own database: the keeper says whom it took it from, and the signer must be that
+     very machine, live, with a certificate that stands. */
   app.post('/api/network/backups', { bodyLimit: MAX_HEAD + 1024 }, async (req, reply) => {
     const who = await requireKeeper(req);
     if (!who.own) throw notKeeper();
     leads();
-    const { head } = RecordBody.parse(req.body);
+    const { head, from } = RecordBody.parse(req.body);
     const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
     const authority = await authorityOf(db, config);
     if (!company || !authority) throw new ApiError(409, 'conflict', 'The company has no certificate authority yet.', 'no_authority');
@@ -134,6 +158,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new ApiError(400, 'validation', err.message, `bundle_${err.reason}`);
     }
     const mine = await findThisMachine(db, config);
+    if (from !== undefined) return reply.code((await recordFrom(from, mine?.id ?? null, head, manifest)) ? 201 : 200).send({ holders: (await bundleRow(db, manifest.id))?.holders ?? [] });
     const [certificate] = mine ? await db.select({ serial: certificates.serial }).from(certificates).where(and(eq(certificates.serial, manifest.serial), eq(certificates.machineId, mine.id), isNull(certificates.revokedAt))) : [];
     if (!mine || manifest.signer !== mine.id || !certificate) throw new ApiError(403, 'forbidden', "This bundle was not signed by this server's own machine with a certificate that stands.");
     if (Math.abs(Date.now() - Date.parse(manifest.madeAt)) > RECORD_WITHIN_MS) throw new ApiError(400, 'validation', 'This bundle was not made today.', 'bundle_time');

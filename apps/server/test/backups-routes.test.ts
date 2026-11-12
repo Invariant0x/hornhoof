@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, departments, machines } from '../src/db/schema.js';
+import { agents, certificates, departments, machines } from '../src/db/schema.js';
 import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
 import type { HolderView, MakerView } from '../src/modules/backups/types.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { issueCertificate, makeAuthority } from '../src/modules/network/authority.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
-import { ageRecipient, backupCompany as company, from, machineKey, MACHINE_ID, VIA } from './helpers-backups.js';
+import { ageRecipient, backupCompany as company, from, machineKey, MACHINE_ID, OWN, VIA } from './helpers-backups.js';
 
 describe('the backups routes', () => {
   it('seals only to the machines that hold the data, and to the recovery key', async () => {
@@ -60,6 +60,51 @@ describe('the backups routes', () => {
     const old = await c.head({ now: new Date(Date.now() - 2 * 86_400_000) });
     expect((await c.record(old.head)).statusCode).toBe(400);
     expect(await bundleRows(c.db)).toHaveLength(1);
+  });
+
+  it('records a fork from another data machine through its keeper', async () => {
+    const c = await company();
+    const authority = (await authorityOf(c.db, c.config))!;
+    /* B holds the data and led before: its keeper sealed what its database held, and this server's keeper took it. */
+    const b = await c.worker('studio', { role: 'data' });
+    const bKey = machineKey();
+    const issued = await issueCertificate(authority, { machineId: b, role: 'data', signKey: bKey.publicPem });
+    await c.db.insert(certificates).values({ serial: issued.serial, machineId: b, until: issued.until });
+    const held = { machine: b, role: 'data' as const, certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() };
+    const record = (head: string, more: object, who: object = OWN) => c.app.inject({ method: 'POST', url: '/api/network/backups', payload: { head, ...more }, ...who });
+    const fork = await c.head({ key: bKey, held, reason: 'fork' });
+    /* Without the keeper's word on whom it took it from, another machine's bundle is not this server's. */
+    expect((await c.record(fork.head)).statusCode).toBe(403);
+    const first = await record(fork.head, { from: b });
+    expect([first.statusCode, await bundleRow(c.db, fork.id)]).toMatchObject([201, { id: fork.id, head: fork.head }]);
+    expect((await record(fork.head, { from: b })).statusCode).toBe(200);
+    /* Only the server's own keeper passes one on, only a fork, and only one its signer gave. */
+    expect((await record((await c.head({ key: bKey, held, reason: 'fork' })).head, { from: b }, from(b))).statusCode).toBe(403);
+    const timer = await record((await c.head({ key: bKey, held })).head, { from: b });
+    expect([timer.statusCode, (timer.json() as { error: { reason?: string } }).error.reason]).toEqual([400, 'bundle_refused']);
+    const other = await c.worker('laptop', { role: 'data' });
+    expect((await record((await c.head({ key: bKey, held, reason: 'fork' })).head, { from: other })).statusCode).toBe(403);
+    expect((await record((await c.head({ reason: 'fork' })).head, { from: c.held.machine })).statusCode).toBe(403);
+    /* From a machine that holds the data no more, or a certificate that was revoked, nothing is recorded. */
+    await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, issued.serial));
+    expect((await record((await c.head({ key: bKey, held, reason: 'fork' })).head, { from: b })).statusCode).toBe(403);
+    expect((await bundleRows(c.db)).filter(row => row.reason === 'fork')).toHaveLength(1);
+  });
+
+  it("answers the maker's view to the keeper of a machine that holds the data", async () => {
+    const c = await company();
+    expect((await c.recoveryFile()).statusCode).toBe(200);
+    const b = await c.worker('studio', { role: 'data', ageKey: await ageRecipient() });
+    const worker = await c.worker('mac');
+    const asMaker = (who: object) => c.app.inject({ url: '/api/network/backups?as=maker', ...who });
+    const own = await c.view<MakerView>();
+    /* Whom to seal to, and nothing of what only the leader's keeper acts on. */
+    const said = (await asMaker(from(b))).json() as MakerView;
+    expect(said).toEqual({ company: c.acme.id, recipients: own.recipients, recovery: own.recovery, last: null, holders: {}, wanted: [], order: null, fork: null });
+    expect(said.recipients.length).toBe(2);
+    /* A machine that holds none of the data hears what it holds, as before, whatever it asks for. */
+    expect((await asMaker(from(worker))).json()).toHaveProperty('keeps');
+    expect((await c.app.inject({ url: '/api/network/backups', ...from(b) })).json()).toHaveProperty('keeps');
   });
 
   it('hands each holder what it holds', async () => {
