@@ -1,33 +1,70 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { useT } from '../i18n';
 import { useLive } from '../tasks';
 import type { InboxCard } from '../types';
 import { BusyLabel } from '../ui/BusyLabel';
+import { FailureLine } from './Feedback';
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 /* Only an issue page on GitHub becomes a link; anything else stays words. */
 const githubPage = (url: string) => url.startsWith('https://github.com/');
 
+type Issue = NonNullable<InboxCard['issue']>;
+
+/* Turns a card into an issue on GitHub, and says why not when it could not. */
+async function openIssue(id: string, setIssue: (issue: Issue) => void, setFailure: (failure: unknown) => void, setBusy: (busy: boolean) => void): Promise<void> {
+  setBusy(true);
+  setFailure(null);
+  try {
+    setIssue((await api.post<{ issue: Issue }>(`/api/feedback/inbox/${id}/issue`, {})).issue);
+  } catch (err) {
+    setFailure(err);
+  }
+  setBusy(false);
+}
+
+/* Which versions and machines sent it, and the error code if it has one. */
+function CardFacts({ card }: { card: InboxCard }) {
+  const t = useT();
+  return (
+    <p className="imp-meta fb-facts">
+      <span>{t.inbox.versions(card.versions.join(', '))}</span>
+      {card.platforms.length > 0 && <span>{t.inbox.platforms(card.platforms.join(', '))}</span>}
+      {card.errorCode && <span>{t.inbox.errorCode(card.errorCode)}</span>}
+    </p>
+  );
+}
+
+/* The card's issue on GitHub, or the button that makes it. */
+function CardIssue({ id, issue: made }: { id: string; issue: Issue | null }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [issue, setIssue] = useState(made);
+  if (issue) {
+    return githubPage(issue.url) ? (
+      <p className="fb-issue">
+        <a href={issue.url} target="_blank" rel="noopener noreferrer">{t.inbox.issued(issue.number)}</a>
+      </p>
+    ) : null;
+  }
+  return (
+    <>
+      <div className="entry-actions">
+        <button className="btn" type="button" disabled={busy} aria-busy={busy || undefined} onClick={() => void openIssue(id, setIssue, setFailure, setBusy)}>
+          <BusyLabel busy={busy} idle={t.inbox.issue} working={t.inbox.creating} />
+        </button>
+      </div>
+      <FailureLine failure={failure} />
+    </>
+  );
+}
+
 /* One card: what was sent, as plain text, how many installations sent it, with which versions and machines, and its
    issue on GitHub or the button that makes it. */
 function Card({ card }: { card: InboxCard }) {
   const t = useT();
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
-  const [issue, setIssue] = useState(card.issue);
-
-  async function open() {
-    setBusy(true);
-    setFailure(null);
-    try {
-      setIssue((await api.post<{ issue: NonNullable<InboxCard['issue']> }>(`/api/feedback/inbox/${card.id}/issue`, {})).issue);
-    } catch (err) {
-      setFailure(err);
-    }
-    setBusy(false);
-  }
-
   return (
     <article className={`imp fb-card fb-${card.priority}`} aria-labelledby={`fb-${card.id}`}>
       <header>
@@ -39,25 +76,26 @@ function Card({ card }: { card: InboxCard }) {
         </p>
       </header>
       {card.text && <p className="fb-text">{card.text}</p>}
-      <p className="imp-meta fb-facts">
-        <span>{t.inbox.versions(card.versions.join(', '))}</span>
-        {card.platforms.length > 0 && <span>{t.inbox.platforms(card.platforms.join(', '))}</span>}
-        {card.errorCode && <span>{t.inbox.errorCode(card.errorCode)}</span>}
-      </p>
-      {issue && githubPage(issue.url) && (
-        <p className="fb-issue">
-          <a href={issue.url} target="_blank" rel="noopener noreferrer">{t.inbox.issued(issue.number)}</a>
-        </p>
-      )}
-      {!issue && (
-        <div className="entry-actions">
-          <button className="btn" type="button" disabled={busy} aria-busy={busy || undefined} onClick={() => void open()}>
-            <BusyLabel busy={busy} idle={t.inbox.issue} working={t.inbox.creating} />
-          </button>
-        </div>
-      )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      <CardFacts card={card} />
+      <CardIssue id={card.id} issue={card.issue} />
     </article>
+  );
+}
+
+/* A card is drawn again when its issue arrives from elsewhere. */
+const cardKey = (card: InboxCard) => `${card.id}:${card.issue ? card.issue.number : ''}`;
+
+/* The cards, loading, or none yet. */
+function Cards({ cards, failure }: { cards: InboxCard[] | null | undefined; failure: unknown }) {
+  const t = useT();
+  if (!cards) return failure === null ? <p className="muted" role="status">{t.common.loading}</p> : null;
+  if (!cards.length) return <p className="muted">{t.inbox.empty}</p>;
+  return (
+    <div className="imps">
+      {cards.map(card => (
+        <Card key={cardKey(card)} card={card} />
+      ))}
+    </div>
   );
 }
 
@@ -75,16 +113,8 @@ export function FeedbackInbox({ onHome }: { onHome: () => void }) {
           <p className="muted">{t.inbox.intro}</p>
         </div>
       </header>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {!cards && failure === null && <p className="muted" role="status">{t.common.loading}</p>}
-      {cards && !cards.length && <p className="muted">{t.inbox.empty}</p>}
-      {!!cards?.length && (
-        <div className="imps">
-          {cards.map(card => (
-            <Card key={`${card.id}:${card.issue?.number ?? ''}`} card={card} />
-          ))}
-        </div>
-      )}
+      <FailureLine failure={failure} />
+      <Cards cards={cards} failure={failure} />
     </section>
   );
 }

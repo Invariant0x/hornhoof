@@ -27,6 +27,14 @@ function refusal(status: number, repo: string): string {
   return answered;
 }
 
+/* The number and page of the issue GitHub created, kept only when the page is on github.com and ends in that number. */
+function createdOf(answer: unknown, repo: string): OpenedIssue {
+  const made = Created.safeParse(answer);
+  const page = made.success ? made.data.html_url : '';
+  if (!made.success || !page.startsWith('https://github.com/') || !page.endsWith(`/issues/${made.data.number}`)) return { problem: `GitHub created the issue but did not say where it is. Look for it in ${repo}.` };
+  return { number: made.data.number, url: page };
+}
+
 /* Creates an issue in the repository with a key the company saved, as a repository is created in github-create.ts. It says
    what went wrong rather than throw, and never with the key. It follows no redirect, so the key stays with GitHub, and keeps
    only a page on github.com that ends in the number GitHub gave. */
@@ -46,10 +54,7 @@ export const openIssueOnGitHub =
         await res.body?.cancel();
         return { problem: refusal(res.status, issue.repo) };
       }
-      const made = Created.safeParse(await res.json());
-      const page = made.success ? made.data.html_url : '';
-      if (!made.success || !page.startsWith('https://github.com/') || !page.endsWith(`/issues/${made.data.number}`)) return { problem: `GitHub created the issue but did not say where it is. Look for it in ${issue.repo}.` };
-      return { number: made.data.number, url: page };
+      return createdOf(await res.json(), issue.repo);
     } catch {
       return { problem: signal.aborted ? `GitHub did not answer within ${timeoutMs} ms.` : 'GitHub could not be reached.' };
     }

@@ -32,6 +32,25 @@ function passWait(reply: FastifyReply, err: unknown): never {
   throw err;
 }
 
+/* The finding a report is sent from: one about Hornhoof itself that still waits, on an installation that sends them on,
+   filed by an agent the person may see, as for taking it. */
+async function findingFor(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, id: string | undefined) {
+  if (!id) return null;
+  const [found] = await ctx.db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
+  if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+  if (!seesAgentId(await viewerOf(ctx.db, me), found.agentId)) throw agentHidden();
+  if (found.scope !== 'platform' || ctx.config.feedbackInbox) throw new ApiError(409, 'conflict', 'This finding is about the work of this company, so it stays here.', 'improvement_not_platform');
+  if (found.status !== 'open') throw new ApiError(409, 'conflict', `This improvement is ${found.status} already.`, 'improvement_decided');
+  return found;
+}
+
+/* What would go for what a person wrote, from a finding's card or not: a finding asks for the whole company first. */
+async function shown(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, written: Written) {
+  if (written.improvement) requireCompanyScope(me);
+  const finding = await findingFor(ctx, me, written.improvement);
+  return { finding, ...shownOf(written, await factsOf(ctx, me.companyId, finding?.code ?? null)) };
+}
+
 /* Feedback to Hornhoof's developers. Any person signed in writes a bug, an improvement or an idea, or sends a finding about
    Hornhoof itself from its card, sees what goes, and only their press sends it: through hornhoof.org, or straight into the
    inbox on Hornhoof's own installation. There the inbox takes what every installation sends, and people who see the whole
@@ -40,24 +59,6 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
   const sentBy = limiter({ max: SENT_PER_HOUR, windowMs: HOUR });
 
-  /* The finding a report is sent from: one about Hornhoof itself that still waits, on an installation that sends them on,
-     filed by an agent the person may see, as for taking it. */
-  async function findingFor(me: Person, id: string | undefined) {
-    if (!id) return null;
-    const [found] = await db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
-    if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
-    if (!seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
-    if (found.scope !== 'platform' || config.feedbackInbox) throw new ApiError(409, 'conflict', 'This finding is about the work of this company, so it stays here.', 'improvement_not_platform');
-    if (found.status !== 'open') throw new ApiError(409, 'conflict', `This improvement is ${found.status} already.`, 'improvement_decided');
-    return found;
-  }
-
-  async function shown(me: Person, written: Written) {
-    if (written.improvement) requireCompanyScope(me);
-    const finding = await findingFor(me, written.improvement);
-    return { finding, ...shownOf(written, await factsOf(ctx, me.companyId, finding?.code ?? null)) };
-  }
-
   app.get('/api/feedback', async req => {
     await requirePerson(req, db);
     return { inbox: config.feedbackInbox };
@@ -65,14 +66,14 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/feedback/preview', async req => {
     const me = await requirePerson(req, db);
-    const { report, hidden, digest } = await shown(me, Written.parse(req.body));
+    const { report, hidden, digest } = await shown(ctx, me, Written.parse(req.body));
     return { report, hidden, digest };
   });
 
   app.post('/api/feedback', async (req, reply) => {
     const me = await requirePerson(req, db);
     const body = Send.parse(req.body);
-    const { finding, report, digest } = await shown(me, body);
+    const { finding, report, digest } = await shown(ctx, me, body);
     if (digest !== body.digest) throw new ApiError(409, 'conflict', 'What would be sent changed since you looked at it. Look at it again.', 'feedback_changed');
     const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());
     if (!allowed) passWait(reply, new ApiError(429, 'too_many', 'You sent many reports this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS }));

@@ -53,6 +53,10 @@ const refused = async (fn: () => Promise<ReturnType<typeof say>>) => {
     throw err;
   }
 };
+/* Whose work a finding is, and for one about Hornhoof itself, the error code Hornhoof gave. */
+function kindOf(scope: (typeof IMPROVEMENT_SCOPES)[number] = 'company', code?: string) {
+  return { scope, code: scope === 'platform' ? (code ?? null) : null };
+}
 const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
   list.map(({ id, title, seen, status, scope, result, agent, department }) => ({ id, title, seen, status, scope, result, foundBy: agent.name, department: department?.name ?? null }));
 
@@ -96,12 +100,12 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
         `With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
       inputSchema: { ...Case, improvement: Id.optional() },
     },
-    async ({ title, problem, facts, guesses, why, change, gain, scope = 'company', code, improvement }) =>
+    async ({ title, problem, facts, guesses, why, change, gain, scope, code, improvement }) =>
       refused(async () => {
         if (!(await room())) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
         const parts = { problem: problem ?? null, facts: facts ?? [], guesses: guesses ?? [], why: why ?? null, change, gain: gain ?? null };
         const text = caseText(parts);
-        const kind = { scope, code: scope === 'platform' ? (code ?? null) : null };
+        const kind = kindOf(scope, code);
         if (improvement) {
           await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });

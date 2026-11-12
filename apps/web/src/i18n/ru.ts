@@ -1477,7 +1477,7 @@ export const ru: Messages = {
     checkInbox: 'Это попадет во входящие разработчиков Hornhoof',
     facts: { kind: 'Вид', title: 'Заголовок', text: 'Описание', version: 'Версия Hornhoof', platform: 'Машины компании', errorCode: 'Код ошибки' },
     noMachines: 'нет',
-    hidden: parts => `Скрыто перед отправкой: ${parts.join(', ')}.`,
+    hidden: list => `Скрыто перед отправкой: ${list}.`,
     hiddenParts: { secret: n => `ключи и пароли: ${n}`, email: n => `почта: ${n}`, address: n => `адреса: ${n}`, path: n => `пути домашних папок: ${n}` },
     send: 'Отправить',
     sending: 'Отправляем…',

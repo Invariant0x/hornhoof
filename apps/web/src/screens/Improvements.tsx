@@ -6,7 +6,7 @@ import { useOrg } from '../org';
 import { placeName } from '../tasks';
 import type { Improvement, ImprovementParts, Org } from '../types';
 import { Markdown } from '../ui/Markdown';
-import { Feedback } from './Feedback';
+import { Feedback, type FeedbackStart } from './Feedback';
 
 function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
   const t = useT();
@@ -62,15 +62,56 @@ function Case({ parts }: { parts: ImprovementParts }) {
   );
 }
 
+/* Who found it and how often, whether it is about Hornhoof itself, and who decided what became of it. */
+function ItemMeta({ item, who }: { item: Improvement; who: string }) {
+  const t = useT();
+  return (
+    <p className="imp-meta">
+      <span>{who}</span>
+      {item.scope === 'platform' && <span className="badge imp-platform">{t.improvements.platform}</span>}
+      {item.seen > 1 && <span>{t.improvements.seen(item.seen)}</span>}
+      {item.status === 'taken' && item.decidedBy && <span>{t.improvements.takenBy(item.decidedBy)}</span>}
+      {item.status === 'sent' && item.decidedBy && <span>{t.improvements.sentBy(item.decidedBy)}</span>}
+    </p>
+  );
+}
+
+/* The feedback window a finding about Hornhoof itself opens on: a bug when Hornhoof gave an error code. */
+const findingStart = (item: Improvement): FeedbackStart => ({ kind: item.code ? 'bug' : 'improvement', title: item.title, text: item.text, improvement: item.id });
+
+/* For one that waits: taking it into work, or setting it aside. A finding about Hornhoof itself is sent to Hornhoof's
+   developers instead, except on Hornhoof's own installation (inbox), whose work it is. */
+function ItemActions({ item, inbox, busy, onDecide, onChanged }: { item: Improvement; inbox: boolean; busy: boolean; onDecide: (how: 'take' | 'dismiss') => void; onChanged: () => void }) {
+  const t = useT();
+  const [sending, setSending] = useState(false);
+  const elsewhere = item.scope === 'platform' && !inbox;
+  return (
+    <>
+      <div className="req-actions">
+        {elsewhere ? (
+          <button className="btn small" type="button" disabled={busy} onClick={() => setSending(true)}>
+            {t.improvements.send}
+          </button>
+        ) : (
+          <button className="btn small" type="button" disabled={busy} onClick={() => onDecide('take')}>
+            {t.improvements.take}
+          </button>
+        )}
+        <button className="btn small ghost" type="button" disabled={busy} onClick={() => onDecide('dismiss')}>
+          {t.improvements.dismiss}
+        </button>
+      </div>
+      {sending && <Feedback inbox={inbox} start={findingStart(item)} onClose={() => setSending(false)} onSent={onChanged} />}
+    </>
+  );
+}
+
 /* One thing to improve: what it is, who found it and how often, the orchestrator's word on it, and for one that waits,
-   taking it into work or setting it aside. A finding about Hornhoof itself is sent to Hornhoof's developers instead, except
-   on Hornhoof's own installation (inbox), whose work it is. One filed as one text shows that text. */
+   what can become of it. One filed as one text shows that text. */
 function Item({ item, org, inbox, onChanged, onTask }: { item: Improvement; org: Org | null; inbox: boolean; onChanged: () => void; onTask: (taskId: string) => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
-  const [sending, setSending] = useState(false);
-  const elsewhere = item.scope === 'platform' && !inbox;
 
   async function decide(how: 'take' | 'dismiss') {
     setBusy(true);
@@ -89,13 +130,7 @@ function Item({ item, org, inbox, onChanged, onTask }: { item: Improvement; org:
     <article className={`imp imp-${item.status}`} aria-labelledby={`imp-${item.id}`}>
       <header>
         <h3 id={`imp-${item.id}`}>{item.title}</h3>
-        <p className="imp-meta">
-          <span>{who}</span>
-          {item.scope === 'platform' && <span className="badge imp-platform">{t.improvements.platform}</span>}
-          {item.seen > 1 && <span>{t.improvements.seen(item.seen)}</span>}
-          {item.status === 'taken' && item.decidedBy && <span>{t.improvements.takenBy(item.decidedBy)}</span>}
-          {item.status === 'sent' && item.decidedBy && <span>{t.improvements.sentBy(item.decidedBy)}</span>}
-        </p>
+        <ItemMeta item={item} who={who} />
       </header>
       {item.parts ? (
         <Case parts={item.parts} />
@@ -110,31 +145,8 @@ function Item({ item, org, inbox, onChanged, onTask }: { item: Improvement; org:
         </p>
       )}
       <TaskLinks item={item} onTask={onTask} />
-      {item.status === 'open' && (
-        <div className="req-actions">
-          {elsewhere ? (
-            <button className="btn small" type="button" disabled={busy} onClick={() => setSending(true)}>
-              {t.improvements.send}
-            </button>
-          ) : (
-            <button className="btn small" type="button" disabled={busy} onClick={() => void decide('take')}>
-              {t.improvements.take}
-            </button>
-          )}
-          <button className="btn small ghost" type="button" disabled={busy} onClick={() => void decide('dismiss')}>
-            {t.improvements.dismiss}
-          </button>
-        </div>
-      )}
+      {item.status === 'open' && <ItemActions item={item} inbox={inbox} busy={busy} onDecide={how => void decide(how)} onChanged={onChanged} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {sending && (
-        <Feedback
-          inbox={inbox}
-          start={{ kind: item.code ? 'bug' : 'improvement', title: item.title, text: item.text, improvement: item.id }}
-          onClose={() => setSending(false)}
-          onSent={onChanged}
-        />
-      )}
     </article>
   );
 }

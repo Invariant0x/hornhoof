@@ -198,6 +198,16 @@ function AccountMenu({
   );
 }
 
+/* The pages of the account menu for people who see the whole company: what employees found to improve, and on Hornhoof's
+   own installation the feedback inbox. */
+function CompanyPage({ tab, improvements, inbox, onTask, onHome }: {
+  tab: Route['kind']; improvements: ReturnType<typeof useImprovements>; inbox: boolean; onTask: (taskId: string) => void; onHome: () => void;
+}) {
+  if (tab === 'improvements') return <Improvements improvements={improvements.improvements} failure={improvements.failure} inbox={inbox} onChanged={improvements.load} onTask={onTask} onHome={onHome} />;
+  if (tab === 'inbox') return <FeedbackInbox onHome={onHome} />;
+  return null;
+}
+
 function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: number; navigate: ReturnType<typeof useRoute>['navigate'] }) {
   const t = useT();
   return (
@@ -426,8 +436,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
         {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
         {tab === 'outbound' && <Outbound onOpenTask={openTask} onHome={goHome} />}
-        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} inbox={inbox} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
-        {tab === 'inbox' && company && <FeedbackInbox onHome={goHome} />}
+        {company && <CompanyPage tab={tab} improvements={{ improvements, failure: improvementsFailure, load: loadImprovements }} inbox={inbox} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
       {taskId && (

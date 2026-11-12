@@ -1453,7 +1453,7 @@ export const en = {
     checkInbox: 'This goes to the inbox of Hornhoof developers',
     facts: { kind: 'Kind', title: 'Title', text: 'Description', version: 'Hornhoof version', platform: 'Machines of the company', errorCode: 'Error code' },
     noMachines: 'none',
-    hidden: (parts: string[]) => `Hidden before sending: ${parts.join(', ')}.`,
+    hidden: (list: string) => `Hidden before sending: ${list}.`,
     hiddenParts: { secret: (n: number) => `keys and passwords ${n}`, email: (n: number) => `email ${n}`, address: (n: number) => `addresses ${n}`, path: (n: number) => `home folder paths ${n}` },
     send: 'Send',
     sending: 'Sending…',
