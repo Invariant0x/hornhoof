@@ -783,22 +783,22 @@ node_mode() {
 # done_banner <pending> <plan>...: the last lines of a run a person watches, with what runs on this computer now and that
 # the window may close.
 done_banner() {
-  local pending=$1 plans=''
+  local pending=$1 list=''
   shift
   [ -z "$FROM_UPDATER" ] || return 0
   while [ $# -gt 0 ]; do
-    if [ -z "$plans" ]; then
-      plans=$1
+    if [ -z "$list" ]; then
+      list=$1
     elif [ $# -eq 1 ]; then
-      plans="$plans and $1"
+      list="$list and $1"
     else
-      plans="$plans, $1"
+      list="$list, $1"
     fi
     shift
   done
   say ''
-  if [ -n "$plans" ]; then
-    say "${COLOR_DONE}Done. Hornhoof runs on this computer, $(host_name), with $plans.${COLOR_OFF}"
+  if [ -n "$list" ]; then
+    say "${COLOR_DONE}Done. Hornhoof runs on this computer, $(host_name), with $list.${COLOR_OFF}"
   else
     say "${COLOR_DONE}Done. Hornhoof runs on this computer, $(host_name), for test runs.${COLOR_OFF}"
   fi
