@@ -1,6 +1,6 @@
 import { and, arrayOverlaps, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { nodeCodes, people } from '../../db/schema.js';
+import { nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { ApiError } from '../../errors.js';
 
@@ -35,6 +35,16 @@ async function insertNodeCode(tx: Db, input: Place): Promise<string> {
     expiresAt: new Date(Date.now() + NODE_CODE_TTL_MS),
   });
   return code;
+}
+
+/* A command that waits to install only plans that are gone ends with them: no screen shows it any more, and it would keep
+   the plan from a new command when it connects again. */
+export async function endRemovedPlanCommands(tx: Db, planIds: string[]): Promise<void> {
+  if (!planIds.length) return;
+  await tx.update(nodeCodes).set({ commandEnc: null, usedAt: new Date() }).where(and(
+    isNull(nodeCodes.usedAt), arrayOverlaps(nodeCodes.subscriptionIds, planIds),
+    sql`not exists (select 1 from ${subscriptions} where ${subscriptions.id} = any(${nodeCodes.subscriptionIds}) and ${subscriptions.removedAt} is null)`,
+  ));
 }
 
 export async function createNodeCode(db: Db, input: Place): Promise<string> {

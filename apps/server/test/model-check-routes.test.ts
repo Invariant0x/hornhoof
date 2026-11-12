@@ -24,8 +24,8 @@ const owned = async () => {
 const place = (c: Company) => ({ companyId: c.companyId, departmentId: c.dev.id, productId: null, kind: 'outbound_review' as const });
 
 describe('limits of a check', () => {
-  it('are set by the owner of the department, in their name', async () => {
-    const c = await owned();
+  it('are set by everyone given the department, in their name', async () => {
+    const c = await company();
     const answer = await setLimits(c, c.danaToken, LIMITS);
     expect(answer.statusCode).toBe(200);
     const [check] = await c.db.select().from(modelChecks);
@@ -37,7 +37,7 @@ describe('limits of a check', () => {
     expect((await setLimits(c, c.ceoToken, LIMITS)).statusCode).toBe(200);
   });
 
-  it.each(['danaToken', 'samToken', 'wholeToken'] as const)('are not set by anyone else: %s', async token => {
+  it.each(['samToken', 'wholeToken'] as const)('are not set by anyone else: %s', async token => {
     const c = await company();
     const answer = await setLimits(c, c[token], LIMITS);
     expect(answer.statusCode).toBe(403);

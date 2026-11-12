@@ -5,6 +5,34 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.12] - 2026-11-12
+
+Everyone given a department now runs it in full, as its responsible person does, and a department may have many such
+people.
+
+### Changed
+
+- A person whose access lists a department sees every employee of it, also those on someone else's plan, and may change
+  them, move them to another plan, write to them, hire into the department, set its repository, sub-units, approvals
+  and channels, and answer its decisions. Before, only the one person the CEO named responsible could, and the others saw
+  only employees on their own plan. Typing into an employee's terminal and a plan's keys stay with that plan's owner.
+  A product or a team of a department alone, and access to the whole company, give no such rights.
+
+## [0.18.11] - 2026-11-12
+
+A person who works in several departments opens each of them again, a plan that was removed connects again without
+waiting a day, and a message on a task no longer slips under a wait its holder asks for at the same moment.
+
+### Fixed
+
+- A person given more than one department saw Insufficient permissions on every department page. The page looked for
+  them only among each department's own people, while the map shows such a person next to the CEO.
+- Connecting a plan again after removing it answered There is an active command for this place, with no command shown,
+  until the old command expired a day later. Removing a plan now ends its waiting command, and connecting a plan that
+  was removed earlier ends the old one first.
+- When a message on a task came into its holder's turn while the holder asked to wait on that task, the wait went in
+  after it and held the task until its deadline. Such a wait is now refused once, so the holder reads the message first.
+
 ## [0.18.10] - 2026-11-12
 
 OpenClaw and Hermes Agent join a company as a person's assistant with one piece of settings, and an assistant such as

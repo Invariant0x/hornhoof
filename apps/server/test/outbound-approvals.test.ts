@@ -122,12 +122,14 @@ describe('an exact approval', () => {
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'cancelled', reasonCodes: ['approval_required'] });
   });
 
-  it('only its department\'s owner, the CEO or the delegate may give it', async () => {
+  it('only someone given its department, the CEO or the delegate may give it', async () => {
     const w = await everyWorld();
     const { messageId } = await w.submit();
     const { id } = await requestOf(w);
-    for (const token of [w.c.samToken, w.c.danaToken, w.c.wholeToken]) expect((await answerAs(w, token, id, true)).statusCode).toBe(403);
+    for (const token of [w.c.samToken, w.c.wholeToken]) expect((await answerAs(w, token, id, true)).statusCode).toBe(403);
     expect(await dispatched(w, messageId, NOON)).toEqual(APPROVAL_REQUIRED);
+    expect((await answerAs(w, w.c.danaToken, id, true)).statusCode).toBe(200);
+    expect((await dispatched(w, messageId, NOON)).kind).toBe('begun');
   });
 
   it('a named owner gives it', async () => {
@@ -149,7 +151,7 @@ describe('an exact approval', () => {
     const asked = await requestOf(w);
     expect(asked.id).not.toBe(first.id);
     expect(await bindingsOf(w)).toHaveLength(2);
-    expect((await answerAs(w, w.c.danaToken, asked.id, true)).statusCode).toBe(403);
+    expect((await answerAs(w, w.c.samToken, asked.id, true)).statusCode).toBe(403);
     expect((await answerAs(w, w.c.wholeToken, asked.id, true)).statusCode).toBe(200);
     expect((await dispatched(w, messageId, NOON)).kind).toBe('begun');
   });

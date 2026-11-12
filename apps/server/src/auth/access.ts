@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../db/client.js';
 import { departments, people, personAccess, teams } from '../db/schema.js';
@@ -43,17 +43,21 @@ export function withOwned(access: Access, named: readonly string[]): Access {
   return owns.length ? { ...access, owns: new Set(owns) } : access;
 }
 
+/* Everyone given a department runs it in full, as its named owner does, and there may be many of them: they see and change
+   every employee of it on whoever's plan, its sub-units, repository and approvals. A team or a product alone is not a department. */
 export async function accessOf(db: Pick<Db, 'select'>, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
   const named = (await db.select({ id: departments.id }).from(departments).where(eq(departments.ownerPersonId, person.id))).map(d => d.id);
   if (person.scopeKind === 'company') return withOwned(WHOLE, named);
   const rows = await db.select().from(personAccess).where(eq(personAccess.personId, person.id));
+  const listed = rows.flatMap(r => (r.departmentId ? [r.departmentId] : []));
+  const given = listed.length ? (await db.select({ id: departments.id }).from(departments).where(and(inArray(departments.id, listed), isNull(departments.parentId)))).map(d => d.id) : [];
   return withOwned(
     {
       whole: false,
-      departments: new Set(rows.flatMap(r => (r.departmentId ? [r.departmentId] : []))),
+      departments: new Set(listed),
       teams: new Set(rows.flatMap(r => (r.teamId ? [r.teamId] : []))),
     },
-    named,
+    [...new Set([...named, ...given])],
   );
 }
 

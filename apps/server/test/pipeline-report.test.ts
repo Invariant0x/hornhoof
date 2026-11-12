@@ -416,12 +416,18 @@ describe('who reads the report', () => {
     expect(res.json().report.turn.number).toBe(7);
   });
 
-  it('keeps the numbers of a whole department to the CEO and the delegate, whatever a person reaches', async () => {
+  it('gives the numbers of a whole department to the CEO, the delegate and its own people, and to no one else, whatever they reach', async () => {
     const c = await company();
     await closedTurn(c);
     const token = await invitePerson(c.app, c.ceoToken, { name: 'Lena', email: 'lena@acme.example', access: { departments: [c.sales.id] } });
+    const own = await get(c, token, c.sales.id, '?turn=7');
+    expect(own.statusCode).toBe(200);
+    expect(own.json().report.department.department.id).toBe(c.sales.id);
+    const other = await get(c, token, c.dev.id, '?turn=7');
+    expect([other.statusCode, other.json().error.reason]).toEqual([403, 'ceo_view_only']);
+    const whole = await invitePerson(c.app, c.ceoToken, { name: 'Zed', email: 'zed@acme.example', access: { whole: true } });
     for (const id of [c.sales.id, c.dev.id]) {
-      const res = await get(c, token, id, '?turn=7');
+      const res = await get(c, whole, id, '?turn=7');
       expect([res.statusCode, res.json().error.reason]).toEqual([403, 'ceo_view_only']);
     }
   });

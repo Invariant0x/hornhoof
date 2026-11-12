@@ -320,15 +320,22 @@ describe('the employee card', () => {
     expect(org.departments[0].employees[0].effort).toBe('xhigh');
   });
 
-  it('lets someone of the department who owns the plan change an employee, and only the whole company or the department\'s owner remove them', async () => {
-    const { app, db, ceo, oleg, sales, brunoId } = await company();
-    await ownPlan(db, 'oleg@acme.com', brunoId);
-    expect((await open(app, oleg, brunoId)).json().canEdit).toBe(true);
-    expect((await patch(app, oleg, brunoId, { name: 'Bob' })).json().name).toBe('Bob');
-    expect((await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(oleg) })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(oleg) })).json().error.reason).toBe('department_owner_only');
+  it('lets someone of a product who owns the plan change an employee, and only the whole company or the department\'s people remove them', async () => {
+    const { app, db, ceo, oleg, dev, sales, brunoId } = await company();
+    /* Pia has only Shop, a product of Development, where Bruno works on her plan. */
+    const [shop] = await db.insert(departments).values({ companyId: dev.companyId, name: 'Shop', parentId: dev.id, roleCode: 'DEV' }).returning();
+    await db.update(agents).set({ productId: shop!.id }).where(eq(agents.id, brunoId));
+    const pia = await invitePerson(app, ceo, { name: 'Pia', email: 'pia@acme.com', access: { departments: [shop!.id] } });
+    await ownPlan(db, 'pia@acme.com', brunoId);
+    expect((await open(app, pia, brunoId)).json()).toMatchObject({ canEdit: true, canRemove: false });
+    expect((await patch(app, pia, brunoId, { name: 'Bob' })).json().name).toBe('Bob');
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(pia) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(pia) })).json().error.reason).toBe('department_owner_only');
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     expect((await open(app, maria, brunoId)).json().error.reason).toBe('agent_hidden');
+    /* Oleg is given Development and runs it: he removes an employee on someone else's plan. */
+    expect((await open(app, oleg, brunoId)).json()).toMatchObject({ canEdit: true, canRemove: true });
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(oleg) })).statusCode).toBe(204);
   });
 
   it('lets go of a plan whose owner lost the department or was disabled', async () => {

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { departments } from '../src/db/schema.js';
 import { ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
@@ -82,17 +82,16 @@ describe('another repository of a department', () => {
     expect(await productsOf(c, c.dev.id)).toEqual(['Shop']);
   });
 
-  it("is added by the department's owner and people with the whole company, and by nobody else", async () => {
+  it('is added by everyone given the department and people with the whole company, and by nobody else', async () => {
     const c = await company();
-    expect((await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana)).statusCode).toBe(200);
     expect((await add(c, c.danaToken, c.dev.id, { url: 'https://github.com/acme/app.git' })).statusCode).toBe(201);
-    expect((await add(c, c.danaToken, c.sales.id, { url: 'https://github.com/acme/crm.git' })).statusCode).toBe(403);
-    const sam = await add(c, c.samToken, c.sales.id, { url: 'https://github.com/acme/crm.git' });
-    expect(sam.statusCode).toBe(403);
-    expect(sam.json().error.reason).toBe('department_owner_only');
+    const dana = await add(c, c.danaToken, c.sales.id, { url: 'https://github.com/acme/crm.git' });
+    expect(dana.statusCode).toBe(403);
+    expect(dana.json().error.reason).toBe('department_owner_only');
+    expect((await add(c, c.samToken, c.sales.id, { url: 'https://github.com/acme/books.git' })).statusCode).toBe(201);
     expect((await add(c, c.wholeToken, c.sales.id, { url: 'https://github.com/acme/crm.git' })).statusCode).toBe(201);
-    expect(await c.db.select({ name: departments.name }).from(departments).where(and(eq(departments.parentId, c.sales.id)))).toEqual([{ name: 'crm' }]);
-    /* The owner reads the repositories of the department, as the people who set repositories do, and of no other. */
+    expect(await productsOf(c, c.sales.id)).toEqual(['books', 'crm']);
+    /* Everyone given the department reads its repositories, as the people who set repositories do, and of no other. */
     const org = (await c.app.inject({ url: '/api/org', ...as(c.danaToken) })).json();
     const dev = org.departments.find((d: { id: string }) => d.id === c.dev.id);
     expect(dev.products.find((p: { name: string }) => p.name === 'app').repository.url).toBe('https://github.com/acme/app.git');

@@ -25,7 +25,7 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
-import { TaskReference as Ref, WaitInput, waitFor } from './external-wait.js';
+import { TaskReference as Ref, WaitInput, lastEventOf, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
@@ -356,9 +356,10 @@ class TaskTools {
         inputSchema: { task: Ref, ...WaitInput.shape },
       },
       async ({ task: ref, ...input }) => this.run(async () => {
+        const heard = await lastEventOf(this.ctx, this.job.agentId);
         const { task } = await this.find(ref);
         this.plain(task, input.reason);
-        const moved = await waitFor(this.ctx, this.job.agentId, task.id, input);
+        const moved = await waitFor(this.ctx, this.job.agentId, task.id, input, undefined, heard);
         return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
       }),
     );

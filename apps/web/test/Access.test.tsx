@@ -105,6 +105,8 @@ describe('restricted access screens', () => {
     ['the person sees the whole company', { company: true, personId: 'p1' }, false],
     ['the person is listed in the department', {}, false],
     ['the person is not listed in the department', { personId: 'p1' }, true],
+    ['the person reaches this department among others', { personId: 'p9', org: { ...DEV_ORG, people: [...DEV_ORG.people, { ...DEV_ORG.people[0]!, id: 'p9', deputy: true, departments: ['d1', 'd2'] }] } }, false],
+    ['the person reaches other departments only', { personId: 'p9', org: { ...DEV_ORG, people: [...DEV_ORG.people, { ...DEV_ORG.people[0]!, id: 'p9', deputy: true, departments: ['d1', 'd3'] }] } }, true],
     ['the department is absent', { deptId: 'closed' }, true],
     ['the organization is still loading', { org: null }, false],
     ['the organization read is denied', { org: null, orgFailure: new ApiFailure(403, 'forbidden', 'Hidden') }, true],

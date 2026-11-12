@@ -167,16 +167,14 @@ describe('an agent\'s way in', () => {
 });
 
 describe('a channel and its policy', () => {
-  it('the CEO and the department\'s owner set them up, and nobody else', async () => {
+  it('the CEO and everyone given the department set them up, and nobody else', async () => {
     const w = await world();
     const body = { ...CHANNEL, departmentId: w.c.dev.id };
-    expect((await post(w, '/api/outbound/channels', body, w.c.danaToken)).statusCode).toBe(403);
     expect((await post(w, '/api/outbound/channels', body, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, '/api/outbound/channels', body, w.c.wholeToken)).statusCode).toBe(403);
     const made = await post(w, '/api/outbound/channels', body, w.c.ceoToken);
     expect(made.statusCode).toBe(200);
     expect(made.json()).toMatchObject({ channelId: expect.any(String), status: 'new', generation: 1 });
-    await w.c.setOwner(w.c.ceoToken, w.c.dev.id, w.c.ids.dana);
     expect((await post(w, '/api/outbound/channels', { ...body, name: 'Theirs' }, w.c.danaToken)).statusCode).toBe(200);
   });
 
@@ -200,7 +198,7 @@ describe('a channel and its policy', () => {
     expect((await post(w, url, { ...QUIET, accountDailyLimit: 0 }, w.c.ceoToken)).statusCode).toBe(400);
     expect((await post(w, url, { timezone: 'Europe/Lisbon' }, w.c.ceoToken)).statusCode).toBe(400);
     expect((await post(w, url, { ...QUIET, timezone: 'Mars/Olympus' }, w.c.ceoToken)).statusCode).toBe(400);
-    expect((await post(w, url, QUIET, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, url, QUIET, w.c.samToken)).statusCode).toBe(403);
     const next = await post(w, url, { ...QUIET, accountDailyLimit: 7 }, w.c.ceoToken);
     expect(next.statusCode).toBe(200);
     expect(next.json()).toMatchObject({ revision: 2, digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
@@ -210,11 +208,11 @@ describe('a channel and its policy', () => {
   it('a person stops it at once, and reopens it when its check holds', async () => {
     const w = await world();
     const stop = `/api/outbound/channels/${w.channel.id}/stop`;
-    expect((await post(w, stop, {}, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, stop, {}, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, stop, {}, w.c.ceoToken)).json()).toMatchObject({ status: 'stopped', generation: 2 });
     expect(await w.submit()).toMatchObject({ status: 'rejected', reasonCodes: ['channel_stopped'] });
     const reopen = `/api/outbound/channels/${w.channel.id}/reopen`;
-    expect((await post(w, reopen, {}, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, reopen, {}, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, reopen, {}, w.c.ceoToken)).statusCode).toBe(409);
   });
 
@@ -232,13 +230,13 @@ describe('a channel and its policy', () => {
 describe('the catalog', () => {
   const propose = (w: World, value: object, token: string, extra: object = {}) => post(w, '/api/outbound/catalog', { departmentId: w.c.dev.id, value, ...extra }, token);
 
-  it('takes a revision that only a person publishes, and only the owner or the CEO', async () => {
+  it('takes a revision that only a person publishes, and only the CEO or someone given the department', async () => {
     const w = await world();
     const made = await propose(w, aClaim(), w.c.ceoToken);
     expect(made.statusCode).toBe(200);
     expect(made.json()).toMatchObject({ revision: 1, status: 'proposed' });
     const { id } = made.json();
-    expect((await post(w, `/api/outbound/catalog/${id}/publish`, {}, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, `/api/outbound/catalog/${id}/publish`, {}, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, `/api/outbound/catalog/${id}/publish`, {}, w.c.ceoToken)).json()).toMatchObject({ status: 'published' });
     expect((await post(w, `/api/outbound/catalog/${id}/publish`, {}, w.c.ceoToken)).statusCode).toBe(409);
     const [row] = await w.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, id));
@@ -258,7 +256,7 @@ describe('the catalog', () => {
     const { id } = (await propose(w, aClaim(), w.c.ceoToken)).json();
     expect((await post(w, `/api/outbound/catalog/${id}/revoke`, {}, w.c.ceoToken)).statusCode).toBe(409);
     await post(w, `/api/outbound/catalog/${id}/publish`, {}, w.c.ceoToken);
-    expect((await post(w, `/api/outbound/catalog/${id}/revoke`, {}, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, `/api/outbound/catalog/${id}/revoke`, {}, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, `/api/outbound/catalog/${id}/revoke`, {}, w.c.ceoToken)).json()).toMatchObject({ status: 'revoked' });
   });
 
@@ -341,9 +339,10 @@ describe('the catalog', () => {
 describe('contacts', () => {
   const NEW = (w: World) => ({ channelId: w.channel.id, kind: 'email', address: 'bob@shop.example', source: 'form', evidence: 'form 12' });
 
-  it('are added by the owner or the CEO for a channel, and the address never comes back', async () => {
+  it('are added by the CEO or someone given the department for a channel, and the address never comes back', async () => {
     const w = await world();
-    expect((await post(w, '/api/outbound/contacts', NEW(w), w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, '/api/outbound/contacts', NEW(w), w.c.samToken)).statusCode).toBe(403);
+    expect((await post(w, '/api/outbound/contacts', { ...NEW(w), address: 'cy@shop.example' }, w.c.danaToken)).statusCode).toBe(200);
     const added = await post(w, '/api/outbound/contacts', NEW(w), w.c.ceoToken);
     expect(added.statusCode).toBe(200);
     expect(added.body).not.toContain('bob@');
@@ -359,7 +358,7 @@ describe('contacts', () => {
   it('a person marks do not contact, for good', async () => {
     const w = await world();
     const url = `/api/outbound/contacts/${w.contact.id}/suppress`;
-    expect((await post(w, url, { evidence: 'by phone' }, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, url, { evidence: 'by phone' }, w.c.wholeToken)).statusCode).toBe(403);
     expect((await post(w, url, { evidence: 'by phone' }, w.c.ceoToken)).statusCode).toBe(200);
     expect((await w.submit()).reasonCodes).toEqual(['contact_suppressed']);
     expect((await post(w, `/api/outbound/contacts/${randomUUID()}/suppress`, { evidence: 'by phone' }, w.c.ceoToken)).statusCode).toBe(404);
@@ -374,7 +373,7 @@ describe('contacts', () => {
   it('a permission is taken back through the department it belongs to', async () => {
     const w = await world();
     const url = `/api/outbound/permissions/${w.permission.id}/revoke`;
-    expect((await post(w, url, {}, w.c.danaToken)).statusCode).toBe(403);
+    expect((await post(w, url, {}, w.c.samToken)).statusCode).toBe(403);
     expect((await post(w, url, {}, w.c.ceoToken)).statusCode).toBe(200);
     expect((await w.submit()).reasonCodes).toEqual(['consent_missing']);
     expect((await post(w, `/api/outbound/permissions/${randomUUID()}/revoke`, {}, w.c.ceoToken)).statusCode).toBe(404);
@@ -491,7 +490,7 @@ describe('what the orchestrator may do for a person', () => {
 
   it('nothing that person may not', async () => {
     const w = await world();
-    const told = (await (await control(w, w.c.ids.dana)).callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
+    const told = (await (await control(w, w.c.ids.sam)).callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
     expect(told.isError).toBe(true);
     expect((await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id)))[0]!.status).toBe('active');
   });

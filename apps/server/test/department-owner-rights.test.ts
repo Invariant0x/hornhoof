@@ -5,7 +5,7 @@ import { canDecide, type Decider } from '../src/auth/decisions.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { agents, departments, jobs, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { company } from './department-owner-fixture.js';
-import { as } from './helpers.js';
+import { as, invitePerson } from './helpers.js';
 
 /* The person the CEO named owner of a department runs it as the CEO does there: its employees, its sub-units and products,
    its repository and its tasks, without asking the CEO. Outside it nothing changes. */
@@ -50,7 +50,6 @@ describe('a department owner on the screen', () => {
     expect((await send(c, c.danaToken, 'DELETE', `/api/departments/${c.dev.id}/teams/${team}`)).statusCode).toBe(204);
     expect(await c.db.select().from(teams).where(eq(teams.departmentId, c.dev.id))).toEqual([]);
     expect((await send(c, c.danaToken, 'POST', `/api/departments/${c.sales.id}/teams`, { name: 'Field' })).statusCode).toBe(403);
-    expect((await send(c, c.samToken, 'POST', `/api/departments/${c.sales.id}/teams`, { name: 'Field' })).statusCode).toBe(403);
   });
 
   it('connects and disconnects the repository of their department and of its product', async () => {
@@ -59,7 +58,6 @@ describe('a department owner on the screen', () => {
     expect((await send(c, c.danaToken, 'PUT', `/api/departments/${c.product.id}/repository`, REPO)).statusCode).toBe(200);
     expect((await send(c, c.danaToken, 'DELETE', `/api/departments/${c.product.id}/repository`)).statusCode).toBe(204);
     expect((await send(c, c.danaToken, 'PUT', `/api/departments/${c.sales.id}/repository`, REPO)).statusCode).toBe(403);
-    expect((await send(c, c.samToken, 'PUT', `/api/departments/${c.sales.id}/repository`, REPO)).statusCode).toBe(403);
   });
 
   it('reads the roster and hires into their department without the CEO, and into no other', async () => {
@@ -87,12 +85,10 @@ describe('a department owner on the screen', () => {
     ]) expect((await send(c, c.danaToken, 'POST', '/api/departments/build', payload)).statusCode, JSON.stringify(payload)).toBe(403);
   });
 
-  it('removes an employee of their department, which someone with only access to it may not', async () => {
+  it('removes an employee of their department, which someone who sees the whole company but has no department may not', async () => {
     const c = await company();
     const ira = await onHerPlan(c, 'Ira');
-    expect((await send(c, c.danaToken, 'GET', `/api/agents/${ira.id}`)).json().canRemove).toBe(false);
-    expect((await send(c, c.danaToken, 'DELETE', `/api/agents/${ira.id}`)).statusCode).toBe(403);
-    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await send(c, c.wholeToken, 'DELETE', `/api/agents/${ira.id}`)).statusCode).toBe(403);
     expect((await send(c, c.danaToken, 'GET', `/api/agents/${ira.id}`)).json().canRemove).toBe(true);
     expect((await send(c, c.danaToken, 'DELETE', `/api/agents/${ira.id}`)).statusCode).toBe(204);
     expect((await c.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, ira.id)))[0]!.removedAt).not.toBeNull();
@@ -102,8 +98,7 @@ describe('a department owner on the screen', () => {
     const c = await company();
     const ira = await onHerPlan(c, 'Ira');
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: ira.subscriptionId!, agentId: ira.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
-    expect((await send(c, c.danaToken, 'POST', `/api/jobs/${job!.id}/cancel`)).statusCode).toBe(403);
-    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await send(c, c.wholeToken, 'POST', `/api/jobs/${job!.id}/cancel`)).statusCode).toBe(403);
     expect((await send(c, c.danaToken, 'POST', `/api/jobs/${job!.id}/cancel`)).statusCode).toBe(202);
     /* The orchestrator is in no department: its turn stays the whole company's to stop. */
     const [own] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.orchestrator.subscriptionId!, agentId: c.orchestrator.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
@@ -113,10 +108,8 @@ describe('a department owner on the screen', () => {
   it('pauses, resumes and makes urgent the work of their department', async () => {
     const c = await company();
     const id = await herTask(c, 'Landing page');
-    expect((await send(c, c.danaToken, 'GET', `/api/tasks/${id}`)).json().task.mayPause).toBe(false);
-    expect((await send(c, c.danaToken, 'PUT', `/api/tasks/${id}/paused`, { paused: true, reason: 'Wait for the brand.' })).statusCode).toBe(403);
-    expect((await send(c, c.danaToken, 'PUT', `/api/tasks/${id}/urgent`, { urgent: true })).statusCode).toBe(403);
-    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await send(c, c.wholeToken, 'PUT', `/api/tasks/${id}/paused`, { paused: true, reason: 'Wait for the brand.' })).statusCode).toBe(403);
+    expect((await send(c, c.wholeToken, 'PUT', `/api/tasks/${id}/urgent`, { urgent: true })).statusCode).toBe(403);
     expect((await send(c, c.danaToken, 'GET', `/api/tasks/${id}`)).json().task.mayPause).toBe(true);
     expect((await send(c, c.danaToken, 'PUT', `/api/tasks/${id}/paused`, { paused: true, reason: 'Wait for the brand.' })).statusCode).toBe(200);
     expect((await send(c, c.danaToken, 'PUT', `/api/tasks/${id}/paused`, { paused: false })).statusCode).toBe(200);
@@ -132,9 +125,7 @@ describe('what a department owner sees', () => {
   it('opens, changes and removes every employee of their department on whoever\'s plan, as the CEO does', async () => {
     const c = await company();
     const card = () => send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}`);
-    expect((await card()).json().error.reason).toBe('agent_hidden');
-    expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).statusCode).toBe(403);
-    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await send(c, c.wholeToken, 'GET', `/api/agents/${c.worker.id}`)).json().error.reason).toBe('agent_hidden');
     expect((await card()).json()).toMatchObject({ name: 'Bruno', canEdit: true, canRemove: true });
     expect((await send(c, c.danaToken, 'PATCH', `/api/agents/${c.worker.id}`, { name: 'Bob' })).json().name).toBe('Bob');
     expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assignee).toMatchObject({ id: c.worker.id });
@@ -214,7 +205,7 @@ describe('the orchestrator for a department owner', () => {
     expect((await c.db.select({ urgent: tasks.urgent }).from(tasks).where(eq(tasks.id, c.task.id)))[0]!.urgent).toBe(true);
   });
 
-  it('refuses the same for another department, and for a person who owns none', async () => {
+  it('refuses the same for another department, and for a person given no department', async () => {
     const c = await owned();
     const hers = await c.tools(c.orchestrator, c.ids.dana);
     expect((await call(hers, 'set_repository', { department: c.sales.id, ...REPO })).isError).toBe(true);
@@ -223,9 +214,27 @@ describe('the orchestrator for a department owner', () => {
     const wes = await c.tools(c.orchestrator, c.ids.wes);
     expect((await call(wes, 'set_repository', { department: c.dev.id, ...REPO })).isError).toBe(true);
     expect((await call(wes, 'set_urgent', { task: c.task.number, urgent: true })).isError).toBe(true);
-    const sams = await c.tools(c.orchestrator, c.ids.sam);
-    expect((await call(sams, 'set_repository', { department: c.sales.id, ...REPO })).isError).toBe(true);
-    expect((await call(sams, 'hire', { department: c.sales.id, people: [{ role: 'SAL-AE', name: 'Ola' }] })).isError).toBe(true);
+    expect((await call(wes, 'hire', { department: c.sales.id, people: [{ role: 'SAL-AE', name: 'Ola' }] })).isError).toBe(true);
     expect(await c.db.select().from(agents).where(and(eq(agents.name, 'Ola'), isNull(agents.removedAt)))).toEqual([]);
+  });
+});
+
+describe('everyone given a department, without being named its owner', () => {
+  /* Sam has Sales, which nobody is named owner of; Sid works there on the CEO's plan. */
+  it('opens, changes and removes every employee of it on whoever\'s plan, and runs its sub-units and repository', async () => {
+    const c = await company();
+    expect((await send(c, c.samToken, 'GET', `/api/agents/${c.seller.id}`)).json()).toMatchObject({ name: 'Sid', canEdit: true, canRemove: true });
+    expect((await send(c, c.samToken, 'PATCH', `/api/agents/${c.seller.id}`, { name: 'Sidney' })).json().name).toBe('Sidney');
+    expect((await send(c, c.samToken, 'POST', `/api/departments/${c.sales.id}/teams`, { name: 'Field' })).statusCode).toBe(201);
+    expect((await send(c, c.samToken, 'PUT', `/api/departments/${c.sales.id}/repository`, REPO)).statusCode).toBe(200);
+    expect((await send(c, c.samToken, 'GET', `/api/agents/${c.worker.id}`)).json().error.reason).toBe('agent_hidden');
+    expect((await send(c, c.samToken, 'POST', `/api/departments/${c.dev.id}/teams`, { name: 'Web' })).statusCode).toBe(403);
+  });
+
+  it('runs it beside a named owner and anyone else given it', async () => {
+    const c = await company();
+    const ola = await invitePerson(c.app, c.ceoToken, { name: 'Ola', email: 'ola@acme.com', access: { departments: [c.sales.id] } });
+    expect((await c.setOwner(c.ceoToken, c.sales.id, c.ids.sam)).statusCode).toBe(200);
+    for (const token of [c.samToken, ola]) expect((await send(c, token, 'GET', `/api/agents/${c.seller.id}`)).json()).toMatchObject({ name: 'Sid', canRemove: true });
   });
 });
