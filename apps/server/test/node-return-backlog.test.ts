@@ -6,7 +6,7 @@ import { GONE_ALONG, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { nodeConnected, nodeDisconnected } from '../src/modules/nodes/connections.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
-import { comment, createTask, GOING_ON_TURNS } from '../src/modules/tasks/engine.js';
+import { comment, createTask, GOING_ON_TURNS, SILENT_TURNS } from '../src/modules/tasks/engine.js';
 import { queueTaskMessage } from '../src/modules/tasks/external-wait.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { echelonsTurn, setUpCompany, testApp } from './helpers.js';
@@ -88,20 +88,22 @@ async function company() {
   const continued = (taskId: string) => db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued'))).orderBy(asc(taskEvents.createdAt));
   const stuck = () => db.select({ taskId: requests.taskId, text: requests.text }).from(requests).where(eq(requests.kind, 'stuck'));
   const statusOf = async (taskId: string) => (await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)))[0]!.status;
+  const silentOf = async (taskId: string) => (await db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, taskId)))[0]!.silent;
+  const reminded = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'reminded')))).length;
   const sentPrompt = (jobId: string) => {
     const call = send.mock.calls.find(([, m]) => m.type === 'job.run' && m.jobId === jobId);
     return call && call[1].type === 'job.run' ? call[1].prompt : null;
   };
-  return { ctx, db, ceo: ceo!, head, bruno, later, drop, back, memberTask, turnsOf, running, run, tell, ask, continued, stuck, statusOf, sentPrompt };
+  return { ctx, db, ceo: ceo!, head, bruno, later, drop, back, memberTask, turnsOf, running, run, tell, ask, continued, stuck, statusOf, silentOf, reminded, sentPrompt };
 }
 
 type Company = Awaited<ReturnType<typeof company>>;
 
-/* Bruno goes on through turns turns on the task without handing anything in, and his machine is switched off during the
-   next one, which Hornhoof ends as machine_offline once the machine stayed away. */
-async function workedThenAway(c: Company, task: { id: string }, turns: number) {
+/* Bruno works through turns turns on the task without handing anything in, saying what said gives in each, and his machine
+   is switched off during the next one, which Hornhoof ends as machine_offline once the machine stayed away. */
+async function workedThenAway(c: Company, task: { id: string }, turns: number, said: (i: number) => string | undefined = i => `Part ${i} pushed.`) {
   await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
-  for (let i = 0; i < turns; i++) await c.run(`Part ${i} pushed.`);
+  for (let i = 0; i < turns; i++) await c.run(said(i));
   const [cut] = await c.running(c.bruno.id);
   c.later();
   await c.drop();
@@ -133,6 +135,7 @@ describe('wake-ups that waited while the machine was away', () => {
     expect(along).toHaveLength(GOING_ON_TURNS);
     expect(along.every(j => j.taskId === task.id)).toBe(true);
     const prompt = c.sentPrompt(one!.id)!;
+    expect(prompt).toContain('These wake-ups on your task waited while your machine was away.');
     for (const said of [...told, 'Any news on the checkout?']) expect(prompt).toContain(said);
 
     await c.run('Back. Read all of it, going on with the totals.');
@@ -167,6 +170,20 @@ describe('wake-ups that waited while the machine was away', () => {
     expect(ran).toEqual(held.map(t => t.id));
     expect(await c.stuck()).toEqual([]);
     for (const task of held) expect(await c.statusOf(task.id)).not.toBe('waiting');
+  });
+
+  it('neither reminds the agent nor clears its quiet turns for a turn from the backlog that ended without a word', async () => {
+    const c = await company();
+    const task = await c.memberTask('Checkout API');
+    await workedThenAway(c, task, SILENT_TURNS - 1, () => undefined);
+    expect(await c.silentOf(task.id)).toBe(SILENT_TURNS - 1);
+
+    await c.back();
+    await c.run();
+
+    expect(await c.stuck()).toEqual([]);
+    expect(await c.statusOf(task.id)).toBe('working');
+    expect([await c.silentOf(task.id), await c.reminded(task.id)]).toEqual([SILENT_TURNS - 1, SILENT_TURNS - 1]);
   });
 
   it('does not count the continuation of a turn from the backlog that failed before it recorded its work', async () => {
