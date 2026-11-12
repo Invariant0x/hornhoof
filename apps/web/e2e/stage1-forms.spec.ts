@@ -160,16 +160,18 @@ async function lowestContrast(form: Locator): Promise<{ ratio: number; what: str
   });
 }
 
-/* Each control keeps its height: a field and a select 40 px, a button of a form's foot and a choice card from 44 px. */
-async function heights(form: Locator): Promise<string[]> {
-  return form.evaluate(root => {
+/* Each control keeps its height: a field and a select 40 px, a button of a form's foot and a choice card from 44 px. On a
+   desktop's width a button of the foot has the room for its words and stays on one line of 44 px. */
+async function heights(form: Locator, wide: boolean): Promise<string[]> {
+  return form.evaluate((root, wide) => {
     const wrong: string[] = [];
     const h = (e: Element) => Math.round(e.getBoundingClientRect().height * 100) / 100;
     for (const e of root.querySelectorAll('.field input:not(.sr, [type="checkbox"], [type="radio"]), .field select, .staff-pick select')) if (Math.abs(h(e) - 40) > 0.5) wrong.push(`${e.tagName} ${h(e)}`);
     for (const e of root.querySelectorAll('.form-foot > *, .entry-actions > *, .kind-card, .check-card, .plan')) if (h(e) < 43.5) wrong.push(`${e.className} ${e.textContent?.trim().slice(0, 20)} ${h(e)}`);
+    if (wide) for (const e of root.querySelectorAll('.form-foot > *')) if (h(e) > 44.5) wrong.push(`one line: ${e.className} ${e.textContent?.trim().slice(0, 20)} ${h(e)}`);
     for (const e of root.querySelectorAll('input[type="checkbox"], input[type="radio"]:not(.sr)')) if (Math.abs(h(e) - 16) > 0.5) wrong.push(`${e.getAttribute('type')} ${h(e)}`);
     return wrong;
-  });
+  }, wide);
 }
 
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.form-card, .t-card.staff, .key-form')].every(e => e.scrollWidth <= e.clientWidth + 1));
@@ -287,7 +289,7 @@ test('every form of stage 1 keeps its layout in each theme, on the longest and t
         const lowest = await lowestContrast(found);
         (report.contrast as Record<string, unknown>)[`${language}-${width}-${form.name}-${choice}`] = lowest;
         expect(lowest.ratio, `${language} ${width} ${form.name} ${choice} ${lowest.what}`).toBeGreaterThanOrEqual(4.5);
-        expect(await heights(found), `${language} ${width} ${form.name} ${choice}`).toEqual([]);
+        expect(await heights(found, width === 1440), `${language} ${width} ${form.name} ${choice}`).toEqual([]);
         expect(await noSideScroll(page), `${language} ${width} ${form.name} ${choice}: no sideways scroll`).toBe(true);
         await found.screenshot({ path: info.outputPath(`${browserName}/${language}-${width}-${form.name}-${choice}.png`), animations: 'disabled' });
       }
@@ -310,11 +312,16 @@ test('a main button keeps its width while it says what it does', async ({ page }
     await form.getByLabel(words.common.email, { exact: true }).fill('oleg@acme.com');
     const main = form.getByRole('button', { name: words.people.createInvite, exact: true });
     const foot = form.locator('.form-foot');
-    const before = { main: await main.boundingBox(), foot: await foot.boundingBox() };
+    /* Measured from the card, so a scroll the click makes to reach the button moves nothing. */
+    const inCard = async (inner: Locator) => {
+      const [box, card] = [(await inner.boundingBox())!, (await form.boundingBox())!];
+      return { x: box.x - card.x, y: box.y - card.y, width: box.width, height: box.height };
+    };
+    const before = { main: await inCard(main), foot: await inCard(foot) };
     await main.click();
     const busy = form.getByRole('button', { name: words.common.creating, exact: true });
     await expect(busy).toHaveAttribute('aria-busy', 'true');
-    expect({ main: await busy.boundingBox(), foot: await foot.boundingBox() }).toEqual(before);
+    expect({ main: await inCard(busy), foot: await inCard(foot) }).toEqual(before);
     release();
     await expect(page.getByText(INVITE, { exact: true })).toBeVisible();
   }

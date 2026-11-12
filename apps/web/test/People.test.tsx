@@ -1,12 +1,18 @@
 import { act, render, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { People } from '../src/screens/People';
+import { AgentIcon, PersonIcon } from '../src/ui/icons';
 import type { Me, PersonView } from '../src/types';
 import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE } from './api-mock';
 import { decl } from './css';
+
+/* The icon a heading or a choice card shows, and how an icon is drawn on its own, to tell the person from the agent. */
+const iconOf = (element: HTMLElement) => element.querySelector('svg')!.outerHTML;
+const drawn = (icon: ReactElement) => render(icon).container.innerHTML;
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
 
@@ -582,6 +588,7 @@ describe("a person's assistant", () => {
     expect(within(rowOf('Ava')).queryByRole('button', { name: 'Edit Ava' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Add my assistant' }));
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(iconOf(screen.getByRole('heading', { name: 'New personal AI assistant' }))).toBe(drawn(<AgentIcon />));
     expect(screen.queryByLabelText('Owner')).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Assistant name'), 'Max');
     await user.click(screen.getByRole('button', { name: 'Create assistant' }));
@@ -643,6 +650,11 @@ describe('the forms to add and edit people', () => {
     expect(person).toBeChecked();
     expect(assistant).not.toBeChecked();
     for (const card of [person!, assistant!]) expect(card.closest('label')!.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(iconOf(person!.closest('label')!)).toBe(drawn(<PersonIcon />));
+    expect(iconOf(assistant!.closest('label')!)).toBe(drawn(<AgentIcon />));
+    expect(person!.closest('label')).toHaveClass('kind-card', 'on');
+    expect(assistant!.closest('label')).not.toHaveClass('on');
+    expect(iconOf(screen.getByRole('heading', { name: 'Add a member to the company' }))).toBe(drawn(<PersonIcon />));
     expect(screen.queryByRole('checkbox', { name: /agent/ })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
   });
@@ -655,13 +667,17 @@ describe('the forms to add and edit people', () => {
     await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
     expect(screen.getByRole('radio', { name: 'Personal AI assistant' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Person' })).not.toBeChecked();
-    expect(screen.getByRole('heading', { name: 'Add a member to the company' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' }).closest('label')).toHaveClass('on');
+    expect(screen.getByRole('radio', { name: 'Person' }).closest('label')).not.toHaveClass('on');
+    expect(iconOf(screen.getByRole('heading', { name: 'Add a member to the company' }))).toBe(drawn(<PersonIcon />));
     expect(screen.getByLabelText('Assistant name')).toHaveValue('Oleg');
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Program')).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'Person' }));
     expect(screen.getByRole('radio', { name: 'Person' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Personal AI assistant' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Person' }).closest('label')).toHaveClass('on');
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' }).closest('label')).not.toHaveClass('on');
     expect(screen.getByLabelText('Name')).toHaveValue('Oleg');
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
     expect(screen.queryByLabelText('Program')).not.toBeInTheDocument();

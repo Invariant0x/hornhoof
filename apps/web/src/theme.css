@@ -898,6 +898,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: normal; overflow-wrap: break-word;
   font-family: var(--f-display); font-size: 14px; font-weight: 600; font-style: normal; line-height: 1.4; letter-spacing: normal; text-transform: none; text-indent: 0;
 }
+/* WebKit lets a button that grows from its narrowest width stop at that width again, so its words wrap with room to spare.
+   A width of fit-content gives it back its whole words; Chromium and Firefox ignore the width under this flex-basis. */
+.form-foot > :is(.act, .btn) { width: fit-content; }
 .notebook li form { display: grid; gap: 8px; min-width: 0; }
 .notebook textarea { width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); font: inherit; resize: vertical; }
 .notebook-add { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
