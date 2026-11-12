@@ -1491,6 +1491,13 @@ export const en = {
       done: (by: string) => `${by} closed it`,
       started: (by: string) => `${by} started it once what it waited for was done`,
       interrupted: (by: string) => `${by}'s turn was cut off by a node restart`,
+      away: (by: string) => `${by}'s turn and its machine`,
+    },
+    /* A turn on a task whose machine Hornhoof cannot reach, and that machine coming back. machine: its name, or none
+       for the server's own machine or one that never said its name. */
+    away: {
+      gone: (machine: string | null, since: string) => `The turn runs on ${machine ?? 'a machine'}, which Hornhoof cannot reach since ${since}. The work there is kept, and the turn goes on when the machine is back.`,
+      back: (machine: string | null) => `${machine ?? 'The machine'} is in reach again, and the turn goes on there.`,
     },
   },
   /* A turn a node restart cut off: on which node and when, why, which turn, and what Hornhoof did about it. */

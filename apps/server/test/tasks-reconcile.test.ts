@@ -148,7 +148,7 @@ describe('turns on a machine that went away', () => {
     expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.ack', jobId: running.id });
   });
 
-  it('fails a running conversation after five minutes away and continues through the failed-turn path once', async () => {
+  it('keeps a turn on a task whose machine is away, tells whoever gave the task once, and goes on when the machine is back', async () => {
     const c = await company();
     const task = await c.task({ status: 'working' });
     /* A turn young enough that its machine going away is all that happens to it: no quiet alarm falls due meanwhile. */
@@ -156,28 +156,67 @@ describe('turns on a machine that went away', () => {
     c.ready.mockReturnValue(false);
     await handleNodeClose(c.ctx, BUILTIN);
     const away = c.ctx.hub.awaySince(BUILTIN)!;
+    const noted = () => c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'away')));
+    const heard = async () => (await c.turnsOf(c.head.id)).filter(j => j.prompt.includes('Hornhoof cannot reach') || j.prompt.includes('in reach again'));
+    await c.round(new Date(away + 5 * MIN));
+    expect([await noted(), await heard()]).toEqual([[], []]);
+    await c.round(new Date(away + 5 * MIN + 1));
+    /* The turn is not failed and nothing is queued in its place: the work on that machine is kept. */
+    expect(await c.turnsOf(c.bruno.id)).toMatchObject([{ id: job.id, status: 'running', error: null }]);
+    expect(await noted()).toMatchObject([{ agentId: c.bruno.id, data: { job: job.id, stage: 'away', holder: c.bruno.id } }]);
+    const [told] = await heard();
+    expect(told!.prompt).toContain(`Bruno's turn on #${task.number} "Checkout API" runs on the server's own machine, which Hornhoof cannot reach since`);
+    expect(told!.prompt).toContain(`The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with Bruno.`);
+    /* Told once, however long the machine stays away. */
+    await c.round(new Date(away + 6 * MIN));
+    await c.round(new Date(away + 90 * MIN));
+    expect([(await noted()).length, (await heard()).length]).toEqual([1, 1]);
+    expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, job.id), eq(agentEvents.kind, 'failed')))).toEqual([]);
+
+    /* The machine is back with the turn still running: nothing is stopped, and whoever gave the task hears that too. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
+    expect(c.send).not.toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
+    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'awaySince').mockReturnValue(null);
+    await c.round(new Date(away + 91 * MIN));
+    await c.round(new Date(away + 92 * MIN));
+    expect((await noted()).map(e => (e.data as { stage: string }).stage)).toEqual(['away', 'back']);
+    expect((await heard()).map(j => j.prompt.includes('in reach again'))).toEqual([false, true]);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Done after all.', tail: '', error: null, sessionId: 'kept-session' });
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'done', result: 'Done after all.' });
+  });
+
+  it('ends the turn as handed on when the task went to someone else while its machine was away', async () => {
+    const c = await company();
+    const task = await c.task({ status: 'working' });
+    const job = await c.job({ taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + 9 * MIN) });
+    c.ready.mockReturnValue(false);
+    await handleNodeClose(c.ctx, BUILTIN);
+    const away = c.ctx.hub.awaySince(BUILTIN)!;
+    await c.round(new Date(away + 5 * MIN + 1));
+    expect(await c.turnsOf(c.bruno.id)).toMatchObject([{ id: job.id, status: 'running' }]);
+    /* The head gave the task to Rita. */
+    await c.db.update(tasks).set({ assigneeAgentId: c.rita.id, executorAgentId: c.rita.id }).where(eq(tasks.id, task.id));
+    await c.round(new Date(away + 7 * MIN));
+    /* The old turn is over, as one Hornhoof ended on purpose: nothing runs it again. */
+    expect(await c.turnsOf(c.bruno.id)).toMatchObject([{ id: job.id, status: 'failed', error: 'handed_on' }]);
+    /* Back, the machine is told to stop it. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
+    expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
+  });
+
+  it('fails a turn of no task after five minutes away, as before', async () => {
+    const c = await company();
+    const job = await c.job({ status: 'running', startedAt: new Date(c.at.getTime() + 9 * MIN) });
+    c.ready.mockReturnValue(false);
+    await handleNodeClose(c.ctx, BUILTIN);
+    const away = c.ctx.hub.awaySince(BUILTIN)!;
     await c.round(new Date(away + 5 * MIN));
     expect((await c.turnsOf(c.bruno.id))[0]!.status).toBe('running');
     await c.round(new Date(away + 5 * MIN + 1));
-    expect(await c.turnsOf(c.bruno.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: job.id, status: 'failed', error: 'machine_offline', finishedAt: expect.any(Date) }),
-      expect.objectContaining({ taskId: task.id, status: 'queued', prompt: expect.stringContaining('Go on with the work') }),
-    ]));
-    await c.round(new Date(away + 6 * MIN));
-    const failed = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, job.id), eq(agentEvents.kind, 'failed')));
-    expect(failed).toHaveLength(1);
-    expect(failed[0]!.data).toEqual({ error: 'machine_offline' });
-    expect(await c.turnsOf(c.bruno.id)).toHaveLength(2);
-    const { agentFailureState } = await import('../src/modules/tasks/failures.js');
-    expect((await agentFailureState(c.ctx, c.bruno.id)).failure).toBeNull();
-
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'failed', error: 'machine_offline', finishedAt: expect.any(Date) });
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
     expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
-    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.event', jobId: job.id, seq: 0, event: { kind: 'text', text: 'Too late.' } });
-    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Done.', tail: '', error: null, sessionId: 'late-session' });
-    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'failed', error: 'machine_offline', result: null, sessionId: null });
-    expect(await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).toHaveLength(1);
-    expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.ack', jobId: job.id });
   });
 
   it('leaves online jobs, queued turns and test jobs alone', async () => {
