@@ -2,11 +2,11 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { WHOLE, type Access, type Spot } from '../src/auth/access.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { proposals, requests } from '../src/db/schema.js';
+import { agents, departments, people, proposals, requests } from '../src/db/schema.js';
 import { decisionOwner as ownerFromAuth } from '../src/auth/decision-owner.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
 import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
-import { as, listen, openStream, until, ownPlan } from './helpers.js';
+import { as, invitePerson, listen, openStream, until, ownPlan } from './helpers.js';
 import { company, everyKind, ownersOf } from './decisions-company.js';
 
 const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds) });
@@ -110,23 +110,19 @@ describe('decisions waiting for people', () => {
     expect((await c.view(c.tokens.dan)).requests.map(r => r.id)).toEqual([release.request.id]);
   });
 
-  it("are counted from what the viewer may read: a department's person sees the work of their agents, and what is theirs to take", async () => {
+  it("are counted from what the viewer may read: a department's person sees all its work, a product's person the work of their agents, and what is theirs to take", async () => {
     const c = await everyKind();
-    /* The worker on someone else's plan: only the decision that is his to take shows, by itself. */
-    const before = await c.view(c.tokens.dan);
-    expect(before.requests).toEqual([]);
-    expect(before.addressed.map(r => [r.id, r.canAnswer])).toEqual([[c.devQuestion.request.id, true]]);
-    expect(before.counts).toEqual({ byPerson: { [c.ids.dan]: 1 }, byAgent: {}, total: 1 });
-    await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
+    /* Development's person runs it in full: every decision its employees ask shows with its work, on whoever's plan. */
     const his = await c.view(c.tokens.dan);
     expect(his.requests.map(r => r.id).sort()).toEqual([c.devQuestion, c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
+    expect(his.addressed).toEqual([]);
     expect(his.proposals).toEqual([]);
     expect(his.computerAccess).toBeNull();
     expect(his.counts).toEqual({ byPerson: { [c.ids.dan]: 1, [c.ids.ivan]: 3 }, byAgent: { [c.workers.dev.id]: 4 }, total: 4 });
-    /* He takes his department's own decisions; approvals, the CEO's topics and a question without a topic are the CEO's. */
+    /* He takes his department's own decisions and its approvals; the CEO's topics and a question without a topic are the CEO's. */
     expect(Object.fromEntries(his.requests.map(r => [r.id, r.canAnswer]))).toEqual({
       [c.devQuestion.request.id]: true,
-      [c.devApproval.request.id]: false,
+      [c.devApproval.request.id]: true,
       [c.devPeople.request.id]: false,
       [c.devPlain.request.id]: false,
     });
@@ -136,6 +132,23 @@ describe('decisions waiting for people', () => {
       [c.devPeople.request.id]: { kind: 'ceo_and_delegate', department: null },
       [c.devPlain.request.id]: { kind: 'ceo_and_delegate', department: null },
     });
+    /* Pia has only Shop, a product of Marketing, where Mo works on someone else's plan: only the decision that is hers to take
+       shows, by itself. */
+    const [shop] = await c.db.insert(departments).values({ companyId: c.acme.id, name: 'Shop', parentId: c.mkt.id, roleCode: 'MAR', position: 3 }).returning();
+    await c.db.update(agents).set({ productId: shop!.id }).where(eq(agents.id, c.workers.mkt.id));
+    const pia = await invitePerson(c.app, c.tokens.ceo, { name: 'Pia', email: 'pia@acme.com', access: { departments: [shop!.id], teams: [] } });
+    const [piaRow] = await c.db.select().from(people).where(eq(people.email, 'pia@acme.com'));
+    const { task } = await createTask(c.ctx, { agentId: c.heads.mkt.id }, { title: 'About Which banner?', brief: '', body: '', departmentId: c.mkt.id, productId: shop!.id, assigneeAgentId: c.workers.mkt.id, executor: true });
+    const { request } = await ask(c.ctx, c.workers.mkt.id, task.id, { kind: 'question', text: 'Which banner?', topic: 'task' });
+    const before = await c.view(pia);
+    expect(before.requests).toEqual([]);
+    expect(before.addressed.map(r => [r.id, r.canAnswer])).toEqual([[request.id, true]]);
+    expect(before.counts).toEqual({ byPerson: { [piaRow!.id]: 1 }, byAgent: {}, total: 1 });
+    await ownPlan(c.db, 'pia@acme.com', c.workers.mkt.id);
+    const hers = await c.view(pia);
+    expect(hers.requests.map(r => [r.id, r.canAnswer])).toEqual([[request.id, true]]);
+    expect(hers.addressed).toEqual([]);
+    expect(hers.counts).toEqual({ byPerson: { [piaRow!.id]: 1 }, byAgent: { [c.workers.mkt.id]: 1 }, total: 1 });
     const tias = await c.view(c.tokens.tia);
     expect(tias.requests).toEqual([]);
     expect(tias.addressed).toEqual([]);
@@ -227,7 +240,7 @@ describe('decisions on the map', () => {
     const org = async (token: string): Promise<OrgView> => (await c.app.inject({ url: '/api/org', ...as(token) })).json();
     expect(cards(await org(c.tokens.ceo))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
     expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 0, [c.ids.zed]: 0, [c.ids.dan]: 0, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
-    expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: null, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
+    expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: 3, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
     expect(cards(await org(c.tokens.sara))).toEqual({ [c.ids.ivan]: 1, [c.ids.zed]: null, [c.ids.dan]: null, [c.ids.sara]: 0, [c.ids.olga]: null, [c.ids.tia]: null });
   });
 });

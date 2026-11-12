@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, people, tasks } from '../src/db/schema.js';
+import { agents, people, tasks, teams } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { as, until, type FakeNode, ownPlan } from './helpers.js';
@@ -208,9 +208,13 @@ describe('the pool of machines', () => {
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
     const part = await nextOf(ann.node, 'tests.run');
+    /* Ann has only Bruno's team of Development: the department itself would show her Bruno on any plan. */
+    const [core] = await c.db.insert(teams).values({ companyId: c.bruno.companyId, departmentId: c.dev.id, name: 'Core' }).returning();
+    await c.db.update(agents).set({ teamId: core!.id }).where(eq(agents.id, c.bruno.id));
+    const [annRow] = await c.db.select().from(people).where(eq(people.name, 'Ann'));
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${annRow!.id}`, payload: { access: { teams: [core!.id] } }, ...as(c.ceo) })).statusCode).toBe(200);
     /* A part on her own machine stays nameless to her while the agent who runs it is on someone else's plan. */
     expect((await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json().machines[0].parts).toEqual([]);
-    const [annRow] = await c.db.select().from(people).where(eq(people.name, 'Ann'));
     await ownPlan(c.db, annRow!.email!, c.bruno.id);
     const seen = (await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json();
     expect(seen.machines.map((m: { name: string }) => m.name)).toEqual(['ann-pc']);

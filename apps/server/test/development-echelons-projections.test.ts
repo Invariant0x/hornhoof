@@ -1,4 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { agents, departments, tasks } from '../src/db/schema.js';
 import { submit } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, ownPlan } from './helpers.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
@@ -31,7 +33,12 @@ describe('one public task snapshot', () => {
   });
   it('does not reveal a hidden checker or candidate through the contributor view', async () => {
     const f = await fixture();
-    const token = await invitePerson(f.app, f.ceoToken, { name: 'Contributor', email: 'contributor@acme.com', access: { departments: [f.author.departmentId!] } });
+    /* A person of a product alone runs nothing of the department: they see the author on their plan and not the checker. */
+    const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, name: 'Shop', parentId: f.author.departmentId!, roleCode: 'DEV', position: 1 }).returning();
+    await f.db.update(agents).set({ productId: product!.id }).where(eq(agents.id, f.author.id));
+    await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
+    const token = await invitePerson(f.app, f.ceoToken, { name: 'Contributor', email: 'contributor@acme.com', access: { departments: [product!.id] } });
+    const listed = await invitePerson(f.app, f.ceoToken, { name: 'Lee', email: 'lee@acme.com', access: { departments: [f.author.departmentId!] } });
     await ownPlan(f.db, 'contributor@acme.com', f.author.id);
     await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Changed source.', review: { baseCommit: BASE } });
     const reply = await f.app.inject({ url: `/api/tasks/${f.task.id}`, ...as(token) });
@@ -39,6 +46,7 @@ describe('one public task snapshot', () => {
     const route = reply.json().task.echelons;
     expect(route).toMatchObject({ stage: 'review', ownerAgentId: null, candidateId: null, assignment: null });
     expect(JSON.stringify(route)).not.toContain(f.reviewer.id);
+    expect((await f.app.inject({ url: `/api/tasks/${f.task.id}`, ...as(listed) })).json().task.echelons).toMatchObject({ ownerAgentId: f.reviewer.id, candidateId: expect.any(String) });
   });
   it('gives the owner of the task\'s department its checker and candidate, as the CEO reads them, in every projection', async () => {
     const f = await fixture();

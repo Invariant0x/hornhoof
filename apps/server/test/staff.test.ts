@@ -199,8 +199,10 @@ describe('staffing', () => {
       const accepted = await c.app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: 'correct horse battery' } });
       return accepted.cookies.find(k => k.name === 'hh_session')!.value;
     })();
+    const sam = await invitePerson(c.app, c.ceo, { name: 'Sam', email: 'sam@acme.com', access: { departments: [c.sales.id] } });
     const line = { role: 'DEV-BE', name: 'Bruno', model: '', subscription: null, skills: ['dev-implement'] };
-    expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('department_owner_only');
+    expect((await hire(c.app, sam, c.dev.id, { people: [line] })).json().error.reason).toBe('department_owner_only');
+    expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('staff_invalid');
     const res = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
     expect(res.json().error.reason).toBe('staff_invalid');
     expect(res.json().error.message).toContain('hh-hornhoof');

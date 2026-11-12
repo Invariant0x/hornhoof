@@ -55,15 +55,17 @@ describe('reading and changing a department\'s approval policy', () => {
     expect((await c.setRule(c.danaToken, c.dev.id, 'price', { mode: 'new_kinds' })).statusCode).toBe(200);
   });
 
-  it('lets someone with access read it but not change it, and refuses it in full to someone without access', async () => {
+  it('lets someone of the whole company read it but not change it, everyone given the department change it, and refuses it in full to someone without access', async () => {
     const c = await company();
-    expect((await c.policy(c.danaToken, c.dev.id)).json()).toMatchObject({ canSetOwner: false, canChangePolicy: false, candidates: [] });
-    const refused = await c.setRule(c.danaToken, c.dev.id, 'price', { mode: 'new_kinds' });
+    expect((await c.policy(c.wholeToken, c.dev.id)).json()).toMatchObject({ canSetOwner: false, canChangePolicy: false, candidates: [] });
+    const refused = await c.setRule(c.wholeToken, c.dev.id, 'price', { mode: 'new_kinds' });
     expect(refused.statusCode).toBe(403);
     expect(refused.json().error.reason).toBe('policy_not_allowed');
     expect((await c.policy(c.samToken, c.dev.id)).statusCode).toBe(404);
     expect((await c.setRule(c.samToken, c.dev.id, 'price', { mode: 'new_kinds' })).statusCode).toBe(403);
-    expect((await c.setRule(c.wholeToken, c.dev.id, 'price', { mode: 'new_kinds' })).statusCode).toBe(403);
+    /* Dana is given Development, though nobody named her its owner. */
+    expect((await c.policy(c.danaToken, c.dev.id)).json()).toMatchObject({ owner: null, canSetOwner: false, canChangePolicy: true, candidates: [] });
+    expect((await c.setRule(c.danaToken, c.dev.id, 'price', { mode: 'new_kinds' })).statusCode).toBe(200);
   });
 
   it('takes the right to change it from an owner who lost access, and gives it to the delegate', async () => {

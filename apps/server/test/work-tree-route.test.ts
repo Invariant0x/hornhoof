@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
@@ -233,10 +233,15 @@ describe('GET /api/departments/:id/tree', () => {
 
   it('keeps candidate and finding details private for a scoped tree reader', async () => {
     const c = await company();
-    const task = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security' });
+    /* A person of a product alone runs nothing of the department: the repository's details stay with its people. */
+    const [shop] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, name: 'Shop', roleCode: 'DEV' }).returning();
+    await c.db.update(agents).set({ productId: shop!.id }).where(inArray(agents.id, [c.bruno.id, c.rita.id]));
+    const task = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security', productId: shop!.id });
     await submit(c.ctx, c.bruno.id, task.id, c.code);
     await verdict(c.ctx, c.rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: 'Checking the boundary.', issues: [{ category: 'data', blocking: false, path: 'logic/totals.ts', line: 1, harm: 'The boundary needs a contract.' }] });
-    const token = await invitePerson(c.app, c.ceoToken, { name: 'Dev', email: 'dev@acme.com', access: { departments: [c.dev.id] } });
+    const token = await invitePerson(c.app, c.ceoToken, { name: 'Dev', email: 'dev@acme.com', access: { departments: [shop!.id] } });
+    const listed = await invitePerson(c.app, c.ceoToken, { name: 'Lee', email: 'lee@acme.com', access: { departments: [c.dev.id] } });
+    expect((await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(listed) })).body).toContain('The boundary needs a contract.');
     await ownPlan(c.db, 'dev@acme.com', c.bruno.id, c.rita.id);
     const response = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(token) });
     expect(response.statusCode).toBe(200);

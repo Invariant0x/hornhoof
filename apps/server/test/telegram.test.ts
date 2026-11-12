@@ -119,20 +119,18 @@ describe('a Telegram bot of a head', () => {
     expect(notHead.json().error.reason).toBe('telegram_heads_only');
   });
 
-  it('is set by people with the whole company and by the person responsible for the head\'s department, by no one else', async () => {
+  it('is set by people with the whole company and by everyone given the head\'s department, by no one else', async () => {
     const c = await company();
     const { sales, head } = await salesHead(c);
     const [acme] = await c.db.select().from(companies);
     const [support] = await c.db.insert(departments).values({ companyId: acme!.id, templateKey: 'support', roleCode: 'SUP' }).returning();
     const ann = await invitePerson(c.app, c.ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales.id] } });
-    const bob = await invitePerson(c.app, c.ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales.id, support!.id] } });
+    const bob = await invitePerson(c.app, c.ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [support!.id] } });
     const [bobRow] = await c.db.select().from(people).where(eq(people.email, 'bob@acme.com'));
     await c.db.update(departments).set({ ownerPersonId: bobRow!.id }).where(eq(departments.id, support!.id));
-    expect((await connectBot(c.app, ann, head.id, SECOND)).statusCode).toBe(403);
     expect((await connectBot(c.app, bob, head.id, SECOND)).statusCode).toBe(403);
     expect((await connectBot(c.app, bob, c.orchestrator.id, SECOND)).statusCode).toBe(403);
-    const [annRow] = await c.db.select().from(people).where(eq(people.email, 'ann@acme.com'));
-    await c.db.update(departments).set({ ownerPersonId: annRow!.id }).where(eq(departments.id, sales.id));
+    expect((await connectBot(c.app, ann, c.orchestrator.id, SECOND)).statusCode).toBe(403);
     const own = await connectBot(c.app, ann, head.id, SECOND);
     expect(own.statusCode).toBe(200);
     expect(own.json()).toEqual({ telegram: { username: 'acme_sales_bot' } });

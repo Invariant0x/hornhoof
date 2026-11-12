@@ -618,10 +618,6 @@ describe('Department view', () => {
     await flyIn(user);
     await drawer(user, 'Department tasks');
     expect(within(screen.getByRole('region', { name: 'Tasks' })).getByRole('button', { name: 'New task' })).toBeInTheDocument();
-    await drawer(user, 'About the department');
-    expect(screen.queryByRole('region', { name: 'Repositories' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Sub-units' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '+ Hire' })).not.toBeInTheDocument();
   });
 
   it('says in its About how the department works, and lets whoever the server allows switch it between turns and all the time', async () => {
@@ -677,6 +673,23 @@ describe('Department view', () => {
     expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
     expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/agents/orchestrator/messages')).toBe(false);
+  });
+
+  it('lets everyone given the department hire into it and change its repository and sub-units, with no owner named', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/roster': [200, ROSTER] },
+      { ...DEV_ORG, departments: [{ ...dev!, ownerPersonId: null, people: [...dev!.people, LENA] }] },
+      listed('p6', 'Lena'),
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const about = screen.getByRole('complementary', { name: 'About the department' });
+    expect(within(about).getByRole('region', { name: 'Repositories' })).toBeInTheDocument();
+    expect(within(about).getByRole('region', { name: 'Sub-units' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '+ Hire' }));
+    expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
   });
 
   it("closes a department to people who do not reach it", async () => {
