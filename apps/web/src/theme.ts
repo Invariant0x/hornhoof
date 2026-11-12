@@ -1,4 +1,6 @@
-export type Theme = 'light' | 'dark';
+import type { BuiltinTheme, Template, TemplateError } from './theme-template';
+
+export type Theme = BuiltinTheme | 'custom';
 
 const KEY = 'hh-theme';
 const root = () => document.documentElement;
@@ -26,3 +28,9 @@ export function setTheme(theme: Theme): void {
     /* Not saved, but applied for this visit. */
   }
 }
+
+/* Stub: templates are not kept yet. */
+export const themeState = (): { choice: Theme | null; custom: Template | null } => ({ choice: null, custom: null });
+export const loadTemplate = (_text: string): TemplateError | null => ({ code: 'not_built' });
+export const resetTemplate = (): void => {};
+export const exportTemplate = (): string => '';

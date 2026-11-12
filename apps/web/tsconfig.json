@@ -8,5 +8,5 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": ["src", "test", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "test", "e2e", "vite.config.ts", "theme-boot-plugin.ts", "playwright.config.ts"]
 }

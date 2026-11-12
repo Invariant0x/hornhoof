@@ -1,0 +1,20 @@
+/* Stub: the theme templates are not built yet. */
+export const THEMES = ['light', 'dark', 'matrix', 'cyberpunk'] as const;
+export type BuiltinTheme = (typeof THEMES)[number];
+export const COLOR_TOKENS = { bg: '--bg', ink: '--ink', surface: '--surface', accent: '--cyan' } as const;
+export type ColorRole = keyof typeof COLOR_TOKENS;
+export const FONT_TOKENS = { display: '--f-display', body: '--f-body', mono: '--f-mono' } as const;
+export type FontRole = keyof typeof FONT_TOKENS;
+export const CUT_TOKEN = '--cut-k';
+export const CUT_RANGE = { min: 0, max: 0 };
+export const TEMPLATE_LIMIT = 0;
+export type Palette = { scheme: 'light' | 'dark'; colors: Record<ColorRole, string>; fonts: Record<FontRole, string[]>; cut: number };
+export type Template = { name: string; base: BuiltinTheme; scheme?: 'light' | 'dark'; colors: Partial<Record<ColorRole, string>>; fonts: Partial<Record<FontRole, string[]>>; cut?: number };
+export type TemplateError = { code: string; key?: string };
+export type Parsed = { ok: true; template: Template } | { ok: false; error: TemplateError };
+export const BUILTIN = {} as Record<BuiltinTheme, Palette>;
+const missing = (): never => { throw new Error('theme templates are not built yet'); };
+export const parseTemplate = (_text: string): Parsed => missing();
+export const templateText = (_template: Template): string => missing();
+export const sampleOf = (_theme: BuiltinTheme): Template => missing();
+export const declarations = (_template: Template): [string, string][] => missing();
