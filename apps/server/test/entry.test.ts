@@ -165,6 +165,29 @@ describe('the way back to leading', () => {
     expect(heard.did).toEqual(['tunnel stop', 'follow']);
   });
 
+  it('leads at once after it took the server over', async () => {
+    const k = keeper();
+    /* Its keeper just promoted its database: the name is its own client's, at 8, and its own nonce came back. */
+    k.said.own = { number: 8, machine: A, split: false };
+    k.said.route = { state: 'held', client: CLIENT, generation: 8 };
+    k.said.now = 5000;
+    await k.it.promoted();
+    expect([k.did, k.it.entry()]).toEqual([['tunnel start'], { sent: clocks(5000), term: { number: 9, machine: A, split: false } }]);
+    /* While its sync controller has no flag yet, it keeps the name and waits; with one, it has what lets it lead. */
+    await k.seconds(3);
+    expect([k.did, k.it.entry()]).toEqual([['tunnel start'], null]);
+    k.said.flag = true;
+    await k.seconds(1);
+    expect(k.it.entry()).toMatchObject({ term: { number: 9, machine: A } });
+    expect(k.did).toEqual(['tunnel start']);
+    /* A name that someone else registered since is no proof, as for any keeper. */
+    const lost = keeper();
+    lost.said.route = { state: 'held', client: OTHER, generation: 9 };
+    await lost.it.promoted();
+    await lost.seconds(1);
+    expect(lost.did).toEqual(['tunnel start', 'tunnel stop', 'follow']);
+  });
+
   it('keeps its link client stopped while it waits', async () => {
     const k = keeper();
     k.said.route = { state: 'empty', client: CLIENT, generation: 7 };

@@ -33,6 +33,9 @@ async function dataKeeper(): Promise<Running> {
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
+  const { othersFinished } = await import('./modules/keeper/proofs.js');
+  const { termOf } = await import('./modules/keeper/promote.js');
+  const { followFromHere } = await import('./modules/keeper/seed-view.js');
   const { Hander } = await import('./modules/keeper/handing.js');
   const { LeadUpdate } = await import('./modules/keeper/lead-update.js');
   const config = loadConfig(process.env);
@@ -66,6 +69,35 @@ async function dataKeeper(): Promise<Running> {
     copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
     sync,
     internet: new InternetMeasures({ dir: KEEPER_DIR, log }),
+    /* What its lease goes by once another machine holds a copy that finished: an answer of its own at the company's
+       link or its copy's word each second, and its copy's promise or the relay's window to lead again. */
+    proofs:
+      config.databaseUrl && config.machineId
+        ? (() => {
+            const sql = keeperSql(config.databaseUrl!, { timeoutMs: 5000 });
+            const relay = new Relay(config.relayUrl);
+            return {
+              needed: () => othersFinished(sql, config.machineId!),
+              probe: async (nonce: string, link: { url: string } | null) => {
+                const base = process.env.HORNHOOF_LINK_PROBE || link?.url;
+                return base ? probeLink(base, nonce) : null;
+              },
+              ownTerm: async () => {
+                const term = await termOf(sql);
+                return term ? { number: term.number, machine: term.machine, split: term.split } : null;
+              },
+              poll: async (link: { name: string; key: string }) => {
+                const sent = { wall: Date.now(), mono: performance.now() };
+                const [route, health] = await Promise.all([relay.route(link.name, link.key, 2000), relay.health(2000)]);
+                return { sent, replied: performance.now(), route, health: { up: health.up, relayStarted: health.relayStarted } };
+              },
+              follow: async () => {
+                await followFromHere({ dir: KEEPER_DIR, controlDir: config.controlDir, sql, machineId: config.machineId!, secret: config.secret });
+                exit();
+              },
+            };
+          })()
+        : undefined,
     /* Its part of a planned switch of the server to this machine: with nothing written down of one it leads at once,
        and tells an old leader that comes back late which machine leads now. */
     taking:
@@ -83,6 +115,13 @@ async function dataKeeper(): Promise<Running> {
                 if (!link) return false;
                 const route = await relay.route(link.name, link.key);
                 return route.known && route.state === 'held' && route.client === link.client;
+              },
+              /* A keeper that took over by itself goes by the name's generation too. */
+              name: async () => {
+                const link = parts.link();
+                if (!link) return null;
+                const route = await relay.route(link.name, link.key);
+                return route.known ? { state: route.state, mine: route.client === link.client, generation: route.generation } : null;
               },
               probe: async nonce => {
                 const base = process.env.HORNHOOF_LINK_PROBE || parts.link()?.url;
@@ -129,6 +168,8 @@ async function followKeeper(): Promise<Running> {
   const { keeperSql } = await import('./modules/keeper/lease-store.js');
   const { tunnelSettings } = await import('./modules/link/link.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
+  const { Relay } = await import('./modules/link/relay.js');
+  const { probeLink } = await import('./modules/keeper/taking.js');
   const config = followConfig(process.env, log);
   const whole = loadConfig(process.env);
   const db = openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 });
@@ -145,6 +186,9 @@ async function followKeeper(): Promise<Running> {
     /* While the copy is being made its database has no link to read yet. */
     settings: () => tunnelSettings(db, whole).catch(() => undefined),
     worker: { internet: new InternetMeasures({ dir: config.dir, log }) },
+    /* What its watch over the leader asks: hornhoof.org of the company's name, and the company's link of who answers there. */
+    relay: new Relay(whole.relayUrl),
+    probe: (nonce, url) => probeLink(process.env.HORNHOOF_LINK_PROBE || url, nonce),
     exit,
   });
 }

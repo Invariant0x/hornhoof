@@ -14,7 +14,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating', beat: '/peer/beat', promise: '/peer/promise' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -85,8 +85,9 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if ((method === 'GET' || method === 'POST') && path.startsWith(PEER_PATHS.switch)) {
     return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
   }
-  /* So are the word of the machine that leads about its update and the beats of the keepers, which go the same way. */
-  if (method === 'POST' && (path === PEER_PATHS.updating || path === PEER_PATHS.beat)) return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
+  /* So are the word of the machine that leads about its update, the beats of the keepers, and a keeper's ask for the
+     next term, which go the same way. */
+  if (method === 'POST' && (path === PEER_PATHS.updating || path === PEER_PATHS.beat || path === PEER_PATHS.promise)) return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
   return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
 }
 

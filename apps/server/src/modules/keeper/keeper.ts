@@ -21,6 +21,9 @@ import { PEER_PATHS } from '../../net/peer-server.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
+import { Reentry } from './entry.js';
+import { LeaseProofs, PROMISE_PATH } from './proofs.js';
+import type { Poll } from './takeover-step.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
 import { RECOVERY_LINK } from '../backups/types.js';
@@ -66,6 +69,20 @@ export type KeeperOptions = {
   pruneEveryMs?: number;
   /* How often it tells the other machines that keep data where it stands; each second unless a test says otherwise. */
   beatEveryMs?: number;
+  /* What its lease goes by once another machine holds a copy that finished: a lease is then renewed only on a proof,
+     and taken only on its copy's promise or through the relay's window. needed: whether another machine holds such a
+     copy. probe: a request through the company's link for who answers there. ownTerm: the term this machine's
+     database stands under. poll: one look at the company's name and the relay's health. follow: writes down whom this
+     machine follows from here on, and ends the keeper, which starts again as one that follows. Without it the keeper
+     leads as a machine that keeps the data alone does. */
+  proofs?: {
+    needed: () => Promise<boolean>;
+    probe: (nonce: string, link: OwnLink | null) => Promise<{ machine: string; nonce: string } | null>;
+    ownTerm: () => Promise<Term | null>;
+    poll: (link: OwnLink) => Promise<Poll>;
+    follow: () => Promise<void>;
+    everyMs?: number;
+  };
   /* For how long a door holds a request while the app is away, and the pause between its tries. 0: it answers at once. */
   holdMs?: number;
   holdEveryMs?: number;
@@ -166,6 +183,10 @@ const GUARD_EVERY_MS = 10_000;
 const BACKUP_KEYS_RETRY_MS = 60_000;
 const FRPC_RESTART_MS = 2000;
 const TAKING_EVERY_MS = 250;
+/* How often a keeper whose lease takes proofs asks for one, or looks for its way back to leading. */
+const PROVE_EVERY_MS = 1000;
+/* How long the copy has to answer an ask for its promise. */
+const PROMISE_ASK_MS = 2000;
 /* After a lease ended with another data machine listed, the link's frpc stays stopped this long, so the name is free
    for a machine that takes over; then it starts again, so this keeper holds its route and the relay can be told. */
 const LINK_PAUSE_MS = 30_000;
@@ -267,6 +288,14 @@ export class Keeper {
   private readonly hander: HandingPart | null;
   private readonly updater: UpdatingPart | null;
   private readonly beating: Beats;
+  /* What the lease is renewed on, and the way back to leading, where a lease takes proofs. */
+  private readonly leaseProofs: LeaseProofs | null;
+  private readonly reentry: Reentry | null;
+  /* Whether another machine holds a copy that finished, as last read; null before the first read. */
+  private neededNow: boolean | null;
+  /* The way back to leading wants the link's client to run, to take the company's name. */
+  private entryTunnel = false;
+  private proofsTimer: NodeJS.Timeout | null = null;
   /* The front door, and where it listens, so that a switch may shut it and open it again. */
   private frontDoor: http.Server | null = null;
   private frontAt: { port: number; host: string } | null = null;
@@ -340,11 +369,50 @@ export class Keeper {
       everyMs: opts.beatEveryMs,
       log: opts.log,
     });
+    const { proofs } = opts;
+    this.neededNow = proofs ? null : false;
+    this.leaseProofs = proofs
+      ? new LeaseProofs({ probe: nonce => proofs.probe(nonce, this.ownLink() ?? null), beats: this.beating, self: opts.config.machineId ?? '', term: () => this.holder.term(), b: () => this.syncNamed(), now: opts.now, everyMs: proofs.everyMs })
+      : null;
+    this.reentry = proofs
+      ? new Reentry({
+          self: opts.config.machineId ?? '',
+          needed: () => this.neededNow,
+          /* With a lease, in the middle of a switch either way, there is nothing to come back to. */
+          idle: () => this.holder.standing() !== null || this.taking || (this.hander?.holds() ?? false),
+          ownTerm: proofs.ownTerm,
+          beats: this.beating,
+          b: () => this.recordNamed(),
+          ask: (networkId, term) => this.links?.ask(networkId, 'POST', PROMISE_PATH, { term }, PROMISE_ASK_MS) ?? Promise.resolve(null),
+          poll: async () => {
+            const link = this.ownLink();
+            return link ? proofs.poll(link) : null;
+          },
+          client: () => this.ownLink()?.client ?? null,
+          tunnel: { start: () => void (this.entryTunnel = true), stop: () => void (this.entryTunnel = false), runs: () => this.entryTunnel },
+          flag: () => (this.sync ? this.sync.flag() !== null : true),
+          follow: proofs.follow,
+          now: opts.now,
+          log: opts.log,
+        })
+      : null;
     this.holder = new LeaseHolder({
       lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log,
       sync: this.sync ?? undefined,
       onEnd: () => this.leaseEnded(),
       hold: () => this.hander?.holds() ?? false,
+      proofs: this.leaseProofs && this.reentry
+        ? {
+            needed: () => this.neededNow,
+            proof: () => this.leaseProofs!.proof(),
+            ended: () => this.leaseProofs!.ended(),
+            entry: () => this.reentry!.entry(),
+            clear: () => {
+              this.leaseProofs!.clear();
+              this.reentry!.taken();
+            },
+          }
+        : undefined,
     });
     /* A machine without an id is none of the company's network, as it carries no public link. */
     this.identity = opts.config.machineId
@@ -420,6 +488,39 @@ export class Keeper {
     return record?.state === 'on' && record.copy && record.generation === this.sync?.generation() ? record.copy : null;
   }
 
+  /* The copy the relay's record names as the one that holds every change, whichever generation it was stored at: the
+     one a keeper that holds no lease asks for its promise. */
+  private recordNamed(): string | null {
+    const record = this.sync?.record();
+    return record?.state === 'on' ? record.copy : null;
+  }
+
+  /* Whether the link's client may run now. While a lease takes proofs, it runs only under a lease that stands or once
+     the way back in takes the name: a keeper that holds no lease holds no name either. Else as before: stopped for a
+     while after a lease ended with another machine listed. */
+  linkWanted(): boolean {
+    if (this.linkHeld) return false;
+    if (this.neededNow) return this.holder.standing() !== null || this.entryTunnel;
+    return performance.now() >= this.linkPausedUntil;
+  }
+
+  /* Whether another machine holds a copy that finished, read anew; an answer that cannot be had keeps the last one. */
+  private async readNeeded(): Promise<void> {
+    const { proofs } = this.opts;
+    if (!proofs) return;
+    const needed = await proofs.needed().catch(() => null);
+    if (needed === null) return;
+    if (needed && this.neededNow === false) this.opts.log('Another machine holds a copy of the data: this machine leads only while hornhoof.org or that copy vouches for it.');
+    this.neededNow = needed;
+  }
+
+  /* Each second: a proof for the lease that stands, or a look for the way back to leading. */
+  private prove(): void {
+    if (this.stopped || !this.neededNow) return;
+    if (this.holder.standing()) void this.leaseProofs?.tick();
+    else void this.reentry?.tick();
+  }
+
   /* Where this keeper stands, as it tells the other machines that keep data each second: handing the server over,
      taking it, leading under its lease, or holding none. */
   private beat(): Beat {
@@ -433,7 +534,7 @@ export class Keeper {
         : lease
           ? { kind: 'lead', term: lease.term, lease: lease.kind, sync: this.syncNamed(), until: lease.until }
           : { kind: 'idle', term: this.holder.lastTerm() };
-    return { machine: this.opts.config.machineId ?? '', host: this.opts.hostname ?? own?.hostname ?? '', stance, number: own?.number ?? null, reach: new Date().toISOString(), ready: true, full: false };
+    return { machine: this.opts.config.machineId ?? '', host: this.opts.hostname ?? own?.hostname ?? '', stance, number: own?.number ?? null, reach: new Date().toISOString(), ready: true, full: this.holder.full() };
   }
 
   /* What its hello says besides who it is: the term it leads under, the machine its commits wait for, and the machine
@@ -488,6 +589,8 @@ export class Keeper {
         await this.holder.guard();
         await this.sync.start();
       }
+      /* So does whether a lease takes a proof: before that is known, none is taken. */
+      await this.readNeeded();
       /* The lease and the fences come before the first word, so a healthy machine leads from it. */
       await this.holder.tick();
       await this.holder.look();
@@ -495,7 +598,11 @@ export class Keeper {
     };
     const leaseTimers = (): void => {
       this.timer = setInterval(() => void tick(), everyMs);
-      this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
+      this.fencesTimer = setInterval(() => void this.holder.look().then(() => this.readNeeded()), linkEveryMs);
+      if (this.opts.proofs) {
+        this.proofsTimer = setInterval(() => this.prove(), this.opts.proofs.everyMs ?? PROVE_EVERY_MS);
+        this.proofsTimer.unref();
+      }
     };
     const afterLead = (): void => {
       this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
@@ -541,6 +648,8 @@ export class Keeper {
         this.taking = false;
         if (this.takingTimer) clearInterval(this.takingTimer);
         this.takingTimer = null;
+        /* Where a lease takes proofs, the promotion is this keeper's proof for its first one. */
+        await this.reentry?.promoted().catch((err: unknown) => this.opts.log(`The keeper could not note that it took the server over: ${reasonOf(err)}`));
         await lead();
         await listenOn(frontDoor, at.front, host).catch((err: unknown) => this.opts.log(`The keeper could not open its front door: ${reasonOf(err)}`));
         if (this.stopped) return;
@@ -560,9 +669,11 @@ export class Keeper {
     if (this.guardTimer) clearInterval(this.guardTimer);
     if (this.slotsTimer) clearInterval(this.slotsTimer);
     if (this.takingTimer) clearInterval(this.takingTimer);
-    this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = null;
+    if (this.proofsTimer) clearInterval(this.proofsTimer);
+    this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = this.slotsTimer = this.proofsTimer = null;
     this.stopped = true;
     this.beating.stop();
+    this.leaseProofs?.stop();
     await this.taker?.stop();
     await this.hander?.stop();
     await this.updater?.stop();
@@ -597,6 +708,8 @@ export class Keeper {
       switches: {
         handle: async (peer, method, path, body) => {
           if (path === PEER_PATHS.beat) return this.beating.handle(peer, body) as { status: number; body: object };
+          /* A keeper that asks this one for the next term hears where this one stands: it leads, or would. */
+          if (path === PEER_PATHS.promise) return { status: 200, body: this.beat() };
           if (!this.taker) return { status: 404, body: { ok: false } };
           return this.taker.handle(await this.networkIdOf(peer.machine), method, path, body);
         },
@@ -716,6 +829,8 @@ export class Keeper {
   /* A lease of this machine ended. With another machine holding the data, the link's frpc stops for a while: the
      machine that holds the latest changes may take the company's name over meanwhile. */
   private leaseEnded(): void {
+    /* Where a lease takes proofs, the link's client stops with the lease and stays stopped until the way back in. */
+    this.entryTunnel = false;
     if ((this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
   }
 
@@ -723,7 +838,7 @@ export class Keeper {
      settings again after that, so it starts anew, holds its route, and the relay can be told what is true now. */
   private async linkUnlessPaused(read: () => Promise<TunnelSettings | null | undefined>): Promise<TunnelSettings | null | undefined> {
     const settings = await read();
-    return settings && (this.linkHeld || performance.now() < this.linkPausedUntil) ? null : settings;
+    return settings && !this.linkWanted() ? null : settings;
   }
 
   /* The chores of the copies' slots, while this machine leads: how much of the log a copy that fell behind is kept,

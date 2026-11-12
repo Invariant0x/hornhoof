@@ -227,6 +227,22 @@ export class Taker {
     if (step.do === 'expire' || step.do === 'forget') forgetTaking(this.opts.dir);
   }
 
+  /* Whether an offer of a planned switch stands, which no go followed yet. */
+  offered(): boolean {
+    try {
+      return readTaking(this.opts.dir)?.phase === 'offered';
+    } catch (err) {
+      if (err instanceof NoteUnreadable) return true;
+      throw err;
+    }
+  }
+
+  /* The copy decided to take the server over and wrote that down: its subscription stops, and the keeper ends. */
+  async takenOver(): Promise<void> {
+    if (await this.opts.subscription.enabled()) await this.opts.subscription.disable();
+    this.end();
+  }
+
   /* Whether a go was taken, and this keeper is to end: its subscription stays stopped from then on. A note that
      cannot be read counts as one, so nothing starts the subscription again on it. */
   going(): boolean {

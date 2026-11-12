@@ -4,24 +4,29 @@ import { PeerDoor } from '../../net/peer-door.js';
 import { PEER_PATHS, PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
+import type { Route } from '../link/relay.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import { Beats, type Beat } from './beats.js';
 import { CopyMaker, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
 import type { FollowConfig } from './follow-config.js';
 import { Leaving, type LeavingOptions } from './leave.js';
+import type { Clocks } from './lease.js';
 import type { Sql } from './lease-store.js';
 import { machineKey, reasonOf } from './machine-keys.js';
 import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
-import { pgSubscription, Taker, type TakerOptions } from './taking.js';
+import type { Taking } from './switch-step.js';
+import { pgSubscription, Taker, writeTaking, type TakerOptions } from './taking.js';
 import { writeKeeperState } from './state.js';
 import { CopyUpdating, type CopyUpdatingOptions } from './updating.js';
+import { Watcher, type WatcherOptions } from './watch.js';
 import { WorkerKeeper, type KeeperView, type WorkerKeeperOptions, type WorkerStatus } from './worker.js';
 
 /* With no leader in reach for this long, the front door passes to this machine's own app, which reads. */
 export const OWN_APP_AFTER_MS = 60_000;
 const EVERY_MS = 1000;
 const REPLICA_EVERY_MS = 60_000;
+const LINK_EVERY_MS = 10_000;
 const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const LOOPBACK = '127.0.0.1';
@@ -63,6 +68,14 @@ export type FollowKeeperOptions = {
   updating?: Partial<CopyUpdatingOptions>;
   /* How often it tells the other machines that keep data where it stands; each second unless a test says otherwise. */
   beatEveryMs?: number;
+  /* hornhoof.org's relay, which the watch over the leader asks of the company's name; none where a test gives its own. */
+  relay?: WatcherOptions['relay'];
+  /* A request through the company's link for who answers there; none where a test gives its own. */
+  probe?: (nonce: string, url: string) => Promise<{ machine: string; nonce: string } | null>;
+  /* What a test changes in the watch over the machine this copy follows. */
+  watcher?: Partial<WatcherOptions>;
+  /* The clocks the beats and the watch go by; the machine's own unless a test says otherwise. */
+  clocks?: () => Clocks;
   /* Ends this keeper, so that it starts again as another kind; the process ends unless a test says otherwise. */
   exit?: () => void;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
@@ -88,6 +101,10 @@ export class FollowKeeper {
   private readonly taker: Taker;
   private readonly updating: CopyUpdating;
   private readonly beating: Beats;
+  private readonly watcher: Watcher;
+  /* The company's link as this machine's own database holds it, as last read. */
+  private linkNow: TunnelSettings | null = null;
+  private linkAt: number | null = null;
   private readonly copySql: Closable;
   private ports: Promise<{ data: number; app: number }> = new Promise(() => {});
   private server: PeerServer | null = null;
@@ -168,8 +185,37 @@ export class FollowKeeper {
       self: () => this.beat(),
       peers: () => (this.view?.data ?? []).filter(machine => machine.networkId !== config.machineId).map(({ machine, networkId }) => ({ machine, networkId })),
       ask: (networkId, method, path, body, timeoutMs) => this.worker.parts().link.ask(networkId, method, path, body, timeoutMs),
+      /* Every beat it hears, and every answer it gets, tells the watch which term the leader leads under. */
+      onHeard: (networkId, beat) => this.watcher.heard(networkId, beat),
+      now: opts.clocks,
       everyMs: opts.beatEveryMs,
       log,
+    });
+    const nobody = { route: async (): Promise<Route> => ({ known: false, why: 'unreachable' }), health: async () => ({ up: false, relayStarted: null }) };
+    this.watcher = new Watcher({
+      dir: config.dir,
+      self: { networkId: config.machineId },
+      link: () => (this.linkNow ? { name: this.linkNow.name, key: this.linkNow.key } : null),
+      relay: opts.relay ?? nobody,
+      probe: async nonce => (this.linkNow && opts.probe ? opts.probe(nonce, this.linkNow.url) : null),
+      beats: this.beating,
+      beat: () => this.beat(),
+      /* The machine its copy was made on or last joined, as the maker wrote it down. */
+      leader: () => {
+        const networkId = this.maker.leader();
+        return networkId ? { networkId } : null;
+      },
+      ready: () => this.maker.report()?.state === 'ready',
+      /* While the leader updates, or a planned switch was offered to this machine, nothing is watched. */
+      holds: () => this.updating.holds() || this.taker.offered(),
+      reach: () => this.maker.report()?.at ?? null,
+      take: taking => this.takeOver(taking),
+      /* The CEO's question comes with the page that asks it; until then the keeper says so in its log alone. */
+      ask: () => undefined,
+      ceo: () => null,
+      now: opts.clocks,
+      log,
+      ...opts.watcher,
     });
     this.peerDoor = new PeerDoor({ app: opts.app });
     this.door = new DbDoor({
@@ -190,6 +236,7 @@ export class FollowKeeper {
     this.timer.unref();
     this.look();
     this.beating.start();
+    this.watcher.start();
     return { front, door };
   }
 
@@ -227,7 +274,7 @@ export class FollowKeeper {
     const own = this.view?.data.find(machine => machine.networkId === machineId);
     const copy = this.maker.report();
     return {
-      machine: machineId, host: own?.hostname ?? '', stance: this.taker.going() ? { kind: 'attempting' } : { kind: 'follow', term: null },
+      machine: machineId, host: own?.hostname ?? '', stance: this.taker.going() ? { kind: 'attempting' } : this.watcher.stance(),
       number: own?.number ?? null, reach: copy?.at ?? null, ready: copy?.state === 'ready', full: false,
     };
   }
@@ -239,6 +286,7 @@ export class FollowKeeper {
   async stop(): Promise<void> {
     this.stopped = true;
     this.beating.stop();
+    this.watcher.stop();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.working;
@@ -280,6 +328,7 @@ export class FollowKeeper {
         handle: async (peer, method, path, body) => {
           const from = this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '';
           if (path === PEER_PATHS.beat) return this.beating.handle(peer, body) as { status: number; body: object };
+          if (path === PEER_PATHS.promise) return this.watcher.promise(from, body) as { status: number; body: object };
           return path === PEER_PATHS.updating ? this.updating.handle(from, body) : this.taker.handle(from, method, path, body);
         },
       },
@@ -308,6 +357,16 @@ export class FollowKeeper {
       log: this.opts.log,
     });
     this.tunnel.start();
+  }
+
+  /* The copy takes the server over, by itself or as the CEO chose: written down first, then its subscription stopped,
+     then the keeper ends, and starts again as the one that takes the server, as after the go of a planned switch. */
+  private async takeOver(taking: Taking): Promise<void> {
+    const leader = this.view?.data.find(machine => machine.networkId === taking.from.networkId)?.hostname || 'the machine that led';
+    const since = taking.heard == null ? 'this keeper started' : new Date(taking.heard).toISOString();
+    writeTaking(this.opts.config.dir, { ...taking, from: { ...taking.from, hostname: leader } });
+    this.opts.log(taking.kind === 'ceo' ? `Going on from ${taking.reach ?? 'what this copy holds'} as the CEO chose.` : `Taking the server over from ${leader}: it has not answered since ${since}.`);
+    await this.taker.takenOver();
   }
 
   /* Null: no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays. */
@@ -345,6 +404,7 @@ export class FollowKeeper {
       return;
     }
     await this.keepPromise();
+    await this.keepLink();
     await this.taker.tick();
     /* Once it took the go of a switch, its subscription stays stopped and this keeper ends: the copy's maker, which
        starts a stopped subscription again, takes no step. */
@@ -366,6 +426,16 @@ export class FollowKeeper {
     } finally {
       body.destroy();
     }
+  }
+
+  /* The company's link as this machine's own database holds it, read anew every ten seconds: the watch over the
+     leader asks hornhoof.org of it. A read that fails keeps the last one. */
+  private async keepLink(): Promise<void> {
+    const now = performance.now();
+    if (this.linkAt !== null && now - this.linkAt < LINK_EVERY_MS) return;
+    this.linkAt = now;
+    const settings = await this.opts.settings().catch(() => undefined);
+    if (settings !== undefined) this.linkNow = settings;
   }
 
   /* What this machine promised the leader for its update: a promise past its time goes, and a stop that a restart cut

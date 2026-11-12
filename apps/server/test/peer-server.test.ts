@@ -348,6 +348,8 @@ describe('routeOf', () => {
     ["a keeper's beat", asked('POST', '/peer/beat'), 'peer', 'data', db, { to: 'switch', method: 'POST', path: '/peer/beat' }],
     ['a beat from a worker', asked('POST', '/peer/beat'), 'peer', 'worker', db, refused(403)],
     ['a beat through the app door', asked('POST', '/peer/beat'), 'app', 'data', db, refused(403)],
+    ['an ask for the next term', asked('POST', '/peer/promise'), 'peer', 'data', db, { to: 'switch', method: 'POST', path: '/peer/promise' }],
+    ['an ask for the next term from a worker', asked('POST', '/peer/promise'), 'peer', 'worker', db, refused(403)],
   ] as const)('%s', (_, headers, kind, role, here, route) => {
     expect(routeOf(headers, kind, role, here)).toEqual(route);
   });

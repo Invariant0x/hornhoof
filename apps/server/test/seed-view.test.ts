@@ -1,8 +1,13 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { authority, certificates, companies, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
-import { seedView } from '../src/modules/keeper/seed-view.js';
+import { REPLICA_FILE } from '../src/modules/keeper/become.js';
+import { followFromHere, seedView } from '../src/modules/keeper/seed-view.js';
+import { PEERS_FILE } from '../src/modules/keeper/worker.js';
 import { createTestSql, TEST_SECRET } from './helpers.js';
 
 const SECRET = Buffer.from(TEST_SECRET, 'base64');
@@ -51,6 +56,19 @@ describe('the view a machine that led builds from its own database', () => {
     });
     /* As B sees it. */
     expect(await seedView(d.sql, B, SECRET)).toMatchObject({ machine: d.b.id, data: [{ machine: d.a.id, networkId: A, hostname: 'rack', number: 1, copyName: null }] });
+  });
+
+  it('writes down that this machine follows another from here on', async () => {
+    const d = await database();
+    const [dir, controlDir] = [mkdtempSync(join(tmpdir(), 'hh-seed-keeper-')), mkdtempSync(join(tmpdir(), 'hh-seed-control-'))];
+    onTestFinished(() => void [dir, controlDir].forEach(folder => rmSync(folder, { recursive: true, force: true })));
+    await followFromHere({ dir, controlDir, sql: d.sql, machineId: A, secret: SECRET, now: () => Date.parse('2026-11-11T12:00:00Z') });
+    /* What the keeper that follows starts from: the network as this database knew it, and the mark of a copy, which
+       its updater and its app read too. */
+    expect(JSON.parse(readFileSync(join(dir, PEERS_FILE), 'utf8'))).toEqual(await seedView(d.sql, A, SECRET));
+    expect(statSync(join(dir, PEERS_FILE)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(join(controlDir, REPLICA_FILE), 'utf8'))).toEqual({ since: '2026-11-11T12:00:00.000Z' });
+    expect(statSync(join(controlDir, REPLICA_FILE)).mode & 0o777).toBe(0o644);
   });
 
   it('names no link while a secret of it is missing', async () => {

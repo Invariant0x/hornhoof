@@ -61,6 +61,8 @@ export type BeatsOptions = {
   peers: () => { machine: string; networkId: string }[];
   /* One request to another data machine's keeper on the session to it; none when no whole answer came in time. */
   ask: (networkId: string, method: 'POST', path: string, body: unknown, timeoutMs: number) => Promise<{ status: number; body: unknown } | null>;
+  /* Called with each beat that was kept, whether a machine sent it or answered with it. */
+  onHeard?: (networkId: string, beat: Beat) => void;
   now?: () => Clocks;
   everyMs?: number;
   log: (line: string) => void;
@@ -105,6 +107,7 @@ export class Beats {
     const row = this.opts.peers().find(known => known.networkId === beat.machine);
     if (peer.role !== 'data' || !row || row.machine !== peer.machine) return REFUSED(403);
     this.lasts.set(beat.machine, { beat, at: this.clocks().mono, sent: null });
+    this.opts.onHeard?.(beat.machine, beat);
     return { status: 200, body: this.opts.self() };
   }
 
@@ -139,6 +142,7 @@ export class Beats {
       const heard = { beat, at: this.clocks().mono, sent };
       this.lasts.set(networkId, heard);
       this.answers.set(networkId, heard);
+      this.opts.onHeard?.(networkId, beat);
     } finally {
       this.flying.delete(networkId);
     }

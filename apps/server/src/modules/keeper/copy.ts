@@ -162,6 +162,11 @@ export class CopyMaker {
     }
   }
 
+  /* The machine this copy was made on or last joined, by its network id; none before a view named one. */
+  leader(): string | null {
+    return this.kept.leader;
+  }
+
   /* The count of migrations the copy's schema was made with; null before it has one. */
   migrations(): number | null {
     return this.kept.migrations;

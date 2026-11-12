@@ -49,6 +49,8 @@ export class Reentry {
   private said = '';
   private working = false;
   private followed = false;
+  /* It took the server over a moment ago, and has not yet seen at which generation the name is its own. */
+  private fresh = false;
   private readonly clocks: () => Clocks;
 
   constructor(private readonly opts: ReentryOptions) {
@@ -64,11 +66,22 @@ export class Reentry {
   taken(): void {
     this.granted = null;
     this.registering = null;
+    this.fresh = false;
     this.asked = null;
     this.promised = null;
     this.shut();
     this.say('');
     if (!this.opts.tunnel.runs()) this.opts.tunnel.start();
+  }
+
+  /* The keeper just took the server over: it registered the company's name, its own nonce came back through the
+     link, and its term is written. That is its proof for its first lease, which it may take at once; and the name it
+     holds is its own registration, so the looks that follow keep it. */
+  async promoted(): Promise<void> {
+    const own = await this.opts.ownTerm();
+    this.opts.tunnel.start();
+    this.fresh = true;
+    this.granted = { sent: this.clocks(), term: { number: Math.max(own?.number ?? 0, this.latest(own)?.number ?? 0) + 1, machine: this.opts.self, split: false } };
   }
 
   /* One look, each second. With a lease held, or while no proof is needed, there is nothing to come back to. */
@@ -126,15 +139,21 @@ export class Reentry {
     const poll = client ? await opts.poll() : null;
     this.window = nextWindow(this.window, poll, false);
     if (poll?.route.known) this.route = { state: poll.route.state, client: poll.route.client, generation: poll.route.generation, sent: poll.sent };
+    if (this.fresh && this.route) {
+      /* The registration it just made is the one at the generation the name stands at, when the name is its own. */
+      if (this.route.state === 'held' && this.route.client === client) this.registering = this.route.generation - 1;
+      this.fresh = false;
+    }
     const ownTerm = await opts.ownTerm();
     const now = this.clocks();
     const step = nextEntryStep({
       now, needed: true, self: opts.self, ownTerm, latest: this.latest(ownTerm), b: this.copy(), asked: this.asked, window: this.window,
       route: this.route, registering: this.registering, client: client ?? '', tunnel: opts.tunnel.runs(), flag: opts.flag(),
     });
-    if (step.do === 'wait') return this.say(`This machine does not lead yet: it waits for ${step.why}.`);
     if (step.do === 'take') return void (this.granted = { sent: step.sent, term: step.term });
+    /* What let it lead a look ago lets it lead no more. */
     this.granted = null;
+    if (step.do === 'wait') return this.say(`This machine does not lead yet: it waits for ${step.why}.`);
     if (step.do === 'follow') {
       this.followed = true;
       opts.tunnel.stop();

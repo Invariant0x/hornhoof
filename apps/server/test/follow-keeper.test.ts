@@ -12,6 +12,7 @@ import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey } from '../src/modules/keeper/machine-keys.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
+import { readFollowed } from '../src/modules/keeper/watch.js';
 import { PROMISE_MS } from '../src/modules/keeper/update-steps.js';
 import { readWord } from '../src/modules/keeper/updating.js';
 import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
@@ -224,6 +225,84 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect([status, own]).toMatchObject([200, { machine: f.config.machineId, stance: { kind: 'follow' } }]);
     expect(await askingAt(ports.data, f.config.dir)('POST', '/peer/beat', leads)).toEqual([403, { ok: false }]);
     expect(f.keeper.beats().last(HOST_ID)!.beat.stance.kind).not.toBe('attempting');
+  });
+
+  it('follows the term of the machine it was made on, and promises that machine the next one', async () => {
+    const dir = folder();
+    const c = await company({ dir, beatEveryMs: 20 });
+    /* Its maker wrote down which machine the copy was made on. */
+    const f = await follower(c, { beatEveryMs: 20 }, own => writeFileSync(join(own, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready', leader: HOST_ID })));
+    await until(() => f.keeper.status().leader !== null);
+    /* The leader's beats say under which term it leads: that is the term this copy follows, written down. */
+    await until(() => readFollowed(f.config.dir) !== null);
+    const followed = readFollowed(f.config.dir)!;
+    expect(followed).toMatchObject({ machine: 'machine-a', split: false });
+    await until(() => c.keeper.beats().last(f.config.machineId)?.beat.stance.kind === 'follow' && (c.keeper.beats().last(f.config.machineId)!.beat.stance as { term: unknown }).term !== null);
+    expect(c.keeper.beats().last(f.config.machineId)!.beat.stance).toEqual({ kind: 'follow', term: followed });
+    const ports = await f.keeper.peerPorts();
+    const next = { number: followed.number + 1, machine: followed.machine, split: false };
+    /* Only a machine of the company that keeps data is answered at all, and only the machine it follows is promised anything. */
+    const leader = askingAt(ports.data, dir);
+    expect(await leader('POST', '/peer/promise', {})).toEqual([400, { ok: false }]);
+    const [status, said] = await leader('POST', '/peer/promise', { term: { ...next, machine: f.config.machineId } });
+    expect([status, said]).toMatchObject([200, { machine: f.config.machineId, stance: { kind: 'follow', term: followed } }]);
+    expect(readFollowed(f.config.dir)).toEqual(followed);
+  });
+
+  it('takes the server over by writing that down and ending, once its watch says so', async () => {
+    const dir = folder();
+    const c = await company({ dir, beatEveryMs: 20 });
+    const sub = { enabled: true, did: [] as string[] };
+    let exits = 0;
+    /* A clock that runs fifty times as fast, and a relay the test plays: the name is free at 7, and its record names
+       this copy as the one that holds every change. */
+    const began = performance.now();
+    const clocks = () => {
+      const ms = (performance.now() - began) * 50;
+      return { wall: 1_700_000_000_000 + ms, mono: ms };
+    };
+    const name = { state: 'held' as 'held' | 'empty' };
+    const said = { ceo: null as number | null };
+    let own = '';
+    const f = await follower(
+      c,
+      {
+        beatEveryMs: 20, clocks,
+        taker: { subscription: { enabled: async () => sub.enabled, applying: async () => sub.enabled, disable: async () => void ((sub.enabled = false), sub.did.push('disable')), enable: async () => void (sub.enabled = true) }, exit: () => void (exits += 1) },
+        watcher: {
+          everyMs: 20, ready: () => true,
+          link: () => ({ name: 'acme', key: 'k'.repeat(32) }),
+          relay: {
+            route: async () => ({ known: true, state: name.state, client: null, since: 0, generation: 7, relayStarted: 100, evictionBound: 30, sync: { state: 'on', copy: own, epoch: 1, generation: 7, at: 1 } }),
+            health: async () => ({ up: true, relayStarted: 100 }),
+          },
+          probe: async () => null,
+          ceo: () => said.ceo,
+        },
+      },
+      folderOf => writeFileSync(join(folderOf, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready', leader: HOST_ID })),
+    );
+    own = f.config.machineId;
+    await until(() => f.keeper.status().leader !== null && readFollowed(f.config.dir) !== null);
+    /* The leader says its commits wait for this copy. */
+    await until(() => f.keeper.beats().last(HOST_ID)?.beat.stance.kind === 'lead');
+    expect(readTaking(f.config.dir)).toBeNull();
+    /* While the leader beats, nothing is taken, whatever the name says. */
+    name.state = 'empty';
+    await new Promise(resolve => setTimeout(resolve, 700));
+    expect([readTaking(f.config.dir), exits]).toEqual([null, 0]);
+    /* The leader is gone. Its last beats never said that its commits wait for this copy, so this copy may lack
+       changes: it asks, and takes nothing by itself. */
+    await c.stop();
+    await until(() => f.lines.includes('This copy may lack changes; asking the CEO.'));
+    expect([readTaking(f.config.dir), exits, sub.did]).toEqual([null, 0, []]);
+    /* The CEO says to go on from this copy: it writes the takeover down, stops its subscription and ends, to start
+       again as the keeper that takes the server. From then it tells the others that it is taking it. */
+    said.ceo = clocks().mono;
+    await until(() => exits === 1);
+    expect(readTaking(f.config.dir)).toMatchObject({ phase: 'go', kind: 'ceo', from: { networkId: HOST_ID }, generation: 7, w: null, copies: null });
+    expect([sub.did, f.keeper.beats().own().stance]).toEqual([['disable'], { kind: 'attempting' }]);
+    expect(f.lines.some(line => line.startsWith('Going on from'))).toBe(true);
   });
 
   it('waits for the update', async () => {

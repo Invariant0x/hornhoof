@@ -1,9 +1,14 @@
+import { chmodSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { MachineRole } from '../../db/schema.js';
 import { Server } from '../link/client.js';
 import type { DataMachine, WorkerLink, WorkerView } from '../network/join.js';
+import { REPLICA_FILE } from './become.js';
 import type { Sql } from './lease-store.js';
+import { writePrivately } from './machine-keys.js';
+import { PEERS_FILE } from './worker.js';
 
 const VisitSecret = z.object({ name: z.string(), key: z.string() });
 
@@ -39,4 +44,16 @@ export async function seedView(sql: Sql, machineId: string, secret: Buffer): Pro
     )
   ).rows;
   return { machine: me.id, role: me.role, authorityPem: authority?.pem ?? null, revoked: revoked.map(row => row.serial), data, link: await linkOf(sql, secret), build: null, go: null, copy: null };
+}
+
+/* A machine that led follows another from here on: its keeper writes down the network as its own database knew it,
+   which the keeper that follows starts from, and the mark of a machine that keeps a copy, which its updater and its
+   app read too. The keeper then ends, and starts again as one that follows. */
+export async function followFromHere(o: { dir: string; controlDir: string; sql: Sql; machineId: string; secret: Buffer; now?: () => number }): Promise<void> {
+  writePrivately(join(o.dir, PEERS_FILE), JSON.stringify(await seedView(o.sql, o.machineId, o.secret)));
+  const marker = join(o.controlDir, REPLICA_FILE);
+  const partial = `${marker}.${process.pid}.tmp`;
+  writeFileSync(partial, JSON.stringify({ since: new Date(o.now?.() ?? Date.now()).toISOString() }));
+  chmodSync(partial, 0o644);
+  renameSync(partial, marker);
 }
