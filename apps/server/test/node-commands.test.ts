@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { nodeCodes } from '../src/db/schema.js';
+import { nodeCodes, subscriptions } from '../src/db/schema.js';
 import { as, invitePerson, sessionFrom, SETUP, setUpCompany, testApp } from './helpers.js';
 
 const MACHINE = { machineId: 'command-test-mac', hostname: 'demo-mac', os: 'darwin', arch: 'arm64' };
@@ -63,6 +63,27 @@ describe('one active install command per place', () => {
     expect((await app.inject({ method: 'POST', url, ...as(ceo) })).statusCode).toBe(409);
     await db.update(nodeCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(nodeCodes.codeHash, first.id));
     expect((await app.inject({ method: 'POST', url, ...as(ceo) })).statusCode).toBe(201);
+  });
+
+  it('ends the command of a removed plan, so the plan connects again with a new one', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const first = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${first.subscriptions[0].id}`, ...as(ceo) })).statusCode).toBe(204);
+    const again = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    expect(again.statusCode).toBe(201);
+    expect((await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands.map((c: { command: string }) => c.command)).toEqual([again.json().command]);
+    expect((await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: codeOf(first.command), ...MACHINE } })).statusCode).toBe(410);
+  });
+
+  it('ends the waiting command of a plan removed before its commands went with it, when the plan connects again', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const first = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
+    await db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, first.subscriptions[0].id));
+    const again = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    expect(again.statusCode).toBe(201);
+    expect((await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands.map((c: { command: string }) => c.command)).toEqual([again.json().command]);
   });
 
   it('blocks a second standalone machine command until Cancel, then rejects join by the cancelled code', async () => {
