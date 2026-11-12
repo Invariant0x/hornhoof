@@ -1085,6 +1085,15 @@ psql_on() {
   docker exec "$DBC" psql -U hornhoof -d "$name" -v ON_ERROR_STOP=1 -q "$@"
 }
 
+# psql_alone <database> <psql arguments>: the same for what a restore does from the moment it closes the database in
+# use. The copy commits wait for loses its connection there with every other session, and no copy follows these
+# statements, so each is committed here alone: left to wait for that copy, the restore would stand still for good.
+psql_alone() {
+  local name=$1
+  shift
+  psql_on "$name" -c 'SET synchronous_commit = local' "$@"
+}
+
 # The databases of Hornhoof there are now, as words; fails when the database server does not say.
 db_names() { psql_on postgres -tAc "SELECT COALESCE(string_agg(datname, ' '), '') FROM pg_database WHERE datname LIKE 'hornhoof%'" 2> /dev/null; }
 
@@ -1793,7 +1802,7 @@ cutover() {
   while kill -0 "$reader" 2> /dev/null && [ "$looks" -lt 60 ]; do
     seen=$(psql_on postgres -tAc "SELECT count(*) FROM pg_stat_activity WHERE datname = 'hornhoof' AND application_name = 'hornhoof-cutover'" 2> /dev/null || true)
     if [ "${seen:-0}" != 0 ]; then
-      psql_on postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS false' > /dev/null 2>&1 || true
+      psql_alone postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS false' > /dev/null 2>&1 || true
       break
     fi
     looks=$((looks + 1))
@@ -1808,9 +1817,11 @@ keep_carry() {
   (umask 077 && sed -n 2p "$1" | jq -ce --arg attempt "$R_ATTEMPT" 'select(type == "object") | {attempt: $attempt, carry: .}' > "$file.new") && owned "$file.new" 600 && mv "$file.new" "$file"
 }
 
-# adopt <term> <machine> <cluster>: the loaded database goes by what the closed one went by (adopt.sql).
+# adopt <term> <machine> <cluster>: the loaded database goes by what the closed one went by (adopt.sql), committed
+# here alone as psql_alone's statements are.
 adopt() {
   {
+    printf '%s\n' 'SET synchronous_commit = local;'
     printf '%s\n' "SELECT set_config('hornhoof.term', :'term', false), set_config('hornhoof.machine', :'machine', false), set_config('hornhoof.cluster', :'cluster', false);"
     cat "$SQL_DIR/adopt.sql"
   } | docker exec -i "$DBC" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q -v term="$1" -v machine="$2" -v cluster="$3" > /dev/null 2>&1
@@ -1838,9 +1849,9 @@ restore_swap() {
   cluster=$(sed -n 1p "$out" | jq -r '.cluster // empty')
   if [ -n "$1" ]; then keep_carry "$out" || return 1; fi
   adopt "$term" "$machine" "$cluster" || return 1
-  psql_on postgres -c "ALTER DATABASE hornhoof RENAME TO hornhoof_before_$R_STAMP" > /dev/null 2>&1 || return 1
+  psql_alone postgres -c "ALTER DATABASE hornhoof RENAME TO hornhoof_before_$R_STAMP" > /dev/null 2>&1 || return 1
   journal old_renamed || return 1
-  psql_on postgres -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null 2>&1 || return 1
+  psql_alone postgres -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null 2>&1 || return 1
   journal new_renamed || return 1
   write_env "$secret" "$node_key" "$relay" || return 1
   rm -f "$env"
@@ -1863,15 +1874,15 @@ restore_back() {
         case " $names " in
           *' hornhoof '*)
             restore_stop
-            psql_on postgres -c 'DROP DATABASE hornhoof WITH (FORCE)' > /dev/null 2>&1 || return 1
+            psql_alone postgres -c 'DROP DATABASE hornhoof WITH (FORCE)' > /dev/null 2>&1 || return 1
             ;;
         esac
-        psql_on postgres -c "ALTER DATABASE $name RENAME TO hornhoof" > /dev/null 2>&1 || return 1
+        psql_alone postgres -c "ALTER DATABASE $name RENAME TO hornhoof" > /dev/null 2>&1 || return 1
         ;;
       *) return 1 ;;
     esac
   fi
-  psql_on postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS true' -c 'DROP DATABASE IF EXISTS hornhoof_restore WITH (FORCE)' > /dev/null 2>&1 || return 1
+  psql_alone postgres -c 'ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS true' -c 'DROP DATABASE IF EXISTS hornhoof_restore WITH (FORCE)' > /dev/null 2>&1 || return 1
   # Settings that were not written whole go, with the backup's values in them.
   rm -f "$SERVER_DIR/.env.new"
   if [ -n "$R_STAMP" ] && [ -f "$kept" ]; then

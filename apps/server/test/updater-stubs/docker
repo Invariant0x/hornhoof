@@ -250,7 +250,7 @@ case "$1 $2" in
         esac ;;
       # The loaded database taking over what the closed one went by. STUB_ADOPT=fail: it cannot.
       *' term='*)
-        cat > /dev/null
+        cat > "$STUB_STATE/adopted"
         [ "${STUB_ADOPT:-ok}" = fail ] && exit 3 ;;
       # A dump going into the copy of the database that takes the place of the one there.
       *)

@@ -193,6 +193,8 @@ describe('updater, backups', () => {
 });
 
 const ATTEMPT = 'a1a1a1a1-0000-4000-8000-000000000001';
+/* What a restore says before each statement that follows the closing of the database in use. */
+const ALONE = 'SET synchronous_commit = local';
 const BUNDLE = 'b2b2b2b2-0000-4000-8000-000000000002';
 const DUMPED = '2026-11-10T08:00:00.000Z';
 /* The server's settings before a restore, and the three a backup brings. */
@@ -266,10 +268,14 @@ describe('updater, restore', () => {
     const order_ = [
       'docker compose stop app node', 'docker exec -i dbcid psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q', 'docker exec -i -e PGAPPNAME=hornhoof-cutover dbcid psql -U hornhoof -d hornhoof ',
       'cutover with the carry', 'docker exec -i dbcid psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q -v term=7 -v machine=m-old -v cluster=c-old',
-      `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ALTER DATABASE hornhoof RENAME TO ${kept}`,
-      'docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ALTER DATABASE hornhoof_restore RENAME TO hornhoof', 'docker compose up -d --no-build app node',
+      `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c ALTER DATABASE hornhoof RENAME TO ${kept}`,
+      `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c ALTER DATABASE hornhoof_restore RENAME TO hornhoof`, 'docker compose up -d --no-build app node',
     ].map(start => at(r.calls, start));
     expect(order_).toEqual([...order_].sort((a, b) => a - b));
+    /* Once the database in use is closed, the copy commits waited for has lost its connection with every other session:
+       what the restore does from there waits for no copy, or it would stand still for good. */
+    expect(r.calls.filter(call => call.includes('ALLOW_CONNECTIONS false'))).toEqual([`docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c ALTER DATABASE hornhoof WITH ALLOW_CONNECTIONS false`]);
+    expect(readFileSync(state(s, 'adopted'), 'utf8').split('\n')[0]).toBe(`${ALONE};`);
     expect(order_.every(index => index >= 0)).toBe(true);
     /* The backup's settings over their lines, the one that had none added, and every other line as it was. */
     expect(envOf(s)).toBe(NEW_ENV);
@@ -348,7 +354,7 @@ describe('updater, restore', () => {
     /* The restored company started with what was carried over for it; the old one, after it failed, without. */
     expect(r.calls.filter(call => call === 'up with the carry')).toHaveLength(1);
     /* The restored one went only while the old one was kept under its own name. */
-    expect(at(r.calls, 'docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c DROP DATABASE hornhoof WITH (FORCE)')).toBeGreaterThan(at(r.calls, 'docker compose up'));
+    expect(at(r.calls, `docker exec dbcid psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q -c ${ALONE} -c DROP DATABASE hornhoof WITH (FORCE)`)).toBeGreaterThan(at(r.calls, 'docker compose up'));
   });
 
   it('refuses settings it cannot write', async () => {
