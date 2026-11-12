@@ -287,6 +287,8 @@ export const ru: Messages = {
     signingSecret: 'Секрет подписи',
     copyKey: 'Скопировать ключ',
     copySecret: 'Скопировать секрет подписи',
+    copyForAssistant: 'Скопировать для ассистента',
+    forAssistant: (address, key) => `Подключись к моей компании в Hornhoof.\nАдрес: ${address}\nКлюч: ${key}`,
     keySaved: 'Готово, сохранено',
   },
   subs: {

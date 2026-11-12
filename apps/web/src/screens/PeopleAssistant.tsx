@@ -107,7 +107,8 @@ function Secret({ label, value, copy }: { label: string; value: string; copy: st
   );
 }
 
-type Made = { key: string; signingSecret: string; person: PersonView };
+/* address: the company's address as its invite links have it. */
+type Made = { key: string; signingSecret: string; address: string; person: PersonView };
 
 /* The key and the signing secret: made, made again or taken away here, and shown once, right after they are made. */
 function KeySection({ person, onChanged }: { person: PersonView; onChanged: (person: PersonView) => void }) {
@@ -144,7 +145,11 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
         <p>{t.people.keyShownOnce}</p>
         <Secret label={t.people.key} value={shown.key} copy={t.people.copyKey} />
         <Secret label={t.people.signingSecret} value={shown.signingSecret} copy={t.people.copySecret} />
-        <div className="actions"><button className="btn" type="button" onClick={() => setShown(null)}>{t.people.keySaved}</button></div>
+        <div className="actions">
+          {/* The address and the key in one text, which the person sends their assistant as it is; never the signing secret. */}
+          <CopyButton text={t.people.forAssistant(shown.address, shown.key)} label={t.people.copyForAssistant} className="btn ghost" />
+          <button className="btn" type="button" onClick={() => setShown(null)}>{t.people.keySaved}</button>
+        </div>
       </> : <>
         <p>{made ? t.people.keyMade(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(made.createdAt))) : t.people.noKey}</p>
         <div className="actions">

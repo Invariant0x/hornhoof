@@ -17,7 +17,7 @@ const PEOPLE: PersonView[] = [
   { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg', email: 'max@acme.com', title: 'CMO', status: 'active', isOwner: false, access: WHOLE },
   { ...AVA, assistant: { ...AVA.assistant!, key: { createdAt: '2026-11-11T10:00:00.000Z' } } },
 ];
-const MADE = { key: `hha_${'K7x-Qp'.repeat(7)}a`, signingSecret: `hhs_${'s3_Vb9'.repeat(7)}z`, person: PEOPLE[2] };
+const MADE = { key: `hha_${'K7x-Qp'.repeat(7)}a`, signingSecret: `hhs_${'s3_Vb9'.repeat(7)}z`, address: 'https://acme.hornhoof.app', person: PEOPLE[2] };
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 
 /* The People screen as the CEO meets it, with the errors the page logs. */
@@ -103,6 +103,7 @@ for (const lang of ['en', 'ru'] as const) {
           expect((await box(shown)).width, 'a key keeps a readable width beside its Copy').toBeGreaterThan((await box(card)).width * 0.4);
         }
         await inside(card.getByRole('button', { name: t.people.copySecret, exact: true }), card, 'Copy signing secret');
+        await inside(card.getByRole('button', { name: t.people.copyForAssistant, exact: true }), card, 'Copy for the assistant');
         expect(await noSideScroll(page), 'no sideways scroll with the key').toBe(true);
         await card.getByRole('button', { name: t.people.keySaved, exact: true }).click();
         await expect(key).toHaveCount(0);

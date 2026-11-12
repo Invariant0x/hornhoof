@@ -9,6 +9,7 @@ import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { ASSISTANT_PROGRAMS, assistants, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
 
 /* Where Hornhoof wakes the assistant: a web address of the program, which the people who set it up chose. */
@@ -93,7 +94,8 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { person: await personView(db, person) };
   });
 
-  /* Makes the key and the signing secret, or makes them again: the ones before stop working at once. Shown only here. */
+  /* Makes the key and the signing secret, or makes them again: the ones before stop working at once. Shown only here, with
+     the company's address as its invite links have it, for the program to call. */
   app.post('/api/people/:id/key', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
@@ -104,7 +106,7 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* What waits for the owner already is told to the assistant once it has a key. */
     ctx.assistants.collect(me.companyId);
     reply.code(201);
-    return { key, signingSecret, person: await personView(db, person) };
+    return { key, signingSecret, address: await publicUrl(db, ctx.config), person: await personView(db, person) };
   });
 
   app.delete('/api/people/:id/key', async req => {

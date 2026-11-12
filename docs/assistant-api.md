@@ -6,7 +6,7 @@ This document is the whole contract. A program built from it alone works with Ho
 
 ## How an assistant comes to be
 
-In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings.
+In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"), never with the signing secret.
 
 * The owner may set up their own assistant. A person who may edit people in People may set one up for anyone. Only the CEO sets up the assistant of the CEO or the CEO delegate, besides the delegate for their own.
 * "Replace" makes a new key and a new signing secret. The ones before stop working at once.

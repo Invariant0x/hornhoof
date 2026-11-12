@@ -250,6 +250,8 @@ export const en = {
     signingSecret: 'Signing secret',
     copyKey: 'Copy key',
     copySecret: 'Copy signing secret',
+    copyForAssistant: 'Copy for the assistant',
+    forAssistant: (address: string, key: string) => `Connect to my company in Hornhoof.\nAddress: ${address}\nKey: ${key}`,
     keySaved: 'Done, saved',
   },
   subs: {

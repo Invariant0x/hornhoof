@@ -485,6 +485,23 @@ describe("a person's assistant", () => {
     expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'DELETE']);
   });
 
+  it.each([
+    ['en', 'Edit Ava', 'Create key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY'],
+    ['ru', 'Изменить Ava', 'Создать ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY'],
+  ])("copies the company's address and the key as one text for the assistant, without the signing secret, in %s", async (language, edit, create, button, text) => {
+    localStorage.setItem('hh-lang', language);
+    mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: KEYED }] });
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: edit }));
+    await user.click(screen.getByRole('button', { name: create }));
+    await user.click(await screen.findByRole('button', { name: button }));
+    expect(copied).toEqual([text]);
+    localStorage.clear();
+  });
+
   it('saves its program and events address, with its title for someone who manages people', async () => {
     const saved: PersonView = { ...AVA, title: 'Helper', assistant: { ...AVA.assistant!, program: 'other', eventsUrl: 'https://ava.example.com/h' } };
     const calls = mockApi({
