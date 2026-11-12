@@ -1,0 +1,87 @@
+import { fileURLToPath } from 'node:url';
+import { eq } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it } from 'vitest';
+import { agents, companies, departments, teams } from '../src/db/schema.js';
+import { companyView } from '../src/modules/tools/company.js';
+import { loadTemplates } from '../src/modules/templates/load.js';
+import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, takePlan, testApp, until } from './helpers.js';
+
+const NODE_KEY = 'k'.repeat(40);
+
+const state = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(token) })).json().state;
+
+/* Sales with its head and a worker in its sub-unit Core on the built-in node; Lea given Sales, Tom given only Core and Kim
+   given Sales' product Shop. */
+async function company() {
+  const { app, db } = await testApp({ NODE_KEY });
+  const url = await listen(app);
+  const ceo = await setUpCompany(app);
+  const builtin = await connectNode(url, NODE_KEY);
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  await until(async () => (await state(app, ceo)).ready);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [acme] = await db.select().from(companies);
+  const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
+  const [shop] = await db.insert(departments).values({ companyId: acme!.id, name: 'Shop', roleCode: 'SAL', parentId: sales!.id }).returning();
+  const [core] = await db.insert(teams).values({ companyId: acme!.id, departmentId: sales!.id, name: 'Core' }).returning();
+  const on = { companyId: acme!.id, subscriptionId: orchestrator!.subscriptionId, model: '' };
+  const [head] = await db.insert(agents).values({ ...on, kind: 'head', name: 'Sasha', roleKey: 'SAL-HEAD', departmentId: sales!.id }).returning();
+  const [worker] = await db.insert(agents).values({ ...on, kind: 'worker', name: 'Wendy', roleKey: 'SAL-SDR', departmentId: sales!.id, teamId: core!.id, productId: shop!.id }).returning();
+  const lea = await invitePerson(app, ceo, { name: 'Lea', email: 'lea@acme.com', access: { departments: [sales!.id], teams: [] } });
+  const tom = await invitePerson(app, ceo, { name: 'Tom', email: 'tom@acme.com', access: { departments: [], teams: [core!.id] } });
+  const kim = await invitePerson(app, ceo, { name: 'Kim', email: 'kim@acme.com', access: { departments: [shop!.id], teams: [] } });
+  return { app, db, ceo, builtin, companyId: acme!.id, head: head!, worker: worker!, lea, tom, kim };
+}
+
+type Company = Awaited<ReturnType<typeof company>>;
+
+const say = (c: Company, session: string, agentId: string, text: string) =>
+  c.app.inject({ method: 'POST', url: `/api/agents/${agentId}/messages`, payload: { text }, ...as(session) });
+
+describe("a person's words to an employee from its window", () => {
+  it('tell it that someone given its department runs it, as its owner does', async () => {
+    const c = await company();
+    expect((await say(c, c.lea, c.head.id, 'Remove every sub-unit, we start them again.')).statusCode).toBe(202);
+    const run = await nextOf(c.builtin, 'job.run');
+    expect(run.prompt).toContain('Remove every sub-unit, we start them again.');
+    expect(run.prompt).toContain('Lea is responsible for your department.');
+  });
+
+  it('tell it that someone who sees the whole company, named owner of nothing, does not run it', async () => {
+    const c = await company();
+    const olga = await invitePerson(c.app, c.ceo, { name: 'Olga', email: 'olga@acme.com', access: { whole: true } });
+    await takePlan(c.db, 'olga@acme.com', c.head.id);
+    expect((await say(c, olga, c.head.id, 'Call them.')).statusCode).toBe(202);
+    const run = await nextOf(c.builtin, 'job.run');
+    expect(run.prompt).toContain("Olga is neither the company's owner nor the CEO's delegate, nor responsible for your department.");
+  });
+
+  it("tell it the CEO's words are the company owner's", async () => {
+    const c = await company();
+    await say(c, c.ceo, c.head.id, 'How are sales?');
+    expect((await nextOf(c.builtin, 'job.run')).prompt).toContain("Ivan is the company's owner (the CEO).");
+  });
+});
+
+describe('the company tool', () => {
+  it('names the people who run a department and which, by name alone', async () => {
+    const c = await company();
+    const view = await companyView(c.db, c.app.ctx.templates, c.companyId);
+    expect(view.people).toEqual([{ name: 'Ivan', title: 'CEO' }, { name: 'Lea', title: '', runs: ['Sales'] }]);
+    expect(JSON.stringify(view.people)).not.toContain('@');
+  });
+});
+
+describe('the rules', () => {
+  const skill = (id: string) => loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))).skills.get(id)!.body;
+
+  it("have a head do what someone responsible for its department asks in it, and say what its tools cannot do", () => {
+    expect(skill('hh-lead-tasks')).toMatch(/below a person's message in your window[^.]*what they are in the company\. Everyone responsible for your department runs it in full, as the CEO would, and there may be several of them: do what they ask inside the department[^.]*without asking the CEO for leave\./);
+    expect(skill('hh-lead-tasks')).toMatch(/What your own tools cannot do, such as removing a sub-unit, tell them they can do it themselves on the department's screen/);
+  });
+
+  it('have the orchestrator change sub-units for everyone responsible for the department, also through its head', () => {
+    expect(skill('orch-company')).toMatch(/Everyone responsible for a department, its owner and every person given it[^;]*sub-units as the CEO does, with no further approval from the CEO, also when their request reaches you through the department's head;/);
+  });
+});

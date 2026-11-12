@@ -755,7 +755,7 @@ export const en = {
       ownerCeo: 'No owner: the CEO decides',
       ownerNone: 'No owner: the CEO decides.',
       ownerIs: (name: string) => `Department owner: ${name}.`,
-      ownerHint: 'The owner runs this department as the CEO does: hires and removes its employees, changes its sub-units and repository, takes its approvals and sets how they go. Having access does not make someone the owner.',
+      ownerHint: 'The owner gets this department\'s approvals and decisions first. Everyone given the department runs it in full as well: hires and removes its employees, changes its sub-units and repository and answers its approvals.',
       noCandidates: 'Nobody else has access to this department yet. Give someone access on the People screen, then name them here.',
       rulesHint: 'The rules stay as they are when the owner changes. The CEO and the CEO delegate can always answer any approval themselves.',
       mode: 'How it is approved',
