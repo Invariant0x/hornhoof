@@ -30,8 +30,16 @@ async function company() {
   const [plan] = await db.insert(subscriptions).values({ companyId, ownerPersonId: ceo!.id, provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready' }).returning();
   const [machine] = await db.insert(machines).values({ companyId, personId: ceo!.id, machineKey: 'laptop', hostname: 'laptop' }).returning();
   const [laptop] = await db.insert(nodes).values({ companyId, machineId: machine!.id, subscriptionId: plan!.id, keyHash: 'laptop', status: 'ready', version: '0.5.0' }).returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, on: { subscriptionId: string; nodeId?: string }) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', ...on, skills: ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
+  /* The skills each role's template turns on, written out so that the test reads no template. */
+  const everyone = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks'];
+  const member = [...everyone, 'hh-report-to-head', 'hh-task-flow'];
+  const skills = {
+    'DEV-HEAD': [...everyone, 'hh-lead-tasks', 'hh-head', 'hh-notebook', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'dev-lead', 'dev-work-pipeline', 'dev-release-improvements', 'dev-test-environment', 'dev-gates', 'dev-testing-policy', 'dev-ci-release', 'dev-worktrees', 'dev-release-notes', 'hh-status-update', 'hh-work-fast'],
+    'DEV-BE': [...member, 'dev-task-flow', 'dev-engineering-rules', 'dev-testing-policy', 'dev-gates', 'dev-language-rules', 'dev-implement', 'dev-tdd', 'dev-worktrees', 'dev-debugging', 'dev-migrations', 'hh-work-fast'],
+    'DEV-REV': [...member, 'dev-task-flow', 'dev-testing-policy', 'dev-gates', 'dev-language-rules', 'dev-review-diff', 'dev-review-fix', 'dev-review-verdict', 'hh-work-fast'],
+  };
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: keyof typeof skills, on: { subscriptionId: string; nodeId?: string }) =>
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', ...on, skills: skills[roleKey] }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD', { subscriptionId: key!.id });
   const bruno = await hire('Bruno', 'worker', 'DEV-BE', { subscriptionId: plan!.id, nodeId: laptop!.id });
   const rita = await hire('Rita', 'worker', 'DEV-REV', { subscriptionId: key!.id });
