@@ -19,6 +19,9 @@ const KeeperStateShape = z.object({
   copies: z.array(z.object({ name: z.string(), state: z.enum(['sync', 'pace', 'behind', 'silent']) })).optional(),
   /* How fast the keeper that leads sent to each machine at its best in the last week, in Mbit/s, by the machine's id. */
   throughput: z.record(z.string(), z.object({ mbps: z.number().int().min(0), at: z.string() })).optional(),
+  /* Whether this machine reaches hornhoof.org, as its keeper last saw it; true when left out. A machine that only
+     reads and does not is cut off, and its agents are told to wrap up. */
+  internet: z.boolean().optional(),
   /* The question a copy puts to the CEO while the machine that leads is gone and the copy may lack changes. */
   question: QuestionShape.nullable().optional(),
 });

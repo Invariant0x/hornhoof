@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { CALL_BODY_MAX, CALL_LOST, CALL_NOT_SENT, CALL_WAITING, frontCalls } from '../src/net/front-calls.js';
+import { CALL_BODY_MAX, CALL_LOST, CALL_NOT_SENT, CALL_PAUSED, CALL_WAITING, frontCalls } from '../src/net/front-calls.js';
 import type { Target } from '../src/net/proxy.js';
 
 const INVOCATION = 'x-hornhoof-invocation';
@@ -164,6 +164,15 @@ describe("front's door for tool calls", () => {
     /* The app refused before the tool ran: the agent hears that the call did not run, and what to do about it. */
     const waiting = await keeperAnswering(refused(503, 'merge_pending'));
     expect(JSON.parse((await post(await doorTo(waiting.target, 40), call(9))).body)).toEqual(toolError(9, CALL_WAITING));
+  });
+
+  it('holds a call the machine cannot take yet', async () => {
+    const { target, seen } = await keeperAnswering(refused(503, 'read_only'), refused(503, 'read_only'), ok);
+    expect(JSON.parse((await post(await doorTo(target), call(1))).body)).toEqual(result(1, 'Noted.'));
+    expect(seen).toHaveLength(3);
+    /* The machine only reads for longer than front holds a call: the agent hears that it did not run. */
+    const paused = await keeperAnswering(refused(503, 'read_only'));
+    expect(JSON.parse((await post(await doorTo(paused.target, 40), call(9))).body)).toEqual(toolError(9, CALL_PAUSED));
   });
 
   it('passes every other answer as it came, and tries none of them again', async () => {

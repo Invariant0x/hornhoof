@@ -90,6 +90,8 @@ export class Watcher {
   private syncBeat: number | null = null;
   private asked = false;
   private decided = false;
+  /* Whether hornhoof.org answered the last look at it; null before the first. */
+  private up: boolean | null = null;
   private term: Term | null;
   private failing = false;
   private readonly clocks: () => Clocks;
@@ -120,6 +122,11 @@ export class Watcher {
   /* The term this copy follows. */
   followed(): Term | null {
     return this.term;
+  }
+
+  /* Whether this machine reached hornhoof.org at its last look there; null while it has not looked. */
+  relayUp(): boolean | null {
+    return this.up;
   }
 
   /* The leader answers at the company's link and not this copy's beats: this copy is cut off from it, and takes
@@ -193,6 +200,7 @@ export class Watcher {
     const due = asking || this.polledAt === null || before - this.polledAt >= SELDOM_MS;
     const poll = due ? await this.poll() : null;
     if (due) this.polledAt = before;
+    if (poll) this.up = poll.health.up;
     this.window = nextWindow(this.window, poll, heardLeader);
     if (poll?.route.known) {
       this.held = poll.route.state === 'held';

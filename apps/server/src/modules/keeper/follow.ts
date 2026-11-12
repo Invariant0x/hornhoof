@@ -117,6 +117,8 @@ export class FollowKeeper {
   private readonly beating: Beats;
   private readonly watcher: Watcher;
   private readonly recovery: Recovery;
+  /* Whether this keeper was given hornhoof.org's relay to ask; a test or an install without one says nothing of it. */
+  private readonly asksRelay: boolean;
   private readonly clocks: () => Clocks;
   /* The question to the CEO, while it stands: since when, and when the leader was last heard, by the wall clock. */
   private asking: { since: number; heard: number | null } | null = null;
@@ -144,6 +146,7 @@ export class FollowKeeper {
   constructor(private readonly opts: FollowKeeperOptions) {
     const { config, log } = opts;
     this.clocks = opts.clocks ?? (() => ({ wall: Date.now(), mono: performance.now() }));
+    this.asksRelay = Boolean(opts.relay ?? opts.watcher?.relay);
     this.copySql = opts.sql(COPY_DB);
     this.saver = opts.secrets
       ? new LedSaver({
@@ -547,7 +550,10 @@ export class FollowKeeper {
   private giveWord(mode: 'off' | 'read' | 'maintenance'): void {
     try {
       const question = this.question();
-      writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null, ...(question ? { question } : {}) });
+      /* A machine that does not reach hornhoof.org is cut off: its app tells the agents so. Said only where this
+         keeper has a relay to ask. */
+      const cut = this.asksRelay && this.watcher.relayUp() === false ? { internet: false } : {};
+      writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null, ...cut, ...(question ? { question } : {}) });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${reasonOf(err)}`);

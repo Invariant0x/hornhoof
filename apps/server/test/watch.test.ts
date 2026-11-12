@@ -103,6 +103,12 @@ describe('the copy that watches the machine it follows', () => {
     expect(w.it.cut()).toBe(false);
     await w.until(-270);
     expect([w.it.cut(), w.takes, w.asks]).toEqual([true, [], []]);
+    expect(w.it.relayUp()).toBe(true);
+    /* Without hornhoof.org this machine is the one that is cut off, and it knows. */
+    const alone = watching({ up: () => false });
+    expect(alone.it.relayUp()).toBeNull();
+    await alone.until(10);
+    expect([alone.it.relayUp(), alone.takes, alone.asks]).toEqual([false, [], []]);
     /* A leader that is gone altogether cuts nobody off. */
     const gone = watching();
     await gone.until(30);

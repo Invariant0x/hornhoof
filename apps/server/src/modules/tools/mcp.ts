@@ -8,7 +8,11 @@ import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
+import { ApiError } from '../../errors.js';
 import { guardTools, invocationOf } from './calls.js';
+import { callName, cutOff, READ_TOOLS } from './read-tools.js';
+import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
+import { readKeeperState } from '../keeper/state.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
 import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
@@ -48,10 +52,12 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
    and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null): McpServer {
+function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   /* Before any tool is registered, so that every one of them is covered. */
   guardTools(server, ctx, job, invocation);
+  /* On a machine that is cut off, a tool that changes something says so and does nothing. */
+  if (reading?.cut) cutOff(server);
   server.registerTool(
     'company',
     { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
@@ -150,7 +156,8 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
      its recovery hold, as Operations do. */
   registerProgramAccessTools(server, ctx, job);
   registerReleaseTool(server, ctx, job);
-  registerDatabaseTool(server, ctx, job, 'write');
+  /* On a machine that only reads, the orchestrator reads the database as a head does. */
+  registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
   registerOrchestratorImprovementTools(server, ctx, job);
   registerMergeTools(server, ctx, job);
   return server;
@@ -160,7 +167,14 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/mcp', async (req, reply) => {
     const job = await jobOf(ctx, req);
-    const server = toolsFor(ctx, app, job, await invocationOf(req, ctx.config));
+    /* On a machine that only reads: a tool that changes something is turned away before any tool runs while the
+       machine has the internet, since it then only waits for the leader or for the CEO, and the front door tries the
+       call again; without the internet the tool itself tells the agent to wrap up. A call there runs as one with no
+       id, so nothing is written of it. */
+    const reading = ctx.mode.current() === 'read' ? { cut: readKeeperState(ctx.config.controlDir)?.internet === false } : null;
+    const name = reading && !reading.cut ? callName(req.body) : null;
+    if (name !== null && !READ_TOOLS.has(name)) throw new ApiError(503, 'unavailable', READ_ONLY_MESSAGE, 'read_only');
+    const server = toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

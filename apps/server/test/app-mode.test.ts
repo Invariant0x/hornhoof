@@ -414,14 +414,17 @@ describe('what each mode allows', () => {
   it('lets reads through in read and maintenance, and names the reason of the rest', () => {
     for (const method of ['GET', 'HEAD', 'OPTIONS']) expect(ask('read', method, '/api/me')).toBeNull();
     expect(ask('maintenance', 'GET', '/api/me')).toBeNull();
-    expect(ask('read', 'POST', '/mcp')).toBe('read_only');
+    /* An agent's tool calls pass in read, where the ones that read are answered; any other change does not. */
+    expect(ask('read', 'POST', '/mcp')).toBeNull();
+    expect(ask('read', 'POST', '/api/tasks')).toBe('read_only');
+    expect(ask('maintenance', 'POST', '/mcp')).toBe('maintenance');
     expect(ask('maintenance', 'DELETE', '/api/x')).toBe('maintenance');
     expect(ask('read', 'GET', '/api/nodes/socket', 'WebSocket')).toBe('read_only');
     expect(ask('maintenance', 'GET', '/api/nodes/socket', 'websocket')).toBe('maintenance');
   });
 
   it("takes a sign-in, a sign-out and the CEO's answer to a copy's question in read, and nowhere else", () => {
-    for (const path of ['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait']) {
+    for (const path of ['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait', '/mcp']) {
       expect(ask('read', 'POST', path), path).toBeNull();
       expect(ask('read', 'POST', `${path}?x=1`), path).toBeNull();
       expect(ask('maintenance', 'POST', path), path).toBe('maintenance');
@@ -498,12 +501,18 @@ describe('the app behind a keeper', () => {
     const mcp = await app.inject({ method: 'POST', url: '/mcp', payload: {}, ...as(token) });
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'a@b.test', password: 'x' } });
     const socket = await app.inject({ url: '/api/nodes/socket', headers: { upgrade: 'websocket', connection: 'upgrade' } });
-    /* A machine that only reads still takes a sign-in, which writes nothing there. */
-    for (const refused of then === 'read' ? [mcp, socket] : [mcp, login, socket]) {
+    const change = await app.inject({ method: 'POST', url: '/api/tasks', payload: {}, ...as(token) });
+    /* A machine that only reads still takes a sign-in, which writes nothing there, and the agents' tool calls, which
+       it answers by its own rules. */
+    for (const refused of then === 'read' ? [change, socket] : [mcp, change, login, socket]) {
       expect(refused.statusCode).toBe(503);
       expect(refused.json().error).toMatchObject({ code: 'unavailable', reason });
     }
-    if (then === 'read') expect([login.statusCode, login.json().error.reason]).toEqual([401, 'wrong_password']);
+    if (then === 'read') {
+      expect([login.statusCode, login.json().error.reason]).toEqual([401, 'wrong_password']);
+      /* The call carries no job's token, so it is nobody's. */
+      expect(mcp.statusCode).toBe(401);
+    }
   };
 
   it('serves reads and refuses changes in maintenance', () => refusesChanges('lead', 'maintenance', 'maintenance'));

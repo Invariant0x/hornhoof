@@ -312,6 +312,9 @@ export class Keeper {
   private linkHeld = false;
   /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
   private settingsNow: TunnelSettings | null | undefined = undefined;
+  /* Whether hornhoof.org answered this keeper's last look at it, which it takes only while it holds no lease; null
+     before the first, and again once it leads. */
+  private relayUp: boolean | null = null;
   /* Whether the link this keeper last read is a hidden name. */
   private hiddenName = false;
   private linkPausedUntil = 0;
@@ -394,7 +397,9 @@ export class Keeper {
           ask: (networkId, term) => this.links?.ask(networkId, 'POST', PEER_PATHS.promise, { term }, PROMISE_ASK_MS) ?? Promise.resolve(null),
           poll: async () => {
             const link = this.ownLink();
-            return link ? proofs.poll(link) : null;
+            const looked = link ? await proofs.poll(link) : null;
+            if (looked) this.relayUp = looked.health.up;
+            return looked;
           },
           client: () => this.ownLink()?.client ?? null,
           tunnel: { start: () => void (this.entryTunnel = true), stop: () => void (this.entryTunnel = false), runs: () => this.entryTunnel },
@@ -891,8 +896,12 @@ export class Keeper {
   private giveWord(): void {
     const dir = this.opts.config.controlDir;
     try {
+      const mode = this.taking ? 'off' : this.mode();
+      if (mode === 'lead') this.relayUp = null;
       writeKeeperState(dir, {
-        mode: this.taking ? 'off' : this.mode(), at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [],
+        mode, at: new Date().toISOString(), link: this.link, doors: this.links?.doors() ?? {}, copies: this.sync?.copies() ?? [],
+        /* A machine that holds no lease and does not reach hornhoof.org is cut off: its app tells the agents so. */
+        ...(this.relayUp === false ? { internet: false } : {}),
         /* How fast this machine sent to each of the others at its best in the last day, for the server order. */
         throughput: this.throughput.best(Date.now()),
       });

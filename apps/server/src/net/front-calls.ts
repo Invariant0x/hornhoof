@@ -12,6 +12,7 @@ export const CALL_BODY_MAX = 1024 * 1024;
 export const CALL_ANSWER_MAX = 4 * 1024 * 1024;
 export const CALL_LOST = 'Hornhoof did not answer this call in time. It may have run; look at its result before you repeat it.';
 export const CALL_NOT_SENT = 'Hornhoof could not be reached in time, so this call did not run. Try it again shortly.';
+export const CALL_PAUSED = 'Hornhoof cannot take changes on this machine for a moment, so this call did not run. Try it again in a minute; if it keeps failing, end your turn with what you have done.';
 export const CALL_WAITING =
   'Hornhoof is bringing back work from another machine, so this call did not run. Try it again in a few minutes; if it keeps failing, end your turn with what you have done, and it is kept and applied once that machine is back.';
 
@@ -69,7 +70,9 @@ const reasonOf = ({ body }: Whole): string | undefined => {
 /* The app says it is starting, or the keeper held the request and the app never came: the call did not reach the app's
    work. Nor did one the app refused because the job's row is still on its way from another machine. */
 const waitsForMerge = (answer: Whole): boolean => answer.status === 503 && reasonOf(answer) === 'merge_pending';
-const neverTaken = (answer: Whole): boolean => answer.status === 503 && (reasonOf(answer) === 'starting' || reasonOf(answer) === 'merge_pending');
+/* Or one the app turned away because its machine only reads for a moment, before any tool ran. */
+const paused = (answer: Whole): boolean => answer.status === 503 && reasonOf(answer) === 'read_only';
+const neverTaken = (answer: Whole): boolean => answer.status === 503 && (reasonOf(answer) === 'starting' || reasonOf(answer) === 'merge_pending' || reasonOf(answer) === 'read_only');
 
 /* Worth another try: that, or a hop before the app had no answer of its own, as when the app dropped the connection. */
 const passes = (answer: Whole): boolean => answer.status === 502 || neverTaken(answer) || (answer.status === 503 && reasonOf(answer) === undefined);
@@ -124,7 +127,7 @@ function passOn(res: http.ServerResponse, { status, raw, body }: Whole): void {
 
 /* What the agent hears of a call front gave up: a tool's own error, which says whether the call may have run. */
 function gaveUp(id: unknown, mayHaveRun: boolean, last: Whole | null): Refusal {
-  const text = mayHaveRun ? CALL_LOST : last && waitsForMerge(last) ? CALL_WAITING : CALL_NOT_SENT;
+  const text = mayHaveRun ? CALL_LOST : last && waitsForMerge(last) ? CALL_WAITING : last && paused(last) ? CALL_PAUSED : CALL_NOT_SENT;
   return { status: 200, headers: JSON_TYPE, body: JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: true } }) };
 }
 

@@ -178,9 +178,10 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const pathOf = (url: string): string => url.split('?')[0]!;
 const wantsSocket = (req: Asked): boolean => String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
 
-/* What a machine that only reads still takes: a sign-in and a sign-out, which write nothing there, and the CEO's
-   answer to the question of which copy to go on from, which goes to the keeper. */
-const READ_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait']);
+/* What a machine that only reads still takes: a sign-in and a sign-out, which write nothing there, the CEO's answer
+   to the question of which copy to go on from, which goes to the keeper, and the agents' tool calls, of which the
+   ones that read are answered. */
+const READ_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait', '/mcp']);
 
 /* Why this mode turns the request away, or null when it lets it through. */
 export function refusalOf(mode: Mode, req: Asked): Refusal | null {
