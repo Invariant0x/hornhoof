@@ -1,6 +1,6 @@
 {
-  "id": "afabbb14-8de3-4052-8964-4f7b73b827be",
-  "prevId": "4773b412-0ecb-4e17-b128-8b3f4a250a0a",
+  "id": "4773b412-0ecb-4e17-b128-8b3f4a250a0a",
+  "prevId": "3cb962e8-d6ec-4fff-adfd-33f22b775b5f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4068,12 +4068,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "copy_old_led": {
-          "name": "copy_old_led",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "data_left_at": {
           "name": "data_left_at",
           "type": "timestamp with time zone",
@@ -4218,7 +4212,7 @@
         },
         "machines_copy_state": {
           "name": "machines_copy_state",
-          "value": "copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped', 'saving')"
+          "value": "copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped')"
         },
         "machines_copy_error": {
           "name": "machines_copy_error",
@@ -10871,13 +10865,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "hidden": {
-          "name": "hidden",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

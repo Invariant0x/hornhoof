@@ -1,12 +1,12 @@
 import { and, asc, eq, gt } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, assistantReplies, jobs } from '../../db/schema.js';
+import { agentEvents, agents, assistantReplies, jobs, type AssistantEventKind } from '../../db/schema.js';
 import { turnGoingOn } from '../conversation/queue.js';
 import { storeEvent } from './events.js';
 
 type ReplyRow = typeof assistantReplies.$inferSelect;
 /* Tells of a new event of an assistant once it is kept. */
-export type Told = (assistantId: string, seq: number) => void;
+export type Told = (assistantId: string, seq: number, kind: AssistantEventKind) => void;
 
 const OPEN = ['queued', 'running'];
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
@@ -31,7 +31,7 @@ async function passOn(ctx: Ctx, row: ReplyRow, told: Told): Promise<boolean> {
     const seq = await storeEvent(ctx.db, { companyId: row.companyId, assistantId: row.assistantId, kind: 'reply', data }, async tx => {
       await tx.update(assistantReplies).set({ afterSeq: words.seq, answered: true }).where(eq(assistantReplies.id, row.id));
     });
-    told(row.assistantId, seq);
+    told(row.assistantId, seq, 'reply');
   }
   return true;
 }
@@ -59,7 +59,7 @@ async function collectOne(ctx: Ctx, row: ReplyRow, told: Told, graceMs: number, 
   const seq = await storeEvent(ctx.db, { companyId: row.companyId, assistantId: row.assistantId, kind: 'reply_end', data }, async tx => {
     await tx.delete(assistantReplies).where(eq(assistantReplies.id, row.id));
   });
-  told(row.assistantId, seq);
+  told(row.assistantId, seq, 'reply_end');
   return null;
 }
 

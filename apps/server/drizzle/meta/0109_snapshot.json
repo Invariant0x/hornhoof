@@ -1,6 +1,6 @@
 {
-  "id": "dd846679-efb7-41bd-ab6a-17e94019b947",
-  "prevId": "acb02a19-f8bf-4a79-a9f9-111f3c8f37cc",
+  "id": "acb02a19-f8bf-4a79-a9f9-111f3c8f37cc",
+  "prevId": "14e7a113-4a17-40a2-8f00-03f0f8e46591",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3458,26 +3458,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "age_key": {
-          "name": "age_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "keeps_backups": {
-          "name": "keeps_backups",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "held_backups": {
-          "name": "held_backups",
-          "type": "uuid[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::uuid[]"
         }
       },
       "indexes": {},
@@ -10050,110 +10030,6 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
-    },
-    "public.recovery_keys": {
-      "name": "recovery_keys",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipient": {
-          "name": "recipient",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "link_print": {
-          "name": "link_print",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "link_name": {
-          "name": "link_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "link_url": {
-          "name": "link_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "made_by": {
-          "name": "made_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "retired_at": {
-          "name": "retired_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "recovery_keys_company_id_companies_id_fk": {
-          "name": "recovery_keys_company_id_companies_id_fk",
-          "tableFrom": "recovery_keys",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "recovery_keys_made_by_people_id_fk": {
-          "name": "recovery_keys_made_by_people_id_fk",
-          "tableFrom": "recovery_keys",
-          "tableTo": "people",
-          "columnsFrom": [
-            "made_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "recovery_keys_recipient_unique": {
-          "name": "recovery_keys_recipient_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "recipient"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
     },
     "public.request_internal": {
       "name": "request_internal",

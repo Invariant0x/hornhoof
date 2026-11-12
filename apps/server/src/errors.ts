@@ -267,17 +267,23 @@ function fenceAnswer(err: unknown, req: FastifyRequest, reply: FastifyReply): Fa
   return reply.status(503).send(body('unavailable', NOT_CONFIRMED, 'not_confirmed'));
 }
 
-function validationAnswer(err: ZodError, reply: FastifyReply): FastifyReply {
-  const first = err.issues[0];
-  const where = first?.path.length ? first.path.join('.') + ': ' : '';
-  return reply.status(400).send(body('validation', where + (first?.message ?? 'Invalid input.')));
+/* A refusal as the caller reads it, its status and its body, for an ApiError or input that does not parse; null for any
+   other error. */
+export function refusal(err: unknown): { status: number; body: ReturnType<typeof body> } | null {
+  if (err instanceof ApiError) return { status: err.status, body: body(err.code, err.message, err.reason, err.details) };
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    const where = first?.path.length ? first.path.join('.') + ': ' : '';
+    return { status: 400, body: body('validation', where + (first?.message ?? 'Invalid input.')) };
+  }
+  return null;
 }
 
 const statusOf = (err: FastifyError | Error): number => ('statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500);
 
 function errorAnswer(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
-  if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
-  if (err instanceof ZodError) return validationAnswer(err, reply);
+  const refused = refusal(err);
+  if (refused) return reply.status(refused.status).send(refused.body);
   const status = statusOf(err);
   if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));
   const atFence = fenceAnswer(err, req, reply);

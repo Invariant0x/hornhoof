@@ -1,12 +1,12 @@
 # Assistant API
 
-A personal assistant is an outside program, such as AvaClone, OpenClaw or any program that speaks HTTP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, reads what they answer, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
+A personal assistant is an outside program, such as AvaClone, OpenClaw, Hermes Agent or any program that speaks HTTP or MCP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, reads what they answer, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
 
 This document is the whole contract. A program built from it alone works with Hornhoof.
 
 ## How an assistant comes to be
 
-In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings.
+In Hornhoof, on the People screen, someone adds a person and ticks "This is an agent (assistant)". They choose its owner (the person it acts for), its program, and optionally its events address. On the assistant's card they then create a key. Hornhoof shows the key and a signing secret once; both go into the program's settings. A program may also take the company's address and the key as one text: the button "Copy for the assistant" there copies them for the person to send, for example in Telegram, as a first line "Connect to my company in Hornhoof.", then "Address: <address>" and "Key: <key>" on lines of their own (in Russian "Подключись к моей компании в Hornhoof.", "Адрес:" and "Ключ:"), never with the signing secret. For OpenClaw and Hermes Agent the window also shows the settings that connect the program, ready to copy into its file: see "Connecting OpenClaw" and "Connecting Hermes Agent".
 
 * The owner may set up their own assistant. A person who may edit people in People may set one up for anyone. Only the CEO sets up the assistant of the CEO or the CEO delegate, besides the delegate for their own.
 * "Replace" makes a new key and a new signing secret. The ones before stop working at once.
@@ -82,7 +82,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 }
 ```
 
-* `program` is `avaclone`, `openclaw` or `other`.
+* `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
 * `departments` and `teams` are the places the owner was given access to. `responsibleFor` lists the departments the owner is responsible for.
 * `telegram` is the owner's Telegram as it is in People now: `username` without the `@`, in lower case, and `id`, the account's number, typed in People or learned once one of the company's Telegram bots met the owner. Each is `null` while unknown, and both are always there. A program that serves several people binds the key to exactly one of them by this, so that nobody else acts with the owner's rights through it. It changes when the owner's Telegram changes, so read it again, for example when the program starts.
@@ -216,9 +216,30 @@ No other field is allowed. Answers `200`:
 
 `status` is `answered`, `approved` or `declined`; `picked` is the option's number for a pick. A `request_closed` event follows. Refusals: `403 decision_not_allowed` when the owner does not take this decision, `409 request_closed` when it is answered already, `400 task_invalid` when the answer does not fit the kind (for example `approve` on a question, or a `pick` that is not an option).
 
+## MCP
+
+A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or Codex, may take the calls above as MCP tools instead of making them itself.
+
+* The address is the company's Hornhoof address and `/api/assistant/mcp`, over Streamable HTTP. Every request is a POST with the key, `Authorization: Bearer hha_…`, as every call carries it. There are no sessions, and `GET` and `DELETE` answer `405`.
+* A request without a valid key answers `401 assistant_key_invalid`, and one while the owner is switched off or gone `403 assistant_owner_inactive`, before any tool runs.
+
+| Tool | Arguments | Does what this call does |
+| --- | --- | --- |
+| `who_am_i` | none | `GET /api/assistant/me` |
+| `list_agents` | none | `GET /api/assistant/agents` |
+| `send_message` | `agentId`, `text` | `POST /api/assistant/messages` |
+| `read_events` | `after`, `wait`, both optional | `GET /api/assistant/events` |
+| `list_requests` | none | `GET /api/assistant/requests` |
+| `answer_request` | `requestId`, and `answer`, `pick`, `approve` or `retry` as in the call's body | `POST /api/assistant/requests/:id/answer` |
+
+* A tool checks what the call checks, acts with the same rights and answers with the call's JSON, as text.
+* `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
+* A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
+* `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
+
 ## Wake
 
-When the assistant's card has an events address, Hornhoof also wakes the program there each time a new event of the assistant is kept, so it need not hold a long poll open. A wake is a POST:
+When the assistant's card has an events address, Hornhoof also wakes the program there each time a new event of the assistant is kept, so it need not hold a long poll open. A wake for AvaClone and other programs is this POST; OpenClaw and Hermes Agent take it in their own form, below:
 
 ```
 POST <events address>
@@ -256,6 +277,99 @@ def is_from_hornhoof(raw_body: bytes, header: str, signing_secret: str) -> bool:
     expected = "sha256=" + hmac.new(signing_secret.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, header or "")
 ```
+
+### A wake for OpenClaw and Hermes Agent
+
+A wake of these programs starts a turn of their model, which costs and may write to the owner. So Hornhoof wakes them only for an event worth a turn: a `reply_end` or a `request`. A `reply` or a `request_closed` waits for the next wake, whose `after` is then the smallest. Tries, pauses and redirects go as above.
+
+OpenClaw, at its wake hook:
+
+```
+POST <events address>
+Authorization: Bearer <signing secret>
+Content-Type: application/json
+
+{"text":"New events wait for you in Hornhoof after number 40. Read them with the Hornhoof tool read_events, with after 40, and tell your owner what they need to know.","mode":"now"}
+```
+
+* The events address is the gateway's address and `/hooks/wake`, for example `http://192.168.1.5:18789/hooks/wake`, and the signing secret is the hook's token (`hooks.token`).
+* OpenClaw puts the text into the agent's main session and runs it as soon as the session is free ([webhooks](https://docs.openclaw.ai/automation/cron-jobs/webhooks), [hooks settings](https://docs.openclaw.ai/gateway/config-hooks)).
+
+Hermes Agent, at its webhook route:
+
+```
+POST <events address>
+Content-Type: application/json
+X-Webhook-Timestamp: 1794448160
+X-Webhook-Signature-V2: <64 hex characters>
+X-Request-ID: hornhoof-<assistant id>-40
+
+{"type":"wake","after":40}
+```
+
+* The events address is the webhook's address and the route, for example `http://192.168.1.5:8644/webhooks/hornhoof`.
+* `X-Webhook-Signature-V2` is Hermes' generic V2 signature: the HMAC-SHA256 of the timestamp, a dot and the exact body, under the signing secret as a UTF-8 string, in lowercase hex. The timestamp is in whole seconds, and Hermes takes it within 5 minutes of its own clock.
+* `X-Request-ID` is the same on every try of one wake, so Hermes runs it once.
+* The route's `prompt` puts the number in place of `{after}` and runs it as a new turn; its answer goes where the route's `deliver` says ([webhooks](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks)).
+
+## Connecting OpenClaw
+
+1. In People, add the assistant for its owner and choose the program OpenClaw. For wakes, give the events address: the address at which Hornhoof reaches OpenClaw's gateway, then `:18789/hooks/wake`, for example `http://192.168.1.5:18789/hooks/wake`. The gateway listens only on its own computer unless `gateway.bind` says otherwise, so Hornhoof reaches it over a private network or through a reverse proxy with HTTPS. Without an events address, OpenClaw still has the tools, but nobody wakes it.
+2. On the assistant's card, make the key. The window shows "Settings for OpenClaw". Copy them.
+3. Put them into `~/.openclaw/openclaw.json` on the computer where OpenClaw runs, next to what is there: the `hornhoof` server under `mcp.servers`, and the `hooks` block. OpenClaw takes both without a restart.
+4. Ask OpenClaw, for example in Telegram, who you are in Hornhoof. It answers with `who_am_i`.
+
+The settings, with the company's address, the key and the signing secret in place:
+
+```json5
+{
+  mcp: {
+    servers: {
+      hornhoof: {
+        url: "https://hornhoof.example.com/api/assistant/mcp",
+        transport: "streamable-http",
+        headers: { Authorization: "Bearer hha_…" },
+      },
+    },
+  },
+  hooks: {
+    enabled: true,
+    token: "hhs_…",
+  },
+}
+```
+
+The `hooks` block is there only when the card has an events address. OpenClaw's own pages: [MCP servers](https://docs.openclaw.ai/tools/mcp), [MCP transports](https://docs.openclaw.ai/cli/mcp/transports), [webhooks](https://docs.openclaw.ai/automation/cron-jobs/webhooks).
+
+## Connecting Hermes Agent
+
+1. In People, add the assistant for its owner and choose the program Hermes Agent. For wakes, give the events address: the address at which Hornhoof reaches the computer Hermes runs on, then `:8644/webhooks/hornhoof`, for example `http://192.168.1.5:8644/webhooks/hornhoof`. Without an events address, Hermes still has the tools, but nobody wakes it.
+2. On the assistant's card, make the key. The window shows "Settings for Hermes Agent". Copy them.
+3. Put them into `~/.hermes/config.yaml` on the computer where Hermes runs, next to what is there: the `hornhoof` server under `mcp_servers`, and the `hornhoof` route of the webhook under `platforms`. Where the file has `platforms` already, `webhook` goes under it. Then start Hermes' gateway again, so it reads them.
+4. The answer to a wake goes to the home chat of Hermes in Telegram (`deliver: telegram`), and with `mirror_to_session` into that chat's conversation too, so the owner answers it there. For another chat, set `deliver_extra` with its `chat_id`, or another program in `deliver`.
+5. Ask Hermes, for example in Telegram, who you are in Hornhoof. It answers with `who_am_i`.
+
+The settings, with the company's address, the key and the signing secret in place:
+
+```yaml
+mcp_servers:
+  hornhoof:
+    url: "https://hornhoof.example.com/api/assistant/mcp"
+    headers:
+      Authorization: "Bearer hha_…"
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      routes:
+        hornhoof:
+          secret: "hhs_…"
+          prompt: "New events wait for you in Hornhoof after number {after}. Read them with the Hornhoof tool read_events, with after {after}, and tell your owner what they need to know."
+          deliver: telegram
+          mirror_to_session: true
+```
+
+The `platforms` part is there only when the card has an events address. Hermes' own pages: [MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp), [webhooks](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks).
 
 ## Limits
 

@@ -16,10 +16,10 @@ import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
 
-const MessageBody = z.object({ agentId: z.uuid(), text: z.string().trim().min(1).max(20_000) }).strict();
+export const MessageBody = z.object({ agentId: z.uuid(), text: z.string().trim().min(1).max(20_000) }).strict();
 /* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
 export const LONGEST_WAIT_S = 50;
-const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
+export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
 const IdParams = z.object({ id: z.uuid() });
 
 /* The assistant writes to exactly the agents its owner writes to in the agent's window: the window's own check, with the
@@ -42,7 +42,7 @@ async function writableAgent(ctx: Ctx, me: Person, id: string): Promise<AgentRow
 }
 
 /* Who the assistant and its owner are, and what the owner is in the company, in plain fields. */
-async function whoAmI(ctx: Ctx, me: Person) {
+export async function whoAmI(ctx: Ctx, me: Person) {
   const { db } = ctx;
   const [helper] = await db.select({ name: people.name, title: people.title, program: assistants.program }).from(people).innerJoin(assistants, eq(assistants.personId, people.id)).where(eq(people.id, me.assistant!.id));
   const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -68,6 +68,36 @@ async function agentView(ctx: Ctx, agent: AgentRow, depts: Map<string, typeof de
   return { id: agent.id, name: agent.name, kind: agent.kind, role: agentRole(ctx, agent), department: dept ? departmentParty(dept) : null };
 }
 
+/* The calls an assistant makes, the same through its routes and through its MCP tools: each checks what it is given and
+   acts with the owner's rights as they are now. */
+
+export async function agentsFor(ctx: Ctx, me: Person) {
+  const depts = new Map((await ctx.db.select().from(departments).where(eq(departments.companyId, me.companyId))).map(d => [d.id, d]));
+  return { agents: await Promise.all((await writable(ctx, me)).map(a => agentView(ctx, a, depts))) };
+}
+
+export async function writeFor(ctx: Ctx, me: Person, body: unknown) {
+  const { agentId, text } = MessageBody.parse(body);
+  const agent = await writableAgent(ctx, me, agentId);
+  const id = await sendForOwner(ctx, me, agent, text);
+  return { message: { id, agentId: agent.id } };
+}
+
+/* A long poll: the events after a number at once, or the first that comes within the wait, until the asker goes. */
+export async function eventsFor(ctx: Ctx, me: Person, query: unknown, gone: AbortSignal) {
+  const { after, wait } = EventsQuery.parse(query);
+  const events = await ctx.assistants.read(me.assistant!.id, after, wait * 1000, gone);
+  return { events, next: events.at(-1)?.seq ?? after };
+}
+
+export const requestsFor = async (ctx: Ctx, me: Person) => ({ requests: await waitingFor(ctx, me) });
+
+/* The same answer the owner gives on their screen, recorded as given by the assistant for them. */
+export function answerFor(ctx: Ctx, me: Person, params: unknown, body: unknown) {
+  const { id } = IdParams.parse(params);
+  return answerRequest(ctx, me, id, AnswerBody.parse(body));
+}
+
 /* What a person's assistant does for them, with its key: reads who it is for and whom it may write to, writes to agents,
    reads what happened since, and answers what waits for its owner, all with the owner's rights. */
 export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -75,37 +105,22 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/assistant/me', async req => whoAmI(ctx, await requireAssistant(req, db)));
 
-  app.get('/api/assistant/agents', async req => {
-    const me = await requireAssistant(req, db);
-    const depts = new Map((await db.select().from(departments).where(eq(departments.companyId, me.companyId))).map(d => [d.id, d]));
-    return { agents: await Promise.all((await writable(ctx, me)).map(a => agentView(ctx, a, depts))) };
-  });
+  app.get('/api/assistant/agents', async req => agentsFor(ctx, await requireAssistant(req, db)));
 
   app.post('/api/assistant/messages', async (req, reply) => {
-    const me = await requireAssistant(req, db);
-    const { agentId, text } = MessageBody.parse(req.body);
-    const agent = await writableAgent(ctx, me, agentId);
-    const id = await sendForOwner(ctx, me, agent, text);
+    const sent = await writeFor(ctx, await requireAssistant(req, db), req.body);
     reply.code(202);
-    return { message: { id, agentId: agent.id } };
+    return sent;
   });
 
-  /* A long poll: the events after a number at once, or the first that comes within the wait. */
   app.get('/api/assistant/events', async (req, reply) => {
     const me = await requireAssistant(req, db);
-    const { after, wait } = EventsQuery.parse(req.query);
     const gone = new AbortController();
     reply.raw.once('close', () => gone.abort());
-    const events = await ctx.assistants.read(me.assistant!.id, after, wait * 1000, gone.signal);
-    return { events, next: events.at(-1)?.seq ?? after };
+    return eventsFor(ctx, me, req.query, gone.signal);
   });
 
-  app.get('/api/assistant/requests', async req => ({ requests: await waitingFor(ctx, await requireAssistant(req, db)) }));
+  app.get('/api/assistant/requests', async req => requestsFor(ctx, await requireAssistant(req, db)));
 
-  /* The same answer the owner gives on their screen, recorded as given by the assistant for them. */
-  app.post('/api/assistant/requests/:id/answer', async req => {
-    const me = await requireAssistant(req, db);
-    const { id } = IdParams.parse(req.params);
-    return answerRequest(ctx, me, id, AnswerBody.parse(req.body));
-  });
+  app.post('/api/assistant/requests/:id/answer', async req => answerFor(ctx, await requireAssistant(req, db), req.params, req.body));
 }

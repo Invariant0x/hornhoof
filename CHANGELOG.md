@@ -5,6 +5,32 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.10] - 2026-11-12
+
+OpenClaw and Hermes Agent join a company as a person's assistant with one piece of settings, and an assistant such as
+AvaClone takes the company's address and its key in one message. A line on the company map stays on while the agent
+under it works, even after it writes to the one above it.
+
+### Added
+
+- Where an assistant's new key is shown once, "Copy for the assistant" copies the company's address and the key in one
+  text, for the person to send their assistant, for example in Telegram. The signing secret never goes into it.
+- A program that is an MCP client, such as OpenClaw or Hermes Agent, takes what an assistant may do as tools at
+  `/api/assistant/mcp` with the assistant's key: who it acts for, whom it may write to, writing to an agent, reading the
+  answers and answering the requests that wait for its owner.
+- Hermes Agent is a program of its own on an assistant's card. Hornhoof wakes OpenClaw at its wake hook and Hermes Agent
+  at its webhook, each in its own form, once an answer is over or a new request waits.
+- For OpenClaw and Hermes Agent the window with the new key also shows their settings, ready to copy into their file.
+  `docs/assistant-api.md` says how to connect each, step by step.
+- The README shows what Hornhoof works with.
+
+### Fixed
+
+- A line on the company map went out while the agent under it still worked, as soon as it wrote to the one above it,
+  for example with a question. Now it stays blue until the agent's turn is over, and turns yellow after it.
+- The lines of tests and of checks never turned yellow when their result went back to the head. Now they do.
+- A wake that failed now joins the next one and starts from the earliest event, as the API document says.
+
 ## [0.18.9] - 2026-11-11
 
 A ready-made company comes with every department staffed and starts working once its subscription is on. Every department

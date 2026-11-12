@@ -53,7 +53,7 @@ export type PersonView = {
   assistant?: AssistantView | null;
 };
 
-export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'other'] as const;
+export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'hermes', 'other'] as const;
 export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
 export type AssistantView = { owner: { id: string; name: string }; program: AssistantProgram; eventsUrl: string | null; key: { createdAt: string } | null };
 
