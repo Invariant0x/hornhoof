@@ -5,6 +5,19 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.12] - 2026-11-12
+
+Everyone given a department now runs it in full, as its responsible person does, and a department may have many such
+people.
+
+### Changed
+
+- A person whose access lists a department sees every employee of it, also those on someone else's plan, and may change
+  them, move them to another plan, write to them, hire into the department, set its repository, sub-units, approvals
+  and channels, and answer its decisions. Before, only the one person the CEO named responsible could, and the others saw
+  only employees on their own plan. Typing into an employee's terminal and a plan's keys stay with that plan's owner.
+  A product or a team of a department alone, and access to the whole company, give no such rights.
+
 ## [0.18.11] - 2026-11-12
 
 A person who works in several departments opens each of them again, a plan that was removed connects again without
