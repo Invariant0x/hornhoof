@@ -13,7 +13,7 @@ import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certifica
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
 import { PIN_FILE, readPin } from '../src/modules/keeper/owner-pin.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
-import { PEERS_FILE, TICKET_FILE } from '../src/modules/keeper/worker.js';
+import { PEERS_FILE, TICKET_FILE, type KeeperView } from '../src/modules/keeper/worker.js';
 import { WIPE_FILE, WIPED_FILE } from '../src/modules/keeper/uploads.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import type { VisitSettings } from '../src/modules/link/visit-client.js';
@@ -24,7 +24,7 @@ import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { as, SETUP, TEST_SECRET, testApp, until } from './helpers.js';
 
-import { type Company, DAY_MS, MAC, SLEEPER, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
+import { type Company, DAY_MS, HOST_ID, MAC, SLEEPER, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -107,6 +107,18 @@ describe("a worker's keeper", () => {
     expect(request.secrets).toEqual({ HORNHOOF_SECRET: TEST_SECRET, NODE_KEY: '', RELAY_URL: c.config.relayUrl });
     expect(statSync(file('role.json')).mode & 0o777).toBe(0o600);
     for (const line of w.lines) expect(line).not.toContain(TEST_SECRET);
+  });
+
+  it("keeps what the leader says of this machine's copy whole: the leader it is of, and the slot to join", async () => {
+    const c = await company();
+    const views: KeeperView[] = [];
+    const w = await worker(c, { onView: view => views.push(view) });
+    await until(async () => (await c.rowOf(w.machine)).ageKey !== null);
+    await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
+    await until(() => views.some(view => view.copy !== null));
+    /* The leader's own network id, which the copy's keeper follows, votes for and takes over from; no slot to join,
+       since no switch made one. */
+    expect(views.find(view => view.copy !== null)!.copy).toMatchObject({ slot: null, lastAttempt: null, leader: HOST_ID, join: null });
   });
 
   it('says when it could not become a data machine', async () => {

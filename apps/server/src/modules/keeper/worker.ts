@@ -136,6 +136,9 @@ const Copy = z.object({
   slot: z.enum(['ok', 'lost', 'missing']).nullable(), leaderSize: z.number().nullable(), migrations: z.number().nullable(),
   old: z.enum(['waiting', 'merged', 'done']).nullable().default(null), upload: z.enum(['waiting', 'received', 'wipe']).nullable().default(null),
   lastAttempt: z.number().int().min(1).nullable().default(null),
+  /* The leader whose word this is and the slot it made for this machine to join; a server of the build before names
+     neither. */
+  leader: z.string().optional(), join: z.string().nullable().optional(),
 });
 /* dataSecret: a server of the build before says none, which reads as none. */
 const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
