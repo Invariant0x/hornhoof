@@ -296,6 +296,16 @@ async function nextTurnNode(ctx: Ctx, agentId: string, sub: Parameters<typeof pl
   return place?.node ?? null;
 }
 
+/* Whether the agent's next turn would go to another node than this one now, as the queue itself would place it: an
+     agent that has work in progress on its own node waits for that one, and so goes nowhere else. Nothing is moved. */
+export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentity): Promise<boolean> {
+  const sub = await liveSubscription(ctx, agentId);
+  if (!sub) return false;
+  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
+  const place = agent ? await placement(ctx, agent, sub) : null;
+  return place !== null && !sameNode(place.node, from);
+}
+
 /* The turn that goes on from this one's words, whichever way it came: a retry after a restart or a continuation. */
 export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string; error: string | null } | null> {
   const [next] = await ctx.db.select({ id: jobs.id, error: jobs.error }).from(jobs).where(or(eq(jobs.retryOf, jobId), eq(jobs.continueOf, jobId))).limit(1);

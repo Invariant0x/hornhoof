@@ -87,6 +87,17 @@ describe('the tools of an agent on a machine that only reads', () => {
     });
     expect([raw.statusCode, raw.json().error.reason]).toEqual([503, 'read_only']);
     expect((await s.call(waiting, 'tasks')).isError).toBeFalsy();
+    /* Several calls in one request are not taken on a machine that only reads, and a token the machine does not know
+       is one to try again, not one that is wrong: a copy may not hold yet that the turn runs. */
+    const batch = await s.app.inject({
+      method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${TOKEN}`, accept: 'application/json, text/event-stream' },
+      payload: [{ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'remember', arguments: { text: 'A note.' } } }],
+    });
+    expect(batch.statusCode).toBe(400);
+    const unknown = await s.app.inject({ method: 'POST', url: '/mcp', headers: { authorization: 'Bearer some-token-this-machine-does-not-know-0123456789' }, payload: { jsonrpc: '2.0', id: 9, method: 'tools/list' } });
+    expect([unknown.statusCode, unknown.json().error.reason]).toEqual([503, 'read_only']);
+    /* The tools that only read, though they are no part of the first list, answer too. */
+    for (const name of ['backlog', 'machines']) expect((await s.call(waiting, name)).content[0]!.text, name).not.toContain('did not run');
   });
 
   it('writes nothing in read, with or without the id of a call', async () => {

@@ -59,6 +59,7 @@ function awayText(t: Messages, e: TaskLogLine, when: (at: string) => string): st
   const [stage, host, since] = [field(e.data, 'stage'), field(e.data, 'host'), field(e.data, 'since')];
   const machine = typeof host === 'string' && host ? host : null;
   if (stage === 'back') return t.tasks.away.back(machine);
+  if (stage === 'ended') return t.tasks.away.ended(machine);
   return stage === 'away' && typeof since === 'string' ? t.tasks.away.gone(machine, when(since)) : null;
 }
 

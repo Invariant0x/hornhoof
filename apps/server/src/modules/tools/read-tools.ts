@@ -6,11 +6,17 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
    itself; on a machine that still has the internet, and so only waits for the leader or for the CEO, the call is
    turned away before any tool runs and tried again by the front door. */
 
-/* The tools whose handlers only read. `computer_result` is not among them: it gives up a command whose keeper never
-   came for it, which is a write. */
+/* The tools whose handlers only read. Not among them, though they sound like reads: `computer_result`, which gives up
+   a command whose keeper never came for it; `pipeline_report`, which may keep a snapshot of a turn; `program_screen`,
+   which keeps a picture of the screen it shows. */
 export const READ_TOOLS: ReadonlySet<string> = new Set([
   'company', 'staffing_options', 'tasks', 'task', 'turns', 'agents', 'failures', 'test_run', 'work_run', 'notebook', 'improvements', 'database', 'view', 'pool',
+  'machines', 'briefing', 'backlog', 'merge_conflicts', 'outbound_status', 'outbound_options', 'approval_policy', 'test_harness',
 ]);
+
+/* What a tool that changes something answers on a machine that only reads for a moment, should a call reach it past
+   the refusal the route gives first. */
+export const PAUSED = 'Hornhoof cannot take changes on this machine for a moment, so this call did not run. Try it again in a minute; if it keeps failing, end your turn with what you have done.';
 
 export const CUT_OFF = 'This machine is cut off and does not take changes now. Finish your current step, commit your work on your task branch, push if you can, and end your turn.';
 

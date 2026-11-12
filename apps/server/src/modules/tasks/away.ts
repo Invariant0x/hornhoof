@@ -13,7 +13,7 @@ import { when } from './silent.js';
    went to someone else meanwhile is ended as handed on, so the machine stops it when it is back. */
 
 type Job = typeof jobs.$inferSelect;
-type Stage = 'away' | 'back';
+type Stage = 'away' | 'back' | 'ended';
 /* host: the machine's name, for the screens; none for the server's own machine and for one with no name. */
 type Noted = { job: string; stage: Stage; holder: string; host: string | null; since: string };
 
@@ -33,8 +33,8 @@ async function hostOf(ctx: Ctx, node: NodeIdentity): Promise<string | null> {
 const named = (ctx: Ctx, node: NodeIdentity, host: string | null): string =>
   host ?? (node.kind === 'builtin' && node.machine === ownMachine(ctx.config) ? "the server's own machine" : 'a machine with no name');
 
-/* What was written down of this turn: that its machine went away, and that it came back. */
-async function notedOf(ctx: Ctx, job: Job): Promise<Noted[]> {
+/* What was written down of this turn: that its machine went away, and that it came back or the turn ended. */
+async function notedOf(ctx: Ctx, job: Pick<Job, 'id' | 'taskId'>): Promise<Noted[]> {
   const rows = await ctx.db
     .select({ data: taskEvents.data })
     .from(taskEvents)
@@ -43,21 +43,25 @@ async function notedOf(ctx: Ctx, job: Job): Promise<Noted[]> {
   return rows.map(row => row.data as Noted);
 }
 
-/* The agent that hears of it: whoever gave the task out, else the orchestrator; nobody when that is the agent whose
-   turn it is, or one that is gone. */
+/* The agent that hears of it: whoever gave the task out, else the orchestrator; never the agent whose turn it is, nor
+   one that is gone. */
 async function hearerOf(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job): Promise<string | null> {
-  const id = task.createdByAgentId ?? (await orchestratorOf(ctx, task.companyId))?.id ?? null;
-  if (!id || id === job.agentId) return null;
-  const [agent] = await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, id));
-  return agent && !agent.removedAt ? id : null;
+  for (const id of [task.createdByAgentId, (await orchestratorOf(ctx, task.companyId))?.id]) {
+    if (!id || id === job.agentId) continue;
+    const [agent] = await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, id));
+    if (agent && !agent.removedAt) return id;
+  }
+  return null;
 }
 
-async function tell(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job, stage: Stage, host: string | null, since: string, text: string, log: string): Promise<void> {
+/* The line in the task's log is Hornhoof's own, of nobody's doing: it is no move of the task, and no sign of life of
+   its holder. to: whether whoever gave the task out is told too. */
+async function note(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job, stage: Stage, host: string | null, since: string, log: string, text: string | null): Promise<void> {
   const data: Noted = { job: job.id, stage, holder: job.agentId!, host, since };
-  await ctx.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'away', agentId: job.agentId, text: log, data });
+  await ctx.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'away', text: log, data });
   published(ctx, task);
-  const to = await hearerOf(ctx, task, job);
-  if (!to) return;
+  const to = text === null ? null : await hearerOf(ctx, task, job);
+  if (!to || text === null) return;
   const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [{ id: task.id, number: task.number }], detail: { en: host ?? `#${task.number}`, ru: host ?? `#${task.number}` } } };
   await enqueueTurn(ctx, { companyId: task.companyId, agentId: to, prompt: text, createdBy: null, message }).catch((err: unknown) => {
     if (!(err instanceof NoSubscription)) throw err;
@@ -65,32 +69,34 @@ async function tell(ctx: Ctx, task: typeof tasks.$inferSelect, job: Job, stage: 
 }
 
 /* A running turn on a task whose machine has been away as long as Hornhoof waits before it counts a machine as gone.
-   since: when the machine went away, in ms. */
-export async function turnAway(ctx: Ctx, job: Job, node: NodeIdentity, since: number): Promise<void> {
+   since: when the machine went away, in ms. elsewhere: whether the queue would run the agent's next turn on another
+   machine now. True when the turn is kept, or was ended here as handed on; false when it is the caller's to end as any
+   turn on a machine that is gone. */
+export async function turnAway(ctx: Ctx, job: Job, node: NodeIdentity, since: number, elsewhere: () => Promise<boolean>): Promise<boolean> {
   const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, job.taskId!));
-  if (!task || !job.agentId) return;
-  const noted = await notedOf(ctx, job);
-  const last = noted.at(-1);
-  /* The task went to someone else while this machine was away: the turn is over, and the machine stops it when it is
-     back. Only a turn of the one who held the task when its machine went away ends so. */
-  if (last?.stage === 'away' && last.holder === job.agentId && task.assigneeAgentId !== job.agentId) {
-    await failOpenJobs(ctx, eq(jobs.id, job.id), 'handed_on');
-    return;
+  if (!task || !job.agentId) return false;
+  const last = (await notedOf(ctx, job)).at(-1);
+  if (last?.stage === 'away') {
+    /* The task went to someone else while this machine was away: the turn is over, and the machine stops it when
+       it is back. */
+    if (task.assigneeAgentId !== job.agentId) await failOpenJobs(ctx, eq(jobs.id, job.id), 'handed_on');
+    return true;
   }
-  if (last?.stage === 'away' || task.assigneeAgentId !== job.agentId) return;
+  /* Only the turn of whoever holds the task is kept, and only while it can go on nowhere else. */
+  if (task.assigneeAgentId !== job.agentId || (await elsewhere())) return false;
   const [agent] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
   const [host, at] = [await hostOf(ctx, node), new Date(since).toISOString()];
   const [who, where] = [agent?.name ?? 'An employee', named(ctx, node, host)];
   const text =
     `Hornhoof: ${who}'s turn on #${task.number} "${task.title}" runs on ${where}, which Hornhoof cannot reach since ${when(at)}. ` +
     `The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with ${who}.`;
-  await tell(ctx, task, job, 'away', host, at, text, `${who}'s turn runs on ${where}, which Hornhoof cannot reach since ${when(at)}. The work there is kept.`);
+  await note(ctx, task, job, 'away', host, at, `${who}'s turn runs on ${where}, which Hornhoof cannot reach since ${when(at)}. The work there is kept.`, text);
+  return true;
 }
 
 /* A running turn on a task whose machine is in reach: when it was told of as away, it is told of once as back. */
 export async function turnBack(ctx: Ctx, job: Job, node: NodeIdentity, now: Date): Promise<void> {
-  const noted = await notedOf(ctx, job);
-  const last = noted.at(-1);
+  const last = (await notedOf(ctx, job)).at(-1);
   if (last?.stage !== 'away') return;
   const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, job.taskId!));
   if (!task || !job.agentId) return;
@@ -98,5 +104,23 @@ export async function turnBack(ctx: Ctx, job: Job, node: NodeIdentity, now: Date
   const [host, at] = [await hostOf(ctx, node), now.toISOString()];
   const [who, where] = [agent?.name ?? 'An employee', named(ctx, node, host)];
   const text = `Hornhoof: ${where} is in reach again, and ${who}'s turn on #${task.number} "${task.title}" goes on there.`;
-  await tell(ctx, task, job, 'back', host, at, text, `${where[0]!.toUpperCase()}${where.slice(1)} is in reach again; ${who}'s turn goes on there.`);
+  await note(ctx, task, job, 'back', host, at, `${where[0]!.toUpperCase()}${where.slice(1)} is in reach again; ${who}'s turn goes on there.`, text);
+}
+
+/* A turn that was told of as away and runs no more, whichever way it ended: its machine came back without it, it was
+   done meanwhile, or the task went to someone else. The log says so once, so no line is left that still promises the
+   turn goes on; whoever gave the task out hears how it ended the way they hear of any turn. */
+export async function settleAwayNotes(ctx: Ctx): Promise<void> {
+  const open = await ctx.db
+    .select({ job: jobs, data: taskEvents.data })
+    .from(taskEvents)
+    .innerJoin(jobs, sql`${jobs.id}::text = ${taskEvents.data} ->> 'job'`)
+    .where(and(eq(taskEvents.kind, 'away'), sql`${taskEvents.data} ->> 'stage' = 'away'`, sql`${jobs.status} <> 'running'`,
+      sql`NOT EXISTS (SELECT 1 FROM task_events later WHERE later.task_id = ${taskEvents.taskId} AND later.kind = 'away' AND later.id > ${taskEvents.id} AND later.data ->> 'job' = ${taskEvents.data} ->> 'job')`));
+  for (const { job, data } of open) {
+    const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, job.taskId!));
+    if (!task || !job.agentId) continue;
+    const host = (data as Noted).host;
+    await note(ctx, task, job, 'ended', host, new Date().toISOString(), `The turn that ran on ${host ?? 'that machine'} is over.`, null);
+  }
 }

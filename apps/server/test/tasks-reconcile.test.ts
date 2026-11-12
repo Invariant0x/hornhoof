@@ -163,7 +163,8 @@ describe('turns on a machine that went away', () => {
     await c.round(new Date(away + 5 * MIN + 1));
     /* The turn is not failed and nothing is queued in its place: the work on that machine is kept. */
     expect(await c.turnsOf(c.bruno.id)).toMatchObject([{ id: job.id, status: 'running', error: null }]);
-    expect(await noted()).toMatchObject([{ agentId: c.bruno.id, data: { job: job.id, stage: 'away', holder: c.bruno.id } }]);
+    /* The line is Hornhoof's own, of nobody's doing: it is no move of the task. */
+    expect(await noted()).toMatchObject([{ agentId: null, data: { job: job.id, stage: 'away', holder: c.bruno.id } }]);
     const [told] = await heard();
     expect(told!.prompt).toContain(`Bruno's turn on #${task.number} "Checkout API" runs on the server's own machine, which Hornhoof cannot reach since`);
     expect(told!.prompt).toContain(`The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with Bruno.`);
@@ -176,12 +177,15 @@ describe('turns on a machine that went away', () => {
     /* The machine is back with the turn still running: nothing is stopped, and whoever gave the task hears that too. */
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
     expect(c.send).not.toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
-    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
     vi.spyOn(c.ctx.hub, 'awaySince').mockReturnValue(null);
+    /* Not before its node said hello again, which may still end a turn the machine no longer runs. */
+    await c.round(new Date(away + 91 * MIN - 1));
+    expect((await noted()).length).toBe(1);
+    c.ready.mockReturnValue(true);
     await c.round(new Date(away + 91 * MIN));
     await c.round(new Date(away + 92 * MIN));
     expect((await noted()).map(e => (e.data as { stage: string }).stage)).toEqual(['away', 'back']);
-    expect((await heard()).map(j => j.prompt.includes('in reach again'))).toEqual([false, true]);
+    expect((await heard()).map(j => j.prompt.includes('in reach again')).sort()).toEqual([false, true]);
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Done after all.', tail: '', error: null, sessionId: 'kept-session' });
     expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'done', result: 'Done after all.' });
   });
@@ -203,6 +207,30 @@ describe('turns on a machine that went away', () => {
     /* Back, the machine is told to stop it. */
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
     expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
+  });
+
+  it('ends a turn of someone who does not hold the task as before, and closes the note of a kept turn that ended', async () => {
+    const c = await company();
+    const task = await c.task({ status: 'working' });
+    /* The head's own turn about the task, on the same machine: it is not the task's work, so it ends and goes on by
+       the failed-turn path, and the head is free for what comes to it. */
+    const about = await c.job({ taskId: task.id, agentId: c.head.id, status: 'running', startedAt: new Date(c.at.getTime() + 9 * MIN) });
+    const job = await c.job({ taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + 9 * MIN) });
+    c.ready.mockReturnValue(false);
+    await handleNodeClose(c.ctx, BUILTIN);
+    const away = c.ctx.hub.awaySince(BUILTIN)!;
+    await c.round(new Date(away + 5 * MIN + 1));
+    expect((await c.turnsOf(c.head.id)).find(j => j.id === about.id)).toMatchObject({ status: 'failed', error: 'machine_offline' });
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'running' });
+    const stages = async () => (await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'away')))).map(e => (e.data as { stage: string }).stage);
+    expect(await stages()).toEqual(['away']);
+    /* The machine comes back without the turn: its hello ends it. The log says once that the turn is over, so no
+       line is left that promises it goes on. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    await c.round(new Date(away + 7 * MIN));
+    await c.round(new Date(away + 8 * MIN));
+    expect(await stages()).toEqual(['away', 'ended']);
   });
 
   it('fails a turn of no task after five minutes away, as before', async () => {
