@@ -29,6 +29,8 @@ const publicRoutes = new Map([
   ['GET /install.ps1', 'public installer for Windows'],
   ['GET /mcp', 'public method rejection'],
   ['DELETE /mcp', 'public method rejection'],
+  ['GET /api/assistant/mcp', 'public method rejection'],
+  ['DELETE /api/assistant/mcp', 'public method rejection'],
 ]);
 const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'requirePerson', path: /^\/api\//, rule: 'human session and company scope' },
