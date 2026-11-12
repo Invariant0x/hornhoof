@@ -559,6 +559,17 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
+/* The steps from adding a personal plan to its agents working, down the card so their words wrap on a phone: a numbered
+   box joined by a line, ticked once passed, filled at the current step with what to do now, dimmed after it. */
+.plan-steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: plan-step; }
+.plan-steps li { position: relative; display: grid; gap: 4px; min-width: 0; min-height: 20px; padding-inline-start: 30px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; counter-increment: plan-step; }
+.plan-steps li::before { content: counter(plan-step); position: absolute; inset-inline-start: 0; top: 0; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--line2); background: var(--surface); font-family: var(--f-display); font-size: 12px; font-weight: 600; line-height: 1; }
+.plan-steps li:not(:last-child)::after { content: ''; position: absolute; inset-inline-start: 10px; top: 22px; bottom: -4px; width: 1px; background: var(--line2); }
+.plan-steps li.done, .plan-steps li.now { color: var(--ink); }
+.plan-steps li.done::before { content: '\2713'; border-color: var(--ok); color: var(--ok); }
+.plan-steps li.now::before { border-color: var(--btn); background: var(--btn); color: var(--on-btn); box-shadow: 0 0 0 3px var(--glow); }
+.plan-steps li.now > span:first-child { font-weight: 600; }
+.plan-steps li p { margin: 0; }
 .key-form { display: grid; gap: 8px; max-width: 520px; }
 .key-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
 .key-form input { font: inherit; font-family: var(--f-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 6px 8px; }
