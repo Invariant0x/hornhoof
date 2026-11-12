@@ -267,7 +267,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
           bindingDigest: sha('initial'),
           thresholds,
           thresholdsBy: w.c.ids.ceo,
-          validUntil: new Date('2026-11-13T00:00:00.000Z'),
+          validUntil: new Date('2036-01-01T00:00:00.000Z'),
         })
         .returning();
       const hashes = OUTBOUND_CHECK_HASHES.outbound_review;
