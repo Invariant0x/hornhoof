@@ -28,14 +28,16 @@ describe('department work mode settings', () => {
     expect((await setMode(c, c.wholeToken, { workMode: 'turns' })).statusCode).toBe(200);
   });
 
-  it('allows listed readers to read without giving them write authority', async () => {
+  it('lets a reader of the whole company read it without write authority, and everyone given the department change it', async () => {
     const c = await company();
-    expect((await mode(c, c.danaToken)).json()).toEqual({ departmentId: c.dev.id, workMode: 'turns', canChangeWorkMode: false });
-    for (const token of [c.danaToken, c.samToken, c.wholeToken]) {
+    expect((await mode(c, c.wholeToken)).json()).toEqual({ departmentId: c.dev.id, workMode: 'turns', canChangeWorkMode: false });
+    for (const token of [c.samToken, c.wholeToken]) {
       expect((await setMode(c, token, { workMode: 'continuous' })).statusCode).toBe(403);
     }
     expect((await mode(c, c.samToken)).statusCode).toBe(404);
     expect((await mode(c, c.ceoToken)).json().workMode).toBe('turns');
+    expect((await mode(c, c.danaToken)).json()).toEqual({ departmentId: c.dev.id, workMode: 'turns', canChangeWorkMode: true });
+    expect((await setMode(c, c.danaToken, { workMode: 'continuous' })).statusCode).toBe(200);
   });
 
   it('revokes a former owner immediately when their access is taken away', async () => {

@@ -96,7 +96,7 @@ describe('the live stream', () => {
     const own = await c.work('Own work', c.crew.mine);
     const hidden = await c.work('Hidden work', c.crew.other);
     const stream = await openStream(c.app, c.tokens.ann);
-    const spot = { departmentId: c.dev.id };
+    const spot = { departmentId: c.product.id, parentId: c.dev.id };
     c.app.ctx.bus.publish(c.companyId, { type: 'task', id: hidden.id, spot });
     c.app.ctx.bus.publish(c.companyId, { type: 'task', id: own.id, spot });
     c.app.ctx.bus.publish(c.companyId, { type: 'context', agentId: c.crew.other.id, used: 0.9 });

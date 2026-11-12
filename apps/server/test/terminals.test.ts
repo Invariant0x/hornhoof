@@ -208,10 +208,15 @@ describe("writing to an agent on the plan of someone else", () => {
     }
   });
 
-  it('tells the owner of the plan they type, and closes the window to a person with the department on another plan', async () => {
-    const { app, bruno, zed, maria } = await withEmployees();
+  it('tells the owner of the plan they type, and a person with the department on another plan that they watch and do not type', async () => {
+    const { app, url, builtin, bruno, zed, maria } = await withEmployees();
     const read = (person: string) => app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(person) });
-    expect((await read(maria)).statusCode).toBe(403);
+    /* Everyone given the department sees its employees on whoever's plan; the program types for its plan's owner alone. */
+    expect((await read(maria)).json().state.canType).toBe(false);
+    const screen = await watch(url, maria, bruno.id);
+    await next(builtin, 'term.open');
+    await until(() => screen.frames.length > 0);
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false, message: true });
     await takePlan(app.ctx.db, 'zed@example.com', bruno.id);
     await app.ctx.db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Zed'));
     expect((await read(zed)).json().state.canType).toBe(true);

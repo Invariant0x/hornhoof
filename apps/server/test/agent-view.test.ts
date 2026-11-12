@@ -191,12 +191,14 @@ describe('tasks', () => {
     const own = await c.work('Own work', c.crew.mine);
     const hidden = await c.work('Hidden work', c.crew.other);
     const elsewhere = await c.work('Far work', c.crew.away, c.sales.id);
-    const given = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Given by Ann', department: c.dev.id }, ...as(c.tokens.ann) });
+    /* Ann has a product of Development and gives no task to the department itself; Wes, with the whole company, does. */
+    const given = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Given by Wes', department: c.dev.id }, ...as(c.tokens.wes) });
     expect(given.statusCode).toBe(201);
     expect(leaks(given, [c.crew.head])).toEqual([]);
     const givenId = given.json().task.id as string;
     expect((await c.get(`/api/tasks/${own.id}`, c.tokens.ann)).statusCode).toBe(200);
-    expect((await c.get(`/api/tasks/${givenId}`, c.tokens.ann)).statusCode).toBe(200);
+    expect((await c.get(`/api/tasks/${givenId}`, c.tokens.wes)).statusCode).toBe(200);
+    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.wes)).statusCode).toBe(403);
     for (const task of [hidden, elsewhere]) {
       const res = await c.get(`/api/tasks/${task.id}`, c.tokens.ann);
       expect(res.statusCode).toBe(403);
@@ -234,7 +236,7 @@ describe('tasks', () => {
     const { createTask, comment, ask } = await import('../src/modules/tasks/engine.js');
     await echelonsTurn(c.db, c.companyId);
     const parent = await c.work('Hidden parent', c.crew.other);
-    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, resultKind: 'code', reviewerAgentId: c.crew.other.id, parentId: parent.id });
+    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, productId: c.product.id, assigneeAgentId: c.crew.mine.id, executor: true, resultKind: 'code', reviewerAgentId: c.crew.other.id, parentId: parent.id });
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, 'Otto was here');
     await comment(c.app.ctx, { agentId: c.crew.mine.id }, task.id, 'Mina says hello');
     await comment(c.app.ctx, { personId: c.ids.ann }, task.id, 'Ann says hello');

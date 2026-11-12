@@ -294,8 +294,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const mine = reach.find(p => p.id === me.person.id);
   const sees = company || !!mine;
   const canGive = company || !!mine?.access.departments.some(x => x.id === d.id);
-  /* The department's owner runs it as the whole company does: its people, sub-units and repository. */
-  const runs = company || (!!mine && d.ownerPersonId === me.person.id);
+  /* Everyone given the department runs it as the whole company does, its named owner among them: its people, sub-units and
+     repository. A team in it alone is not the department. */
+  const runs = canGive;
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | 'hire' | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, sees && (tree || drawer === 'speed'));

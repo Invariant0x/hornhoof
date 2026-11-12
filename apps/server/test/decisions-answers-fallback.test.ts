@@ -36,16 +36,20 @@ it('shows the computer to people of the whole company and lets only the CEO and 
     expect(await asked()).toBeNull();
   });
 
-it('lets only the CEO and the delegate apply the cards, with or without the card', async () => {
+it('lets only the CEO and the delegate apply the structure card, and the people of a department its staff, with or without the card', async () => {
     const c = await staffed();
     for (const token of [c.tokens.zed, c.tokens.dan]) {
       for (const payload of [{ proposalId: c.structure.id, items: [] }, { items: [] }]) {
         const res = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload, ...as(token) });
         expect(res.statusCode).toBe(403);
       }
+    }
+    /* Dan, given Development, staffs it: an empty list is refused for what it says, not for who sends it. */
+    for (const [token, refused] of [[c.tokens.zed, true], [c.tokens.dan, false]] as const) {
       for (const payload of [{ proposalId: c.staff.id, people: [] }, { people: [] }]) {
         const res = await c.app.inject({ method: 'POST', url: `/api/departments/${c.dev.id}/staff`, payload, ...as(token) });
-        expect([403, 404]).toContain(res.statusCode);
+        if (refused) expect([403, 404]).toContain(res.statusCode);
+        else expect([403, 404]).not.toContain(res.statusCode);
       }
     }
     const zedsTry = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [] }, ...as(c.tokens.zed) });

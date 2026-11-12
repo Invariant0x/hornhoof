@@ -407,14 +407,18 @@ describe('who sees the lines', () => {
     const hers = await org(maria);
     expect(lineOf(hers, hana.id, bruno.id)).toBeUndefined();
     expect(lineOf(hers, orchestrator.id, hana.id)).toBeUndefined();
-    const dan = await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev.id] } });
-    /* A line takes both of its ends: on his plan only Bruno, it does not show; with Hana too, it does. */
+    const dan = await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { whole: true } });
+    /* The whole company runs no department, so a line takes both of its ends on his plans: on his plan only Bruno, it does
+       not show; with Hana too, it does. */
     await ownPlan(ctx.db, 'dan@acme.com', bruno.id);
     expect(lineOf(await org(dan), hana.id, bruno.id)).toBeUndefined();
     await ownPlan(ctx.db, 'dan@acme.com', hana.id, bruno.id);
     const his = await org(dan);
     expect(stateOf(his, hana, bruno)).toBe('yellow');
     expect(Object.keys(lineOf(his, hana.id, bruno.id)!).sort()).toEqual(['downstreamAgentId', 'returnedAt', 'returnedEpoch', 'upstreamAgentId', 'workEpoch', 'working']);
+    /* A person of the department runs it and sees its lines on whoever's plan. */
+    const lee = await invitePerson(app, ceo, { name: 'Lee', email: 'lee@acme.com', access: { departments: [dev.id] } });
+    expect(stateOf(await org(lee), hana, bruno)).toBe('yellow');
   });
 });
 

@@ -178,14 +178,18 @@ describe('tasks for people', () => {
     ]));
   });
 
-  it('shows a commit to approve to the people of the department, and lets only the CEO and the delegate approve it', async () => {
-    const { ctx, db, head, bruno, dev, oleg, ceo, post, get } = await company();
-    await ownPlan(db, 'oleg@acme.com', bruno.id);
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
+  it("shows a commit to approve to the people of the department and of its product, and lets the department's people approve it", async () => {
+    const { app, ctx, db, companyId, head, bruno, dev, oleg, ceo, post, get } = await company();
+    /* A person of a product alone reads its approvals and takes none: they are the department's. */
+    const [shop] = await db.insert(departments).values({ companyId, name: 'Shop', parentId: dev.id, roleCode: 'DEV', position: 1 }).returning();
+    await db.update(agents).set({ productId: shop!.id }).where(eq(agents.id, bruno.id));
+    const pia = await invitePerson(app, ceo, { name: 'Pia', email: 'pia@acme.com', access: { departments: [shop!.id] } });
+    await ownPlan(db, 'pia@acme.com', bruno.id);
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, productId: shop!.id, assigneeAgentId: bruno.id, executor: true });
     const { request } = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
-    expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
-    expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('decision_not_allowed');
-    expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');
+    for (const person of [pia, oleg]) expect((await get(person, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
+    expect((await post(pia, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('decision_not_allowed');
+    expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');
   });
 
   it('leaves starting and closing turns to the orchestrator', async () => {
@@ -198,7 +202,8 @@ describe('tasks for people', () => {
   it('keeps a repository token secret and refuses plain http', async () => {
     const { db, companyId, dev, ceo, oleg, maria, app, get } = await company();
     const put = (token: string, payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(token) });
-    expect((await put(oleg, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' })).json().error.reason).toBe('department_owner_only');
+    expect((await put(maria, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' })).json().error.reason).toBe('department_owner_only');
+    expect((await put(oleg, { url: 'https://github.com/acme/app.git', branch: 'main' })).statusCode).toBe(200);
     expect((await put(ceo, { url: 'http://github.com/acme/app.git', branch: 'main' })).json().error.reason).toBe('repo_invalid');
     /* An address that is no address is refused too, with a token or without. */
     for (const token of ['', 'ghp_secret1234']) {
@@ -221,12 +226,13 @@ describe('tasks for people', () => {
     await app.inject({ method: 'PUT', url: `/api/departments/${shop!.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop9999' }, ...as(ceo) });
     const products = (await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).products;
     expect(products).toEqual([{ id: shop!.id, name: 'Shop', repository: { url: 'https://github.com/acme/shop.git', branch: 'main', tokenLast4: '9999', author: null, testMemoryGb: 4, fullTestCommand: null } }]);
-    /* Only people who see the whole company set repositories, so only they read where they are. */
-    for (const person of [oleg, maria]) {
-      const listed = (await get(person, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
-      expect(listed.repository).toBe(null);
-      expect(listed.products).toEqual([{ id: shop!.id, name: 'Shop', repository: null }]);
-    }
+    /* Only people who set a department's repositories read where they are: the whole company and the department's people. */
+    const seen = (await get(oleg, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
+    expect(seen.repository).toMatchObject({ url: 'https://github.com/acme/app.git', tokenLast4: '1234' });
+    expect(seen.products).toEqual([{ id: shop!.id, name: 'Shop', repository: expect.objectContaining({ url: 'https://github.com/acme/shop.git' }) }]);
+    const listed = (await get(maria, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
+    expect(listed.repository).toBe(null);
+    expect(listed.products).toEqual([{ id: shop!.id, name: 'Shop', repository: null }]);
     expect((await app.inject({ method: 'DELETE', url: `/api/departments/${dev.id}/repository`, ...as(ceo) })).statusCode).toBe(204);
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository).toBe(null);
   });
@@ -284,14 +290,17 @@ describe('tasks for people', () => {
   });
 
   it('hides an independent executor from a person who does not see that agent', async () => {
-    const { app, ctx, db, dev, head, bruno, oleg } = await company();
-    await ownPlan(db, 'oleg@acme.com', head.id);
+    const { app, ctx, db, dev, head, bruno, ceo, oleg, get } = await company();
+    /* The whole company runs no department: such a person sees only the agents on a plan of their own. */
+    const wes = await invitePerson(app, ceo, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
+    await ownPlan(db, 'wes@acme.com', head.id);
     const prerequisite = (await createTask(ctx, { agentId: head.id }, { title: 'Prerequisite', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     const made = await app.inject({ method: 'POST', url: '/api/tasks', payload: {
       title: 'Launch', department: dev.id, after: [prerequisite.number],
       independentPart: { title: 'Examples', brief: '', body: 'Write examples.', executor: bruno.id },
-    }, ...as(oleg) });
+    }, ...as(wes) });
     expect(made.statusCode).toBe(201);
     expect(made.json().task.independentPart).toBeNull();
+    expect((await get(oleg, `/api/tasks/${made.json().task.id}`)).json().task.independentPart).toMatchObject({ title: 'Examples' });
   });
 });

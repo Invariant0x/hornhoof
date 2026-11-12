@@ -101,15 +101,15 @@ describe('what waits for people', () => {
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.ann)).statusCode).toBe(404);
   });
 
-  it('takes the decision away from an owner who is one no more', async () => {
+  it('takes the decision away from an owner who has the department no more', async () => {
     const c = await aclCompany();
     const { request, picture } = await approval(c);
-    expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/owner`, payload: { personId: c.ids.ann }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.olga}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
     expect((await c.get('/api/requests', c.tokens.olga)).json()).toMatchObject({ requests: [], addressed: [] });
     expect((await answer(c, request.id, c.tokens.olga, { approve: true })).statusCode).toBe(403);
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(404);
-    /* The new owner sees the department's people, and reads it with its work. */
-    expect((await c.get('/api/requests', c.tokens.ann)).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
+    /* With no owner left, the approval is the CEO's. */
+    expect((await c.get('/api/requests', c.tokens.ceo)).json().requests.map((r: { id: string; canAnswer: boolean }) => [r.id, r.canAnswer])).toEqual([[request.id, true]]);
   });
 
   it('gives an outsider nothing of it: not to see, not to answer', async () => {
@@ -151,7 +151,7 @@ describe('what waits for people', () => {
   it('counts a request by a hidden agent on a task the person sees as theirs only when they may answer it', async () => {
     const c = await aclCompany();
     const { createTask } = await import('../src/modules/tasks/engine.js');
-    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.far.id, executor: true, reviewerAgentId: c.crew.mine.id });
+    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, productId: c.product.id, assigneeAgentId: c.crew.far.id, executor: true, reviewerAgentId: c.crew.mine.id });
     await c.db.update(tasks).set({ createdByAgentId: c.crew.mine.id }).where(eq(tasks.id, task.id));
     const { request } = await ask(c.app.ctx, c.crew.far.id, task.id, { text: 'Costs money?', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
     const ann = (await c.get('/api/requests', c.tokens.ann)).json();
@@ -364,16 +364,16 @@ describe('plans, machines and the pool', () => {
 describe('notebooks', () => {
   it('keeps a note and leaves out the hidden agent who wrote it', async () => {
     const c = await aclCompany();
-    await addNote(c.app.ctx, departmentBook(c.dev), 'A note on the release', { personId: null, byOrchestrator: false, agentId: c.crew.other.id });
-    await addNote(c.app.ctx, departmentBook(c.dev), 'A note on the build', { personId: null, byOrchestrator: false, agentId: c.crew.mine.id });
+    await addNote(c.app.ctx, departmentBook(c.product), 'A note on the release', { personId: null, byOrchestrator: false, agentId: c.crew.other.id });
+    await addNote(c.app.ctx, departmentBook(c.product), 'A note on the build', { personId: null, byOrchestrator: false, agentId: c.crew.mine.id });
     await addNote(c.app.ctx, companyBook(c.companyId), 'A note on sales', { personId: null, byOrchestrator: false, agentId: c.crew.wide.id });
     await addNote(c.app.ctx, companyBook(c.companyId), 'A note on prices', { personId: null, byOrchestrator: false, agentId: c.crew.other.id });
-    const dev = await c.get(`/api/departments/${c.dev.id}/notebook`, c.tokens.ann);
+    const dev = await c.get(`/api/departments/${c.product.id}/notebook`, c.tokens.ann);
     expect(dev.json().notes.map((n: { by: unknown }) => n.by)).toEqual([null, { kind: 'agent', id: c.crew.mine.id, name: 'Mina' }]);
     expect(leaks(dev, [c.crew.other])).toEqual([]);
     const company = await c.get('/api/notebook', c.tokens.wes);
     expect(company.json().notes.map((n: { by: unknown }) => n.by)).toEqual([{ kind: 'agent', id: c.crew.wide.id, name: 'Wanda' }, null]);
-    expect((await c.get(`/api/departments/${c.dev.id}/notebook`, c.tokens.lisa)).json().notes[0].by).toMatchObject({ id: c.crew.other.id });
+    expect((await c.get(`/api/departments/${c.product.id}/notebook`, c.tokens.lisa)).json().notes[0].by).toMatchObject({ id: c.crew.other.id });
   });
 });
 

@@ -94,6 +94,8 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
 type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>> };
 const ALL_OK = { ann: 200, olga: 200, wes: 200, lisa: 200, ceo: 200 };
 const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, lisa: 200, ceo: 200 };
+/* Ann has App, a product of Development, and not the department itself: for her it does not exist, and its notebook is closed. */
+const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, lisa: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK },
@@ -112,14 +114,14 @@ const LISTS: Listed[] = [
   { route: 'GET /api/machines/access', url: () => '/api/machines/access', statuses: ALL_OK },
   { route: 'GET /api/machines/here', url: () => '/api/machines/here', statuses: ALL_OK },
   { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
-  { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: { ...DEPARTMENT_ITSELF, ann: 403 } },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 200, wes: 403, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
-  { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
-  { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: DEPARTMENT_ITSELF },
+  { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
-  { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
 ];
 
 /* Elsewhere, with the reason it is not a row above. */

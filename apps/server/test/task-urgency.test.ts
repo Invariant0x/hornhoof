@@ -137,7 +137,7 @@ describe('a new task', () => {
 });
 
 describe('the task route', () => {
-  it('takes urgent only from the CEO or the CEO delegate', async () => {
+  it("takes urgent only from the CEO, the CEO delegate or the department's people", async () => {
     const c = await company();
     const post = (token: string, urgent?: unknown) => c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Fix', department: c.dev.id, ...(urgent === undefined ? {} : { urgent }) }, ...as(token) });
     const whole = await invitePerson(c.app, c.ceoToken, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
@@ -147,8 +147,8 @@ describe('the task route', () => {
     expect(made.json().task.urgent).toBe(true);
     expect((await post(c.ceoToken)).json().task.urgent).toBe(false);
     expect((await post(whole, true)).statusCode).toBe(403);
-    expect((await post(listed, true)).statusCode).toBe(403);
     expect((await post(listed)).json().task.urgent).toBe(false);
+    expect((await post(listed, true)).json().task.urgent).toBe(true);
     expect((await post(c.ceoToken, 'yes')).statusCode).toBe(400);
   });
 
@@ -336,13 +336,16 @@ describe('a team that takes only urgent work', () => {
     expect((await c.db.select().from(teams).where(eq(teams.id, c.quick.id)))[0]).toMatchObject({ name: 'Fastest', urgentOnly: true });
   });
 
-  it('refuses a person without the whole company, an empty change and another word for yes', async () => {
+  it('refuses a person with only the team, an empty change and another word for yes', async () => {
     const c = await company();
+    const teamed = await invitePerson(c.app, c.ceoToken, { name: 'Tia', email: 'tia@acme.com', access: { teams: [c.quick.id] } });
     const listed = await invitePerson(c.app, c.ceoToken, { name: 'Lee', email: 'lee@acme.com', access: { departments: [c.dev.id] } });
-    expect((await c.app.inject({ method: 'PATCH', url: teamUrl(c), payload: { urgentOnly: true }, ...as(listed) })).statusCode).toBe(403);
+    expect((await c.app.inject({ method: 'PATCH', url: teamUrl(c), payload: { urgentOnly: true }, ...as(teamed) })).statusCode).toBe(403);
     expect((await c.app.inject({ method: 'PATCH', url: teamUrl(c), payload: {}, ...as(c.ceoToken) })).statusCode).toBe(400);
     expect((await c.app.inject({ method: 'PATCH', url: teamUrl(c), payload: { urgentOnly: 'yes' }, ...as(c.ceoToken) })).statusCode).toBe(400);
     expect((await c.db.select().from(teams).where(eq(teams.id, c.quick.id)))[0]!.urgentOnly).toBe(false);
+    /* A person of the department runs it, its teams with it. */
+    expect((await c.app.inject({ method: 'PATCH', url: teamUrl(c), payload: { urgentOnly: true }, ...as(listed) })).statusCode).toBe(200);
   });
 
   it('is not reached through another department or company', async () => {

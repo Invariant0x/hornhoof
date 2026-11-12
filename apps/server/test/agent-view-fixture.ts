@@ -18,11 +18,14 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
       { companyId, templateKey: 'sales', roleCode: 'SAL', position: 2 },
     ])
     .returning();
+  /* Ann and Bob work in App, a product of Development, not in the department itself: everyone given the department runs it in
+     full, so a product is where the rule of a plan and a place still holds. */
+  const [app_] = await db.insert(departments).values({ companyId, name: 'App', roleCode: 'DEV', parentId: dev!.id, position: 3 }).returning();
   const invite = (name: string, access: Parameters<typeof invitePerson>[2]['access']) => invitePerson(app, ceo, { name, email: `${name.toLowerCase()}@acme.com`, access });
   const tokens = {
     ceo,
-    ann: await invite('Ann', { departments: [dev!.id] }),
-    bob: await invite('Bob', { departments: [dev!.id] }),
+    ann: await invite('Ann', { departments: [app_!.id] }),
+    bob: await invite('Bob', { departments: [app_!.id] }),
     olga: await invite('Olga', { departments: [dev!.id] }),
     wes: await invite('Wes', { whole: true }),
     lisa: await invite('Lisa', { whole: true }),
@@ -36,7 +39,7 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
     (await db.insert(subscriptions).values({ companyId, provider: 'claude', kind: 'personal', label, status: 'ready', ownerPersonId }).returning())[0]!;
   const plans = { ann: await plan(ids.ann, 'Ann plan'), bob: await plan(ids.bob, 'Bob plan'), olga: await plan(ids.olga, 'Olga plan'), wes: await plan(ids.wes, 'Wes plan'), lisa: await plan(ids.lisa, 'Lisa plan') };
   const hire = async (name: string, kind: 'head' | 'worker', departmentId: string, subscriptionId: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey: kind === 'head' ? 'DEV-HEAD' : 'DEV-BE', departmentId, model: '', subscriptionId }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey: kind === 'head' ? 'DEV-HEAD' : 'DEV-BE', departmentId, productId: departmentId === dev!.id ? app_!.id : null, model: '', subscriptionId }).returning())[0]!;
   const crew = {
     /* Own plan, reachable department: Ann's. */
     mine: await hire('Mina', 'worker', dev!.id, plans.ann.id),
@@ -54,8 +57,8 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Work of one agent, given by the head of Development. */
   const work = async (title: string, agent: { id: string }, departmentId = dev!.id) =>
-    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, assigneeAgentId: agent.id, executor: true })).task;
+    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, productId: departmentId === dev!.id ? app_!.id : null, assigneeAgentId: agent.id, executor: true })).task;
   const get = (url: string, token: string) => app.inject({ url, ...as(token) });
-  return { app, db, url, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, work, get };
+  return { app, db, url, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, product: app_!, work, get };
 }
 

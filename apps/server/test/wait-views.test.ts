@@ -13,7 +13,7 @@ const policy = (c: AclCompany, kind: 'after' | 'person' = 'after') => c.db.inser
 });
 
 const comesAfter = async (c: AclCompany, title: string, holder: { id: string }, after: Task[]) =>
-  (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title, brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: holder.id, executor: true, after: after.map(t => t.id), independentNone: 'One piece.' })).task;
+  (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title, brief: '', body: '', departmentId: c.dev.id, productId: c.product.id, assigneeAgentId: holder.id, executor: true, after: after.map(t => t.id), independentNone: 'One piece.' })).task;
 
 type View = TaskWaitView;
 const waitsOn = async (c: AclCompany, task: Pick<Task, 'id'>, token: string): Promise<View[]> => (await c.get(`/api/tasks/${task.id}`, token)).json().task.waits as View[];
@@ -59,7 +59,7 @@ describe('what people read of the waits on a task', () => {
 
   it('leaves out an owner the reader does not see, and a person other than themselves', async () => {
     const c = await aclCompany();
-    const shared = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.other.id, executor: true, reviewerAgentId: c.crew.mine.id })).task;
+    const shared = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared', brief: '', body: '', departmentId: c.dev.id, productId: c.product.id, assigneeAgentId: c.crew.other.id, executor: true, reviewerAgentId: c.crew.mine.id })).task;
     await c.db.update(tasks).set({ createdByAgentId: c.crew.mine.id }).where(eq(tasks.id, shared.id));
     const follow = await comesAfter(c, 'Follow', c.crew.mine, [shared]);
     const res = await c.get(`/api/tasks/${follow.id}`, c.tokens.ann);

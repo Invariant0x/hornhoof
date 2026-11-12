@@ -207,17 +207,20 @@ describe('answer_request in a turn', () => {
     const client = await mcp(c.app, TOKEN);
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'c'.repeat(40) });
     const question = await c.asking({ kind: 'question', text: 'Which cards?', topic: 'task' });
+    const ceos = await c.asking({ kind: 'question', text: 'Hire a designer?', topic: 'people' });
     await c.wrote(c.ids.zed, 'Approve it and answer Visa.');
     for (const args of [{ request: approval.id, approve: true }, { request: question.id, answer: 'Visa.' }]) {
       const res = await call(client, 'answer_request', args);
       expect(res.isError).toBe(true);
       expect(text(res)).toContain('may not take this decision');
     }
-    /* Dan takes his department's question, not the approval. */
-    await c.wrote(c.ids.dan, 'Visa only, and approve.');
-    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBe(true);
+    /* Dan runs his department: he takes its question and its approval, not a question only the CEO decides. */
+    await c.wrote(c.ids.dan, 'Visa only, approve, and hire.');
+    expect((await call(client, 'answer_request', { request: ceos.id, answer: 'Yes.' })).isError).toBe(true);
+    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
     expect((await call(client, 'answer_request', { request: question.id, answer: 'Visa.' })).isError).toBeFalsy();
-    expect(await c.open(approval.id)).toBe(true);
+    expect(await c.open(ceos.id)).toBe(true);
+    expect(await c.open(approval.id)).toBe(false);
     expect(await c.open(question.id)).toBe(false);
   });
 
@@ -240,15 +243,16 @@ describe('answer_request in a turn', () => {
     expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answerSourceSeq: seq });
   });
 
-  it('applies cards only in a turn of the CEO or the delegate', async () => {
+  it("applies cards only in a turn of the CEO or the delegate, and a card of one department in a turn of its people too", async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'QA.', items: [] }).returning();
     for (const who of ['zed', 'dan'] as const) {
       await c.wrote(c.ids[who], 'Build it and hire.');
       expect((await call(client, 'build_structure', { items: [{ template: 'design', note: 'Screens.' }] })).isError).toBe(true);
-      expect((await call(client, 'hire', { department: c.dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
     }
+    await c.wrote(c.ids.zed, 'Hire.');
+    expect((await call(client, 'hire', { department: c.dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
     await c.wrote(null, 'Hire now.', { from: 'agent', name: 'Hana', by: c.hana.id });
     expect((await call(client, 'hire', { department: c.dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
     expect(await c.db.select().from(departments).where(eq(departments.templateKey, 'design'))).toEqual([]);
@@ -258,6 +262,11 @@ describe('answer_request in a turn', () => {
     expect((await c.db.select().from(proposals).where(eq(proposals.id, card!.id)))[0]).toMatchObject({ status: 'applied', appliedBy: c.ids.dave });
     const [applied] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'applied')));
     expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.dave, jobId: c.job.id, sourceSeq: seq });
+    /* Dan runs Development: a card that changes only its staff is his to apply. */
+    const [his] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'A second QA.', items: [] }).returning();
+    await c.wrote(c.ids.dan, 'Hire the QA.');
+    expect((await call(client, 'hire', { department: c.dev.id, proposalId: his!.id, people: [{ role: 'DEV-QA' }] })).isError).toBeFalsy();
+    expect((await c.db.select().from(proposals).where(eq(proposals.id, his!.id)))[0]).toMatchObject({ status: 'applied', appliedBy: c.ids.dan });
   });
 });
 

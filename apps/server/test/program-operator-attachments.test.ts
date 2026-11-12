@@ -45,8 +45,14 @@ async function fixture() {
     await c.db.update(subscriptions).set({ ownerPersonId: reader.id }).where(eq(subscriptions.id, c.sub.id));
     return reader;
   };
+  /* A product of the target's department, with the target in it. */
+  const intoProduct = async () => {
+    const [product] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Shop', parentId: c.dev.id, roleCode: 'DEV', position: 1 }).returning();
+    await c.db.update(agents).set({ productId: product!.id }).where(eq(agents.id, c.agent.id));
+    return product!;
+  };
   const download = (token: string, id = picture!.id) => c.app.inject({ method: 'GET', url: `/api/attachments/${id}`, ...as(token) });
-  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, enrol, listedIn, planOwner, download };
+  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, enrol, listedIn, planOwner, intoProduct, download };
 }
 
 it('downloads the case PNG for its assigned operator, actual report recipient and current orchestrator after resolution', async () => {
@@ -155,10 +161,13 @@ describe('to everyone else the picture does not exist', () => {
     expect(res.json()).toEqual(missing.json());
   };
 
-  it('for the department without the plan, the plan without the department, and neither', async () => {
+  it('for the product without the plan, the plan without the department, and neither', async () => {
     const c = await fixture();
-    for (const reader of [await c.listedIn(c.dev.id), await c.listedIn(c.watcher.departmentId!)]) await asMissing(c, reader.token);
+    const product = await c.intoProduct();
+    for (const reader of [await c.listedIn(product.id), await c.listedIn(c.watcher.departmentId!)]) await asMissing(c, reader.token);
     await asMissing(c, (await c.planOwner(c.watcher.departmentId!)).token);
+    /* The department's people run it, so they see every employee of it on whoever's plan. */
+    expect((await c.download((await c.listedIn(c.dev.id)).token)).statusCode).toBe(200);
   });
 
   it('for the whole company or the department owner on another plan', async () => {
@@ -175,9 +184,9 @@ describe('to everyone else the picture does not exist', () => {
     await asMissing(c, (await c.enrol({}, foreign!.id)).token);
   });
 
-  it('once the plan or the department is gone from a person who had both', async () => {
+  it('once the plan or the product is gone from a person who had both', async () => {
     const c = await fixture();
-    const owner = await c.planOwner(c.dev.id);
+    const owner = await c.planOwner((await c.intoProduct()).id);
     expect((await c.download(owner.token)).statusCode).toBe(200);
     await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
     await asMissing(c, owner.token);

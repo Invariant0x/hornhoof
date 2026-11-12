@@ -196,7 +196,8 @@ describe('setting a department owner', () => {
     const reach = (id: string, scopeKind: 'listed' | 'company' = 'listed') => accessOf(c.db, { id, scopeKind });
     expect((await reach(c.ids.dana)).owns).toEqual(new Set([c.dev.id]));
     await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.dana}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.ceoToken) });
-    expect((await reach(c.ids.dana)).owns ?? new Set()).toEqual(new Set());
+    /* Development no more; Sales she runs now, as everyone given it does. */
+    expect((await reach(c.ids.dana)).owns).toEqual(new Set([c.sales.id]));
   });
 
   it('shows the company the owner who counts now: none once that person is switched off or loses access', async () => {
@@ -238,9 +239,13 @@ describe('approvals with a department owner', () => {
     const his = await waiting(c, c.ceoToken);
     expect(his.requests).toMatchObject([{ ownerPersonId: c.ids.ceo, canAnswer: true, decidedBy: { kind: 'ceo_and_delegate', department: null } }]);
     expect(his.counts).toMatchObject({ byPerson: { [c.ids.ceo]: 1 }, total: 1 });
-    /* An approval no owner takes is the CEO's: it is nothing of Dana's, nor is the agent's work she does not see. */
-    expect((await waiting(c, c.danaToken)).requests).toEqual([]);
-    expect((await waiting(c, c.danaToken)).addressed).toEqual([]);
+    /* An approval no owner takes goes to the CEO. Dana, given Development, still sees it with its work and may take it;
+       Sam of Sales sees nothing of it. */
+    const hers = await waiting(c, c.danaToken);
+    expect(hers.requests).toMatchObject([{ ownerPersonId: c.ids.ceo, canAnswer: true }]);
+    expect(hers.addressed).toEqual([]);
+    expect((await waiting(c, c.samToken)).requests).toEqual([]);
+    expect((await waiting(c, c.samToken)).addressed).toEqual([]);
   });
 
   it('adds nothing to the number the CEO waits on while the department has its own owner, and still lists it for the CEO', async () => {
@@ -272,11 +277,13 @@ describe('approvals with a department owner', () => {
     }
   });
 
-  it('takes the right from a former owner at once, and the waiting approval goes to the new one', async () => {
+  it('leaves a former owner the right while she has the department, takes it at once with her access, and the waiting approval goes to the new owner', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const request = await asked(c);
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.wes);
+    expect((await waiting(c, c.danaToken)).requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.dana}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.ceoToken) });
     const refused = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(c.danaToken) });
     expect(refused.statusCode).toBe(403);
     expect((await waiting(c, c.wholeToken)).requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);

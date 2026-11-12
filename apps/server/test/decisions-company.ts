@@ -97,7 +97,7 @@ const answers: Record<Kind, object> = {
 
 const matrix: Record<Kind, Partial<Record<Who, 200 | 403 | 404>>> = {
   devQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 200, eve: 200, sara: 403, tia: 403 },
-  devApproval: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403, tia: 403 },
+  devApproval: { ceo: 200, delegate: 200, zed: 403, dan: 200, eve: 200, sara: 403, tia: 403 },
   devPeople: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403 },
   devPlain: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403 },
   salesQuestion: { ceo: 200, delegate: 200, zed: 403, sara: 200, olga: 200, dan: 403 },
@@ -128,9 +128,12 @@ export function registerAnswerCases(kinds: readonly Kind[]) {
         const [row] = await c.db.select().from(requests).where(eq(requests.id, id));
         expect(row!.status === 'open').toBe(status !== 200);
         if (status !== 200) expect(row).toMatchObject({ answeredBy: null, answer: null, picked: null });
-        /* What is not theirs to take and comes with no agent of theirs does not show at all. */
+        /* What is not theirs to take does not show at all, unless its agent is one they see: everyone given Development sees
+           every agent of it, and reads a decision only the CEO takes without the right to answer it. */
         const seen = await c.view(c.tokens[who]);
-        if (status === 403) expect([...seen.requests, ...seen.addressed].find(r => r.id === id)).toBeUndefined();
+        const shown = [...seen.requests, ...seen.addressed].find(r => r.id === id);
+        if (status === 403 && kind.startsWith('dev') && (who === 'dan' || who === 'eve')) expect(shown).toMatchObject({ canAnswer: false });
+        else if (status === 403) expect(shown).toBeUndefined();
       });
     }
   }
