@@ -69,6 +69,7 @@ export async function writeTunnelSettings(db: Db, config: Config, log?: FastifyB
 export class PublicLinks {
   readonly relay: Relay;
   private queue: Promise<unknown> = Promise.resolve();
+  private hiddenFails = false;
 
   constructor(private readonly ctx: { db: Db; config: Config; log: FastifyBaseLogger; tls?: { kick(): void } }) {
     this.relay = new Relay(ctx.config.relayUrl);
@@ -103,20 +104,26 @@ export class PublicLinks {
       if (old) return true;
       try {
         await this.change(companyId, undefined, true);
+        this.hiddenFails = false;
         return true;
       } catch (err) {
-        this.ctx.log.warn({ error: loggable(err) }, "Could not make the company's hidden name at the relay yet.");
+        /* Said once an outage: the ranking asks again each minute. */
+        if (!this.hiddenFails) this.ctx.log.warn({ error: loggable(err) }, "Could not make the company's hidden name at the relay yet. Each ranking tries again.");
+        this.hiddenFails = true;
         return false;
       }
     });
   }
 
-  /* Asks the relay for the new name, keeps it, and lets the old one go. In turn with every other change. */
-  private async change(companyId: string, name: string | undefined, hidden: boolean): Promise<LinkView> {
+  /* Asks the relay for the new name, keeps it, and lets the old one go. In turn with every other change. first: the
+     old name is let go before the new one is kept, and a relay that does not take that changes nothing: for a link a
+     person removes, whose name must not stay taken with a key nobody holds. */
+  private async change(companyId: string, name: string | undefined, hidden: boolean, first = false): Promise<LinkView> {
     const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
     if (old && !hidden && !old.hidden && name === old.name) return { name: old.name, url: old.url };
     const bound = await this.relay.bind(hidden ? undefined : name);
     try {
+      if (old && first) await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
       await saveLink(this.ctx.db, this.ctx.config, companyId, bound, hidden);
     } catch (err) {
       await this.letGo(bound.name, bound.key);
@@ -124,13 +131,14 @@ export class PublicLinks {
     }
     await this.writeSettings();
     this.ctx.tls?.kick();
-    if (old) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
+    if (old && !first) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
     return { name: bound.name, url: bound.url };
   }
 
   /* The relay lets the link go first, so a link it still holds is never forgotten here. While another machine keeps a
-     copy, the copies and the server tell each other through a name at the relay who holds the latest changes: the
-     public name goes, and a hidden one takes its place first. A hidden name stays while it is needed. */
+     copy, the copies and the server tell each other through a name at the relay who holds the latest changes: a
+     hidden name is taken, the public one is let go, and only then is the hidden one kept in its place. A hidden name
+     stays while it is needed. */
   remove(companyId: string): Promise<void> {
     return this.inTurn(async () => {
       const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
@@ -139,7 +147,7 @@ export class PublicLinks {
       const others = sql`${machines.networkId} IS DISTINCT FROM ${config.machineId}`;
       const [copy] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
       if (copy) {
-        if (!old.hidden) await this.change(companyId, undefined, true);
+        if (!old.hidden) await this.change(companyId, undefined, true, true);
         return;
       }
       await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));

@@ -525,13 +525,18 @@ describe('the lease proof on the link', () => {
     }
     expect((await ask(ports.linkHttp, '/api/me', 'POST')).status).toBe(404);
     expect((await askOver(await overTls(ports.linkTls), { path: '/tasks' })).status).toBe(404);
-    /* A socket is turned away as a page is. */
-    const socket = new WebSocket(`ws://127.0.0.1:${ports.linkHttp}/api/nodes/socket`);
-    socket.on('error', () => undefined);
-    const [, refusal] = (await once(socket, 'unexpected-response')) as [http.ClientRequest, http.IncomingMessage];
-    expect(refusal.statusCode).toBe(404);
-    refusal.destroy();
-    socket.terminate();
+    /* A socket is turned away as a page is, on the path of the lease proof too. */
+    for (const path of ['/api/nodes/socket', LEASE]) {
+      const socket = new WebSocket(`ws://127.0.0.1:${ports.linkHttp}${path}`);
+      socket.on('error', () => undefined);
+      const [, refusal] = (await once(socket, 'unexpected-response')) as [http.ClientRequest, http.IncomingMessage];
+      expect(refusal.statusCode, path).toBe(404);
+      refusal.destroy();
+      socket.terminate();
+    }
+    /* No certificate is ever ordered or served for it: what goes through it rides the relay's TLS. */
+    await holdCertificate(db, config, companyId);
+    expect(await readLinkMode(db, config)).toBe('http');
     /* Who holds the lease is still said, on both doors, and the front door serves the company as ever. */
     const proof = { machine: MACHINE_ID, term: keeper.term(), nonce: NONCE };
     expect(JSON.parse((await ask(ports.linkHttp, LEASE)).body)).toEqual(proof);

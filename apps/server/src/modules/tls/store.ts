@@ -85,7 +85,8 @@ function passes(row: TlsRow, link: LinkView, secret: Buffer, log?: FastifyBaseLo
 export async function readLinkMode(db: Db, config: Config, log?: FastifyBaseLogger): Promise<'http' | 'https'> {
   if (config.acmeDirectory === null) return 'http';
   const [link] = await db.select().from(publicLinks).limit(1);
-  if (!link) return 'http';
+  /* A hidden name has no certificate of its own: what goes through it rides the relay's TLS. */
+  if (!link || link.hidden) return 'http';
   const row = await tlsOf(db, link.companyId);
   return row && passes(row, link, config.secret, log) ? 'https' : 'http';
 }

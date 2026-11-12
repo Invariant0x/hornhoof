@@ -18,6 +18,9 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
   const { language } = useLanguage();
   const [view, setView] = useState<QuestionView | null>(null);
   const [busy, setBusy] = useState(false);
+  /* The question the CEO told a copy to go on from, by when it was first asked: the machine that takes the server is
+     away from the page for a while, so its buttons give way to a line that says what happens. */
+  const [went, setWent] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
 
   /* A server from before copies never answers, and so asks nothing; a look that fails changes nothing, so a question
@@ -43,6 +46,7 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
     setFailure(null);
     try {
       await api.post(path, body);
+      setWent('networkId' in body ? question.since : null);
     } catch (err) {
       setFailure(err);
     } finally {
@@ -59,7 +63,9 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
     <div className="update-banner question-banner glass" role="group" aria-label={q.title}>
       <p>{copies.length === 1 && only ? q.oneCopy(leader, heard, named(only.host, only.networkId), clock(language, only.reach)) : q.moreCopies(leader, heard)}</p>
       {question.waiting && new Date(question.waiting).getTime() > Date.now() && <p>{q.waiting(leader)}</p>}
-      {view.canAnswer ? (
+      {went === question.since ? (
+        <p>{q.goingOn}</p>
+      ) : view.canAnswer ? (
         <>
           <div className="entry-actions" role="group" aria-label={q.answers}>
             {copies.map(copy => (

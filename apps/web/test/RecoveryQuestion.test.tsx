@@ -71,15 +71,16 @@ describe('the question of which copy to go on from', () => {
     });
     const user = userEvent.setup();
     const box = await screen.findByRole('group', { name: 'The server stopped answering' });
-    await user.click(within(box).getByRole('button', { name: `Go on from ${time('en', '2026-11-12T14:01:00.000Z')} on nuc` }));
-    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: '/api/network/question/go-on', body: { networkId: C, reach: '2026-11-12T14:01:00.000Z' } }]));
-    await user.click(within(box).getByRole('button', { name: 'Go on from the copy on air' }));
-    await waitFor(() => expect(calls.filter(call => call.method === 'POST').at(-1)).toEqual({ method: 'POST', path: '/api/network/question/go-on', body: { networkId: D, reach: null } }));
     await user.click(within(box).getByRole('button', { name: 'Wait for deb' }));
-    await waitFor(() => expect(calls.filter(call => call.method === 'POST').at(-1)).toEqual({ method: 'POST', path: '/api/network/question/wait', body: {} }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toEqual([{ method: 'POST', path: '/api/network/question/wait', body: {} }]));
     /* The next look says he waits; he may still choose a copy. */
     expect(await within(box).findByText('Waiting for deb. You can still choose a copy to go on from.')).toBeInTheDocument();
     expect(within(box).getAllByRole('button')).toHaveLength(4);
+    await user.click(within(box).getByRole('button', { name: 'Go on from the copy on air' }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST').at(-1)).toEqual({ method: 'POST', path: '/api/network/question/go-on', body: { networkId: D, reach: null } }));
+    /* The copy he chose takes the server and is away from the page meanwhile: the buttons give way to what happens. */
+    expect(await within(box).findByText('Hornhoof goes on from the copy you chose. About a minute.')).toBeInTheDocument();
+    expect(within(box).queryAllByRole('button')).toEqual([]);
   });
 
   it('says why an answer was refused', async () => {

@@ -312,6 +312,8 @@ export class Keeper {
   private linkHeld = false;
   /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
   private settingsNow: TunnelSettings | null | undefined = undefined;
+  /* Whether the link this keeper last read is a hidden name. */
+  private hiddenName = false;
   private linkPausedUntil = 0;
   private slotsTimer: NodeJS.Timeout | null = null;
   private keptSizeAt: number | null = null;
@@ -587,6 +589,8 @@ export class Keeper {
       ? async () => {
           const now = await settings();
           this.settingsNow = now;
+          /* A read that failed says nothing: the door of a hidden name stays shut on what was last known. */
+          if (now !== undefined) this.hiddenName = now?.hidden === true;
           return now;
         }
       : null;
@@ -919,7 +923,7 @@ export class Keeper {
     const own = (req: http.IncomingMessage) => (opts.link ? this.leaseProof(req) : null) ?? switchAnswer(req, () => this.switchWord());
     /* A hidden name is the machines' alone: at its door the keeper says who holds the lease, and nothing else is
        answered or passed on, a socket no more than a page. */
-    const closed = opts.link ? (req: http.IncomingMessage) => (this.settingsNow?.hidden && proofNonce(req) === undefined ? HIDDEN_NAME : null) : undefined;
+    const closed = opts.link ? (req: http.IncomingMessage) => (this.hiddenName && (proofNonce(req) === undefined || req.headers.upgrade !== undefined) ? HIDDEN_NAME : null) : undefined;
     /* While the app restarts a request is held for it. An update takes minutes, so in maintenance it is answered at once. */
     const holding = (req: http.IncomingMessage) => (this.mode() === 'maintenance' ? maintenanceAnswer(req) : null);
     const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own, closed, holdMs: this.opts.holdMs ?? KEEPER_HOLD_MS, holdEveryMs: this.opts.holdEveryMs, holding }));

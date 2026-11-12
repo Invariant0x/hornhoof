@@ -1566,6 +1566,7 @@ export const en = {
     warning: (leader: string) => `Only if ${leader} is off. If ${leader} works too, both sides get changes; Hornhoof merges them later and the orchestrator asks you about real conflicts.`,
     waiting: (leader: string) => `Waiting for ${leader}. You can still choose a copy to go on from.`,
     ceoOnly: 'Only the CEO answers this, from their own session.',
+    goingOn: 'Hornhoof goes on from the copy you chose. About a minute.',
   },
   switch: {
     label: 'Where Hornhoof runs',

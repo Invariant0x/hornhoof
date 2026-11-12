@@ -120,7 +120,12 @@ describe('the line that says where the company runs', () => {
 
   it('shows the question as soon as the keeper says one stands', async () => {
     const question = { since: HEARD, leader: { networkId: 'a'.repeat(64), host: 'deb', heard: HEARD }, copies: [{ networkId: 'b'.repeat(64), host: 'mac', number: 2, reach: null, self: true }], waiting: null };
-    shown({ ...STILL, question: true }, { routes: { 'GET /api/network/question': [200, { question, canAnswer: false }] } });
+    const { view } = shown({ ...STILL, question: true }, { routes: { 'GET /api/network/question': [200, { question, canAnswer: false }] } });
     expect(await screen.findByRole('group', { name: 'The server stopped answering' })).toBeInTheDocument();
+    view.unmount();
+    /* Also while the machine says the company moves: the question is the CEO's to answer. */
+    shown({ ...STILL, moving: true, from: 'm1', to: null, question: true }, { routes: { 'GET /api/network/question': [200, { question, canAnswer: false }] } });
+    expect(await screen.findByRole('group', { name: 'The server stopped answering' })).toBeInTheDocument();
+    expect(screen.queryByText(/Lost deb/)).not.toBeInTheDocument();
   });
 });

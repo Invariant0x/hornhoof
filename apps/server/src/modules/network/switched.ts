@@ -51,7 +51,9 @@ function promptOf(row: Newest): string {
     return `Hornhoof runs on ${to} now, from what it had at ${timeWords(row.reach)}, as the CEO chose after ${from} stopped answering at ${timeWords(row.heard)}. `
       + `Tell the CEO so in your window in a sentence or two, and that what ${from} did after ${timeWords(row.reach)} comes back, merged, once ${from} is back.`;
   }
-  return `Hornhoof runs on ${to} now: ${from} stopped answering at ${timeWords(row.heard)}, and ${to} had every change it confirmed. `
+  /* A leader whose disk filled up said so itself and gave the server up: it did not stop answering. */
+  const why = row.reason === 'disk_full' ? `the disk of ${from} filled up, so it gave the server up` : `${from} stopped answering at ${timeWords(row.heard)}`;
+  return `Hornhoof runs on ${to} now: ${why}, and ${to} had every change it confirmed. `
     + `Tell the CEO so in your window in a sentence or two, and that jobs ${from} started that still run carry on; their results arrive once ${from} is back and merged.`;
 }
 
@@ -69,7 +71,7 @@ export async function noteSwitch(ctx: Ctx): Promise<void> {
   const orchestrator = await orchestratorOf(ctx, row.company);
   if (!orchestrator) return;
   const text = promptOf(row);
-  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [], detail: { en: named(row.to_host), ru: named(row.to_host) } } };
+  const message = { personId: null, text, notification: { source: 'machine' as const, tasks: [], detail: { en: named(row.to_host), ru: row.to_host || 'машина без имени' } } };
   await enqueueTurn(ctx, { companyId: row.company, agentId: orchestrator.id, prompt: text, createdBy: null, answersCeo: true, message }).catch((err: unknown) => {
     if (!(err instanceof NoSubscription)) throw err;
   });

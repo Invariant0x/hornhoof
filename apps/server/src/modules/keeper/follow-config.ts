@@ -24,7 +24,9 @@ function serverIn(dir: string, own: string | undefined): string | undefined {
       const address = Array.isArray(machine.addresses) ? machine.addresses.find((one): one is string => typeof one === 'string' && one.length > 0) : undefined;
       if (address && typeof machine.webPort === 'number') return `http://${address}:${machine.webPort}`;
     }
-    return undefined;
+    /* With no machine to name, the hidden name itself: nothing is served there, but the keeper starts, reaches the
+       leader over the peer link as ever, and gives it what this machine holds. */
+    return typeof view.link?.url === 'string' ? view.link.url : undefined;
   } catch {
     return undefined;
   }

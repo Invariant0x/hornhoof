@@ -66,7 +66,8 @@ export function SwitchBanner({ children }: { children?: ReactNode }) {
 
   const nameOf = (id: string | null | undefined): string | null => (id ? (hosts.current.get(id) ?? null) : null);
   const line = (text: string) => <div className="update-banner glass" role="status" aria-label={t.switch.label}><span>{text}</span></div>;
-  if (word?.moving) {
+  /* A question that stands is the CEO's to answer, whatever else moves. */
+  if (word?.moving && !word.question) {
     const [from, to] = [nameOf(word.from), nameOf(word.to)];
     if (word.to !== null) return line(to ? t.switch.moving(to) : t.switch.movingSomewhere);
     return line(from ? t.switch.lost(from) : t.switch.lostLeader);

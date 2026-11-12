@@ -249,6 +249,10 @@ describe('the backups routes', () => {
     /* What the CEO's banner asks, in a few words. */
     expect((await c.app.inject({ url: '/api/backups/recovery', ...as(c.ceo) })).json()).toEqual({ recoveryNeeded: false, linkChanged: false });
     expect((await c.app.inject({ url: '/api/backups/recovery', ...as(zed) })).statusCode).toBe(403);
+    /* A hidden name Hornhoof takes by itself for the company's machines is no link: the file the CEO saved still opens
+       what is made from now on, and nothing asks for a new one. */
+    await saveLink(c.db, c.config, c.acme.id, { name: 'x9k2', url: 'https://x9k2.hornhoof.test', key: 'h'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test' } }, true);
+    expect((await c.app.inject({ url: '/api/backups/recovery', ...as(c.ceo) })).json()).toEqual({ recoveryNeeded: false, linkChanged: false });
     await saveLink(c.db, c.config, c.acme.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test' } });
     expect((await c.app.inject({ url: '/api/backups/recovery', ...as(c.ceo) })).json()).toEqual({ recoveryNeeded: true, linkChanged: true });
   });

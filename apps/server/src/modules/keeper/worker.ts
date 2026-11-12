@@ -511,7 +511,9 @@ export class WorkerKeeper {
     const leads = this.leader();
     const has = Boolean(leads);
     if (leads) this.lastLed = { leader: leads.machine, sync: leads.hello.sync ?? null };
-    this.lostAt = leads || !this.lastLed ? null : (this.lostAt ?? Date.now());
+    /* A machine that was disconnected, or that waits for the leader's update, lost no leader: nothing moves then. */
+    const quiet = this.disconnected || this.opts.updating?.() === true;
+    this.lostAt = leads || !this.lastLed || quiet ? null : (this.lostAt ?? Date.now());
     this.noLeaderSince = has || this.opts.updating?.() ? null : (this.noLeaderSince ?? now);
     this.setDoor(has);
     this.aimFront();

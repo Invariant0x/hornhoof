@@ -72,6 +72,11 @@ describe('where the company runs after the server moved', () => {
     expect(turn!.prompt).toContain(`Hornhoof runs on mac now: deb stopped answering at ${heard}, and mac had every change it confirmed.`);
     expect(turn!.prompt).toContain('their results arrive once deb is back and merged.');
     expect(await s.noted(id)).not.toBeNull();
+    /* A leader whose disk filled up gave the server up itself: the orchestrator is not told it stopped answering. */
+    const full = await stand();
+    await full.handed('takeover', HOUR, { reason: 'disk_full' });
+    await noteSwitch(full.app.ctx);
+    expect((await full.turns())[0]!.prompt).toContain('Hornhoof runs on mac now: the disk of deb filled up, so it gave the server up, and mac had every change it confirmed.');
     /* A second start says nothing again. */
     await noteSwitch(s.app.ctx);
     expect(await s.turns()).toHaveLength(1);

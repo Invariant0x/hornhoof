@@ -132,9 +132,12 @@ describe('the question to the CEO', () => {
     s.word({ wait: true, at: 'no time at all' });
     await s.recovery.tick();
     expect(s.recovery.waiting()).toBeNull();
+    /* A word counts from when the CEO gave it, not from when this keeper read it. */
     s.word({ goOn: B, reach: '2026-11-12T14:01:40.000Z', at: new Date(WALL - CEO_KEEP_MS + 1000).toISOString() });
     await s.recovery.tick();
-    expect(s.recovery.go()).toBe(50_000);
+    expect(s.recovery.go()).toBe(50_000 - CEO_KEEP_MS + 1000);
+    s.pass(1000);
+    expect(s.recovery.go()).toBeNull();
   });
 
   it('drops a word it cannot read', async () => {

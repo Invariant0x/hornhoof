@@ -185,7 +185,7 @@ export class Recovery {
       return;
     }
     if (word.goOn === opts.self) {
-      if (word.reach === opts.reach()) this.goOn(word.reach);
+      if (word.reach === opts.reach()) this.goOn(word.reach, Date.parse(word.at));
       else opts.log('The CEO chose to go on from this copy as it was before; it holds something else now, so nothing is done.');
       return;
     }
@@ -195,8 +195,12 @@ export class Recovery {
     else opts.log(`The CEO chose to go on from ${word.reach ?? WHAT_IT_HOLDS} on ${host}, which did not take it.`);
   }
 
-  private goOn(reach: string | null): void {
-    this.went = this.clocks().mono;
+  /* given: when the CEO gave the word, by the wall clock, where this keeper knows it: the word counts from then, so a
+     leader heard between his answer and this keeper's reading of it voids it as any leader heard after it does. */
+  private goOn(reach: string | null, given?: number): void {
+    const now = this.clocks();
+    const age = given === undefined || Number.isNaN(given) ? 0 : Math.max(0, now.wall - given);
+    this.went = now.mono - age;
     this.waits = null;
     this.opts.log(`The CEO chose to go on from ${reach ?? WHAT_IT_HOLDS} on ${this.opts.host(this.opts.self) || 'this machine'}.`);
   }

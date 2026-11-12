@@ -37,13 +37,21 @@ export function linkPrint(link: { name: string; key: string } | null): string | 
   return link ? createHash('sha256').update(`${link.name}\n${link.key}`).digest('hex') : null;
 }
 
+/* The company's link as a recovery file keeps it: the one people open the company at. A hidden name, which Hornhoof
+   took by itself for the company's machines, is none: making or dropping one changes nothing a file was saved with,
+   and a new server takes a name of its own. */
+async function fileLink(db: Db, config: Config) {
+  const link = await tunnelSettings(db, config);
+  return link && !link.hidden ? link : null;
+}
+
 export type ActiveRecovery = { id: string; recipient: string; madeAt: Date; madeBy: string; link: RecoveryLink | null };
 
 /* The company's recovery key now: the newest one not retired, when the link it was saved with is the link now. With the
    link taken, renamed or removed since, there is none, and bundles are sealed without one until a new file is saved. */
 export async function activeRecovery(db: Db, config: Config): Promise<ActiveRecovery | null> {
   const [newest] = await db.select().from(recoveryKeys).where(isNull(recoveryKeys.retiredAt)).orderBy(desc(recoveryKeys.madeAt), desc(recoveryKeys.id)).limit(1);
-  if (!newest || newest.linkPrint !== linkPrint(await tunnelSettings(db, config))) return null;
+  if (!newest || newest.linkPrint !== linkPrint(await fileLink(db, config))) return null;
   const link = newest.linkName && newest.linkUrl ? { name: newest.linkName, url: newest.linkUrl } : null;
   return { id: newest.id, recipient: newest.recipient, madeAt: newest.madeAt, madeBy: newest.madeBy, link };
 }
@@ -51,7 +59,7 @@ export async function activeRecovery(db: Db, config: Config): Promise<ActiveReco
 /* Whether a key that is not retired was saved with another link than the one now: a new file is due. */
 export async function linkChanged(db: Db, config: Config): Promise<boolean> {
   const [newest] = await db.select({ linkPrint: recoveryKeys.linkPrint }).from(recoveryKeys).where(isNull(recoveryKeys.retiredAt)).orderBy(desc(recoveryKeys.madeAt), desc(recoveryKeys.id)).limit(1);
-  return Boolean(newest) && newest!.linkPrint !== linkPrint(await tunnelSettings(db, config));
+  return Boolean(newest) && newest!.linkPrint !== linkPrint(await fileLink(db, config));
 }
 
 /* Makes a new pair and the file with its private half, which is answered once and kept nowhere: the row holds the
@@ -61,7 +69,7 @@ export async function makeRecoveryFile(db: Db, config: Config, me: Person): Prom
   if (!authority) throw new ApiError(409, 'conflict', 'The company has no certificate authority yet. Wait a minute and try again.', 'no_authority');
   const identity = await generateX25519Identity();
   const recipient = await identityToRecipient(identity);
-  const link = await tunnelSettings(db, config);
+  const link = await fileLink(db, config);
   const madeAt = new Date();
   const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
   await db.transaction(async tx => {

@@ -111,9 +111,11 @@ function servingOf(link: Link | null, row: TlsRow | null): { host: string | null
 /* What the listener holds, to tell a change. Only public things go in. */
 const servedKey = (host: string | null, certPem: string | null): string => JSON.stringify([host, certPem]);
 
+/* The link a certificate is ordered for: the one people open. A hidden name serves no page, so the authority could
+   never check it and nobody would ever see its certificate. */
 async function linkOfCompany(db: Db): Promise<Link | null> {
-  const [link] = await db.select({ companyId: publicLinks.companyId, name: publicLinks.name, url: publicLinks.url }).from(publicLinks).limit(1);
-  return link ?? null;
+  const [link] = await db.select({ companyId: publicLinks.companyId, name: publicLinks.name, url: publicLinks.url, hidden: publicLinks.hidden }).from(publicLinks).limit(1);
+  return link && !link.hidden ? { companyId: link.companyId, name: link.name, url: link.url } : null;
 }
 
 /* The certificate of the company's link: it decides when to order, renew and back off, and which mode the tunnel runs in.

@@ -54,8 +54,11 @@ describe('what the keeper of a machine that keeps a copy is started with', () =>
     /* And a link people use still comes first. */
     writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link: { ...link, hidden: false }, data }));
     expect(followConfig(ENV, undefined, dir).joinServer).toBe('https://x9.hornhoof.test');
-    /* Nobody but itself to reach: as with no server. */
+    /* Nobody but itself to name: the keeper still starts, on the hidden name, and reaches the leader over the peer
+       link; with no link either, as with no server. */
     writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link, data: data.slice(0, 2) }));
+    expect(followConfig(ENV, undefined, dir).joinServer).toBe('https://x9.hornhoof.test');
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link: null, data: data.slice(0, 2) }));
     expect(() => followConfig(ENV, undefined, dir)).toThrow("HORNHOOF_JOIN_SERVER is not the address of the company's server.");
   });
 });
