@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
@@ -34,8 +34,8 @@ async function company() {
 
 type Company = Awaited<ReturnType<typeof company>>;
 
-async function assistantOf(c: Company, ownerId: string, name = 'Ava', eventsUrl?: string) {
-  const { id } = (await c.app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name, owner: ownerId, program: 'avaclone', eventsUrl }, ...as(c.ceo) })).json().person;
+async function assistantOf(c: Company, ownerId: string, name = 'Ava', eventsUrl?: string, program = 'avaclone') {
+  const { id } = (await c.app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name, owner: ownerId, program, eventsUrl }, ...as(c.ceo) })).json().person;
   const made = (await c.app.inject({ method: 'POST', url: `/api/people/${id}/key`, ...as(c.ceo) })).json();
   return { id: id as string, key: made.key as string, secret: made.signingSecret as string };
 }
@@ -51,12 +51,12 @@ async function aTask(c: Company) {
 
 /* A stand-in for an assistant's events address: it keeps every wake as it came, and answers with the next status given. */
 async function standIn(statuses: number[]) {
-  const wakes: { body: string; signature: string | undefined }[] = [];
+  const wakes: { body: string; signature: string | undefined; headers: IncomingHttpHeaders }[] = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', chunk => (body += chunk));
     req.on('end', () => {
-      wakes.push({ body, signature: req.headers['x-hornhoof-signature'] as string | undefined });
+      wakes.push({ body, signature: req.headers['x-hornhoof-signature'] as string | undefined, headers: req.headers });
       res.writeHead(statuses.shift() ?? 200).end();
     });
   });
@@ -200,6 +200,55 @@ describe('a wake at the events address', () => {
       expect(JSON.parse(wake.body)).toEqual({ type: 'wake', after: told!.seq - 1 });
       expect(wake.signature).toBe(`sha256=${createHmac('sha256', ava.secret).update(wake.body).digest('hex')}`);
     }
+  });
+
+  it("goes to OpenClaw's wake hook with the signing secret as its token, once an answer is over, from before its first word", async () => {
+    const c = await company();
+    const address = await standIn([]);
+    const ava = await assistantOf(c, c.owner.id, 'Ava', address.url, 'openclaw');
+    await write(c, ava.key, c.orchestrator.id, 'Plan the launch.');
+    const run = await nextOf(c.builtin, 'job.run');
+    c.builtin.send({ type: 'job.started', jobId: run.jobId });
+    c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it.' } });
+    await until(async () => (await eventsOf(c, ava.key)).length === 1);
+    /* A moment for a wake that would go for a word alone; none does. */
+    await new Promise(done => setTimeout(done, 100));
+    expect(address.wakes).toEqual([]);
+    c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
+    await until(() => address.wakes.length === 1);
+    const [word, end] = await eventsOf(c, ava.key);
+    expect(end!.kind).toBe('reply_end');
+    const [wake] = address.wakes;
+    expect(wake!.headers).toMatchObject({ authorization: `Bearer ${ava.secret}`, 'content-type': 'application/json' });
+    expect(wake!.signature).toBeUndefined();
+    const after = word!.seq - 1;
+    expect(JSON.parse(wake!.body)).toEqual({ text: `New events wait for you in Hornhoof after number ${after}. Read them with the Hornhoof tool read_events, with after ${after}, and tell your owner what they need to know.`, mode: 'now' });
+  });
+
+  it('goes to a Hermes webhook signed as Hermes checks it, and a request that waits no more joins the next wake', async () => {
+    const c = await company();
+    const address = await standIn([]);
+    const ava = await assistantOf(c, c.owner.id, 'Ava', address.url, 'hermes');
+    const task = await aTask(c);
+    const asked = (await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which region first?', topic: 'task' })).request;
+    await until(() => address.wakes.length === 1);
+    const [told] = await eventsOf(c, ava.key);
+    const [wake] = address.wakes;
+    expect(JSON.parse(wake!.body)).toEqual({ type: 'wake', after: told!.seq - 1 });
+    const stamp = wake!.headers['x-webhook-timestamp'] as string;
+    expect(Math.abs(Number(stamp) - Date.now() / 1000)).toBeLessThan(60);
+    expect(wake!.headers['x-webhook-signature-v2']).toBe(createHmac('sha256', ava.secret).update(`${stamp}.${wake!.body}`).digest('hex'));
+    expect(wake!.headers['x-request-id']).toBe(`hornhoof-${ava.id}-${told!.seq - 1}`);
+    expect(wake!.signature).toBeUndefined();
+
+    await c.app.inject({ method: 'POST', url: `/api/assistant/requests/${asked.id}/answer`, payload: { answer: 'Europe.' }, headers: { authorization: `Bearer ${ava.key}` } });
+    await until(async () => (await eventsOf(c, ava.key, told!.seq)).length === 1);
+    await new Promise(done => setTimeout(done, 100));
+    expect(address.wakes).toHaveLength(1);
+    const [closed] = await eventsOf(c, ava.key, told!.seq);
+    await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which city then?', topic: 'task' });
+    await until(() => address.wakes.length === 2);
+    expect(JSON.parse(address.wakes[1]!.body)).toEqual({ type: 'wake', after: closed!.seq - 1 });
   });
 
   it('holds up nothing while it waits to be tried again', async () => {

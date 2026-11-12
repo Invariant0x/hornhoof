@@ -27,10 +27,17 @@ const PEOPLE: PersonView[] = [
   { id: 'p3', name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', status: 'invited', isOwner: false, access: WHOLE },
   {
     id: 'h1', name: 'Ava', email: null, title: 'Personal assistant', status: 'active', isOwner: false, access: { whole: false, departments: [], teams: [] },
-    assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'avaclone', eventsUrl: 'https://ava.example.com/hornhoof/events', key: { createdAt: '2026-11-11T10:00:00.000Z' } },
+    assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', key: { createdAt: '2026-11-11T10:00:00.000Z' } },
   },
 ];
-const MADE = { key: `hha_${'K7x-Qp'.repeat(7)}a`, signingSecret: `hhs_${'s3_Vb9'.repeat(7)}z`, person: PEOPLE[3] };
+const KEY = `hha_${'K7x-Qp'.repeat(7)}a`;
+const SECRET = `hhs_${'s3_Vb9'.repeat(7)}z`;
+/* OpenClaw's settings as the server gives them, with their longest lines: the address and the key. */
+const SETUP = {
+  file: '~/.openclaw/openclaw.json',
+  text: ['{', '  mcp: {', '    servers: {', '      hornhoof: {', '        url: "https://acme.hornhoof.app/api/assistant/mcp",', '        transport: "streamable-http",', `        headers: { Authorization: "Bearer ${KEY}" },`, '      },', '    },', '  },', '  hooks: {', '    enabled: true,', `    token: "${SECRET}",`, '  },', '}'].join('\n'),
+};
+const MADE = { key: KEY, signingSecret: SECRET, address: 'https://acme.hornhoof.app', setup: SETUP, person: PEOPLE[3] };
 const INVITE = 'https://hq.acme.com/invite/hh_inv_98f2c4a17b0e4d12a9c3f0e6b5d7a8c1';
 const MACHINE = { id: 'm1', hostname: 'ivan-mbp', status: 'needs_login' as const, online: true };
 const KIMI: SubView = {
@@ -102,7 +109,7 @@ const FORM = '.form-card, .t-card.staff, .key-form';
 /* Where every block and control of the open form stands, with its padding, margin, border and font. */
 async function geometry(form: Locator): Promise<Record<string, unknown>[]> {
   return form.evaluate(root => {
-    const selectors = [':scope', '.form-head', '.form-title', '.form-title > svg', '.field', '.field > label', '.field > .label', '.field-control', 'input:not(.sr)', 'select', '.hint', '.kind-switch', '.kind-card', '.kind-card > svg', '.check-card', '.form-foot', '.form-foot > *', '.secret', '.secret-code', '.alert', '.warn-line', '.warn-line > svg', '.plan', '.plan > svg', '.staff-row', '.staff-field', '.badge', 'h4', 'h4 > svg', '.entry-actions > *', '.key-line', '.access-list label', '.busy-swap'];
+    const selectors = [':scope', '.form-head', '.form-title', '.form-title > svg', '.field', '.field > label', '.field > .label', '.field-control', 'input:not(.sr)', 'select', '.hint', '.kind-switch', '.kind-card', '.kind-card > svg', '.check-card', '.form-foot', '.form-foot > *', '.secret', '.secret > p', '.secret-code', '.alert', '.warn-line', '.warn-line > svg', '.plan', '.plan > svg', '.staff-row', '.staff-field', '.badge', 'h4', 'h4 > svg', '.entry-actions > *', '.key-line', '.access-list label', '.busy-swap'];
     const seen = new Set<Element>();
     const out: Record<string, unknown>[] = [];
     const origin = root.getBoundingClientRect();

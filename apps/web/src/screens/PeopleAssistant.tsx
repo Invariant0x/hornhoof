@@ -52,11 +52,13 @@ export function KindSwitch({ agent, onChange }: { agent: boolean; onChange: (age
 
 function ProgramAndAddress({ program, eventsUrl, onProgram, onEventsUrl }: { program: AssistantProgram; eventsUrl: string; onProgram: (p: AssistantProgram) => void; onEventsUrl: (url: string) => void }) {
   const t = useT();
+  /* OpenClaw and Hermes take a wake at their own webhook, whose address the person makes from the computer's. */
+  const where = program === 'openclaw' ? t.people.eventsUrlOpenclaw : program === 'hermes' ? t.people.eventsUrlHermes : '';
   return <>
     <Field label={t.people.program}>
       {p => <select {...p} value={program} onChange={e => onProgram(e.target.value as AssistantProgram)}>{ASSISTANT_PROGRAMS.map(k => <option key={k} value={k}>{t.people.programs[k]}</option>)}</select>}
     </Field>
-    <Field label={t.people.eventsUrl} hint={t.people.eventsUrlHint}>
+    <Field label={t.people.eventsUrl} hint={where ? `${t.people.eventsUrlHint} ${where}` : t.people.eventsUrlHint}>
       {p => <input {...p} type="url" value={eventsUrl} onChange={e => onEventsUrl(e.target.value)} maxLength={500} placeholder="https://" autoComplete="off" spellCheck={false} />}
     </Field>
   </>;
@@ -123,13 +125,34 @@ function Secret({ label, value, copy }: { label: string; value: string; copy: st
       <span className="secret-title" id={id}>{label}</span>
       <code className="secret-code">{value}</code>
       <div className="form-foot">
-        <CopyButton text={value} label={copy} main />
+        <CopyButton text={value} label={copy} className="btn" />
       </div>
     </div>
   );
 }
 
-type Made = { key: string; signingSecret: string; person: PersonView };
+/* The settings that connect the program, as they go into its own file. */
+type Setup = { file: string; text: string };
+
+/* The settings for the program, shown once like the key: where they go, their lines whole, and a Copy that takes them all. */
+function SetupLines({ program, setup }: { program: AssistantProgram; setup: Setup }) {
+  const t = useT();
+  const id = useId();
+  return (
+    <div className="secret" role="group" aria-labelledby={id}>
+      <span className="secret-title" id={id}>{t.people.setupFor(t.people.programs[program])}</span>
+      <p className="muted">{t.people.setupWhere(setup.file)}</p>
+      <pre className="secret-code"><code>{setup.text}</code></pre>
+      <div className="form-foot">
+        <CopyButton text={setup.text} label={t.people.copySetup} className="btn" />
+      </div>
+    </div>
+  );
+}
+
+/* address: the company's address as its invite links have it. setup: the settings for OpenClaw or Hermes, or null for a
+   program that takes the address and the key in its own way. */
+type Made = { key: string; signingSecret: string; address: string; setup?: Setup | null; person: PersonView };
 
 /* The key and the signing secret: made, made again or taken away here, and shown once, right after they are made. */
 function KeySection({ person, onChanged }: { person: PersonView; onChanged: (person: PersonView) => void }) {
@@ -169,7 +192,12 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
         </div>
         <Secret label={t.people.key} value={shown.key} copy={t.people.copyKey} />
         <Secret label={t.people.signingSecret} value={shown.signingSecret} copy={t.people.copySecret} />
-        <div className="form-foot"><button className="btn ghost" type="button" onClick={() => setShown(null)}>{t.people.hideKey}</button></div>
+        {shown.setup && <SetupLines program={shown.person.assistant?.program ?? 'other'} setup={shown.setup} />}
+        <div className="form-foot">
+          {/* The address and the key in one text, which the person sends their assistant as it is; never the signing secret. */}
+          <CopyButton text={t.people.forAssistant(shown.address, shown.key)} label={t.people.copyForAssistant} className="btn" />
+          <button className="btn ghost" type="button" onClick={() => setShown(null)}>{t.people.hideKey}</button>
+        </div>
       </> : <>
         <p className="key-line"><KeyIcon />{made ? t.people.keyMade(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(made.createdAt))) : t.people.noKey}</p>
         <div className="entry-actions">

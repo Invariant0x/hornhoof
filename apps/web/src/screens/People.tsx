@@ -27,7 +27,7 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
         <p className="muted">{t.people.linkNote}</p>
         <code className="secret-code">{url}</code>
         <div className="form-foot">
-          <CopyButton text={url} main />
+          <CopyButton text={url} className="btn" />
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
         </div>
       </div>

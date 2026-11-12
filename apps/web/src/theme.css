@@ -557,6 +557,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .secret { display: grid; gap: 8px; min-width: 0; }
 .secret-title { font-weight: 600; }
 .secret-code { display: block; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); font-family: var(--f-mono); font-size: 12px; line-height: 1.55; direction: ltr; text-align: left; overflow-wrap: anywhere; }
+/* A program's settings keep their lines and indents, and a long line wraps inside the box. */
+pre.secret-code { margin: 0; white-space: pre-wrap; }
+.secret-code code { font: inherit; }
 /* An assistant's key on its card: a line on it, the key and secret once made, and its buttons under the line. */
 .assistant-key { display: grid; gap: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
 .assistant-key h3, .assistant-key p { margin: 0; }
