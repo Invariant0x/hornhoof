@@ -15,7 +15,7 @@ const copy = (over: Partial<CopySample> = {}): CopySample => ({
 });
 const C = copy();
 const D = copy({ machine: 'd', networkId: D_ID, number: 3, name: 'copy_d0d0d0d0d0d0d0d0_1' });
-const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, target: null, hold: false, ...over });
+const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, target: null, hold: false, leads: true, ...over });
 const memory = (over: Partial<SyncMemory> = {}): SyncMemory => ({ w: null, posting: false, flag: null, checkpointed: false, blocked: false, ...over });
 const step = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => nextSyncStep(sample(s), memory(m));
 const said = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => {
@@ -144,6 +144,13 @@ describe('the next step of the sync controller', () => {
     expect(said({ ...named, target: D_ID }, { w: '0/1' }).action).toEqual(NONE);
     /* With the request gone, the lower number takes the place again. */
     expect(said(named, { w: '0/1' }).action).toEqual(POST_OFF);
+  });
+
+  it('names a copy only while this machine leads', () => {
+    expect(said({ record: OFF })).toEqual({ action: { do: 'set', name: C.name }, flag: 'relay_off', renew: true });
+    /* A machine that hands the server over, or holds no lease, names none: the name would stay behind in its database,
+       and the first commit there, when it takes the server again, would wait for a copy that is none. */
+    expect(said({ record: OFF, leads: false })).toEqual({ action: NONE, flag: 'relay_off', renew: true });
   });
 
   it('hold: clears the setting once off is stored', () => {

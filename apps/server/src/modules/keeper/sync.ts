@@ -293,6 +293,7 @@ export class SyncController {
     this.heldNow = this.holding && setting === null && this.route !== null && this.stored?.state === 'off' && this.stored.generation === this.route.generation;
     return {
       hold: this.holding,
+      leads: this.opts.leads(),
       now, others, listed: machines.length, setting, route: this.route, record: this.stored, oldestWaitMs,
       slowForMs: this.slowSince === null ? 0 : now - this.slowSince,
       namedBytes5s: named ? this.bytesOver(named.machine, now) : 0,

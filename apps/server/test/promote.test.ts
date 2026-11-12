@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { handoverOf, markHanded, recordHandover, termOf, writeTerm } from '../src/modules/keeper/promote.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
+import { handoverOf, makeSlots, markHanded, recordHandover, termOf, waitForNoCopy, writeTerm } from '../src/modules/keeper/promote.js';
 import { createTestSql, ownDatabases } from './helpers.js';
 
 /* These tests write the term a database stands under, which a truncate does not undo. */
@@ -47,6 +48,50 @@ describe('the steps of a promotion', () => {
     /* The machine that handed the server over takes it back later: its old term is not this attempt's. */
     expect(await writeTerm(d.sql, { above: 0, machine: A })).toEqual({ number: 2, machine: A, split: false });
     expect(await d.state()).toEqual([{ number: '2', machine: A, split: false, to: null, lsn: null, at: null }]);
+  });
+
+  it('makes a slot only where none is, and takes one that is still being made for none', async () => {
+    /* As Postgres lists them: one that is whole, and one whose making waits for a transaction that was open then. */
+    const slots = new Map([['copy_a0a0a0a0a0a0a0a0_2', true], ['copy_b0b0b0b0b0b0b0b0_2', false]]);
+    const made: string[] = [];
+    const sql = {
+      query: async (text: string, params: unknown[] = []) => {
+        const name = String(params[0]);
+        if (text.includes('pg_create_logical_replication_slot')) {
+          made.push(name);
+          slots.set(name, true);
+          return { rows: [] };
+        }
+        return { rows: slots.has(name) ? [{ whole: slots.get(name) }] : [] };
+      },
+    } as unknown as Sql;
+    await makeSlots(sql, ['copy_a0a0a0a0a0a0a0a0_2', 'copy_c0c0c0c0c0c0c0c0_1']);
+    expect(made).toEqual(['copy_c0c0c0c0c0c0c0c0_1']);
+    /* What is written before that slot is whole never reaches whoever joins it: the promotion stops here and tries again. */
+    await expect(makeSlots(sql, ['copy_c0c0c0c0c0c0c0c0_1', 'copy_b0b0b0b0b0b0b0b0_2'])).rejects.toThrow('the slot copy_b0b0b0b0b0b0b0b0_2 is still being made');
+    expect(made).toEqual(['copy_c0c0c0c0c0c0c0c0_1']);
+    slots.set('copy_b0b0b0b0b0b0b0b0_2', true);
+    await makeSlots(sql, ['copy_b0b0b0b0b0b0b0b0_2']);
+    expect(made).toEqual(['copy_c0c0c0c0c0c0c0c0_1']);
+  });
+
+  it('waits for no copy before it writes anything', async () => {
+    /* A name left from a time this machine led before: every commit would wait for a copy that follows it no more. */
+    let names = 'FIRST 1 ("copy_b0b0b0b0b0b0b0b0_1")';
+    const asked: string[] = [];
+    const sql = {
+      query: async (text: string) => {
+        if (text.includes('current_setting')) return { rows: [{ names }] };
+        asked.push(text);
+        if (text.includes('pg_reload_conf')) names = '';
+        return { rows: [] };
+      },
+    } as unknown as Sql;
+    await waitForNoCopy(sql);
+    expect(asked).toEqual(['ALTER SYSTEM RESET synchronous_standby_names', 'SELECT pg_reload_conf()']);
+    /* With none named nothing is changed. */
+    await waitForNoCopy(sql);
+    expect(asked).toHaveLength(2);
   });
 
   it('records a handover and ends the request', async () => {

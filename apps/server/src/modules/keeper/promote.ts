@@ -74,11 +74,33 @@ export async function raiseSequences(sql: Sql, room = 1000): Promise<string[]> {
   return set;
 }
 
-/* A slot for each machine that follows this one from now on, unless it is there. */
+/* A slot for each machine that follows this one from now on, unless it is there. A slot is there only once it is
+   whole. Postgres lists one from the moment its making begins, and that making waits for every transaction that was
+   open then: a keeper that gave up waiting for the answer finds the slot listed the next time, and what it wrote
+   before the slot is whole would never reach the machine that joins it. Such a slot is none yet, and this fails
+   until it is whole or gone. */
 export async function makeSlots(sql: Sql, names: string[]): Promise<void> {
   for (const name of names) {
-    await sql.query(`SELECT pg_create_logical_replication_slot($1::text, 'pgoutput') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1::text)`, [name]);
+    const [slot] = (await sql.query<{ whole: boolean }>('SELECT confirmed_flush_lsn IS NOT NULL AS whole FROM pg_replication_slots WHERE slot_name = $1::text', [name])).rows;
+    if (slot?.whole) continue;
+    if (slot) throw new Error(`the slot ${name} is still being made`);
+    await sql.query(`SELECT pg_create_logical_replication_slot($1::text, 'pgoutput')`, [name]);
   }
+}
+
+const NO_COPY_TRIES = 20;
+const NO_COPY_WAIT_MS = 100;
+
+/* A database that begins to lead waits for no copy. A name left in its setting from a time it led before names a copy
+   that follows it no more, and every commit of the promotion would wait for that copy for good. The sync controller
+   names one again once this machine leads. */
+export async function waitForNoCopy(sql: Sql): Promise<void> {
+  const named = async (): Promise<boolean> => ((await sql.query<{ names: string }>(`SELECT current_setting('synchronous_standby_names') AS names`)).rows[0]?.names ?? '') !== '';
+  if (!(await named())) return;
+  await sql.query('ALTER SYSTEM RESET synchronous_standby_names');
+  await sql.query('SELECT pg_reload_conf()');
+  /* The reload reaches a session a moment later. */
+  for (let tries = 0; tries < NO_COPY_TRIES && (await named()); tries++) await new Promise(resolve => setTimeout(resolve, NO_COPY_WAIT_MS));
 }
 
 /* The record of a planned switch, under the switch's id, and the end of the request it answers, in one commit. A

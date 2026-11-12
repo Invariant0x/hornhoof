@@ -9,7 +9,7 @@ import { reasonOf, writePrivately } from './machine-keys.js';
 import { IDLE_MS, Looks } from './looks.js';
 import { ident, TermShape } from './sql-words.js';
 import { NoteUnreadable, readNote } from './notes.js';
-import { applyRunning, dropSubscriptions, handoverOf, makeSlots, raiseSequences, recordHandover, termOf, writeTerm } from './promote.js';
+import { applyRunning, dropSubscriptions, handoverOf, makeSlots, raiseSequences, recordHandover, termOf, waitForNoCopy, writeTerm } from './promote.js';
 import { ensurePublication } from './replica.js';
 import { nextTakeStep, SWITCH_MS, takeState, type Taking, type TakeState } from './switch-step.js';
 
@@ -499,6 +499,7 @@ export class Promoter {
     const { sql, machine } = this.opts;
     if ((taking.kind ?? 'planned') !== 'planned') return this.takeover(taking);
     if (taking.w === null) throw new Error('what it wrote down names no end of the old leader\'s log');
+    await waitForNoCopy(sql);
     await writeTerm(sql, { above: taking.term.number, machine: machine.networkId });
     await dropSubscriptions(sql);
     await raiseSequences(sql);
@@ -528,6 +529,7 @@ export class Promoter {
       applied = read?.lsn ?? '0/0';
       writeTaking(dir, { ...taking, w: applied });
     }
+    await waitForNoCopy(sql);
     await writeTerm(sql, { above: taking.term.number, machine: machine.networkId });
     await dropSubscriptions(sql);
     await raiseSequences(sql);

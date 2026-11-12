@@ -45,6 +45,8 @@ export type SyncSample = {
   namedBytes5s: number;
   target: string | null;
   hold: boolean;
+  /* This machine leads now: it holds its lease and is not handing the server over. */
+  leads: boolean;
 };
 
 /* What the controller keeps between looks. w: how far the leader had written once the setting held. posting: an answer
@@ -123,7 +125,10 @@ function decide(s: SyncSample, m: SyncMemory): { action: SyncAction; flag: Flag 
     return { action: NONE, flag: 'copy' };
   }
   if (offStored) {
-    const next = moveTarget(s) ?? best(s);
+    /* Only a machine that leads names a copy. One that hands the server over, or holds no lease, would leave the name
+       behind in a database nobody writes, and the first commit there, when it takes the server again, would wait for a
+       copy that is none. */
+    const next = s.leads ? (moveTarget(s) ?? best(s)) : undefined;
     return { action: next ? { do: 'set', name: next.name } : NONE, flag: 'relay_off' };
   }
   return { action: POST_OFF, flag: null };
