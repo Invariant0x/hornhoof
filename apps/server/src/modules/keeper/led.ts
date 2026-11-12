@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import { sealBundle, type BundleSecrets } from '../backups/bundle.js';
 import { BundleStore } from '../backups/store.js';
@@ -50,14 +51,15 @@ export type LedSaverOptions = {
   key: MachineKey;
   held: () => HeldCertificate | null;
   /* The machine's own key for backups: the bundle is sealed to it too. */
-  age: { identity: string; recipient: string };
+  age: () => Promise<{ recipient: string }>;
   secrets: () => BundleSecrets;
   /* The machine that leads now, by its network id. */
   leader: () => { networkId: string } | null;
   /* Whom the company's backups are sealed to, as the keeper that leads is told it by its app. */
   view: () => Promise<MakerView | null>;
-  /* Gives the bundle to the keeper that leads; the status it answered, none when it did not. */
-  put: (networkId: string, id: string, file: string) => Promise<number | null>;
+  /* Gives the bundle to the keeper that leads, as it travels: its head, then its sealed part. The status that keeper
+     answered, none when it did not. */
+  put: (networkId: string, id: string, bundle: { length: number; stream(): Readable }) => Promise<number | null>;
   now?: () => Date;
   everyMs?: number;
   log: (line: string) => void;
@@ -184,7 +186,7 @@ export class LedSaver {
     try {
       const sealed = await sealBundle({
         dump: createReadStream(file), id: led.id, company: view.company, dumpedAt: new Date(dump.data.at), now: this.now(), reason: 'fork', migrations: dump.data.migrations,
-        secrets: opts.secrets(), recipients: [...view.recipients, opts.age.recipient], recovery: view.recovery?.recipient ?? null, recoveryLink: view.recovery?.link ?? null,
+        secrets: opts.secrets(), recipients: [...view.recipients, (await opts.age()).recipient], recovery: view.recovery?.recipient ?? null, recoveryLink: view.recovery?.link ?? null,
         key: opts.key, held, out,
       });
       this.bundles.put(sealed.head, sealed.manifest, out);
@@ -201,7 +203,7 @@ export class LedSaver {
     const leader = this.opts.leader();
     const stored = this.bundles.open(led.id);
     if (!leader || !stored) return;
-    const status = await this.opts.put(leader.networkId, led.id, this.bundles.ageFile(led.id)).catch(() => null);
+    const status = await this.opts.put(leader.networkId, led.id, stored).catch(() => null);
     if (status !== 200 && status !== 201) return;
     const dumps = join(this.opts.controlDir, DUMPS_DIR);
     for (const end of ['.sql.gz', '.json']) rmSync(join(dumps, `${led.id}${end}`), { force: true });

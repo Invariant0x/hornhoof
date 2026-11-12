@@ -1,4 +1,5 @@
 import { createReadStream, statfsSync } from 'node:fs';
+import type { Readable } from 'node:stream';
 import { DbDoor, composeAllowed } from '../../net/db-door.js';
 import { PeerDoor } from '../../net/peer-door.js';
 import { PEER_PATHS, PeerServer } from '../../net/peer-server.js';
@@ -6,11 +7,15 @@ import type { Target } from '../../net/proxy.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import type { Route } from '../link/relay.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
+import type { BundleSecrets } from '../backups/bundle.js';
+import type { MakerView } from '../backups/types.js';
+import { ageKey } from './age-key.js';
 import { Beats, type Beat } from './beats.js';
 import { CopyMaker, type CopyMakerOptions, type CopyReport } from './copy.js';
 import { KEEPER_PORTS } from './doors.js';
 import type { FollowConfig } from './follow-config.js';
 import { Leaving, type LeavingOptions } from './leave.js';
+import { LedSaver, type LedSaverOptions } from './led.js';
 import type { Clocks } from './lease.js';
 import type { Sql } from './lease-store.js';
 import { machineKey, reasonOf } from './machine-keys.js';
@@ -32,6 +37,7 @@ const FRPC_RESTART_MS = 2000;
 const LOOPBACK = '127.0.0.1';
 const ANY_ADDRESS = '0.0.0.0';
 const COPY_DB = 'hornhoof';
+const BACKUPS_PATH = '/api/network/backups';
 
 type Closable = Sql & { close(): Promise<void> };
 
@@ -76,6 +82,11 @@ export type FollowKeeperOptions = {
   watcher?: Partial<WatcherOptions>;
   /* The clocks the beats and the watch go by; the machine's own unless a test says otherwise. */
   clocks?: () => Clocks;
+  /* The company's secrets as this machine holds them, which go into the backup of a database of its own that led.
+     Without them such a database is never touched, and its copy stops. */
+  secrets?: () => BundleSecrets;
+  /* What a test changes in how a database that led is saved. */
+  saver?: Partial<LedSaverOptions>;
   /* Ends this keeper, so that it starts again as another kind; the process ends unless a test says otherwise. */
   exit?: () => void;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
@@ -102,6 +113,8 @@ export class FollowKeeper {
   private readonly updating: CopyUpdating;
   private readonly beating: Beats;
   private readonly watcher: Watcher;
+  /* What saves this machine's database when it led before; none where the keeper holds no secrets to seal it with. */
+  private readonly saver: LedSaver | null;
   /* The company's link as this machine's own database holds it, as last read. */
   private linkNow: TunnelSettings | null = null;
   private linkAt: number | null = null;
@@ -123,6 +136,29 @@ export class FollowKeeper {
 
   constructor(private readonly opts: FollowKeeperOptions) {
     const { config, log } = opts;
+    this.copySql = opts.sql(COPY_DB);
+    this.saver = opts.secrets
+      ? new LedSaver({
+          dir: config.dir,
+          controlDir: config.controlDir,
+          sql: this.copySql,
+          key: machineKey(config.dir),
+          held: () => this.worker.parts().certificates.current(),
+          age: () => ageKey(config.dir),
+          secrets: opts.secrets,
+          leader: () => this.leader(),
+          /* Whom the company's backups are sealed to, as the leader's app tells a machine that holds the data. */
+          view: async () => {
+            const answer = await this.worker.fromLeader('GET', `${BACKUPS_PATH}?as=maker`);
+            return answer?.status === 200 ? (answer.body as MakerView) : null;
+          },
+          put: (_networkId, id, bundle) => this.putLed(id, bundle),
+          now: opts.now,
+          log,
+          ...opts.saver,
+        })
+      : null;
+    const saver = this.saver;
     this.maker = new CopyMaker({
       admin: opts.sql('postgres'),
       db: opts.sql,
@@ -132,6 +168,7 @@ export class FollowKeeper {
       password: replicaPassword(config.secret),
       diskFree: () => this.diskFree(),
       updating: () => this.updating.holds(),
+      ...(saver ? { saver: { tick: () => saver.tick(), done: () => saver.done(), state: () => saver.state(), forget: () => saver.forget() } } : {}),
       log,
       now: opts.now,
       ...opts.maker,
@@ -162,7 +199,6 @@ export class FollowKeeper {
       log,
       ...opts.leaving,
     });
-    this.copySql = opts.sql(COPY_DB);
     const subscription = pgSubscription(this.copySql, async () => this.maker.report()?.name ?? null);
     this.updating = new CopyUpdating({
       controlDir: config.controlDir,
@@ -418,6 +454,19 @@ export class FollowKeeper {
     const mode = this.maker.mode();
     this.giveWord(mode === 'read' && this.updating.holds() ? 'maintenance' : mode);
     await this.keepReplica();
+  }
+
+  /* The bundle of this machine's database that led goes to the keeper that leads, as it travels, with its length said
+     first; the status that keeper answered. */
+  private async putLed(id: string, bundle: { length: number; stream(): Readable }): Promise<number> {
+    const body = bundle.stream();
+    try {
+      const answer = await this.worker.parts().link.stream('PUT', `${PEER_PATHS.led}${id}`, body, bundle.length);
+      answer.body.destroy();
+      return answer.status;
+    } finally {
+      body.destroy();
+    }
   }
 
   /* What this machine holds goes to the keeper that leads, on a stream of its own, with its length said first. */

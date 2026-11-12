@@ -2,10 +2,11 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buffer } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
 import * as age from 'age-encryption';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { checkHead } from '../src/modules/backups/bundle.js';
+import { checkHead, headLine } from '../src/modules/backups/bundle.js';
 import { BundleStore } from '../src/modules/backups/store.js';
 import type { MakerView } from '../src/modules/backups/types.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
@@ -45,13 +46,13 @@ async function saver() {
   const lines: string[] = [];
   const make = () =>
     new LedSaver({
-      dir, controlDir, sql, key, age: { identity, recipient: own },
+      dir, controlDir, sql, key, age: async () => ({ recipient: own }),
       held: () => ({ machine: machineId, role: 'data', certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() }),
       secrets: () => ({ HORNHOOF_SECRET: 's'.repeat(44), NODE_KEY: 'n'.repeat(44), RELAY_URL: 'https://relay.hornhoof.test' }),
       leader: () => ({ networkId: B }),
       view: async () => said.view,
-      put: async (to, id, file) => {
-        puts.push({ to, id, bytes: readFileSync(file).length });
+      put: async (to, id, bundle) => {
+        puts.push({ to, id, bytes: (await buffer(bundle.stream())).length });
         return said.put;
       },
       now: () => said.now, log: line => lines.push(line),
@@ -90,7 +91,8 @@ describe('saving the database of a machine that led', () => {
     /* One sealed bundle, a fork, signed by this machine, which the keeper that leads took: the dump goes. */
     const [bundle] = s.store().list();
     expect(s.check(bundle!.head)).toMatchObject({ id: led.id, reason: 'fork', signer: s.machineId, migrations: 116 });
-    expect(s.puts).toEqual([{ to: B, id: led.id, bytes: bundle!.size }]);
+    /* It travels as any bundle does: its head, then its sealed part. */
+    expect(s.puts).toEqual([{ to: B, id: led.id, bytes: Buffer.byteLength(headLine(bundle!.head)) + bundle!.size }]);
     expect([s.it.done(), readLed(s.dir)]).toMatchObject([true, { sealed: true, recorded: true }]);
     expect(['sql.gz', 'json'].map(end => existsSync(join(s.controlDir, 'dumps', `${led.id}.${end}`)))).toEqual([false, false]);
     /* Done, it asks nobody again. */

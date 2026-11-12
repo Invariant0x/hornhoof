@@ -170,6 +170,7 @@ async function followKeeper(): Promise<Running> {
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const { Relay } = await import('./modules/link/relay.js');
   const { probeLink } = await import('./modules/keeper/taking.js');
+  const { bundleSecrets } = await import('./modules/keeper/keeper.js');
   const config = followConfig(process.env, log);
   const whole = loadConfig(process.env);
   const db = openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 });
@@ -189,6 +190,8 @@ async function followKeeper(): Promise<Running> {
     /* What its watch over the leader asks: hornhoof.org of the company's name, and the company's link of who answers there. */
     relay: new Relay(whole.relayUrl),
     probe: (nonce, url) => probeLink(process.env.HORNHOOF_LINK_PROBE || url, nonce),
+    /* What a database of this machine that led is sealed with, when it has one to save. */
+    secrets: () => bundleSecrets(whole),
     exit,
   });
 }

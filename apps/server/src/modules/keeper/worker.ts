@@ -636,6 +636,13 @@ export class WorkerKeeper {
     return answerOf(await askApp(this.doorTarget, method, path, body, signal));
   }
 
+  /* One question to the app of the machine that leads, through the peer link: its status and what it said, or
+     nothing while no leader is in reach. */
+  async fromLeader(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; body: unknown } | null> {
+    const res = await this.askLeader(method, path, body);
+    return res ? answerOf(res) : null;
+  }
+
   /* Through the peer link, from the leader, while there is one. */
   private async askLeader(method: 'GET' | 'POST', path: string, body?: unknown): Promise<AppAnswer | null> {
     if (this.stopped || !this.leader()) return null;
