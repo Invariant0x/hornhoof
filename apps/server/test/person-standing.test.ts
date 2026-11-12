@@ -77,8 +77,8 @@ describe('the rules', () => {
   const skill = (id: string) => loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))).skills.get(id)!.body;
 
   it("have a head do what someone responsible for its department asks in it, and say what its tools cannot do", () => {
-    expect(skill('hh-lead-tasks')).toMatch(/below a person's message in your window[^.]*what they are in the company\. Everyone responsible for your department runs it in full, as the CEO would, and there may be several of them: do what they ask inside the department[^.]*without asking the CEO for leave\./);
-    expect(skill('hh-lead-tasks')).toMatch(/What your own tools cannot do, such as removing a sub-unit, tell them they can do it themselves on the department's screen/);
+    expect(skill('hh-lead-tasks')).toMatch(/below a person's message Hornhoof says what they are in the company\. The CEO may give you any task\. Everyone responsible for your department, and there may be several, runs it in full as the CEO would: do what they ask inside it without asking the CEO for leave\./);
+    expect(skill('hh-lead-tasks')).toMatch(/What your tools cannot do, such as removing a sub-unit, they can do on the department's screen, or you pass it to the orchestrator saying who asked\./);
   });
 
   it('have the orchestrator change sub-units for everyone responsible for the department, also through its head', () => {
