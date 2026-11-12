@@ -5,6 +5,21 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.11] - 2026-11-12
+
+A person who works in several departments opens each of them again, a plan that was removed connects again without
+waiting a day, and a message on a task no longer slips under a wait its holder asks for at the same moment.
+
+### Fixed
+
+- A person given more than one department saw Insufficient permissions on every department page. The page looked for
+  them only among each department's own people, while the map shows such a person next to the CEO.
+- Connecting a plan again after removing it answered There is an active command for this place, with no command shown,
+  until the old command expired a day later. Removing a plan now ends its waiting command, and connecting a plan that
+  was removed earlier ends the old one first.
+- When a message on a task came into its holder's turn while the holder asked to wait on that task, the wait went in
+  after it and held the task until its deadline. Such a wait is now refused once, so the holder reads the message first.
+
 ## [0.18.10] - 2026-11-12
 
 OpenClaw and Hermes Agent join a company as a person's assistant with one piece of settings, and an assistant such as
