@@ -148,6 +148,9 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/assistant/events': 'assistants-events.test.ts: the events of this assistant alone',
   'GET /api/assistant/requests': 'assistants-events.test.ts: the requests that wait for its owner',
   'POST /api/assistant/requests/:id/answer': 'assistants-events.test.ts: what its owner may answer, 403 otherwise',
+  'POST /api/assistant/mcp': "assistants-mcp.test.ts: the same reads and writes over MCP, by the assistant's key and with its owner's rights",
+  'GET /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
+  'DELETE /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
