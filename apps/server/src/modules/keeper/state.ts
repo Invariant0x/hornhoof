@@ -1,6 +1,7 @@
 import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { QuestionShape } from './question.js';
 
 export const KEEPER_FILE = 'keeper.json';
 export const FRESH_MS = 10_000;
@@ -18,6 +19,8 @@ const KeeperStateShape = z.object({
   copies: z.array(z.object({ name: z.string(), state: z.enum(['sync', 'pace', 'behind', 'silent']) })).optional(),
   /* How fast the keeper that leads sent to each machine at its best in the last week, in Mbit/s, by the machine's id. */
   throughput: z.record(z.string(), z.object({ mbps: z.number().int().min(0), at: z.string() })).optional(),
+  /* The question a copy puts to the CEO while the machine that leads is gone and the copy may lack changes. */
+  question: QuestionShape.nullable().optional(),
 });
 export type KeeperState = z.infer<typeof KeeperStateShape>;
 

@@ -22,6 +22,7 @@ import { machineKey, reasonOf } from './machine-keys.js';
 import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
 import type { Taking } from './switch-step.js';
 import { pgSubscription, Taker, writeTaking, type TakerOptions } from './taking.js';
+import { makeQuestion, Recovery, type Question, type RecoveryOptions } from './question.js';
 import { writeKeeperState } from './state.js';
 import { CopyUpdating, type CopyUpdatingOptions } from './updating.js';
 import { Watcher, type WatcherOptions } from './watch.js';
@@ -80,6 +81,8 @@ export type FollowKeeperOptions = {
   probe?: (nonce: string, url: string) => Promise<{ machine: string; nonce: string } | null>;
   /* What a test changes in the watch over the machine this copy follows. */
   watcher?: Partial<WatcherOptions>;
+  /* What a test changes in how the CEO's answer to this copy's question is read. */
+  recovery?: Partial<RecoveryOptions>;
   /* The clocks the beats and the watch go by; the machine's own unless a test says otherwise. */
   clocks?: () => Clocks;
   /* The company's secrets as this machine holds them, which go into the backup of a database of its own that led.
@@ -113,6 +116,10 @@ export class FollowKeeper {
   private readonly updating: CopyUpdating;
   private readonly beating: Beats;
   private readonly watcher: Watcher;
+  private readonly recovery: Recovery;
+  private readonly clocks: () => Clocks;
+  /* The question to the CEO, while it stands: since when, and when the leader was last heard, by the wall clock. */
+  private asking: { since: number; heard: number | null } | null = null;
   /* What saves this machine's database when it led before; none where the keeper holds no secrets to seal it with. */
   private readonly saver: LedSaver | null;
   /* The company's link as this machine's own database holds it, as last read. */
@@ -136,6 +143,7 @@ export class FollowKeeper {
 
   constructor(private readonly opts: FollowKeeperOptions) {
     const { config, log } = opts;
+    this.clocks = opts.clocks ?? (() => ({ wall: Date.now(), mono: performance.now() }));
     this.copySql = opts.sql(COPY_DB);
     this.saver = opts.secrets
       ? new LedSaver({
@@ -248,12 +256,27 @@ export class FollowKeeper {
       holds: () => this.updating.holds() || this.taker.offered(),
       reach: () => this.maker.report()?.at ?? null,
       take: taking => this.takeOver(taking),
-      /* The CEO's question comes with the page that asks it; until then the keeper says so in its log alone. */
-      ask: () => undefined,
-      ceo: () => null,
+      /* The question stands in this keeper's word to the app, which shows it; the CEO's answer comes back through the
+         control folder. */
+      ask: (on, sample) => {
+        const now = this.clocks();
+        this.asking = on ? { since: now.wall, heard: sample.heard === null ? null : now.wall - (now.mono - sample.heard) } : null;
+      },
+      ceo: () => this.recovery.go(),
       now: opts.clocks,
       log,
       ...opts.watcher,
+    });
+    this.recovery = new Recovery({
+      controlDir: config.controlDir,
+      self: config.machineId,
+      reach: () => this.maker.report()?.at ?? null,
+      others: () => this.question()?.copies.filter(copy => !copy.self).map(copy => copy.networkId) ?? [],
+      host: networkId => this.view?.data.find(machine => machine.networkId === networkId)?.hostname ?? '',
+      ask: (networkId, path, body, timeoutMs) => this.worker.parts().link.ask(networkId, 'POST', path, body, timeoutMs),
+      now: opts.clocks,
+      log,
+      ...opts.recovery,
     });
     this.peerDoor = new PeerDoor({ app: opts.app });
     this.door = new DbDoor({
@@ -275,6 +298,7 @@ export class FollowKeeper {
     this.look();
     this.beating.start();
     this.watcher.start();
+    this.recovery.start();
     return { front, door };
   }
 
@@ -325,6 +349,7 @@ export class FollowKeeper {
     this.stopped = true;
     this.beating.stop();
     this.watcher.stop();
+    this.recovery.stop();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.working;
@@ -367,6 +392,7 @@ export class FollowKeeper {
           const from = this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '';
           if (path === PEER_PATHS.beat) return this.beating.handle(peer, body) as { status: number; body: object };
           if (path === PEER_PATHS.promise) return this.watcher.promise(from, body) as { status: number; body: object };
+          if (path === PEER_PATHS.goOn) return this.recovery.handle(from, body);
           return path === PEER_PATHS.updating ? this.updating.handle(from, body) : this.taker.handle(from, method, path, body);
         },
       },
@@ -503,10 +529,22 @@ export class FollowKeeper {
     }
   }
 
-  /* The app reads once the copy holds every table, and is off until then; it never leads on this keeper's word. */
+  /* The question to the CEO as of now, while this copy asks one: the leader it watched, each copy that is up, and
+     until when the CEO chose to wait. */
+  private question(): Question | null {
+    const leader = this.maker.leader();
+    if (!this.asking || !leader) return null;
+    const host = this.view?.data.find(machine => machine.networkId === leader)?.hostname || this.beating.last(leader)?.beat.host || '';
+    const { since, heard } = this.asking;
+    return makeQuestion({ since, leader: { networkId: leader, host }, heard, self: this.beat(), beats: this.beating.all(), now: this.clocks().mono, waiting: this.recovery.waiting() });
+  }
+
+  /* The app reads once the copy holds every table, and is off until then; it never leads on this keeper's word. With
+     it goes the question to the CEO, while one stands. */
   private giveWord(mode: 'off' | 'read' | 'maintenance'): void {
     try {
-      writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null });
+      const question = this.question();
+      writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null, ...(question ? { question } : {}) });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${reasonOf(err)}`);

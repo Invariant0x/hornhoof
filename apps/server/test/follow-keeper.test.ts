@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import http2 from 'node:http2';
@@ -10,6 +11,7 @@ import { COPY_STATE, copyName } from '../src/modules/keeper/copy.js';
 import { FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey } from '../src/modules/keeper/machine-keys.js';
+import { RECOVERY_FILE } from '../src/modules/keeper/question.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
 import { readFollowed } from '../src/modules/keeper/watch.js';
@@ -262,7 +264,6 @@ describe('the keeper of a machine that keeps a copy', () => {
       return { wall: 1_700_000_000_000 + ms, mono: ms };
     };
     const name = { state: 'held' as 'held' | 'empty' };
-    const said = { ceo: null as number | null };
     let own = '';
     const f = await follower(
       c,
@@ -277,8 +278,8 @@ describe('the keeper of a machine that keeps a copy', () => {
             health: async () => ({ up: true, relayStarted: 100 }),
           },
           probe: async () => null,
-          ceo: () => said.ceo,
         },
+        recovery: { everyMs: 20 },
       },
       folderOf => writeFileSync(join(folderOf, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready', leader: HOST_ID })),
     );
@@ -296,9 +297,19 @@ describe('the keeper of a machine that keeps a copy', () => {
     await c.stop();
     await until(() => f.lines.includes('This copy may lack changes; asking the CEO.'));
     expect([readTaking(f.config.dir), exits, sub.did]).toEqual([null, 0, []]);
+    /* Its word to the app carries the question while it stands: the leader, and this copy as the one to go on from. */
+    await until(() => readKeeperState(f.config.controlDir)?.question != null);
+    const question = readKeeperState(f.config.controlDir)!.question!;
+    expect(question).toMatchObject({ leader: { networkId: HOST_ID }, copies: [{ networkId: own, self: true, reach: null }], waiting: null });
+    expect(question.leader.heard).not.toBeNull();
+    /* The CEO chooses to wait: the question says until when, and nothing is taken. */
+    const answer = (said: object) => writeFileSync(join(f.config.controlDir, RECOVERY_FILE), JSON.stringify({ id: randomUUID(), by: 'p1', at: new Date().toISOString(), ...said }));
+    answer({ wait: true });
+    await until(() => readKeeperState(f.config.controlDir)?.question?.waiting != null);
+    expect([readTaking(f.config.dir), exits]).toEqual([null, 0]);
     /* The CEO says to go on from this copy: it writes the takeover down, stops its subscription and ends, to start
        again as the keeper that takes the server. From then it tells the others that it is taking it. */
-    said.ceo = clocks().mono;
+    answer({ goOn: own, reach: null });
     await until(() => exits === 1);
     expect(readTaking(f.config.dir)).toMatchObject({ phase: 'go', kind: 'ceo', from: { networkId: HOST_ID }, generation: 7, w: null, copies: null });
     expect([sub.did, f.keeper.beats().own().stance]).toEqual([['disable'], { kind: 'attempting' }]);
