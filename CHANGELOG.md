@@ -36,6 +36,9 @@ do in it, and the page of a plan leads its owner from the install command to wor
 - Ctrl+V in an agent's terminal on Windows and Linux typed ^V into the program instead of pasting.
 - A department's pipeline report answers where the database may only be read, instead of failing on a snapshot it could
   not keep.
+- An agent left work to a background helper, ended its answer, and asked the person to write again: Hornhoof's tools
+  stop when the answer ends, so the helper lost them halfway. Every agent's rules now say to finish work that uses
+  Hornhoof's tools inside the answer.
 
 ## [0.18.12] - 2026-11-12
 
