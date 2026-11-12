@@ -261,6 +261,26 @@ describe('work tree words', () => {
   });
 });
 
+describe("the words of a copy's question to the CEO", () => {
+  it('words the question in both languages', () => {
+    const said = (dict: typeof en): Record<string, string> =>
+      Object.fromEntries(Object.entries(dict.question).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c', 'd') : value]));
+    const [english, russian] = [said(en), said(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['oneCopy', 'moreCopies', 'goOn', 'goOnAt', 'wait', 'warning', 'waiting', 'ceoOnly']));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    /* A time that is not known is left out, in both. */
+    expect(en.question.oneCopy('deb', null, 'mac', null)).toBe('deb stopped answering. This mac may not have what deb did last. That comes back when deb does.');
+    expect(ru.question.oneCopy('deb', null, 'mac', null)).toBe('Машина deb перестала отвечать. У mac может не быть последнего, что сделала машина deb. Это вернется вместе с deb.');
+    expect([en.errors.question_changed, ru.errors.question_changed]).toEqual(['The question changed. Look again.', 'Вопрос изменился. Посмотрите еще раз.']);
+  });
+});
+
 describe('the words of copies', () => {
   /* Every string of a copy's part, each function called with words of its own. */
   const said = (dict: typeof en): Record<string, string> =>

@@ -707,6 +707,17 @@ export type DataView = {
   number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null; led?: { until: string } | null;
 };
 
+/* The question a machine that keeps a copy puts to the CEO when the machine that led stopped answering and the copies
+   may lack changes. leader.heard: when it was last heard. copies: each copy that is up, with how far its changes
+   reach. waiting: until when the CEO chose to wait. */
+export type Question = {
+  since: string;
+  leader: { networkId: string; host: string; heard: string | null };
+  copies: { networkId: string; host: string; number: number | null; reach: string | null; self: boolean }[];
+  waiting: string | null;
+};
+export type QuestionView = { question: Question | null; canAnswer: boolean };
+
 /* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
    when only the leader holds the changes. */
 export type CopiesView = { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null };

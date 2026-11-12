@@ -1554,6 +1554,19 @@ export const en = {
     take: 'Take into work',
     dismiss: 'Set aside',
   },
+  question: {
+    title: 'The server stopped answering',
+    answers: 'What to do',
+    oneCopy: (leader: string, heard: string | null, host: string, reach: string | null) =>
+      `${leader} stopped answering${heard ? ` at ${heard}` : ''}. This ${host} may not have what ${leader} did ${reach ? `after ${reach}` : 'last'}. That comes back when ${leader} does.`,
+    moreCopies: (leader: string, heard: string | null) => `${leader} stopped answering${heard ? ` at ${heard}` : ''}. The copies that are up may not have all ${leader} did. That comes back when ${leader} does.`,
+    goOn: (reach: string | null) => (reach ? `Go on from ${reach}` : 'Go on from this copy'),
+    goOnAt: (reach: string | null, host: string) => (reach ? `Go on from ${reach} on ${host}` : `Go on from the copy on ${host}`),
+    wait: (leader: string) => `Wait for ${leader}`,
+    warning: (leader: string) => `Only if ${leader} is off. If ${leader} works too, both sides get changes; Hornhoof merges them later and the orchestrator asks you about real conflicts.`,
+    waiting: (leader: string) => `Waiting for ${leader}. You can still choose a copy to go on from.`,
+    ceoOnly: 'Only the CEO answers this, from their own session.',
+  },
   updates: {
     label: 'Hornhoof update',
     out: (version: string, title: string) => (title ? `Hornhoof ${version} is out: ${title}` : `Hornhoof ${version} is out.`),
@@ -1702,6 +1715,7 @@ export const en = {
     needs_recovery_file: 'This server cannot open this backup. Add the recovery file it was made for.',
     recovery_file_invalid: 'This is not a Hornhoof recovery file.',
     not_owner_session: 'Only the CEO does this, signed in as themselves.',
+    question_changed: 'The question changed. Look again.',
     no_authority: 'The company is not ready for this yet. Wait a minute and try again.',
     not_recovering: 'This Hornhoof is not being restored from a recovery file.',
     bundle_refused: 'This is not a backup the recovery file opens.',

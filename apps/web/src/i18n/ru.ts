@@ -1583,6 +1583,19 @@ export const ru: Messages = {
     take: 'Взять в работу',
     dismiss: 'Отложить',
   },
+  question: {
+    title: 'Сервер перестал отвечать',
+    answers: 'Что делать',
+    oneCopy: (leader, heard, host, reach) =>
+      `Машина ${leader} перестала отвечать${heard ? ` в ${heard}` : ''}. У ${host} может не быть ${reach ? `того, что машина ${leader} сделала после ${reach}` : `последнего, что сделала машина ${leader}`}. Это вернется вместе с ${leader}.`,
+    moreCopies: (leader, heard) => `Машина ${leader} перестала отвечать${heard ? ` в ${heard}` : ''}. У копий, которые сейчас в сети, может не быть всего, что сделала машина ${leader}. Это вернется вместе с ${leader}.`,
+    goOn: reach => (reach ? `Продолжить с ${reach}` : 'Продолжить с этой копии'),
+    goOnAt: (reach, host) => (reach ? `Продолжить с ${reach} на ${host}` : `Продолжить с копии на ${host}`),
+    wait: leader => `Ждать ${leader}`,
+    warning: leader => `Только если машина ${leader} выключена. Если машина ${leader} тоже работает, изменения будут на обеих сторонах; Hornhoof потом сольет их, а оркестратор спросит вас о настоящих конфликтах.`,
+    waiting: leader => `Ждем ${leader}. Вы все еще можете выбрать копию, с которой продолжить.`,
+    ceoOnly: 'Ответить может только CEO, из своей сессии.',
+  },
   updates: {
     label: 'Обновление Hornhoof',
     out: (version, title) => (title ? `Вышел Hornhoof ${version}: ${title}` : `Вышел Hornhoof ${version}.`),
@@ -1734,6 +1747,7 @@ export const ru: Messages = {
     needs_recovery_file: 'Этот сервер не может открыть эту копию. Добавьте файл восстановления, для которого она сделана.',
     recovery_file_invalid: 'Это не файл восстановления Hornhoof.',
     not_owner_session: 'Это делает только CEO, под своим входом.',
+    question_changed: 'Вопрос изменился. Посмотрите еще раз.',
     no_authority: 'Компания еще не готова к этому. Подождите минуту и попробуйте снова.',
     not_recovering: 'Этот Hornhoof не восстанавливается из файла восстановления.',
     bundle_refused: 'Это не копия, которую открывает файл восстановления.',
