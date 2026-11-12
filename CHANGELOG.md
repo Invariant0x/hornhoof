@@ -5,6 +5,15 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.15] - 2026-11-12
+
+Moving the map no longer selects the words on it.
+
+### Fixed
+
+- A press, a drag or a double click on the map or the tree no longer marks a card's words, so a browser's translator
+  or search does not pop up over them.
+
 ## [0.18.14] - 2026-11-12
 
 A personal assistant can now have an agent of its own that thinks for it on a plan its owner picks, and that agent can
