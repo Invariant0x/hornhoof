@@ -119,7 +119,6 @@ const FORMAT = 'hornhoof-theme';
 const VERSION = 1;
 const TOP_KEYS = ['format', 'version', 'name', 'base', 'scheme', 'colors', 'fonts', 'cut'];
 const NAME_LIMIT = 60;
-const COLOR_LIMIT = 40;
 const FONT_LIMIT = 6;
 
 /* What would make a value more than a colour or a font name: a link, a function that reads something, a way out of the
@@ -138,14 +137,14 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 const unsafe = (value: unknown) => typeof value === 'string' && UNSAFE.test(value);
 
 function isColor(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > COLOR_LIMIT) return false;
+  if (typeof value !== 'string') return false;
   if (HEX.test(value)) return true;
   const rgb = RGB.exec(value);
   return !!rgb && [rgb[1], rgb[2], rgb[3]].every(channel => Number(channel) <= 255);
 }
 
 function isFontList(value: unknown): value is string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > FONT_LIMIT) return false;
+  if (!Array.isArray(value) || value.length > FONT_LIMIT) return false;
   const known = (name: unknown) => typeof name === 'string' && (GENERIC.includes(name) || SYSTEM.includes(name) || FONT_NAME.test(name));
   return value.every(known) && GENERIC.includes(value[value.length - 1] as string);
 }
