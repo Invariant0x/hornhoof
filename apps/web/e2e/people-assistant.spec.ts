@@ -81,7 +81,9 @@ for (const lang of ['en', 'ru'] as const) {
         expect(await noSideScroll(page), 'no sideways scroll with the list').toBe(true);
 
         await page.getByRole('button', { name: t.people.invitePerson, exact: true }).click();
-        await page.getByRole('radio', { name: t.people.kindAssistant, exact: true }).check();
+        const assistant = page.getByRole('radio', { name: t.people.kindAssistant, exact: true });
+        await page.locator('label.kind-card', { has: assistant }).click();
+        await expect(assistant).toBeChecked();
         const form = page.locator('.panel', { has: page.getByRole('button', { name: t.people.createAssistant, exact: true }) });
         await expect(form.getByLabel(t.people.assistantOwner, { exact: true })).toBeVisible();
         await expect(form.getByLabel(t.people.program, { exact: true })).toBeVisible();

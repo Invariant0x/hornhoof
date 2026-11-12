@@ -541,6 +541,10 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* A switch on a frame of its own beside its label, like the deputy in a person's window. */
 .check-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
 .check-card input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+/* A tick in a form's row is no text field: it keeps its own size and shows its focus ring. */
+.access .field-control input, .check-card input { padding: 0; border: 0; background: none; }
+.access .field-control input:focus, .check-card input:focus { box-shadow: none; }
+.access .field-control input:focus-visible, .check-card input:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .check-card > span { display: grid; gap: 4px; min-width: 0; }
 .check-card b { font-weight: 600; overflow-wrap: break-word; }
 .check-card small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
@@ -652,7 +656,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .plan { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 44px; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
 .plan.on { border-color: var(--cyan); }
-.plan input { grid-row: span 2; }
+.plan input { grid-row: span 2; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
 .plan .pm { grid-row: span 2; width: 20px; height: 20px; }
 .plan b { overflow-wrap: break-word; }
 .plan span { font-size: 12px; overflow-wrap: break-word; }
