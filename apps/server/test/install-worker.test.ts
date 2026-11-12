@@ -336,6 +336,12 @@ describe('install.sh on a machine that has the core', () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).not.toContain("is a server's folder");
     expect(up(r.calls)).toEqual(['docker compose up -d --no-build front keeper db migrate app']);
+    /* With its built-in node turned on, that starts too; the updater never does, since it is replaced after them. */
+    writeFileSync(join(core, '.env'), readFileSync(join(core, '.env'), 'utf8').replace('COMPOSE_PROFILES=data\n', 'COMPOSE_PROFILES=data,builtin\n'));
+    const builtin = install({ args: ['worker'], env: { ...fromUpdater, STUB_SERVICES: 'front keeper db migrate app node updater' }, tty: '' });
+    expect(builtin.code, builtin.out).toBe(0);
+    expect(up(builtin.calls)).toEqual(['docker compose up -d --no-build front keeper db migrate app node']);
+    writeFileSync(join(core, '.env'), readFileSync(join(core, '.env'), 'utf8').replace('COMPOSE_PROFILES=data,builtin\n', 'COMPOSE_PROFILES=data\n'));
     const after = readFileSync(join(core, '.env'), 'utf8');
     expect(valueOf(after, 'HORNHOOF_ROLE')).toEqual(['data']);
     expect(valueOf(after, 'COMPOSE_PROFILES')).toEqual(['data']);

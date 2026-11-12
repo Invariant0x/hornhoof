@@ -92,6 +92,8 @@ export type CopyMakerOptions = {
   /* The password of the replica role, which the schema's request and the role in each new database need. */
   password: string;
   diskFree: () => number | null;
+  /* Whether this machine promised the machine that leads to wait for its update, and the promise holds. */
+  updating?: () => boolean;
   log: (line: string) => void;
   now?: () => Date;
   /* Where the copy's database finds the leader's: the keeper's door, unless a test names the leader itself. */
@@ -181,6 +183,13 @@ export class CopyMaker {
         this.said = this.making(null);
       }
       this.heard(order);
+      /* While this machine waits for the leader's update, the copy stays as it is: nothing of it is made, made again,
+         swapped or started, and a subscription that stands still counts toward nothing. What the leader's views said
+         meanwhile is kept, and the first step after the wait acts on it. */
+      if (this.opts.updating?.()) {
+        this.disabledSince = null;
+        return;
+      }
       await this.step(order);
       this.failing = false;
     } catch (err) {
@@ -491,12 +500,15 @@ export class CopyMaker {
     }
     const sub = await this.subscription(sql);
     const at = await this.pulse(sql);
-    const stopped = sub ? await this.stoppedFor(sql, sub.enabled) : 0;
     /* A view of another leader than the one this copy follows counts toward none of the reasons to make it again,
        until that leader named no slot for it twice in a row: then it did not hold everything, and is made again. */
     const elsewhere = this.elsewhere(order);
     if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
-    const why = elsewhere ? (elsewhere.moved ? 'the company server moved to a machine that does not hold a place for this copy' : null) : this.broken(order, sub ? stopped : ENABLE_FOR_MS);
+    /* A copy that is to be made again whatever its subscription does is not started first: one that stood still for
+       the leader's update takes nothing from a database of another version. */
+    const known = elsewhere ? null : this.broken(order, 0);
+    const stopped = sub && !known ? await this.stoppedFor(sql, sub.enabled) : 0;
+    const why = elsewhere ? (elsewhere.moved ? 'the company server moved to a machine that does not hold a place for this copy' : null) : (known ?? this.broken(order, sub ? stopped : ENABLE_FOR_MS));
     if (why) return this.kept.old ? this.giveUp() : this.remake(why);
     if (!sub || stopped > 0) {
       const free = this.opts.diskFree();

@@ -239,8 +239,10 @@ note() {
   (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg node "$NODE_DIGEST" \
     --arg updater "$UPDATER_DIGEST" --arg previous "$PREVIOUS" --arg back_app "$BACK_APP" --arg back_node "$BACK_NODE" \
     --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" --arg nodes_free "$NODES_FREE" --arg rev "$UPDATER_REV" \
+    --arg path "$PATH_KIND" --arg shape "$SHAPE" \
     '{id: $id, version: $version, tag: $tag, digest: $digest, node: $node, updater: $updater, previous: $previous,
-      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup, nodes_free: $nodes_free, rev: $rev}' \
+      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup, nodes_free: $nodes_free, rev: $rev,
+      path: $path, shape: $shape}' \
     > "$SERVER_DIR/backups/update.json.new")
   mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
 }
@@ -263,6 +265,11 @@ recall() {
   BACKUP=$(jq -r '.backup' "$file")
   NODES_FREE=$(jq -r '.nodes_free // empty' "$file")
   NOTE_REV=$(jq -r '.rev // empty' "$file")
+  # What the machine was when the update began; a note from before this was written names neither, and then it is
+  # what the machine is now.
+  PATH_KIND=$(jq -r '.path // empty' "$file")
+  SHAPE=$(jq -r '.shape // empty' "$file")
+  case "$PATH_KIND:$SHAPE" in lead:server | lead:worker | copy:server | copy:worker | worker:worker) ;; *) read_kind ;; esac
   plain_tag "$TAG" && plain_digest "$DIGEST" && digest_or_none "$NODE_DIGEST" && digest_or_none "$UPDATER_DIGEST" && plain_tag "$PREVIOUS" || return 1
   own "$IMAGE" "$BACK_APP" && own "$NODE_IMAGE" "$BACK_NODE" && own "$UPDATER_IMAGE" "$BACK_UPDATER" || return 1
   case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
@@ -304,16 +311,60 @@ same_node() {
 # replica.json. Either follows the company server's build as a worker does: it saves no database and runs no migration
 # of its own, since a copy's schema is the company server's, and it installs when the server gives it its turn. A
 # machine whose settings say worker is one whatever this updater was started as: it was wiped of the data it kept.
-worker() { [ "$ROLE" = worker ] || [ -f "$CONTROL/replica.json" ] || [ "$(env_value HORNHOOF_ROLE)" = worker ]; }
+worker() { [ "$(path_kind)" != lead ]; }
+
+# What this machine is now, in two words. Its path picks the steps of an update: worker by the role its settings name,
+# or this updater's own where they name none; copy with replica.json; else lead, the machine whose database the company
+# writes. Its shape picks the installer and its files: worker on a machine that joined, whose settings name the
+# worker's compose file, and on any worker; server on a machine the company was installed on. A copy can be of either
+# shape, and so can the machine that leads, since the CEO moves the server between them. Both words are read at the
+# start of each update and stand until it ends, so a machine that changes in the middle ends the update as it began it.
+PATH_KIND=''
+SHAPE=''
+path_kind() {
+  local role
+  if [ -n "$PATH_KIND" ]; then
+    printf '%s' "$PATH_KIND"
+    return 0
+  fi
+  role=$(env_value HORNHOOF_ROLE)
+  if [ "${role:-$ROLE}" = worker ]; then
+    printf worker
+  elif [ -f "$CONTROL/replica.json" ]; then
+    printf copy
+  else
+    printf lead
+  fi
+}
+shape() {
+  if [ -n "$SHAPE" ]; then
+    printf '%s' "$SHAPE"
+  elif [ "$(path_kind)" = worker ] || [ -n "$(env_value COMPOSE_FILE)" ]; then
+    printf worker
+  else
+    printf server
+  fi
+}
+joined() { [ "$(shape)" = worker ]; }
+read_kind() {
+  PATH_KIND=''
+  SHAPE=''
+  PATH_KIND=$(path_kind)
+  SHAPE=$(shape)
+}
+forget_kind() {
+  PATH_KIND=''
+  SHAPE=''
+}
 
 # The service whose container is the build that runs here: the app on a server, the keeper on a worker, which has no app.
 main_service() { if worker; then printf keeper; else printf app; fi; }
 
-# compose_files <compose file>: FILES is what names that build to compose: its file, and on a worker the overlay beside
-# it, which leaves the services that keep data out.
+# compose_files <compose file>: FILES is what names that build to compose: its file, and on a machine that joined the
+# overlay beside it, which leaves the services that keep data out where no profile turns them on.
 compose_files() {
   FILES=(-f "$1")
-  if worker && [ -f "${1%compose.yaml}compose.worker.yaml" ]; then FILES+=(-f "${1%compose.yaml}compose.worker.yaml"); fi
+  if joined && [ -f "${1%compose.yaml}compose.worker.yaml" ]; then FILES+=(-f "${1%compose.yaml}compose.worker.yaml"); fi
 }
 
 # The services a compose file names, one per line; none when compose cannot read it.
@@ -529,8 +580,8 @@ unpack() {
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
   fi
-  # A worker also needs the overlay that names what it does not run.
-  if worker && ! docker cp "$cid:/app/compose.worker.yaml" "$dir/compose.worker.yaml" > /dev/null; then
+  # A machine that joined also needs the overlay that names what it does not run.
+  if joined && ! docker cp "$cid:/app/compose.worker.yaml" "$dir/compose.worker.yaml" > /dev/null; then
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
   fi
@@ -626,8 +677,9 @@ pull_images() {
   HORNHOOF_VERSION="$TAG" HORNHOOF_APP_REF="$IMAGE@$DIGEST" HORNHOOF_NODE_REF="$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" \
     HORNHOOF_UPDATER_REF="$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")" \
     docker compose --project-directory "$SERVER_DIR" "${FILES[@]}" pull $services >> "$WORK/install.log" 2>&1 || return 1
-  # A worker's nodes are no service of its compose file, so their image comes by itself, for the installer to start.
-  if worker && [ -n "$NODE_DIGEST" ]; then docker pull "$NODE_IMAGE@$NODE_DIGEST" >> "$WORK/install.log" 2>&1 || return 1; fi
+  # The nodes of a machine that joined are no service of its compose file unless it keeps the data, so their image
+  # comes by itself, for the installer to start.
+  if joined && [ -n "$NODE_DIGEST" ]; then docker pull "$NODE_IMAGE@$NODE_DIGEST" >> "$WORK/install.log" 2>&1 || return 1; fi
 }
 
 # The containers of this server, one per line: id and service. .env names the compose project; a server set up before
@@ -660,8 +712,8 @@ run_installer() {
     HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" "$(install_mode)" >> "$WORK/install.log" 2>&1
 }
 
-# What the installer is run as: a server's, or a worker's.
-install_mode() { if worker; then printf worker; else printf server; fi; }
+# What the installer is run as: a server's, or that of a machine that joined.
+install_mode() { shape; }
 
 # install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and
 # they start exactly these images. They are on this computer already: the new build's came before the database was
@@ -694,9 +746,13 @@ nodes_url() {
   printf '%s/api/nodes/update' "${health%/api/health}"
 }
 
-# Where the build that runs now answers: at front when the compose file its installer copied here names it.
+# Where the build that runs now answers. On a machine that does not lead, its keeper says so: its front door leads to
+# another machine's app. On the one that leads, the app does, at front when the compose file its installer copied here
+# names it; the address a joined machine's settings name is its keeper's, from the time it did not lead.
 health_url() {
-  if [ -n "${HORNHOOF_HEALTH_URL:-}" ]; then
+  if worker; then
+    printf '%s' "${HORNHOOF_HEALTH_URL:-http://keeper:7080/api/keeper}"
+  elif [ -n "${HORNHOOF_HEALTH_URL:-}" ] && ! joined; then
     printf '%s' "$HORNHOOF_HEALTH_URL"
   elif names_service "$SERVER_DIR/compose.yaml" front; then
     printf 'http://front:8080/api/health'
@@ -757,6 +813,7 @@ update() {
     stop_with failed "This Hornhoof was not set up with install.sh server, so it updates by running that command again." finished
     return 0
   fi
+  read_kind
   TAG=$tag
   DIGEST=$digest
   NODE_DIGEST=$node
@@ -921,6 +978,7 @@ handle_request() {
   rm -rf "$WORK"
   WORK=''
   NODES_FREE=''
+  forget_kind
 }
 
 update_running() { [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ]; }
@@ -995,6 +1053,7 @@ interrupted() {
   update_running || return 0
   read_status
   if ! recall; then
+    forget_kind
     stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
     return 0
   fi
@@ -1003,6 +1062,7 @@ interrupted() {
   rm -rf "$WORK"
   WORK=''
   NODES_FREE=''
+  forget_kind
 }
 
 # psql_on <database> <arguments>: psql in the db container, which stops at the first statement that fails.
@@ -1524,16 +1584,48 @@ wipe_check() {
   done
 }
 
-# .env of a machine that holds the company's data no more: none of the company's secrets, no password of a database,
-# no profile that starts one, and a worker's role. Every other line as it was.
+# The address of the company a wiped machine reaches as a worker: https and a host name, nothing more.
+company_address() {
+  case "$1" in https://?*) ;; *) return 1 ;; esac
+  case "${1#https://}" in *[!A-Za-z0-9.-]* | .* | *. | -*) return 1 ;; esac
+  [ "${#1}" -le 200 ]
+}
+
+# The overlay a joined machine's compose file goes with comes from the build that runs here, whose compose file the
+# folder holds already.
+take_overlay() {
+  local image cid took=1
+  [ ! -f "$SERVER_DIR/compose.worker.yaml" ] || return 0
+  image=$(running keeper "$IMAGE")
+  [ -n "$image" ] || image=$(env_value HORNHOOF_APP_REF)
+  [ -n "$image" ] || image="$IMAGE:$(env_value HORNHOOF_VERSION)"
+  cid=$(docker create "$image" 2> /dev/null) || return 1
+  if docker cp "$cid:/app/compose.worker.yaml" "$SERVER_DIR/compose.worker.yaml.new" > /dev/null 2>&1 && mv "$SERVER_DIR/compose.worker.yaml.new" "$SERVER_DIR/compose.worker.yaml"; then took=0; fi
+  docker rm "$cid" > /dev/null 2>&1 || true
+  return "$took"
+}
+
+# wipe_env <server>: .env of a machine that holds the company's data no more: none of the company's secrets, no
+# password of a database, no profile that starts one, and a worker's role. A machine the company was installed on
+# names no compose file of a joined machine and no company to reach: it gets both lines, in the same writing, once the
+# overlay is in its folder. Every other line as it was.
 wipe_env() {
-  local file="$SERVER_DIR/.env"
-  (umask 077 && awk '
+  local file="$SERVER_DIR/.env" join=''
+  if [ -z "$(env_value COMPOSE_FILE)" ]; then
+    company_address "$1" && take_overlay || return 1
+    join=$1
+  fi
+  (umask 077 && JOIN="$join" awk '
+    BEGIN { join = ENVIRON["JOIN"] }
     /^(HORNHOOF_SECRET|NODE_KEY|RELAY_URL|POSTGRES_PASSWORD)=/ { sub(/=.*/, "="); print; next }
     /^COMPOSE_PROFILES=/ { next }
     /^HORNHOOF_ROLE=/ { if (!put) print "HORNHOOF_ROLE=worker"; put = 1; next }
+    join != "" && /^(COMPOSE_FILE|HORNHOOF_JOIN_SERVER)=/ { next }
     { print }
-    END { if (!put) print "HORNHOOF_ROLE=worker" }' "$file" > "$file.new") && as_env "$file.new"
+    END {
+      if (!put) print "HORNHOOF_ROLE=worker"
+      if (join != "") { print "COMPOSE_FILE=compose.yaml:compose.worker.yaml"; print "HORNHOOF_JOIN_SERVER=" join }
+    }' "$file" > "$file.new") && as_env "$file.new"
 }
 
 # What a worker runs starts under a worker's role, with no profile on, and what is left of the services that kept the
@@ -1546,7 +1638,7 @@ wipe_up() {
   HORNHOOF_ROLE=worker COMPOSE_PROFILES='' compose up -d --no-build --remove-orphans $services > /dev/null 2>&1
 }
 
-# wipe_step <step>: one step of a wipe; WIPE_WHY says what it could not do.
+# wipe_step <step> <server>: one step of a wipe; WIPE_WHY says what it could not do.
 WIPE_WHY=''
 wipe_step() {
   local volume
@@ -1569,7 +1661,7 @@ wipe_step() {
       ;;
     env)
       WIPE_WHY="could not take the company's settings out"
-      wipe_env && rm -f "$CONTROL/replica.json"
+      wipe_env "$2" && rm -f "$CONTROL/replica.json"
       ;;
     up)
       WIPE_WHY='could not start what a worker runs'
@@ -1583,15 +1675,23 @@ wipe_step() {
 # company's secrets, after which the machine is a worker like any other. Each step is written into the request before
 # it runs, so a step that failed, or an updater that stopped, goes on from it at the next pass. The last step says so
 # in wiped.json {id, at}, and the look at this updater's own role, which comes next, starts one as a worker's. The
-# settings of a company server name no role, and nothing is ever wiped there.
+# settings of a machine the company was installed on name no role: nothing is ever wiped there while it leads, and
+# once it keeps a copy of another machine's, the request names with server the address of the company, https and a
+# host name, which the machine then reaches as a worker; without it nothing goes.
 WIPE_SAID=''
 wipe_request() {
-  local request="$CONTROL/wipe.json" id step next checked
+  local request="$CONTROL/wipe.json" id step next checked server
   [ -f "$request" ] || return 0
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
   id=$(jq -r '.id // empty | tostring' "$request" 2> /dev/null || true)
-  if ! plain_id "$id" || [ -z "$(env_value HORNHOOF_ROLE)" ]; then
+  if ! plain_id "$id" || { [ -z "$(env_value HORNHOOF_ROLE)" ] && [ ! -f "$CONTROL/replica.json" ]; }; then
     rm -f "$request"
+    return 0
+  fi
+  server=$(jq -r '.server // empty | tostring' "$request" 2> /dev/null || true)
+  if [ -z "$(env_value COMPOSE_FILE)" ] && ! company_address "$server"; then
+    [ "$WIPE_SAID" = address ] || say "The request to wipe this machine names no address of the company to reach afterwards, so nothing is wiped."
+    WIPE_SAID=address
     return 0
   fi
   step=$(jq -r '.step // "check" | tostring' "$request" 2> /dev/null || true)
@@ -1605,7 +1705,8 @@ wipe_request() {
       done) next='' ;;
       *) step=check next=stop ;;
     esac
-    (umask 077 && jq -n --arg id "$id" --arg step "$step" '{id: $id, step: $step}' > "$request.new") && owned "$request.new" 600 && mv "$request.new" "$request" || return 0
+    (umask 077 && jq -n --arg id "$id" --arg step "$step" --arg server "$server" '{id: $id, step: $step} + (if $server == "" then {} else {server: $server} end)' > "$request.new") &&
+      owned "$request.new" 600 && mv "$request.new" "$request" || return 0
     case "$step" in
       check)
         checked=0
@@ -1625,7 +1726,7 @@ wipe_request() {
         say "This machine holds nothing of the company's data any more."
         return 0
         ;;
-      *) wipe_step "$step" || { wipe_waits "$step"; return 0; } ;;
+      *) wipe_step "$step" "$server" || { wipe_waits "$step"; return 0; } ;;
     esac
     step=$next
   done
@@ -1994,10 +2095,13 @@ after_nodes_look() {
 
 catch_up_nodes() {
   local now code answer poll behind
-  if worker; then
+  if joined; then
     worker_nodes
     return 0
   fi
+  # A machine the company was installed on that follows another now has no server of its own to ask about its nodes:
+  # they move with its next install.
+  if worker; then return 0; fi
   now=$(date +%s)
   [ "$now" -ge "$NODES_AT" ] || return 0
   NODES_AT=$((now + NODES_CHECK))

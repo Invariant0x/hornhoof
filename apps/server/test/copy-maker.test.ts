@@ -100,10 +100,10 @@ function stand(over: { diskFree?: number } = {}) {
   onTestFinished(() => void [controlDir, dir].forEach(folder => rmSync(folder, { recursive: true, force: true })));
   const c = cluster();
   c.add('hornhoof');
-  const state = { now: new Date('2026-11-11T12:00:00Z'), lines: [] as string[], diskFree: over.diskFree ?? 50 * 2 ** 30 };
+  const state = { now: new Date('2026-11-11T12:00:00Z'), lines: [] as string[], diskFree: over.diskFree ?? 50 * 2 ** 30, updating: false };
   const maker = () =>
     new CopyMaker({
-      admin: c.sqlOn('postgres'), db: c.sqlOn, controlDir, dir, networkId: NETWORK_ID, password: PASSWORD, diskFree: () => state.diskFree, log: line => state.lines.push(line), now: () => state.now,
+      admin: c.sqlOn('postgres'), db: c.sqlOn, controlDir, dir, networkId: NETWORK_ID, password: PASSWORD, diskFree: () => state.diskFree, updating: () => state.updating, log: line => state.lines.push(line), now: () => state.now,
     });
   const later = (ms: number) => void (state.now = new Date(state.now.getTime() + ms));
   const request = () => (existsSync(join(controlDir, SCHEMA_FILE)) ? (JSON.parse(readFileSync(join(controlDir, SCHEMA_FILE), 'utf8')) as Record<string, unknown>) : null);
@@ -464,6 +464,67 @@ describe('the maker of a copy', () => {
     await maker.tick({ ...ORDER, migrations: 109 });
     expect(s.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', old: { attempt: 1, migrations: 108 } });
     expect(s.state.lines[0]).toContain('the company server runs another version of the database');
+  });
+
+  it('holds its subscription for the update', async () => {
+    const s = stand();
+    const maker = await following(s);
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    /* The leader's word stopped it: for ten minutes the maker starts nothing, asks nothing and counts nothing. */
+    s.state.updating = true;
+    sub.enabled = false;
+    const from = s.run.length;
+    for (let minutes = 0; minutes <= 10; minutes++) {
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect([s.run.length, sub.enabled, maker.report()?.state]).toEqual([from, false, 'ready']);
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'ready' });
+    /* The word gone and the leader's database as it was: the copy follows again. */
+    s.state.updating = false;
+    await maker.tick({ ...ORDER });
+    expect(changes(s, from)).toEqual([`hornhoof: ALTER SUBSCRIPTION "${NAME}" ENABLE`]);
+    await maker.tick({ ...ORDER });
+    expect([s.kept().attempt, maker.report()?.state, s.state.lines]).toEqual([1, 'ready', []]);
+    /* With the leader's database of another version, it is made again, and not started first. */
+    const other = stand();
+    const made = await following(other);
+    other.state.updating = true;
+    other.databases.get('hornhoof')!.subs.get(NAME)!.enabled = false;
+    await made.tick({ ...ORDER, migrations: 109 });
+    other.later(60_000);
+    other.state.updating = false;
+    const at = other.run.length;
+    await made.tick({ ...ORDER, migrations: 109 });
+    expect(other.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', phase: 'detach', old: { attempt: 1, migrations: 108 } });
+    expect(changes(other, at)).toEqual([]);
+  });
+
+  it('remakes nothing while the word holds', async () => {
+    const s = stand();
+    const maker = await following(s);
+    s.state.updating = true;
+    const from = s.run.length;
+    await maker.tick({ ...ORDER, migrations: 109 });
+    for (let views = 0; views < 3; views++) await maker.tick({ ...ORDER, slot: 'missing' });
+    expect([s.run.length, s.databases.has('hornhoof_next'), s.request()]).toEqual([from, false, null]);
+    /* What the views said is kept. */
+    expect(s.kept()).toMatchObject({ attempt: 1, database: 'hornhoof', phase: 'ready', missing: 3 });
+    /* The word gone: one remake, against the order of then. */
+    s.state.updating = false;
+    await maker.tick({ ...ORDER, migrations: 110 });
+    expect(s.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', phase: 'detach', old: { attempt: 1, migrations: 108 }, missing: 0 });
+    expect(s.state.lines).toEqual(["This machine's copy is made again: the company server runs another version of the database. The old one is read until the new one is whole."]);
+    /* A remake under way when a word comes stops where it is, and goes on after. */
+    s.state.updating = true;
+    const under = s.run.length;
+    for (let ticks = 0; ticks < 5; ticks++) await maker.tick({ ...ORDER, migrations: 110 });
+    expect([s.run.length, s.kept().phase, s.databases.has('hornhoof_next')]).toEqual([under, 'detach', false]);
+    s.state.updating = false;
+    await until(s, maker, 'schema', { ...ORDER, migrations: 110 });
+    await maker.tick({ ...ORDER, migrations: 110 });
+    expect(s.request()).toMatchObject({ attempt: 2, database: 'hornhoof_next' });
+    expect(changes(s, from).filter(line => line.includes('CREATE DATABASE'))).toEqual(['postgres: CREATE DATABASE "hornhoof_next"']);
   });
 
   it('gives up an earlier side database whole', async () => {

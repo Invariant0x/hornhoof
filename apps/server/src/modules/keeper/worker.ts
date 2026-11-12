@@ -83,11 +83,14 @@ export type WorkerKeeperOptions = {
      says it is; a worker's keeper alone takes the steps that make its machine a data machine. visitKind: which service
      of the data machines its visitor reaches through the relay: 'view' is the one with the way to the data while the
      last view, at the start the one it wrote down, carries that secret, and the app's without it. ownApp: this
-     machine's own app, which the front door passes to once no leader was in reach for afterMs: it reads. extraReport:
-     what goes into each report besides. onView: called with each view of the leader's. */
+     machine's own app, which the front door passes to once no leader was in reach for afterMs: it reads. updating:
+     whether this machine promised the leader to wait for its update; while it did, the front door never passes to its
+     own app, a request that waits is told of the update, and the time with no leader counts from the promise's end.
+     extraReport: what goes into each report besides. onView: called with each view of the leader's. */
   role?: MachineRole;
   visitKind?: 'app' | 'view';
   ownApp?: { target: Target; afterMs: number };
+  updating?: () => boolean;
   extraReport?: () => object;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
@@ -498,7 +501,7 @@ export class WorkerKeeper {
     if (this.stopped) return;
     const now = this.clock();
     const has = Boolean(this.leader());
-    this.noLeaderSince = has ? null : (this.noLeaderSince ?? now);
+    this.noLeaderSince = has || this.opts.updating?.() ? null : (this.noLeaderSince ?? now);
     this.setDoor(has);
     this.aimFront();
     /* A leader just found is asked at once for the view and told where this machine is, once the door to it is open. */
@@ -760,7 +763,7 @@ export class WorkerKeeper {
      program's call waits out the hold. */
   private holding(req: http.IncomingMessage): Refusal | null {
     if (this.disconnected) return disconnectedAnswer(req);
-    if (updaterBusy(this.opts.config.controlDir)) return maintenanceAnswer(req);
+    if (updaterBusy(this.opts.config.controlDir) || this.opts.updating?.()) return maintenanceAnswer(req);
     const since = this.noLeaderSince;
     const long = since !== null && this.clock() - since >= (this.opts.noLeaderPageMs ?? NO_LEADER_PAGE_MS);
     return long && wantsPage(req) ? this.noLeader(req) : null;

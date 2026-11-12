@@ -14,6 +14,7 @@ import { machineKey, reasonOf } from './machine-keys.js';
 import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
 import { pgSubscription, Taker, type TakerOptions } from './taking.js';
 import { writeKeeperState } from './state.js';
+import { CopyUpdating, type CopyUpdatingOptions } from './updating.js';
 import { WorkerKeeper, type KeeperView, type WorkerKeeperOptions, type WorkerStatus } from './worker.js';
 
 /* With no leader in reach for this long, the front door passes to this machine's own app, which reads. */
@@ -57,6 +58,8 @@ export type FollowKeeperOptions = {
   leaving?: Partial<LeavingOptions>;
   /* What a test changes in how this machine answers a planned switch of the server to it. */
   taker?: Partial<TakerOptions>;
+  /* What a test changes in how this machine waits for an update of the machine that leads. */
+  updating?: Partial<CopyUpdatingOptions>;
   /* Ends this keeper, so that it starts again as another kind; the process ends unless a test says otherwise. */
   exit?: () => void;
   /* What offers this machine to its peers through the relay; frpc unless a test says otherwise. */
@@ -70,7 +73,9 @@ export type FollowKeeperOptions = {
    company's link, so nothing it does can make this machine write the company's tables. Once the leader says its owner
    sees the whole company no more, it stops the copy, gives the leader what it holds, and has the machine wiped. When
    the CEO moves the server here, it answers the keeper that hands the server over, and once that one said go it ends,
-   to start again as the keeper that takes the server. */
+   to start again as the keeper that takes the server. While the machine that leads updates, it keeps the promise it
+   gave that machine: its app says so and takes no change, its front door waits for the leader, and its copy is
+   neither made again nor started. */
 export class FollowKeeper {
   private readonly maker: CopyMaker;
   private readonly leaving: Leaving;
@@ -78,6 +83,7 @@ export class FollowKeeper {
   private readonly peerDoor: PeerDoor;
   private readonly door: DbDoor;
   private readonly taker: Taker;
+  private readonly updating: CopyUpdating;
   private readonly copySql: Closable;
   private ports: Promise<{ data: number; app: number }> = new Promise(() => {});
   private server: PeerServer | null = null;
@@ -88,6 +94,7 @@ export class FollowKeeper {
   private replicaAt: number | null = null;
   private replicaFails = false;
   private wordFails = false;
+  private updatingFails = false;
   private stopped = false;
 
   constructor(private readonly opts: FollowKeeperOptions) {
@@ -100,6 +107,7 @@ export class FollowKeeper {
       networkId: config.machineId,
       password: replicaPassword(config.secret),
       diskFree: () => this.diskFree(),
+      updating: () => this.updating.holds(),
       log,
       now: opts.now,
       ...opts.maker,
@@ -113,6 +121,7 @@ export class FollowKeeper {
       role: 'data',
       visitKind: 'view',
       ownApp: { target: opts.app, afterMs: opts.ownAppAfterMs ?? OWN_APP_AFTER_MS },
+      updating: () => this.updating.holds(),
       extraReport: () => {
         const copy = this.maker.report();
         return copy ? { copy } : {};
@@ -125,16 +134,27 @@ export class FollowKeeper {
       dir: config.dir,
       halt: () => this.maker.halt(),
       put: (id, file, length) => this.put(id, file, length),
+      server: () => this.linkOrigin(),
       log,
       ...opts.leaving,
     });
     this.copySql = opts.sql(COPY_DB);
+    const subscription = pgSubscription(this.copySql, async () => this.maker.report()?.name ?? null);
+    this.updating = new CopyUpdating({
+      controlDir: config.controlDir,
+      sql: this.copySql,
+      leader: () => this.leader()?.networkId ?? null,
+      subscription,
+      now: opts.now && (() => opts.now!().getTime()),
+      log,
+      ...opts.updating,
+    });
     this.taker = new Taker({
       dir: config.dir,
       sql: this.copySql,
       leader: () => this.leader(),
       copyReady: () => this.maker.report()?.state === 'ready',
-      subscription: pgSubscription(this.copySql, async () => this.maker.report()?.name ?? null),
+      subscription,
       exit: opts.exit ?? (() => process.exit(0)),
       log,
       ...opts.taker,
@@ -170,6 +190,16 @@ export class FollowKeeper {
     const leads = this.worker.parts().link.leader();
     const row = leads && this.view?.data.find(machine => machine.machine === leads.machine);
     return row ? { networkId: row.networkId, hostname: row.hostname ?? '' } : null;
+  }
+
+  /* The address of the company's link as this keeper's view names it, when it is https: its scheme and host. */
+  private linkOrigin(): string | null {
+    try {
+      const url = new URL(this.view?.link?.url ?? '');
+      return url.protocol === 'https:' ? url.origin : null;
+    } catch {
+      return null;
+    }
   }
 
   status(): WorkerStatus & { copy: CopyReport | null } {
@@ -213,9 +243,14 @@ export class FollowKeeper {
       door: this.peerDoor,
       db: this.opts.db,
       hello: () => ({ machine: certificates.current()?.machine ?? '', role: 'data', lead: false, commit: config.commit }),
-      /* A switch is answered to a data machine of the company by the id its keeper runs under; one this machine's view
-         does not list is nobody it would answer. */
-      switches: { handle: (peer, method, path, body) => this.taker.handle(this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '', method, path, body) },
+      /* A switch, and a word about the leader's update, is answered to a data machine of the company by the id its
+         keeper runs under; one this machine's view does not list is nobody it would answer. */
+      switches: {
+        handle: async (peer, method, path, body) => {
+          const from = this.view?.data.find(machine => machine.machine === peer.machine)?.networkId ?? '';
+          return path === PEER_PATHS.updating ? this.updating.handle(from, body) : this.taker.handle(from, method, path, body);
+        },
+      },
       log,
     });
     this.server = server;
@@ -268,12 +303,15 @@ export class FollowKeeper {
       await this.leaving.step(owed);
       return;
     }
+    await this.keepPromise();
     await this.taker.tick();
     /* Once it took the go of a switch, its subscription stays stopped and this keeper ends: the copy's maker, which
        starts a stopped subscription again, takes no step. */
     if (this.taker.going()) return;
     await this.maker.tick(this.view?.copy ?? null);
-    this.giveWord(this.maker.mode());
+    /* While the leader updates, an app that reads says so; one with no copy to read stays off. */
+    const mode = this.maker.mode();
+    this.giveWord(mode === 'read' && this.updating.holds() ? 'maintenance' : mode);
     await this.keepReplica();
   }
 
@@ -289,8 +327,20 @@ export class FollowKeeper {
     }
   }
 
+  /* What this machine promised the leader for its update: a promise past its time goes, and a stop that a restart cut
+     is finished. A failure is said once. */
+  private async keepPromise(): Promise<void> {
+    try {
+      await this.updating.tick();
+      this.updatingFails = false;
+    } catch (err) {
+      if (!this.updatingFails) this.opts.log(`The keeper could not keep its promise to wait for an update: ${reasonOf(err)}`);
+      this.updatingFails = true;
+    }
+  }
+
   /* The app reads once the copy holds every table, and is off until then; it never leads on this keeper's word. */
-  private giveWord(mode: 'off' | 'read'): void {
+  private giveWord(mode: 'off' | 'read' | 'maintenance'): void {
     try {
       writeKeeperState(this.opts.config.controlDir, { mode, at: new Date().toISOString(), link: null });
       this.wordFails = false;

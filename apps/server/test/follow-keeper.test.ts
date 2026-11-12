@@ -12,6 +12,7 @@ import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey } from '../src/modules/keeper/machine-keys.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
+import { readWord } from '../src/modules/keeper/updating.js';
 import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
 import { TEST_SECRET, until } from './helpers.js';
 import { ask, company, folder, heldIn, HOST_ID, SLEEPER, worker, type Company } from './worker-keeper-fixture.js';
@@ -52,12 +53,13 @@ function emptyCluster() {
 
 /* A machine that joined, was given the data by the server, and whose keeper is started anew as one that follows: as its
    updater leaves it once the settings are written. */
-async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}) {
+async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, before: (dir: string) => void = () => undefined) {
   const w = await worker(c);
   await until(async () => (await c.rowOf(w.machine)).ageKey !== null);
   await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
   await until(() => existsSync(join(w.config.controlDir, 'role.json')) && heldIn(w.config.dir).role === 'data');
   await w.stop();
+  before(w.config.dir);
   const lines: string[] = [];
   const cluster = emptyCluster();
   const keeper = new FollowKeeper({
@@ -103,6 +105,22 @@ function through(port: number, text: string): Promise<string> {
     });
     socket.write(text);
   });
+}
+
+/* As the keeper of a machine asks another's peer door, with the certificate its folder holds. */
+function askingAt(port: number, certDir: string) {
+  const held = heldIn(certDir);
+  const session = http2.connect(`https://${LOOPBACK}:${port}`, { ca: held.authorityPem, cert: held.certPem, key: machineKey(certDir).privatePem, checkServerIdentity: () => undefined });
+  session.on('error', () => undefined);
+  onTestFinished(() => void session.destroy());
+  return async (method: 'GET' | 'POST', path: string, body?: object) => {
+    const stream = session.request({ ':method': method, ':path': path });
+    stream.end(body ? JSON.stringify(body) : undefined);
+    const status = await new Promise<number>(resolve => stream.once('response', headers => resolve(Number(headers[':status']))));
+    let text = '';
+    for await (const chunk of stream) text += String(chunk);
+    return [status, text ? (JSON.parse(text) as unknown) : null];
+  };
 }
 
 describe('the keeper of a machine that keeps a copy', () => {
@@ -169,21 +187,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     });
     await until(() => f.keeper.status().leader !== null);
     const ports = await f.keeper.peerPorts();
-    /* As the keeper of this machine, with its certificate, asks. */
-    const asking = (certDir: string) => {
-      const held = heldIn(certDir);
-      const session = http2.connect(`https://${LOOPBACK}:${ports.data}`, { ca: held.authorityPem, cert: held.certPem, key: machineKey(certDir).privatePem, checkServerIdentity: () => undefined });
-      session.on('error', () => undefined);
-      onTestFinished(() => void session.destroy());
-      return async (method: 'GET' | 'POST', path: string, body?: object) => {
-        const stream = session.request({ ':method': method, ':path': path });
-        stream.end(body ? JSON.stringify(body) : undefined);
-        const status = await new Promise<number>(resolve => stream.once('response', headers => resolve(Number(headers[':status']))));
-        let text = '';
-        for await (const chunk of stream) text += String(chunk);
-        return [status, text ? (JSON.parse(text) as unknown) : null];
-      };
-    };
+    const asking = (certDir: string) => askingAt(ports.data, certDir);
     const id = '3f2b8c1e-7a4d-4e6f-9b10-5c2d8e7f1a23';
     const offer = { switch: id, term: { number: 5, machine: HOST_ID, split: false }, deadline: 0 };
     /* Another data machine, here this one itself, offers nothing: only the machine its link names as the leader does. */
@@ -199,6 +203,38 @@ describe('the keeper of a machine that keeps a copy', () => {
     const steps = f.cluster.run.length;
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(f.cluster.run.length).toBe(steps);
+  });
+
+  it('waits for the update', async () => {
+    const dir = folder();
+    const c = await company({ dir });
+    const clock = { now: 0 };
+    /* Its copy holds every table, so its app reads. */
+    const f = await follower(c, { ownAppAfterMs: 100, updating: { now: () => clock.now } }, own => writeFileSync(join(own, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready' })));
+    await until(() => f.keeper.status().leader !== null);
+    await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
+    const ports = await f.keeper.peerPorts();
+    const promise = { version: '0.19.0', until: 1000, migrations: 2 };
+    /* Another data machine, here this one itself, is promised nothing: only the machine its link names as the leader is. */
+    expect(await askingAt(ports.data, f.config.dir)('POST', '/peer/updating', promise)).toEqual([403, { ok: false }]);
+    expect(await askingAt(ports.data, dir)('POST', '/peer/updating', promise)).toEqual([200, { ok: true }]);
+    expect(readWord(f.config.controlDir)).toMatchObject({ leader: HOST_ID, version: '0.19.0', stopped: false });
+    await until(() => readKeeperState(f.config.controlDir)?.mode === 'maintenance');
+    /* The copy's maker takes no step while the word holds. */
+    const made = () => f.cluster.run.filter(line => /SUBSCRIPTION|CREATE DATABASE|DROP DATABASE/.test(line)).length;
+    const steps = made();
+    /* The leader is gone for far longer than the time after which this machine would read by itself. */
+    await c.stop();
+    await until(() => f.keeper.status().leader === null);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const waiting = await ask(f.ports.front, { path: '/api/tasks' });
+    expect([waiting.status, waiting.json()]).toMatchObject([503, { error: { reason: 'maintenance' } }]);
+    expect([made(), readKeeperState(f.config.controlDir)?.mode]).toEqual([steps, 'maintenance']);
+    /* The promise ran out: the app reads again, and the time with no leader counts from here. */
+    clock.now = 1000;
+    await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
+    expect([readWord(f.config.controlDir), f.lines]).toEqual([null, expect.arrayContaining(["The company server's update promise ran out."])]);
+    await until(async () => (await ask(f.ports.front, { path: '/tasks' }).catch(() => null))?.body === "the copy's own app: /tasks");
   });
 
   it('gives the leader what it holds once its owner lost the scope, and asks for its wipe only when the leader keeps it', async () => {

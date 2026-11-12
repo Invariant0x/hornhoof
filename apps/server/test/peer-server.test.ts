@@ -341,6 +341,10 @@ describe('routeOf', () => {
     ['a switch from a worker', asked('POST', '/peer/switch/go'), 'peer', 'worker', db, refused(403)],
     ['a switch through the app door', asked('POST', '/peer/switch/go'), 'app', 'data', db, refused(403)],
     ['another method at a switch', asked('PUT', '/peer/switch/go'), 'peer', 'data', db, refused(404)],
+    ['a word about an update', asked('POST', '/peer/updating'), 'peer', 'data', db, { to: 'switch', method: 'POST', path: '/peer/updating' }],
+    ['a word about an update from a worker', asked('POST', '/peer/updating'), 'peer', 'worker', db, refused(403)],
+    ['a word about an update through the app door', asked('POST', '/peer/updating'), 'app', 'data', db, refused(403)],
+    ['a question at the path of an update', asked('GET', '/peer/updating'), 'peer', 'data', db, refused(404)],
   ] as const)('%s', (_, headers, kind, role, here, route) => {
     expect(routeOf(headers, kind, role, here)).toEqual(route);
   });

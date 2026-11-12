@@ -18,6 +18,9 @@ export type LeavingOptions = {
   halt: () => Promise<void>;
   /* Sends one packed upload to the keeper that leads, and gives its answer's status. */
   put: (id: string, file: string, length: number) => Promise<number>;
+  /* The address of the company's link, https and its host; null without one. A machine the company was installed on
+     reaches the company there once it is wiped, as a worker. */
+  server?: () => string | null;
   log: (line: string) => void;
   clock?: () => number;
   /* How long after the leader took an upload it is offered again, and how long after anything else. */
@@ -133,7 +136,8 @@ export class Leaving {
     if (existsSync(join(controlDir, WIPE_FILE)) || existsSync(join(controlDir, WIPED_FILE))) return;
     try {
       for (const name of KEEPER_FILES) rmSync(join(dir, name), { force: true });
-      writePrivately(join(controlDir, WIPE_FILE), JSON.stringify({ id: randomUUID() }));
+      const server = this.opts.server?.() ?? null;
+      writePrivately(join(controlDir, WIPE_FILE), JSON.stringify({ id: randomUUID(), ...(server ? { server } : {}) }));
       this.opts.log("The company server keeps everything this machine held: its database, its dumps and the company's secrets go now.");
     } catch (err) {
       this.sayOnce('wipe', `Could not ask the updater to wipe this machine: ${reasonOf(err)}`);

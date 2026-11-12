@@ -18,7 +18,7 @@ function stand() {
   const controlDir = folder();
   const dir = folder();
   const lines: string[] = [];
-  const state = { now: 0, halts: 0, haltFails: false, answer: 201 as number | Error, puts: [] as { id: string; bytes: string; length: number }[] };
+  const state = { now: 0, halts: 0, haltFails: false, answer: 201 as number | Error, puts: [] as { id: string; bytes: string; length: number }[], server: 'https://acme.hornhoof.test' as string | null };
   const leaving = new Leaving({
     controlDir,
     dir,
@@ -31,6 +31,7 @@ function stand() {
       if (state.answer instanceof Error) throw state.answer;
       return state.answer;
     },
+    server: () => state.server,
     log: line => lines.push(line),
     clock: () => state.now,
   });
@@ -127,8 +128,10 @@ describe('the keeper of a machine that stops holding the data', () => {
     expect(existsSync(join(s.controlDir, WIPE_FILE))).toBe(false);
     expect(readdirSync(s.dir).sort()).toEqual([COPY_STATE, 'frpc-peer.toml', 'frpc-visit.toml', 'machine.key'].sort());
     await s.leaving.step('wipe');
-    const { id } = JSON.parse(readFileSync(join(s.controlDir, WIPE_FILE), 'utf8')) as { id: string };
+    const { id, server } = JSON.parse(readFileSync(join(s.controlDir, WIPE_FILE), 'utf8')) as { id: string; server?: string };
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    /* It names the company's address, which a machine the company was installed on reaches as a worker afterwards. */
+    expect(server).toBe('https://acme.hornhoof.test');
     expect(statSync(join(s.controlDir, WIPE_FILE)).mode & 0o777).toBe(0o600);
     /* What the keeper's own folder held of the copy went first; the machine's own key stays. */
     expect(readdirSync(s.dir)).toEqual(['machine.key']);
@@ -136,6 +139,11 @@ describe('the keeper of a machine that stops holding the data', () => {
     writeFileSync(join(s.controlDir, WIPE_FILE), JSON.stringify({ id, step: 'volume' }));
     await s.leaving.step('wipe');
     expect(JSON.parse(readFileSync(join(s.controlDir, WIPE_FILE), 'utf8'))).toEqual({ id, step: 'volume' });
+    /* A company with no link names none. */
+    const plain = stand();
+    plain.state.server = null;
+    await plain.leaving.step('wipe');
+    expect(Object.keys(JSON.parse(readFileSync(join(plain.controlDir, WIPE_FILE), 'utf8')) as object)).toEqual(['id']);
     /* And once it is done, no second wipe is asked for while the leader has not heard of it yet. */
     rmSync(join(s.controlDir, WIPE_FILE));
     writeFileSync(join(s.controlDir, WIPED_FILE), JSON.stringify({ id, at: new Date().toISOString() }));

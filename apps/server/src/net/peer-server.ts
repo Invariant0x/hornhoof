@@ -14,7 +14,7 @@ import type { MachineRole } from '../db/schema.js';
 import { openTcp } from './peer-door.js';
 import { UUID, type Target } from './proxy.js';
 
-export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/' } as const;
+export const PEER_PATHS = { hello: '/peer/hello', backups: '/peer/backups/', upload: '/peer/upload/', switch: '/peer/switch/', updating: '/peer/updating' } as const;
 export const APP_AUTHORITY = 'app:8080';
 export const DB_AUTHORITY = 'db:5432';
 
@@ -36,7 +36,8 @@ export type PeerServerOptions = {
   backups?: PeerBackups;
   /* What takes the upload of a machine that stopped holding the company's data; without it, none is taken. */
   uploads?: PeerUploads;
-  /* What answers the keeper of another data machine about a planned switch of the server; without it, nothing does. */
+  /* What answers the keeper of another data machine about a planned switch of the server, and about an update of the
+     machine that leads; without it, nothing does. */
   switches?: PeerSwitches;
   log: (line: string) => void;
   now?: () => Date;
@@ -84,6 +85,8 @@ export function routeOf(headers: IncomingHttpHeaders, kind: Kind, role: MachineR
   if ((method === 'GET' || method === 'POST') && path.startsWith(PEER_PATHS.switch)) {
     return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
   }
+  /* So is the word of the machine that leads about its update, which goes the same way. */
+  if (method === 'POST' && path === PEER_PATHS.updating) return kind === 'peer' && role === 'data' ? { to: 'switch', method, path } : { to: 'refused', status: 403 };
   return method === 'GET' && path === PEER_PATHS.hello ? { to: 'hello' } : { to: 'refused', status: 404 };
 }
 
