@@ -24,6 +24,7 @@ import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { Following } from './following.js';
 import { HolderKeeper } from './holder.js';
+import { switchAnswer, switchWord, type SwitchWord } from './switch-word.js';
 import { WIPE_FILE, WIPED_FILE } from './uploads.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures, type Internet } from './measures.js';
@@ -91,6 +92,9 @@ export type WorkerKeeperOptions = {
   visitKind?: 'app' | 'view';
   ownApp?: { target: Target; afterMs: number };
   updating?: () => boolean;
+  /* What a machine that keeps a copy adds to its word of where the company moves: that its copy is cut off from the
+     leader, and that it asks the CEO a question. */
+  switchMore?: () => { cut: boolean; question: boolean };
   extraReport?: () => object;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
@@ -202,6 +206,10 @@ export class WorkerKeeper {
   private stopped = false;
   private hadLeader = false;
   private noLeaderSince: number | null = null;
+  /* The machine that led and the copy its commits waited for, as the last hello of a leader named them, and when that
+     leader was lost, by the wall clock; null while one is named. */
+  private lastLed: { leader: string; sync: string | null } | null = null;
+  private lostAt: number | null = null;
   private noSessionSince: number | null = null;
   private renewTriedAt: number | null = null;
   private renewing = false;
@@ -500,7 +508,10 @@ export class WorkerKeeper {
   private look(): void {
     if (this.stopped) return;
     const now = this.clock();
-    const has = Boolean(this.leader());
+    const leads = this.leader();
+    const has = Boolean(leads);
+    if (leads) this.lastLed = { leader: leads.machine, sync: leads.hello.sync ?? null };
+    this.lostAt = leads || !this.lastLed ? null : (this.lostAt ?? Date.now());
     this.noLeaderSince = has || this.opts.updating?.() ? null : (this.noLeaderSince ?? now);
     this.setDoor(has);
     this.aimFront();
@@ -759,8 +770,20 @@ export class WorkerKeeper {
     return noLeaderAnswer(req, { data: this.view?.data ?? [], linkUrl: this.view?.link?.url ?? null });
   }
 
-  /* The keeper's own word on itself, which is never passed on. */
+  /* Where the company's server is going, as this machine knows it: for a while after it lost the leader, to the copy
+     the leader's commits waited for. */
+  switchWord(): SwitchWord {
+    const more = this.opts.switchMore?.() ?? { cut: false, question: false };
+    return switchWord({
+      now: Date.now(), kind: this.opts.role === 'data' ? 'follow' : 'worker', self: this.view?.machine ?? '', handingTo: null, leads: false,
+      leader: this.leader()?.machine ?? null, lastLeader: this.lastLed?.leader ?? null, lastSync: this.lastLed?.sync ?? null, lostSince: this.lostAt, ...more,
+    });
+  }
+
+  /* The keeper's own word on itself and on where the company moves, which is never passed on. */
   private ownAnswer(req: http.IncomingMessage): Refusal | null {
+    const moving = switchAnswer(req, () => this.switchWord());
+    if (moving) return moving;
     if (req.method !== 'GET' || String(req.url).split('?')[0] !== KEEPER_PATH) return null;
     return { status: 200, headers: JSON_HEADERS, body: JSON.stringify(this.status()) };
   }

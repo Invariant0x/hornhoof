@@ -11,8 +11,9 @@ const QUIET_MS = 30_000;
 
 /* Under the top bar, on a machine that keeps a copy of the company's data: when the machine that led stopped
    answering and the copies may lack changes, the question of which copy to go on from, or to wait. Everyone reads it;
-   the CEO alone answers, from their own session. While nothing is asked, what else there is to say stands there. */
-export function RecoveryQuestion({ children }: { children?: ReactNode }) {
+   the CEO alone answers, from their own session. While nothing is asked, what else there is to say stands there.
+   again: turns true when the machine's keeper says a question stands, so it is read at once. */
+export function RecoveryQuestion({ children, again = false }: { children?: ReactNode; again?: boolean }) {
   const t = useT();
   const { language } = useLanguage();
   const [view, setView] = useState<QuestionView | null>(null);
@@ -26,7 +27,7 @@ export function RecoveryQuestion({ children }: { children?: ReactNode }) {
     void look();
     const timer = setInterval(() => void look(), asking ? ASKING_MS : QUIET_MS);
     return () => clearInterval(timer);
-  }, [look, asking]);
+  }, [look, asking, again]);
 
   const question = view?.question;
   if (!question) return <>{children}</>;

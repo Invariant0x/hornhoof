@@ -75,6 +75,23 @@ describe("a worker's keeper", () => {
     expect((await c.app.inject({ url: '/api/keeper' })).statusCode).toBe(404);
   });
 
+  it('says the company moves when the leader is lost, by itself and to anyone', async () => {
+    const c = await company();
+    const w = await worker(c);
+    await until(() => w.status().leader !== null);
+    const leader = w.status().leader!.machine;
+    const word = async () => (await ask(w.front, { path: '/api/network/switch' })).json() as { self: string | null; moving: boolean; from: string | null; to: string | null; since: string | null };
+    await until(async () => (await word()).self === w.machine);
+    expect(await word()).toEqual({ self: w.machine, moving: false, from: null, to: null, since: null, cut: false, question: false });
+    /* The leader is gone: for a while the page hears that the company moves, from that machine, to nobody this one
+       knows, since the leader named no copy its commits waited for. */
+    await c.stop();
+    await until(async () => (await word()).moving);
+    const lost = await word();
+    expect(lost).toMatchObject({ self: w.machine, moving: true, from: leader, to: null, cut: false, question: false });
+    expect(Number.isNaN(Date.parse(lost.since!))).toBe(false);
+  });
+
   it('becomes a data machine when its row says so', async () => {
     const c = await company();
     const w = await worker(c);

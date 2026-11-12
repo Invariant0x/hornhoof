@@ -9,7 +9,7 @@ import { reasonOf, writePrivately } from './machine-keys.js';
 import { readNote } from './notes.js';
 import { TermShape } from './sql-words.js';
 import type { Taking } from './switch-step.js';
-import { above, nextWatchStep, nextWindow, NO_WINDOW, promiseAnswer, TAKE_MS, type Poll, type WatchSample, type Window } from './takeover-step.js';
+import { above, nextWatchStep, nextWindow, NO_WINDOW, promiseAnswer, SILENT_MS, TAKE_MS, type Poll, type WatchSample, type Window } from './takeover-step.js';
 
 /* The watch a machine that keeps a copy holds over the machine it follows. Each second it looks at the company's name
    at hornhoof.org, at the relay's health, at what answers at the company's link and at the leader's beats. When the
@@ -120,6 +120,14 @@ export class Watcher {
   /* The term this copy follows. */
   followed(): Term | null {
     return this.term;
+  }
+
+  /* The leader answers at the company's link and not this copy's beats: this copy is cut off from it, and takes
+     nothing. */
+  cut(): boolean {
+    const now = this.clocks().mono;
+    const silent = now - Math.max(this.lastBeat ?? this.started, this.started) >= SILENT_MS;
+    return silent && this.linkAnswered !== null && now - this.linkAnswered < SILENT_MS;
   }
 
   stance(): Stance {

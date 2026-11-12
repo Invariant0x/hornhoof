@@ -370,8 +370,13 @@ describe('the keeper', () => {
     const count = (method: string) => lease.calls.filter(call => call.method === method).length;
     await until(() => wordIn(k.dir) === 'lead');
     expect([(await send(front, { path: '/' })).status, count('take'), parts.leads(), parts.term()?.number]).toEqual([200, 1, true, 1]);
+    /* Whoever asks at its door hears from the keeper itself where the company moves: nothing while it leads, and the
+       machine it hands the server to once it does, whatever the app does. */
+    const moves = async () => JSON.parse((await send(front, { path: '/api/network/switch?x=1' })).body) as object;
+    expect(await moves()).toEqual({ self: null, moving: false, from: null, to: null, since: null, cut: false, question: false });
     /* It stops: the door closes, the lease ends, and it leads no more. */
     said.holds = true;
+    expect(await moves()).toMatchObject({ moving: true, to: target.machine, cut: false, question: false });
     await parts.front.close();
     await parts.lease.fence();
     await expect(send(front, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });

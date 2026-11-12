@@ -718,6 +718,15 @@ export type Question = {
 };
 export type QuestionView = { question: Question | null; canAnswer: boolean };
 
+/* What the keeper of the machine the page came from says of where the company's server is going. self: that machine.
+   from, to: the machine the server moves from and to; while cut, from is the server this machine's copy cannot reach.
+   All are machine ids. */
+export type SwitchWord = { self: string | null; moving: boolean; from: string | null; to: string | null; since: string | null; cut: boolean; question: boolean };
+
+/* The newest move of the server, for a day after it: its machines by their names, when the machine that led was last
+   heard, and how far the changes of the one that took the server reached. */
+export type Switched = { id: string; kind: 'planned' | 'takeover' | 'ceo'; reason: string | null; from: string; to: string; heard: string | null; reach: string | null; at: string };
+
 /* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
    when only the leader holds the changes. */
 export type CopiesView = { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null };

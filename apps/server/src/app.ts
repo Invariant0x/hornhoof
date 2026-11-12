@@ -82,6 +82,7 @@ import { registerRequestSources } from './modules/sources/requests.js';
 import { keyRoutes } from './modules/computer/keys.js';
 import { refreshBuild } from './modules/network/follow.js';
 import { questionRoutes } from './modules/network/question-routes.js';
+import { noteSwitch, switchedRoutes } from './modules/network/switched.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
@@ -269,6 +270,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.mode.whenLead(settleRestore, () => clearTimeout(carryTimer));
   /* What the databases that came back hold is brought back while this app leads, a look a minute. */
   ctx.mode.whenLead(() => ctx.merger.start(), () => ctx.merger.stop());
+  /* On a machine that just took the server over, the orchestrator hears of it once and tells the CEO. */
+  ctx.mode.whenLead(() => noteSwitch(ctx).catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not tell the orchestrator that the server moved.')), () => undefined);
   app.addHook('onClose', async () => ctx.merger.stop());
   /* The machines that may hold the data are numbered while this app leads, at once and then each minute. */
   ctx.mode.whenLead(() => ctx.ranking.start(), () => ctx.ranking.stop());
@@ -373,6 +376,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   linkRoutes(app, ctx);
   networkRoutes(app, ctx);
   questionRoutes(app, ctx);
+  switchedRoutes(app, ctx);
   copiesRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);

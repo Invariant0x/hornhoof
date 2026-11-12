@@ -96,6 +96,19 @@ describe('the copy that watches the machine it follows', () => {
     expect([w.it.attempting(), w.it.stance()]).toEqual([true, { kind: 'attempting' }]);
   });
 
+  it('says it is cut off while the leader answers at the link and not its beats', async () => {
+    /* No beat of the leader ever reaches this copy, and the leader holds the name and answers there. */
+    const w = watching({ beats: () => true, lost: true, route: () => ({ state: 'held', generation: 7 }) });
+    await w.until(-290);
+    expect(w.it.cut()).toBe(false);
+    await w.until(-270);
+    expect([w.it.cut(), w.takes, w.asks]).toEqual([true, [], []]);
+    /* A leader that is gone altogether cuts nobody off. */
+    const gone = watching();
+    await gone.until(30);
+    expect(gone.it.cut()).toBe(false);
+  });
+
   it('asks the CEO when it may lack changes, and stops asking when the leader is back', async () => {
     const w = watching({ record: () => on(C), beats: t => t <= 0 || t >= 60 });
     await w.until(59);

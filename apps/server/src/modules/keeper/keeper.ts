@@ -21,6 +21,7 @@ import { PEER_PATHS } from '../../net/peer-server.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
+import { switchAnswer, switchWord, type SwitchWord } from './switch-word.js';
 import { Reentry } from './entry.js';
 import { LeaseProofs } from './proofs.js';
 import type { Poll } from './takeover-step.js';
@@ -171,6 +172,8 @@ export type TakingPart = {
   start(): Promise<void>;
   stop(): Promise<void>;
   leads(): boolean;
+  /* The machine it takes the server from, and when that began; none while no switch is written down. */
+  from?(): { networkId: string; at: number } | null;
   handle(from: string, method: string, path: string, body: unknown): Promise<{ status: number; body: object; after?: () => void }>;
 };
 
@@ -895,9 +898,24 @@ export class Keeper {
     }
   }
 
-  /* A door of the link also answers who holds the lease here; on the front door that path is the app's, like any other. */
+  /* Where the company's server is going, as this keeper knows it: to the machine it hands the server to, or here while
+     it takes the server and does not lead yet. */
+  private switchWord(): SwitchWord {
+    const data = this.peers?.current()?.data ?? [];
+    const machineOf = (networkId: string | null | undefined): string | null => (networkId && data.find(machine => machine.networkId === networkId)?.machine) || null;
+    const to = this.hander?.to?.() ?? null;
+    const taking = this.taking ? (this.taker?.from?.() ?? null) : null;
+    return switchWord({
+      now: Date.now(), kind: to ? 'handing' : this.taking ? 'taking' : 'lead', self: machineOf(this.opts.config.machineId) ?? '', handingTo: to?.machine ?? null, leads: !this.taking,
+      leader: null, lastLeader: machineOf(taking?.networkId), lastSync: null, lostSince: null, since: taking?.at ?? null, cut: false, question: false,
+    });
+  }
+
+  /* Every door answers by itself where the company moves, so a page that waits through a switch hears it also while
+     the app is down. A door of the link also answers who holds the lease here; on the front door that path is the
+     app's, like any other. */
   private door(headers: PassOptions['headers'], opts: { link?: boolean } = {}): http.Server {
-    const own = opts.link ? (req: http.IncomingMessage) => this.leaseProof(req) : undefined;
+    const own = (req: http.IncomingMessage) => (opts.link ? this.leaseProof(req) : null) ?? switchAnswer(req, () => this.switchWord());
     /* While the app restarts a request is held for it. An update takes minutes, so in maintenance it is answered at once. */
     const holding = (req: http.IncomingMessage) => (this.mode() === 'maintenance' ? maintenanceAnswer(req) : null);
     const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own, holdMs: this.opts.holdMs ?? KEEPER_HOLD_MS, holdEveryMs: this.opts.holdEveryMs, holding }));

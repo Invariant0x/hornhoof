@@ -281,6 +281,27 @@ describe("the words of a copy's question to the CEO", () => {
   });
 });
 
+describe('the words of a move of the server', () => {
+  it('words the move and what follows it in both languages', () => {
+    const said = (part: object): Record<string, string> =>
+      Object.fromEntries(Object.entries(part).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c') : (value as string)]));
+    for (const [english, russian] of [[said(en.switch), said(ru.switch)], [said(en.switched), said(ru.switched)]] as const) {
+      expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+      for (const [key, text] of Object.entries(russian)) {
+        expect(text.length, key).toBeGreaterThan(0);
+        expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+        expect(text, key).not.toBe(english[key]);
+      }
+      for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    }
+    expect(Object.keys(en.switch)).toEqual(expect.arrayContaining(['moving', 'movingSomewhere', 'lost', 'lostLeader', 'cut']));
+    expect(Object.keys(en.switched)).toEqual(expect.arrayContaining(['takeover', 'ceo', 'planned', 'diskFull', 'close']));
+    /* A time nobody wrote down is left out. */
+    expect([en.switched.takeover('mac', 'deb', null), ru.switched.takeover('mac', 'deb', null)]).toEqual(['Hornhoof runs on mac now. deb stopped answering.', 'Hornhoof теперь работает на mac. Машина deb перестала отвечать.']);
+    expect([en.switched.ceo('mac', null), ru.switched.ceo('mac', null)]).toEqual(['Hornhoof runs on mac now, as you chose.', 'Hornhoof теперь работает на mac, как вы выбрали.']);
+  });
+});
+
 describe('the words of copies', () => {
   /* Every string of a copy's part, each function called with words of its own. */
   const said = (dict: typeof en): Record<string, string> =>

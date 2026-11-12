@@ -21,6 +21,28 @@ const WORDS = {
   ru: { title: 'Сервер перестал отвечать', wait: 'Ждать rack-01', last: 'Продолжить с копии на lab-nuc', ceoOnly: 'Ответить может только CEO, из своей сессии.' },
 };
 
+const MOVE = {
+  en: { label: 'Where Hornhoof runs', moving: `Moving the company to ${LONG}. Your work is kept. About a minute.`, after: new RegExp(`^Hornhoof runs on ${LONG} now\\. rack-01 stopped answering at .+\\.$`), close: 'Close' },
+  ru: { label: 'Где работает Hornhoof', moving: `Компания переезжает на ${LONG}. Ваша работа сохранена. Около минуты.`, after: new RegExp(`^Hornhoof теперь работает на ${LONG}\\. Машина rack-01 перестала отвечать в .+\\.$`), close: 'Закрыть' },
+};
+
+/* The page with what the keeper says of a move, and what the app says of the last one. */
+async function openMoving(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', moving: boolean): Promise<void> {
+  await serveApi(page);
+  await page.addInitScript(({ language, theme }) => {
+    localStorage.setItem('hh-lang', language);
+    localStorage.setItem('hh-theme', theme);
+  }, { language, theme });
+  const org: Org = { company: ME.company, orchestrator: null, agents: { total: 0, working: 0 }, people: [], departments: [] };
+  await page.route('**/api/org', route => route.fulfill({ json: org }));
+  await page.route('**/api/machines', route => route.fulfill({ json: { machines: [{ id: 'm1', hostname: 'rack-01' }, { id: 'm3', hostname: LONG }], builtin: null } }));
+  await page.route('**/api/network/switch', route => route.fulfill({ json: { self: 'm3', moving, from: moving ? 'm1' : null, to: moving ? 'm3' : null, since: null, cut: false, question: false } }));
+  const switched = { id: 'h1', kind: 'takeover', reason: null, from: 'rack-01', to: LONG, heard: '2026-11-12T14:02:00.000Z', reach: '2026-11-12T14:01:40.000Z', at: '2026-11-12T14:03:00.000Z' };
+  await page.route('**/api/network/switched', route => route.fulfill({ json: { switched: moving ? null : switched } }));
+  await page.route('**/api/network/question', route => route.fulfill({ json: { question: null, canAnswer: false } }));
+  await page.goto('/');
+}
+
 async function openWith(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', canAnswer: boolean): Promise<void> {
   await serveApi(page);
   await page.addInitScript(({ language, theme }) => {
@@ -64,6 +86,28 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     expect((await box(banner)).x + (await box(banner)).width).toBeLessThanOrEqual(width + 1);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(`question-${language}-${theme}-${width}.png`), fullPage: true });
+  });
+
+  test(`says where the company moves and where it runs after, ${place}`, async ({ page }, info) => {
+    const m = MOVE[language];
+    await page.setViewportSize({ width, height });
+    await openMoving(page, language, theme, true);
+    const moving = page.getByRole('status', { name: m.label, exact: true });
+    await expect(moving.getByText(m.moving, { exact: true })).toBeVisible();
+    expect((await box(moving)).x).toBeGreaterThanOrEqual(0);
+    expect((await box(moving)).x + (await box(moving)).width).toBeLessThanOrEqual(width + 1);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`moving-${language}-${theme}-${width}.png`), fullPage: true });
+    await openMoving(page, language, theme, false);
+    const after = page.getByRole('status', { name: m.label, exact: true });
+    const [line, close] = [after.getByText(m.after), after.getByRole('button', { name: m.close, exact: true })];
+    await expect(line).toBeVisible();
+    await expect(close).toBeVisible();
+    for (const one of [line, close]) expect(await within(one, after)).toBe(true);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`switched-${language}-${theme}-${width}.png`), fullPage: true });
+    await close.click();
+    await expect(after).toHaveCount(0);
   });
 
   test(`shows the question without answers to anyone else, ${place}`, async ({ page }) => {

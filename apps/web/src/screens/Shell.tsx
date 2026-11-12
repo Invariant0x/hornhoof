@@ -9,7 +9,7 @@ import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
 import { Outbound } from '../ui/Outbound';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
-import { RecoveryQuestion } from '../ui/RecoveryQuestion';
+import { SwitchBanner } from '../ui/SwitchBanner';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -427,10 +427,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
-      <RecoveryQuestion>
+      <SwitchBanner>
         {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
         <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount('settings')} />
-      </RecoveryQuestion>
+      </SwitchBanner>
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}

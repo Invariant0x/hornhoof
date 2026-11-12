@@ -373,6 +373,17 @@ export class Promoter {
     return this.promoted;
   }
 
+  /* The machine it takes the server from, and when that began, while a switch is written down; none otherwise, also
+     when the note cannot be read. */
+  from(): { networkId: string; at: number } | null {
+    try {
+      const taking = readTaking(this.opts.dir);
+      return taking ? { networkId: taking.from.networkId, at: taking.at } : null;
+    } catch {
+      return null;
+    }
+  }
+
   /* One look at a time; a look that fails changes nothing, and is said once an outage. */
   look(): Promise<void> {
     if (this.stopped) return Promise.resolve();

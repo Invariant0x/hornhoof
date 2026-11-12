@@ -191,6 +191,7 @@ export class FollowKeeper {
       visitKind: 'view',
       ownApp: { target: opts.app, afterMs: opts.ownAppAfterMs ?? OWN_APP_AFTER_MS },
       updating: () => this.updating.holds(),
+      switchMore: () => ({ cut: this.watcher.cut(), question: this.asking !== null }),
       extraReport: () => {
         const copy = this.maker.report();
         return copy ? { copy } : {};

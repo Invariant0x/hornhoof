@@ -1567,6 +1567,21 @@ export const en = {
     waiting: (leader: string) => `Waiting for ${leader}. You can still choose a copy to go on from.`,
     ceoOnly: 'Only the CEO answers this, from their own session.',
   },
+  switch: {
+    label: 'Where Hornhoof runs',
+    moving: (to: string) => `Moving the company to ${to}. Your work is kept. About a minute.`,
+    movingSomewhere: 'Moving the company to another machine. Your work is kept. About a minute.',
+    lost: (from: string) => `Lost ${from}. Hornhoof is finding where to go on; your work is kept.`,
+    lostLeader: 'Lost the machine that ran the server. Hornhoof is finding where to go on; your work is kept.',
+    cut: (self: string | null, from: string | null) => `${self ?? 'This machine'} cannot reach ${from ?? 'the machine that runs the server'}; copy stopped.`,
+  },
+  switched: {
+    takeover: (to: string, from: string, time: string | null) => (time ? `Hornhoof runs on ${to} now. ${from} stopped answering at ${time}.` : `Hornhoof runs on ${to} now. ${from} stopped answering.`),
+    ceo: (to: string, time: string | null) => (time ? `Hornhoof runs on ${to} now, from what it had at ${time}, as you chose.` : `Hornhoof runs on ${to} now, as you chose.`),
+    planned: (to: string) => `Hornhoof runs on ${to} now.`,
+    diskFull: (from: string, to: string) => `${from}'s disk is full; ${to} leads.`,
+    close: 'Close',
+  },
   updates: {
     label: 'Hornhoof update',
     out: (version: string, title: string) => (title ? `Hornhoof ${version} is out: ${title}` : `Hornhoof ${version} is out.`),
