@@ -266,7 +266,10 @@ describe('a restore from a backup', () => {
     await db.delete(peerSecrets);
     await db.insert(peerSecrets).values([{ kind: 'app', secretEnc: 'older-app' }, { kind: 'data', secretEnc: 'older-data' }]);
     const left = '2026-11-10T08:00:00.000Z';
-    const made = '2026-11-01T00:00:00.000Z';
+    /* Times as the database gives them, to the microsecond: the restored rows keep them whole, so they are the rows
+       the database from before holds and nothing differs when that one is merged. */
+    const made = '2026-11-01T00:00:00.123456+00:00';
+    const sealed = '2026-11-02T00:00:00.654321+00:00';
     const carry: Carry = {
       people: [], invites: [], serials: [], recoveryKeys: [],
       machines: [
@@ -274,8 +277,10 @@ describe('a restore from a backup', () => {
         { id: stays, revoked: false, lendsTests: true, keepsBackups: true, role: 'data', dataLeftAt: null, uploadState: null },
       ],
       link: { name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'newer-key', nextKeyEnc: 'newer-next', tunnelEnc: 'newer-tunnel', createdAt: made },
-      peerSecrets: [{ kind: 'app', secretEnc: 'newer-app' }, { kind: 'data', secretEnc: 'newer-data' }, { kind: 'visit', secretEnc: 'newer-visit' }],
+      /* The carry of a build before named no time for a secret: that one counts from the restore. */
+      peerSecrets: [{ kind: 'app', secretEnc: 'newer-app', createdAt: sealed }, { kind: 'data', secretEnc: 'newer-data', createdAt: sealed }, { kind: 'visit', secretEnc: 'newer-visit' }],
     };
+    const before = new Date();
     await applyCarry(s.app.ctx, carry);
     const machine = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
     /* The machine that stopped holding the data since does not hold it again, and still owes its upload. */
@@ -284,6 +289,10 @@ describe('a restore from a backup', () => {
     /* The link's key is the one the relay takes now, with a change that was under way, and the secrets are today's. */
     expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'acme', keyEnc: 'newer-key', nextKeyEnc: 'newer-next', tunnelEnc: 'newer-tunnel', createdAt: new Date(made) }]);
     expect((await db.select().from(peerSecrets)).map(row => `${row.kind}=${row.secretEnc}`).sort()).toEqual(['app=newer-app', 'data=newer-data', 'visit=newer-visit']);
+    const times = async (query: string) => ((await db.execute(sql.raw(query))) as unknown as { rows: { at: string }[] }).rows.map(row => row.at);
+    expect(await times(`SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS at FROM public_links`)).toEqual(['2026-11-01T00:00:00.123456']);
+    expect(await times(`SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS at FROM peer_secrets WHERE kind <> 'visit' ORDER BY kind`)).toEqual(['2026-11-02T00:00:00.654321', '2026-11-02T00:00:00.654321']);
+    expect((await db.select().from(peerSecrets).where(eq(peerSecrets.kind, 'visit')))[0]!.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
     /* A hidden name stays hidden across a restore, and a public link stays public over a hidden row. */
     await applyCarry(s.app.ctx, { ...carry, link: { ...carry.link!, name: 'x9', hidden: true } });
     expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'x9', hidden: true, keyEnc: 'newer-key' }]);

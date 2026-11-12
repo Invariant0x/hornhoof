@@ -115,6 +115,10 @@ function holdsNow(machine: Carry['machines'][number]): Partial<typeof machines.$
   return { role: machine.role, dataLeftAt: machine.dataLeftAt ? new Date(machine.dataLeftAt) : null, uploadState: machine.uploadState ?? null, ...left };
 }
 
+/* A time as the database that closed gave it, written back whole: through a Date it would lose its microseconds, and
+   the restored row would differ from the one that database holds when it is merged. */
+const timeOf = (text: string) => sql<Date>`${text}::timestamptz`;
+
 /* The link and the secrets of the peer services as they were when the old database closed: the key the relay takes
    now, a change of it that was under way, and secrets no machine that left knows. A company that has no link now gets
    none back. */
@@ -123,13 +127,14 @@ async function carryLink(db: Db, companyId: string, carry: Carry): Promise<void>
     if (carry.link === null) await tx.delete(publicLinks);
     else if (carry.link) {
       /* A carry of a build from before hidden names says nothing of it: that link was a public one. */
-      const row = { name: carry.link.name, url: carry.link.url, hidden: carry.link.hidden === true, keyEnc: carry.link.keyEnc, nextKeyEnc: carry.link.nextKeyEnc, tunnelEnc: carry.link.tunnelEnc, createdAt: new Date(carry.link.createdAt) };
+      const row = { name: carry.link.name, url: carry.link.url, hidden: carry.link.hidden === true, keyEnc: carry.link.keyEnc, nextKeyEnc: carry.link.nextKeyEnc, tunnelEnc: carry.link.tunnelEnc, createdAt: timeOf(carry.link.createdAt) };
       await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: row });
     }
     if (!carry.peerSecrets) return;
     await tx.delete(peerSecrets);
     /* Only the kinds this build knows: a kind of a later one would not fit the table. */
-    const known = carry.peerSecrets.flatMap(secret => PEER_SECRET_KINDS.filter(kind => kind === secret.kind).map(kind => ({ kind, secretEnc: secret.secretEnc })));
+    /* A carry of a build from before names no time for a secret: that one counts from now. */
+    const known = carry.peerSecrets.flatMap(secret => PEER_SECRET_KINDS.filter(kind => kind === secret.kind).map(kind => ({ kind, secretEnc: secret.secretEnc, ...(secret.createdAt ? { createdAt: timeOf(secret.createdAt) } : {}) })));
     if (known.length > 0) await tx.insert(peerSecrets).values(known);
   });
 }

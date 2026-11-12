@@ -92,6 +92,9 @@ describe('the carry of a restore', () => {
     /* The link whole, each secret as it is stored: sealed. */
     expect(carry.link).toMatchObject({ name: 'acme', url: 'https://acme.hornhoof.org', hidden: false, keyEnc: 'sealed-key', nextKeyEnc: 'sealed-next', tunnelEnc: 'sealed-tunnel' });
     expect(new Date(carry.link!.createdAt).getTime()).toBe(made.getTime());
-    expect([...carry.peerSecrets!].sort((a, b) => a.kind.localeCompare(b.kind))).toEqual([{ kind: 'app', secretEnc: 'sealed-app' }, { kind: 'data', secretEnc: 'sealed-data' }]);
+    expect([...carry.peerSecrets!].sort((a, b) => a.kind.localeCompare(b.kind))).toMatchObject([{ kind: 'app', secretEnc: 'sealed-app' }, { kind: 'data', secretEnc: 'sealed-data' }]);
+    /* Each secret with when it was made, so the restored row is the one the database from before holds. */
+    const stored = await db.select().from(peerSecrets);
+    for (const secret of carry.peerSecrets!) expect(new Date(secret.createdAt!).getTime()).toBe(stored.find(row => row.kind === secret.kind)!.createdAt.getTime());
   });
 });
