@@ -2,6 +2,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { agentRole, HIDDEN, openAgentSql } from '../../src/db/agent-sql.js';
 import { copyName } from '../../src/modules/keeper/copy.js';
+import { keeperSql, leaseStore } from '../../src/modules/keeper/lease-store.js';
 import { REPLICA_ROLE } from '../../src/modules/keeper/replica.js';
 import { pair, type Pair } from './pair.js';
 
@@ -45,6 +46,14 @@ describe('a copy of the company on a second Postgres', () => {
     expect(p.maker.mode()).toBe('read');
     expect(p.maker.report()).toMatchObject({ state: 'ready', error: null, name, old: null });
     expect(p.lines).toEqual([]);
+    /* A copy may take the server over, and a keeper leads on no database whose network functions anyone may run: the
+       schema came with no rights, and they are closed on the copy as the leader's own migration closes them. */
+    const fences = keeperSql(p.copyUrl('hornhoof'), { timeoutMs: 20_000 });
+    try {
+      expect((await leaseStore(fences, { machineId: p.networkId }).problems()).filter(line => line.startsWith('PUBLIC may still run net.'))).toEqual([]);
+    } finally {
+      await fences.close();
+    }
 
     const copy = await connected(p.copyUrl('hornhoof'));
     try {

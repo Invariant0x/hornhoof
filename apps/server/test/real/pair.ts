@@ -87,7 +87,8 @@ export async function pair(opts: { leader?: Platform; copy?: Platform } = {}): P
       if (!existsSync(request)) return false;
       const asked = JSON.parse(readFileSync(request, 'utf8')) as { attempt: number; database: string; port: number; password: string };
       const dump = (flags: string[]) => copy.exec(['pg_dump', '-h', leader.host, '-p', '5432', '-U', REPLICA_ROLE, ...flags, 'hornhoof'], { env: { PGPASSWORD: asked.password }, pass: ['PGPASSWORD'] });
-      const schema = (await dump(['--schema-only', '--no-owner', '--no-publications', '--no-subscriptions', '--no-privileges'])) + (await dump(['--data-only', '--table=drizzle.__drizzle_migrations']));
+      // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- the copy's own server, which goes with the pair
+      const schema = (await dump(['--schema-only', '--no-owner', '--no-publications', '--no-subscriptions', '--no-privileges'])) + (await dump(['--data-only', '--table=drizzle.__drizzle_migrations'])) + 'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;\n';
       await copy.exec(['psql', '-U', 'hornhoof', '-1', '-v', 'ON_ERROR_STOP=1', '-d', asked.database], { stdin: schema });
       await copy.exec(['sh', '-c', 'umask 077 && cat > "$PGDATA/replica.pgpass"'], { stdin: `*:*:*:${REPLICA_ROLE}:${asked.password}\n` });
       mkdirSync(join(controlDir, SCHEMA_DIR), { recursive: true });

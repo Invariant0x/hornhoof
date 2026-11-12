@@ -186,7 +186,10 @@ describe('the updater of a worker that is given the data', () => {
     expect(r.calls.filter(c => c === 'pg_dump had its password')).toHaveLength(2);
     const load = r.calls.findIndex(c => c === 'docker exec -i dbcid psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d hornhoof');
     expect(load).toBeGreaterThan(r.calls.indexOf(dumps[1]!));
-    expect(readFileSync(join(s.dir, 'loaded'), 'utf8')).toBe('-- the schema of hornhoof\n-- the rows of drizzle.__drizzle_migrations\n');
+    /* The schema comes with no rights, since the leader's roles are not this machine's. A function is open to everyone
+       until it is closed, and the keeper leads on no database whose network functions are: they are closed here as
+       the leader's own migration closes them, so a copy that takes the server over may lead. */
+    expect(readFileSync(join(s.dir, 'loaded'), 'utf8')).toBe('-- the schema of hornhoof\n-- the rows of drizzle.__drizzle_migrations\nREVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;\n');
     /* The password the copy's subscription reads goes into the database's own folder, on standard input. */
     expect(readFileSync(join(s.dir, 'passfile'), 'utf8')).toBe(`*:*:*:hornhoof_replica:${password}\n`);
     expect(has(s, 'schema/1.done')).toBe(true);

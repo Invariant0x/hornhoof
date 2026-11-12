@@ -1322,7 +1322,11 @@ load_schema() {
     PGPASSWORD=$(jq -r '.password // empty' "$request" 2> /dev/null) || exit 1
     export PGPASSWORD
     docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --schema-only --no-owner --no-publications --no-subscriptions --no-privileges hornhoof > "$dump" 2> /dev/null &&
-      docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null
+      docker exec -e PGPASSWORD "$db" pg_dump -h keeper -p "$port" -U hornhoof_replica --data-only --table=drizzle.__drizzle_migrations hornhoof >> "$dump" 2> /dev/null &&
+      # The schema comes with no rights, since the leader's roles are not this machine's. A function is open to
+      # everyone until it is closed, and a keeper leads on no database whose network functions are: they are closed
+      # as the leader's own migration closes them, so a copy that takes the server over may lead.
+      printf '%s\n' 'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC;' >> "$dump"
   ) || { rm -f "$dump"; printf "The company server's schema could not be read."; return 1; }
   docker exec -i "$db" psql -U hornhoof -1 -v ON_ERROR_STOP=1 -d "$database" < "$dump" > /dev/null 2>&1 ||
     { rm -f "$dump"; printf 'The schema could not be loaded into the database.'; return 1; }
