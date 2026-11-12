@@ -7,7 +7,7 @@ import type { Improvement, Me } from '../src/types';
 import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TASKS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
-const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null };
+const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null, scope: 'company' as const, code: null };
 const IMPROVEMENTS: Improvement[] = [
   {
     ...base,
@@ -348,5 +348,53 @@ describe('improvements', () => {
     for (let i = 0; i < 9; i += 1) await user.tab();
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('heading', { level: 1, name: 'Improvements' })).toBeInTheDocument();
+  });
+});
+
+describe('a finding about Hornhoof itself', () => {
+  const PLATFORM: Improvement = { ...IMPROVEMENTS[0]!, id: 'i9', title: 'The terminal closes after an update', text: 'Change: keep the terminal through an update.', seen: 1, scope: 'platform', code: 'terminal_lost' };
+  const preview = (body: { kind: string; title: string; text: string }) => [200, { report: { kind: body.kind, title: body.title, text: body.text, facts: { version: '0.18.11', platform: ['linux x64'], errorCode: 'terminal_lost' } }, hidden: { secret: 0, email: 0, address: 0, path: 0 }, digest: 'e'.repeat(64) }];
+
+  it('goes to Hornhoof developers from its card through the feedback window, instead of into the company work', async () => {
+    const user = userEvent.setup();
+    const calls = shell({
+      'GET /api/improvements': [200, { improvements: [PLATFORM] }],
+      'GET /api/feedback': [200, { inbox: false }],
+      'POST /api/feedback/preview': preview,
+      'POST /api/feedback': [200, { sent: true }],
+    });
+    await openImprovements(user);
+    const item = screen.getByRole('article', { name: 'The terminal closes after an update' });
+    expect(within(item).getByText('About Hornhoof itself')).toBeInTheDocument();
+    expect(within(item).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
+    expect(within(item).getByRole('button', { name: 'Set aside' })).toBeInTheDocument();
+    await user.click(within(item).getByRole('button', { name: 'Send to Hornhoof developers' }));
+    const box = await screen.findByRole('dialog', { name: 'Write to Hornhoof developers' });
+    const check = await within(box).findByRole('region', { name: 'This goes to Hornhoof developers' });
+    expect(calls.filter(c => c.path === '/api/feedback/preview').map(c => c.body)).toEqual([{ kind: 'bug', title: 'The terminal closes after an update', text: 'Change: keep the terminal through an update.', improvement: 'i9' }]);
+    expect(check).toHaveTextContent('Error codeterminal_lost');
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/feedback')).toBe(false);
+    await user.click(within(box).getByRole('button', { name: 'Send' }));
+    await within(box).findByText('Sent. Thank you, Hornhoof developers will read it.');
+    expect(calls.filter(c => c.method === 'POST' && c.path === '/api/feedback').map(c => c.body)).toEqual([{ kind: 'bug', title: 'The terminal closes after an update', text: 'Change: keep the terminal through an update.', improvement: 'i9', digest: 'e'.repeat(64) }]);
+    expect(calls.some(c => c.path === '/api/improvements/i9/take')).toBe(false);
+  });
+
+  it("is taken into work like any other on Hornhoof's own installation", async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [PLATFORM] }], 'GET /api/feedback': [200, { inbox: true }] });
+    await openImprovements(user);
+    const item = screen.getByRole('article', { name: 'The terminal closes after an update' });
+    expect(within(item).getByRole('button', { name: 'Take into work' })).toBeInTheDocument();
+    expect(within(item).queryByRole('button', { name: 'Send to Hornhoof developers' })).not.toBeInTheDocument();
+  });
+
+  it('is listed apart once sent', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [IMPROVEMENTS[0]!, { ...PLATFORM, status: 'sent', decidedBy: 'Ivan' }] }], 'GET /api/feedback': [200, { inbox: false }] });
+    await openImprovements(user);
+    const sent = within(screen.getByRole('region', { name: 'Sent to Hornhoof developers' })).getByRole('article', { name: 'The terminal closes after an update' });
+    expect(sent).toHaveTextContent('Sent by Ivan');
+    expect(within(sent).queryByRole('button')).not.toBeInTheDocument();
   });
 });

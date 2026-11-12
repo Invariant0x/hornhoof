@@ -48,6 +48,16 @@ describe('loadConfig', () => {
     }
   });
 
+  it("is Hornhoof's own feedback inbox only when FEEDBACK_INBOX says true", () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: '' }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: 'false' }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: 'true' }).feedbackInbox).toBe(true);
+    for (const FEEDBACK_INBOX of ['yes', '1', 'TRUE']) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX })).toThrow('FEEDBACK_INBOX must be true or false.');
+    }
+  });
+
   it('talks to Telegram\'s own Bot API unless TELEGRAM_API_URL names a stand-in', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).telegramApiUrl).toBe('https://api.telegram.org');
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TELEGRAM_API_URL: 'http://127.0.0.1:9100/' }).telegramApiUrl).toBe('http://127.0.0.1:9100');

@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, improvements, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 
@@ -13,9 +14,10 @@ const NODE_KEY = 'k'.repeat(40);
 const TOKENS = { orchestrator: 'tool-token-orch-0123456789abcdef0123', hana: 'tool-token-hana-0123456789abcdef0123', bruno: 'tool-token-bruno-0123456789abcdef012', wendy: 'tool-token-wendy-0123456789abcdef012' };
 
 /* Development with Hana at its head and Bruno in it, Operations with Wendy, who collects weak points, and a running turn
-   for each of them and the orchestrator, whose tokens reach their tools. */
-async function company() {
-  const { app, db } = await testApp({ NODE_KEY });
+   for each of them and the orchestrator, whose tokens reach their tools. It reaches a relay of the test's own. */
+async function company(env: NodeJS.ProcessEnv = {}) {
+  const relay = await fakeRelay();
+  const { app, db } = await testApp({ NODE_KEY, RELAY_URL: relay.url, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -39,7 +41,7 @@ async function company() {
     [wendy.id, TOKENS.wendy],
   ] as const)
     await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
-  return { app, db, ceo, acme: acme!, orchestrator: orchestrator!, dev: dev!, hana, bruno, wendy };
+  return { app, db, relay, ceo, acme: acme!, orchestrator: orchestrator!, dev: dev!, hana, bruno, wendy };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -322,5 +324,50 @@ describe('improvements', () => {
     const rows = await db.select().from(improvements);
     expect(rows.find(r => r.id === first)).toMatchObject({ status: 'open', result: 'This costs money: the CEO has to choose the machine.' });
     expect(rows.find(r => r.id === second)).toMatchObject({ status: 'dismissed' });
+  });
+});
+
+describe('findings about Hornhoof itself', () => {
+  const ON_NODE = { title: 'Install git-lfs on the nodes', problem: 'The node image has no git-lfs.', change: 'Add git-lfs to the node image.' };
+
+  it("are told apart from the company's own work, with the error code Hornhoof gave, and putting one sends nothing out", async () => {
+    const { app, relay, ceo } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const own = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Write the release steps down', change: 'Add them to the notebook.' })).content[0]!.text).improvement;
+    const platform = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform', code: 'git_lfs_missing' })).content[0]!.text).improvement;
+    expect((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'everywhere' })).isError).toBe(true);
+    expect((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform', code: 'Not a code' })).isError).toBe(true);
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed.find((i: { id: string }) => i.id === own)).toMatchObject({ scope: 'company', code: null });
+    expect(listed.find((i: { id: string }) => i.id === platform)).toMatchObject({ scope: 'platform', code: 'git_lfs_missing', status: 'open' });
+    const seen = JSON.parse((await call(wendy, 'improvements')).content[0]!.text);
+    expect(seen.find((i: { id: string }) => i.id === platform)).toMatchObject({ scope: 'platform' });
+    expect(relay.calls).toEqual([]);
+  });
+
+  it("are not taken into another company's own work: the CEO sends them to Hornhoof's developers instead", async () => {
+    const { app, db, ceo, orchestrator, dev } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform' })).content[0]!.text);
+    const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    expect([taken.statusCode, taken.json().error.reason]).toEqual([409, 'improvement_platform_elsewhere']);
+    await instruct(app, db, ceo, orchestrator.id);
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install git-lfs', goal: 'Have git-lfs.', improvement: id, tasks: [work(dev.id, 'Change the node image')] });
+    expect(planned.isError).toBe(true);
+    expect(await db.select().from(tasks)).toEqual([]);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${id}/dismiss`, ...as(ceo) })).statusCode).toBe(200);
+  });
+
+  it("go into the engine's own work on Hornhoof's own installation, like any other", async () => {
+    const { app, db, ceo, orchestrator, dev } = await company({ FEEDBACK_INBOX: 'true' });
+    const wendy = await mcp(app, TOKENS.wendy);
+    const first = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform' })).content[0]!.text).improvement;
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${first}/take`, ...as(ceo) })).statusCode).toBe(200);
+    const second = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, title: 'Install jq too', scope: 'platform' })).content[0]!.text).improvement;
+    await instruct(app, db, ceo, orchestrator.id);
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Have jq.', improvement: second, tasks: [work(dev.id, 'Change the node image')] });
+    expect(planned.isError).toBeFalsy();
+    expect((await db.select().from(improvements).where(eq(improvements.id, second)))[0]).toMatchObject({ status: 'taken' });
   });
 });
