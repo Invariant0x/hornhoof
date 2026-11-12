@@ -128,7 +128,7 @@ app.post('/__e2e/scenario', async req => {
   /* A failing verdict keeps the work with Review, which repairs it itself, so the one who holds it asks. */
   const choiceReq = (await ask(app.ctx, fx.reviewer.id, mainTask.id, {
     kind: 'choice',
-    topic: body.withPickTask ? 'release' : 'task',
+    topic: body.withPickTask ? 'people' : 'task',
     text: body.lang === 'ru'
       ? 'Какой вариант отображения длинного отчета и файлов задачи удобнее?'
       : 'Which layout for reading long reports and task files works better?',

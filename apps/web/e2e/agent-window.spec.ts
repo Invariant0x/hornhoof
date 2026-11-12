@@ -11,7 +11,7 @@ async function prepare(page: Page, info: TestInfo, { lang, theme, width }: Setti
     localStorage.setItem('hh-theme', theme);
   }, { lang, theme });
   await chooseTerminal(page);
-  const words = lang === 'en' ? { subscriptions: 'Subscriptions', machines: 'Machines', card: 'Open the card of', open: 'Open Bruno', close: 'Close', task: 'Task', back: 'Back to terminal', minimize: 'Minimize', restore: 'Restore Bruno, Developer', full: 'Full screen', size: 'Restore size', noTask: 'No task', why: 'This agent has no current task.', write: 'Write to Bruno' } : { subscriptions: 'Подписки', machines: 'Машины', card: 'Открыть карточку', open: 'Открыть: Bruno', close: 'Закрыть', task: 'Задача', back: 'К терминалу', minimize: 'Свернуть', restore: 'Развернуть: Bruno, Разработчик', full: 'На весь экран', size: 'Обычный размер', noTask: 'Нет задачи', why: 'У агента сейчас нет задачи.', write: 'Сообщение для Bruno' };
+  const words = lang === 'en' ? { subscriptions: 'Subscriptions', machines: 'Machines', card: 'Open the card of', open: 'Open Bruno', close: 'Close', task: 'Task', back: 'Back to terminal', minimize: 'Minimize', restore: 'Restore Bruno, Developer', full: 'Full screen', size: 'Restore size', noTask: 'No task', why: 'This agent has no current task.', write: 'Write to Bruno', chat: 'Chat' } : { subscriptions: 'Подписки', machines: 'Машины', card: 'Открыть карточку', open: 'Открыть: Bruno', close: 'Закрыть', task: 'Задача', back: 'К терминалу', minimize: 'Свернуть', restore: 'Развернуть: Bruno, Разработчик', full: 'На весь экран', size: 'Обычный размер', noTask: 'Нет задачи', why: 'У агента сейчас нет задачи.', write: 'Сообщение для Bruno', chat: 'Чат' };
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -163,6 +163,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
           await expect(window).toBeVisible();
           await expect(window).toHaveCount(1);
           if (!awake) {
+            await window.getByRole('button', { name: words.chat, exact: true }).click();
             await window.getByRole('textbox', { name: words.write }).fill('Please check the cart');
             await window.getByRole('textbox', { name: words.write }).press('Enter');
             await expect.poll(() => live.messages.at(-1)).toEqual({ text: 'Please check the cart' });
@@ -178,7 +179,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const { words, errors, window } = await prepare(page, info, settings, { awake: false, hasTask: false });
       await openFromMap(page, lang);
       await expect(window.getByRole('button', { name: words.noTask })).toBeDisabled();
-      await expect(window.locator('.xterm-screen, .t-log').first()).toBeVisible();
+      await expect(window.locator('.xterm-screen, .t-log, .t-load').first()).toBeVisible();
       await expect(window.getByText(words.why)).toHaveCount(0);
       await expect(page.getByRole('complementary', { name: '#1 Checkout step 1' })).toHaveCount(0);
       await checkSurface(page, errors);

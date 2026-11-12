@@ -75,6 +75,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
+  '/api/feedback': { inbox: false },
   '/api/map/layout': { blocks: {} },
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },
