@@ -64,6 +64,12 @@ function ProgramAndAddress({ program, eventsUrl, onProgram, onEventsUrl }: { pro
   </>;
 }
 
+type Draft = { name: string; title: string; owner: string; program: AssistantProgram; eventsUrl: string };
+
+/* What Create sends: the person themself as the owner when they add their own, and no events address for an empty one. */
+const assistantBody = (me: Me, own: boolean, draft: Draft) =>
+  ({ name: draft.name.trim(), title: draft.title.trim(), owner: own ? me.person.id : draft.owner, program: draft.program, eventsUrl: draft.eventsUrl.trim() || null });
+
 /* own: the person adds their own assistant, so there is nobody to choose. kind: the switch back to inviting a person, under
    the heading the invite form has, so switching moves nothing above it. */
 export function NewAssistant({ me, people, own, heading, kind, initial, onMade, onClose }: { me: Me; people: PersonView[]; own: boolean; heading: string; kind?: ReactNode; initial: { name: string; title: string }; onMade: (person: PersonView) => void; onClose: () => void }) {
@@ -82,8 +88,7 @@ export function NewAssistant({ me, people, own, heading, kind, initial, onMade, 
     setBusy(true);
     setFailure('');
     try {
-      const body = { name: name.trim(), title: title.trim(), owner: own ? me.person.id : owner, program, eventsUrl: eventsUrl.trim() || null };
-      onMade((await api.post<{ person: PersonView }>('/api/people/assistants', body)).person);
+      onMade((await api.post<{ person: PersonView }>('/api/people/assistants', assistantBody(me, own, { name, title, owner, program, eventsUrl }))).person);
     } catch (err) {
       setFailure(errorText(t, err));
       setBusy(false);

@@ -105,7 +105,6 @@ async function setTheme(page: Page, choice: Choice) {
   }, { choice, custom: templateText(CUSTOM) });
 }
 
-const FORM = '.form-card, .t-card.staff, .key-form';
 /* Where every block and control of the open form stands, with its padding, margin, border and font. */
 async function geometry(form: Locator): Promise<Record<string, unknown>[]> {
   return form.evaluate(root => {

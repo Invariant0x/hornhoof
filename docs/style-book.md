@@ -109,7 +109,8 @@ These are set on components, not themes: `--cut`, `--c2`, `--edge`, `--strip-roo
 | `--f-display` | `'Tektur', 'Onest', system-ui, sans-serif` | Headings, buttons, tabs |
 | `--f-body` | `'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif` | Body text |
 | `--f-mono` | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Commands, code, keys |
-| `--cut-k` | `1` | Not type: how far corners are cut, 0 square, 1 the usual cut. Each theme sets it, Matrix 0 |
+
+Beside the colours and the fonts, a theme sets one more token, `--cut-k`: how far corners are cut, `1` the usual cut and `0` square, as in Matrix.
 
 Fonts are imported in `apps/web/src/main.tsx`:
 
