@@ -164,6 +164,7 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   const state: Route['state'] = { ...route.state, phase: 'escalated', stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
   const row = await move(ctx, task, { status: kind === 'content' ? 'blocked' : 'working', assigneeAgentId: kind === 'content' ? null : agentId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
+    ...(kind === 'content' ? { returned: true as const } : {}),
   }, async tx => {
     await heldCheckingIdentity(tx, task, route, await currentCandidate(tx, task, route));
     if (await failureKind(tx, task, route, input.runIds) !== kind) throw refuse(409, 'task_changed', 'The failed check changed.');
@@ -184,7 +185,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
   const row = await move(ctx, task, { status: 'open', assigneeAgentId: headId, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } },
+    kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } }, returned: true,
   }, async tx => {
     await heldCheckingIdentity(tx, task, route, candidate);
     await candidateRunEvidence(tx, task, route, input.data.runIds);

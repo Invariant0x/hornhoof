@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -16,7 +16,8 @@ import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan, ownDatabases, echelonsTurn } from './helpers.js';
 import { rowsRead } from './rows-read.js';
-import { BASE, HEAD } from './development-echelons-fixture.js';
+import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
+import { testsFixture } from './development-echelons-verification.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 
 ownDatabases();
@@ -468,18 +469,83 @@ describe('results given back in a message', () => {
     expect(stateOf(await org(), hana, bruno)).toBe('yellow');
   });
 
-  it('keep the turn that gave a message back off the line while it runs, until a new turn starts', async () => {
-    const { db, ctx, hana, bruno, member, run, tools, org, end } = await online();
+  it('keep blue while the turn that wrote to its head runs, also about the task it works on, and turn yellow once it ends', async () => {
+    const { db, ctx, orchestrator, hana, bruno, member, run, tools, org, end } = await online();
     const api = await member('Checkout API', bruno.id);
     const { job, call } = await tools(bruno.id, api.id);
     await startWork(ctx, job.id);
     expect(stateOf(await org(), hana, bruno)).toBe('blue');
+    /* A question in the middle of the work: it goes on while the head reads. */
+    expect((await call('message_employee', { employee: hana.id, text: 'One question: is one retry enough? Until you answer I go on with one.', task: api.number })).isError).toBeFalsy();
+    const asked = await org();
+    expect(stateOf(asked, hana, bruno)).toBe('blue');
+    expect(stateOf(asked, orchestrator, hana)).toBe('blue');
     await call('message_employee', { employee: hana.id, text: 'Halfway: the API answers, the page is next.' });
-    expect(stateOf(await org(), hana, bruno)).toBe('yellow');
+    expect(stateOf(await org(), hana, bruno)).toBe('blue');
     await end(job.id);
+    expect(stateOf(await org(), hana, bruno)).toBe('yellow');
     await run(bruno.id, api.id);
     expect(stateOf(await org(), hana, bruno)).toBe('blue');
     expect(await db.select().from(mapReturns)).not.toHaveLength(0);
+  });
+
+  it("keep the department line blue while its head, at work on the department's task, writes to the orchestrator", async () => {
+    const { ctx, orchestrator, hana, top, tools, org, end } = await online();
+    const { job, call } = await tools(hana.id, top.id);
+    await startWork(ctx, job.id);
+    expect((await call('tell_orchestrator', { text: 'Which provider do we take? Until you answer I prepare both.' })).isError).toBeFalsy();
+    expect(stateOf(await org(), orchestrator, hana)).toBe('blue');
+    await end(job.id);
+    expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
+  });
+
+  it('keep a task the turn handed in off the line, also once that turn writes to the one above', async () => {
+    const { db, ctx, orchestrator, hana, top, tools, org } = await online();
+    const { job, call } = await tools(hana.id, top.id);
+    await startWork(ctx, job.id);
+    /* The turn hands the task in while it still reads as at work, as a member's task the head accepts does under the
+       department task. */
+    await db.transaction(tx => returnAlongLine(tx, { agentId: hana.id, sourceKey: 'task:accepted', sourceTaskId: top.id, returnedAt: new Date() }));
+    expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
+    expect((await call('tell_orchestrator', { text: 'Payments are in, I tidy up the notes.' })).isError).toBeFalsy();
+    expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
+  });
+});
+
+/* What the browser draws for the line, read straight from the company's lines. */
+async function drawn(db: Db, companyId: string, up: { id: string }, down: { id: string }): Promise<string> {
+  const { lines, serverNow } = await mapLines(db, companyId);
+  const line = lines.find(l => l.upstreamAgentId === up.id && l.downstreamAgentId === down.id);
+  if (!line) return 'none';
+  return lineState({ working: line.working, workEpoch: line.workEpoch, returnedEpoch: line.returnedEpoch, returnedAt: line.returnedAt ? Date.parse(line.returnedAt) : null }, serverNow.getTime());
+}
+
+describe('results a checking stage gives back to the head', () => {
+  it('turn the Tests owner\'s line yellow once it hands the verified candidate to the head', async () => {
+    const f = await testsFixture();
+    const run = await f.run();
+    expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe('quiet');
+    await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+    expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe('yellow');
+  });
+
+  it.each([
+    ['failed', 'yellow'],
+    ['no_machine', 'quiet'],
+  ] as const)('give a failed check back to the head only when the candidate failed it: %s', async (error, state) => {
+    const f = await testsFixture();
+    const run = await f.run();
+    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, run.id));
+    await f.db.update(testParts).set({ status: 'failed', exitCode: error === 'failed' ? 1 : null, error, commit: error === 'failed' ? f.finalCommit : null, finishedAt: new Date() }).where(eq(testParts.runId, run.id));
+    await report(f.ctx, f.tester.id, f.task.id, { ...f.verified([run.id]), done: false });
+    expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe(state);
+  });
+
+  it("turn a reviewer's line yellow when it sends a wrong goal back to the head", async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Changed totals and tests.', review: { baseCommit: BASE } });
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, reviewedCommit: HEAD, escalate: true, comment: 'The requested total is missing; this implements a different goal.' });
+    expect(await drawn(f.db, f.task.companyId, f.head, f.reviewer)).toBe('yellow');
   });
 });
 
