@@ -140,8 +140,12 @@ const Copy = z.object({
      neither. */
   leader: z.string().optional(), join: z.string().nullable().optional(),
 });
-/* dataSecret: a server of the build before says none, which reads as none. */
-const Link = z.object({ name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null) });
+/* dataSecret: a server of the build before says none, which reads as none. hidden: one from before hidden names says
+   nothing of it. */
+const Link = z.object({
+  name: z.string(), url: z.string(), serverAddr: z.string(), serverPort: z.number(), appSecret: z.string(), visitorKey: z.string(), dataSecret: z.string().nullable().default(null),
+  hidden: z.boolean().optional(),
+});
 /* A view as an answer gives it, each field by itself: one the answer lacks, or gives as a server of another version
    does, is left out, and what the keeper has of it stays. */
 const Answer = z.object({
@@ -154,6 +158,13 @@ const Answer = z.object({
   crlPem: z.string().nullable().optional().catch(undefined),
   copy: Copy.nullable().optional().catch(undefined),
 });
+/* What an answer says of the network, with the fields it lacks left out; null for an answer that is no view at all. */
+export function viewIn(answer: unknown): Partial<KeeperView> | null {
+  const said = Answer.safeParse(answer);
+  if (!said.success) return null;
+  return Object.fromEntries(Object.entries(said.data).filter(([, value]) => value !== undefined)) as Partial<KeeperView>;
+}
+
 /* The server's build and this machine's turn to install it, as the leader's view names them; none when it names none. */
 const Build = z.object({ version: z.string(), tag: z.string(), digest: z.string(), nodeDigest: z.string(), updaterDigest: z.string(), commit: z.string() });
 const Follow = z.object({ build: Build.nullable().catch(null).default(null), go: z.object({ commit: z.string(), until: z.string(), leftMs: z.number().min(0) }).nullable().catch(null).default(null) });
@@ -387,10 +398,8 @@ export class WorkerKeeper {
   /* An answer is merged into what the keeper has field by field, and the list of revoked certificates never shrinks:
      a path that hides a field, or a server of another version that lacks one, takes nothing away. */
   private mergeView(answer: unknown, keep = true): void {
-    const said = Answer.safeParse(answer);
-    if (!said.success) return;
-    const given = Object.fromEntries(Object.entries(said.data).filter(([, value]) => value !== undefined)) as Partial<View>;
-    if (Object.keys(given).length === 0) return;
+    const given = viewIn(answer);
+    if (!given || Object.keys(given).length === 0) return;
     for (const serial of given.revoked ?? []) this.revoked.add(serial);
     const before: View = this.view ?? { machine: '', role: 'worker', authorityPem: null, revoked: [], crlPem: null, data: [], link: null, copy: null };
     /* A list of revoked certificates that is signed stays until a newer one comes: an answer of a server that does not

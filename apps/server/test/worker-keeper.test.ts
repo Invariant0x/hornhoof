@@ -13,7 +13,8 @@ import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certifica
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
 import { PIN_FILE, readPin } from '../src/modules/keeper/owner-pin.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
-import { PEERS_FILE, TICKET_FILE, type KeeperView } from '../src/modules/keeper/worker.js';
+import { PEERS_FILE, TICKET_FILE, viewIn, type KeeperView } from '../src/modules/keeper/worker.js';
+import type { WorkerView } from '../src/modules/network/join.js';
 import { WIPE_FILE, WIPED_FILE } from '../src/modules/keeper/uploads.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import type { VisitSettings } from '../src/modules/link/visit-client.js';
@@ -119,6 +120,28 @@ describe("a worker's keeper", () => {
     /* The leader's own network id, which the copy's keeper follows, votes for and takes over from; no slot to join,
        since no switch made one. */
     expect(views.find(view => view.copy !== null)!.copy).toMatchObject({ slot: null, lastAttempt: null, leader: HOST_ID, join: null });
+  });
+
+  it('drops nothing of a view the server gives', () => {
+    const [network, other] = [HOST_ID, 'b'.repeat(64)];
+    const view: WorkerView = {
+      machine: '6f0e2c1a-0d7b-4a53-9c58-2f1c7c0f6d11', role: 'data', authorityPem: 'pem', revoked: ['01'],
+      data: [{ machine: '0b0f6c7e-3a43-4d0e-8a57-6f4f6f0a2b22', networkId: other, hostname: 'deb', addresses: ['10.0.0.2'], peerPort: 8180, webPort: 8080, number: 2, copyName: 'copy_bbbbbbbbbbbbbbbb_1' }],
+      link: { name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: 'a'.repeat(43), visitorKey: 'v'.repeat(32), dataSecret: 'd'.repeat(43), hidden: true },
+      build: null, go: null,
+      copy: { slot: 'ok', leaderSize: 1024, migrations: 116, old: 'waiting', upload: null, lastAttempt: 1, leader: network, join: 'copy_bbbbbbbbbbbbbbbb_2' },
+    };
+    /* The build and this machine's turn to install it are read apart. */
+    const kept: Partial<WorkerView> = { ...view };
+    delete kept.build;
+    delete kept.go;
+    expect(viewIn(JSON.parse(JSON.stringify(view)))).toEqual(kept);
+    /* A server of the build before names less, and what it leaves out is no word of it. */
+    expect(viewIn({ data: [{ machine: 'm', networkId: other, hostname: null, addresses: [], peerPort: null, webPort: null }], copy: { slot: null, leaderSize: null, migrations: null } })).toEqual({
+      data: [{ machine: 'm', networkId: other, hostname: null, addresses: [], peerPort: null, webPort: null, number: null, copyName: null }],
+      copy: { slot: null, leaderSize: null, migrations: null, old: null, upload: null, lastAttempt: null },
+    });
+    expect(viewIn('nothing')).toBeNull();
   });
 
   it('says when it could not become a data machine', async () => {
