@@ -2,6 +2,7 @@ import { useT } from '../i18n';
 import type { ShownCommand, SubView } from '../types';
 import { CommandBox, CommandLifetime, liveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
+import { PlanSteps } from '../ui/PlanSteps';
 import { subName } from '../ui/subscription';
 
 /* During a rolling update an older server may not yet send the IDs; labels are only that compatibility fallback. */
@@ -20,6 +21,7 @@ export function SubscriptionCommandBlocks({ subscriptions, commands, now, onDone
     return <section key={sub.id} aria-label={title}>
       <Edge className="panel" cut={12}>
         <h2>{title}</h2>
+        <PlanSteps sub={sub} command={command} />
         <p className="muted">{t.subs.runThis}</p>
         <CommandBox command={command.command} />
         <CommandLifetime expiresAt={command.expiresAt} />

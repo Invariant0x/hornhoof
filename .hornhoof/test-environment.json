@@ -641,6 +641,7 @@
           "apps/server/test/operations-required.test.ts",
           "apps/server/test/orchestrator-control.test.ts",
           "apps/server/test/org.test.ts",
+          "apps/server/test/person-standing.test.ts",
           "apps/server/test/pipeline-guidance.test.ts",
           "apps/server/test/program-operator-placement.test.ts",
           "apps/server/test/prompt.test.ts",

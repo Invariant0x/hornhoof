@@ -47,13 +47,14 @@ const PWSH = spawnSync('sh', ['-c', 'command -v pwsh'], { encoding: 'utf8' }).st
 /* docker as install.ps1 meets it, writing each call and the settings it was handed as a line of JSON. STUB_DOCKER "stopped"
    answers info only once Docker Desktop started; STUB_OSTYPE is the kind of containers it runs; STUB_PULL "fail" downloads
    nothing and STUB_IMAGE_LOCAL "1" has the image here. run runs the shell command it gets, as the container would, with curl
-   writing STUB_INSTALL_SH where it is told to, and ends as that ends. */
+   writing STUB_INSTALL_SH where it is told to, and ends as that ends. exec reads the sign-in link install.sh wrote in the
+   container, STUB_OPEN_URL, and counts each look; with STUB_RUN_UNTIL_LOOKS run lasts until that many looks were taken. */
 const DOCKER_STUB = `#!${process.execPath}
-const { appendFileSync, existsSync } = require('node:fs');
+const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ['HORNHOOF_SERVER', 'HORNHOOF_HOME', 'HORNHOOF_MACHINE', 'HORNHOOF_HOST_CPU', 'HORNHOOF_HOST_CPUS', 'HORNHOOF_HOST_MEMORY']) {
+for (const name of ['HORNHOOF_SERVER', 'HORNHOOF_HOME', 'HORNHOOF_MACHINE', 'HORNHOOF_HOST_CPU', 'HORNHOOF_HOST_CPUS', 'HORNHOOF_HOST_MEMORY', 'HORNHOOF_FROM_WINDOWS']) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 appendFileSync(process.env.STUB_LOG, JSON.stringify({ args, env }) + '\\n');
@@ -65,7 +66,14 @@ if (args[0] === 'info') {
   if (s.STUB_PULL === 'fail') process.exit(1);
 } else if (args[0] === 'image') {
   if (s.STUB_IMAGE_LOCAL !== '1') process.exit(1);
+} else if (args[0] === 'exec') {
+  if (args.at(-1) !== '/tmp/hornhoof-open-url') process.exit(1);
+  appendFileSync(s.STUB_STATE + '/looks', 'look\\n');
+  if (!s.STUB_OPEN_URL) process.exit(1);
+  console.log(s.STUB_OPEN_URL);
 } else if (args[0] === 'run') {
+  const looks = () => existsSync(s.STUB_STATE + '/looks') ? readFileSync(s.STUB_STATE + '/looks', 'utf8').split('\\n').filter(Boolean).length : 0;
+  while (looks() < Number(s.STUB_RUN_UNTIL_LOOKS || 0)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   const c = args.indexOf('-c');
   const r = spawnSync('/bin/sh', args.slice(c), { stdio: 'inherit', env: { ...process.env, HORNHOOF_HOME: s.STUB_STATE + '/inside' } });
   process.exit(r.status);
@@ -109,6 +117,10 @@ exec "$STUB_STATE/put-docker"
 echo "installer $*" >> "$STUB_STATE/windows.log"
 [ "$STUB_INSTALL_FAIL" = 1 ] && exit 1
 exec "$STUB_STATE/put-docker"
+`,
+  /* The browser of the system, which PowerShell's Start-Process opens a link with on Linux. */
+  'xdg-open': `#!/bin/sh
+echo "open $*" >> "$STUB_STATE/windows.log"
 `,
   reg: `#!/bin/sh
 echo "reg $*" >> "$STUB_STATE/windows.log"
@@ -171,6 +183,7 @@ function windows(script: string, { args = ['--join', CODE], env = {}, docker = t
   writeFileSync(join(bin, 'curl'), CURL_STUB, { mode: 0o755 });
   writeFileSync(join(bin, 'wsl.ps1'), WSL_STUB);
   writeFileSync(join(bin, 'reg'), WINDOWS_STUBS.reg!, { mode: 0o755 });
+  writeFileSync(join(bin, 'xdg-open'), WINDOWS_STUBS['xdg-open']!, { mode: 0o755 });
   if (winget) writeFileSync(join(bin, 'winget'), WINDOWS_STUBS.winget!, { mode: 0o755 });
   writeFileSync(join(dir, 'installer'), WINDOWS_STUBS.installer!, { mode: 0o755 });
   writeFileSync(join(dir, 'put-docker'), PUT_DOCKER, { mode: 0o755 });
@@ -204,7 +217,9 @@ function windows(script: string, { args = ['--join', CODE], env = {}, docker = t
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l) as { args: string[]; env: Record<string, string> });
   const done = readFileSync(join(dir, 'windows.log'), 'utf8').trim().split('\n').filter(Boolean);
-  return { code: res.status, out: res.stdout + res.stderr, calls, done, dir, run: calls.find(c => c.args[0] === 'run') };
+  /* The watcher reads the sign-in link from the container beside the run, as often as time allows. */
+  const own = calls.filter(c => c.args[0] !== 'exec');
+  return { code: res.status, out: res.stdout + res.stderr, calls: own, looks: calls.filter(c => c.args[0] === 'exec'), done, dir, run: calls.find(c => c.args[0] === 'run') };
 }
 
 const NOTICE = 'Installing Docker Desktop, where Hornhoof runs its nodes. Docker Desktop has its own terms: free for personal use and small companies, see https://docs.docker.com/subscription/desktop-license/';
@@ -230,6 +245,8 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(r.calls[2]!.args).toEqual(['pull', UPDATER]);
     const run = r.run!.args;
     expect(run.slice(0, 3)).toEqual(['run', '--rm', '-i']);
+    /* A name of its own, by which the watcher reads the sign-in link in it. */
+    expect(run[run.indexOf('--name') + 1]).toMatch(/^hornhoof-install-[0-9a-f]{12}$/);
     expect(run[run.indexOf('--hostname') + 1]).toMatch(/^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$/);
     expect(run[run.indexOf('-v') + 1]).toBe('//var/run/docker.sock:/var/run/docker.sock');
     expect(run.slice(run.indexOf('--entrypoint'), run.indexOf('-c'))).toEqual(['--entrypoint', 'sh', UPDATER]);
@@ -238,7 +255,7 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(run.filter((_, i) => run[i - 1] === '-e').every(word => /^HORNHOOF_[A-Z_]+$/.test(word))).toBe(true);
     const key = readFileSync(join(home, '.hornhoof', 'machine'), 'utf8');
     expect(key).toMatch(/^[0-9a-f]{32}$/);
-    expect(r.run!.env).toMatchObject({ HORNHOOF_SERVER: SERVER, HORNHOOF_HOME: '/hornhoof', HORNHOOF_MACHINE: key });
+    expect(r.run!.env).toMatchObject({ HORNHOOF_SERVER: SERVER, HORNHOOF_HOME: '/hornhoof', HORNHOOF_MACHINE: key, HORNHOOF_FROM_WINDOWS: '1' });
     expect(r.run!.env.HORNHOOF_HOST_CPUS).toMatch(/^[1-9][0-9]*$/);
     expect(r.out).toContain(`install.sh --join ${CODE}`);
     expect(r.out).toContain(`machine ${key}`);
@@ -250,6 +267,35 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     expect(again.run!.args.at(-1)).toBe('install');
     expect(again.run!.env.HORNHOOF_MACHINE).toBe(key);
     expect(again.out).toContain(`machine ${key}`);
+  });
+
+  it('shows the first of the four steps, the one for Docker Desktop, before it checks Docker Desktop, and none for a removal', async () => {
+    const r = windows(await script());
+    expect(r.code).toBe(0);
+    const step = r.out.indexOf('Step 1 of 4: Checking this computer');
+    expect(step).toBeGreaterThanOrEqual(0);
+    expect(r.out.indexOf('Checking Docker Desktop.')).toBeGreaterThan(step);
+    /* Its input is no console, so it waits for no Enter. */
+    expect(r.out).not.toContain('Press Enter');
+    const removal = windows(await script(), { args: ['--uninstall'] });
+    expect(removal.code).toBe(0);
+    expect(removal.out).not.toContain('Step 1 of 4');
+  });
+
+  /* PowerShell on a Mac opens a link with /usr/bin/open, the real browser, so this runs on Linux only. */
+  it.skipIf(process.platform === 'darwin')('opens the sign-in link install.sh hands over in the browser of Windows, each link once and only a plain https one', async () => {
+    const link = 'https://claude.ai/oauth/authorize?code=1';
+    const r = windows(await script(), { env: { STUB_OPEN_URL: link, STUB_RUN_UNTIL_LOOKS: '3' } });
+    expect(r.code).toBe(0);
+    expect(r.done.filter(l => l.startsWith('open '))).toEqual([`open ${link}`]);
+    const name = r.run!.args[r.run!.args.indexOf('--name') + 1];
+    expect(r.looks.length).toBeGreaterThanOrEqual(3);
+    for (const look of r.looks) expect(look.args).toEqual(['exec', name, 'cat', '/tmp/hornhoof-open-url']);
+    for (const odd of ['file:///etc/passwd', 'https://claude.ai/x y']) {
+      const other = windows(await script(), { env: { STUB_OPEN_URL: odd, STUB_RUN_UNTIL_LOOKS: '2' } });
+      expect(other.code).toBe(0);
+      expect(other.done.filter(l => l.startsWith('open '))).toEqual([]);
+    }
   });
 
   it('takes the latest updater image for a server CI did not build', async () => {
@@ -332,7 +378,9 @@ describe.runIf(PWSH)('install.ps1 in PowerShell', () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-ps1-home-'));
     const r = windows(await script(), { docker: false, winget: true, home, env: { STUB_WSL: 'none', STUB_RESTART: '1' } });
     expect(r.code).toBe(0);
+    expect(r.out).toContain('Restart needed');
     expect(r.out).toContain('Windows needs a restart to finish installing. Restart the computer; when you sign in again, Hornhoof goes on by itself in a PowerShell window.');
+    expect(r.out).toContain('To restart, save your open work, then choose Start, Power, Restart. After the restart, leave the Hornhoof window open until it says Done.');
     expect(r.run).toBeUndefined();
     const line = readFileSync(join(r.dir, 'runonce'), 'utf8');
     expect(line).toBe(`${RUN_ONCE}for(;;){try{$s=irm ${SERVER}/install.ps1;break}catch{'Waiting for the network.';sleep 2}};&([scriptblock]::Create($s)) --join ${CODE}`);

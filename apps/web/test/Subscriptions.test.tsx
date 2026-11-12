@@ -936,9 +936,11 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Kimi, Ivan' });
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(workingParts(card)).toEqual([]);
-    /* Why, the command and the one for Windows, each with Copy, and how long they work, then Remove: one block, nothing beside it. */
-    const [why, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
+    /* Why, the steps to its work, the command and the one for Windows, each with Copy, and how long they work, then Remove:
+       one block, nothing beside it. */
+    const [why, steps, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
+    expect(steps).toHaveRole('list');
     await vi.waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
     expect(install).toHaveTextContent(lifetime);
     expect(buttons(install!)).toEqual([actions[0], actions[0]]);

@@ -18,7 +18,8 @@ import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { LimitCell, LimitMeters } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
-import { clock, limitState, planStateOnMachine, stateOf, subName, waitsThere, windowName, windowUsage } from '../ui/subscription';
+import { clock, limitState, planStateOnMachine, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
+import { PlanSteps } from '../ui/PlanSteps';
 import { replaceSubscription } from './subscription-list';
 export { clock } from '../ui/subscription';
 
@@ -28,9 +29,6 @@ const POLL_LIMIT_MS = 150_000;
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
 /* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
 type Signing = { subId: string; nodeId: string; hostname: string };
-
-/* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
-const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
 
 const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
@@ -323,14 +321,15 @@ function RemoveAsk({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
 const needsFix = (s: SubView, note: SignNote | null): boolean => s.status !== 'ready' || Boolean(note?.command);
 
 /* The card of a plan that does not work, in one block across it: what is wrong and where, or the nodes too old for its
-   sign-in with the command that updates them, then what to do about it and Remove. A plan waiting for its machine shows
-   its owner the install command there. */
+   sign-in with the command that updates them, then what to do about it and Remove. Its owner sees the steps to its work
+   with the one to take now, unless those nodes come first, and for a plan waiting for its machine the install command. */
 function PlanFix(props: PlanProps) {
   const t = useT();
   const { sub: s, me, controls: c } = props;
   return (
     <section className="blk blk-fix">
       {!c.note?.command && <p>{fixWords(t, s)}</p>}
+      {!c.note?.command && s.owner.id === me.person.id && <PlanSteps sub={s} command={c.command} signing={Boolean(c.signing)} />}
       <SubscriptionInstall sub={s} ownerId={me.person.id} command={c.command} onNew={() => c.newCommand(s)} />
       <SignInNote note={c.note} />
       <div className="machine-actions"><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>

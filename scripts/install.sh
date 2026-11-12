@@ -59,6 +59,10 @@ SERVER_DIR=$BASE_DIR
 NAME=''
 PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
+# On Windows install.ps1 runs this script in a container, after it took the step that sets up Docker. The container has no
+# browser, so a sign-in link goes into LINK_FILE, which install.ps1 watches and opens in the browser of Windows.
+FROM_WINDOWS="${HORNHOOF_FROM_WINDOWS:-}"
+LINK_FILE="${HORNHOOF_LINK_FILE:-/tmp/hornhoof-open-url}"
 # How long a joined node may take to get its plan's sign-in from Hornhoof, in seconds.
 SIGNIN_WAIT="${HORNHOOF_SIGNIN_WAIT:-20}"
 # How long a machine's new core may take to get its place in the company from the server, in seconds.
@@ -99,11 +103,30 @@ OS=''
 ARCH=''
 DOCKER=(docker)
 SUDO_SAID=''
+# A person who watches in a terminal sees the headers in color. Output that goes anywhere else, or NO_COLOR, gets none.
+COLOR_STEP=''
+COLOR_DONE=''
+COLOR_OFF=''
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+  COLOR_STEP=$(printf '\033[1;36m')
+  COLOR_DONE=$(printf '\033[1;32m')
+  COLOR_OFF=$(printf '\033[0m')
+fi
+RULE='----------------------------------------------------------------'
 
 say() { printf '%s\n' "$*"; }
 fail() {
   printf '%s\n' "$*" >&2
   exit 1
+}
+
+# step <number> <title> <what happens>: a header a person follows the run by, with what happens in the step in plain
+# words. The updater runs with no one watching, so it shows none.
+step() {
+  [ -z "$FROM_UPDATER" ] || return 0
+  say ''
+  say "${COLOR_STEP}Step $1 of 4: $2${COLOR_OFF}"
+  say "$3"
 }
 
 # ask <question> <default>: one line from the terminal, the default on Enter.
@@ -301,11 +324,15 @@ check_server() {
 }
 
 pull_image() {
+  local code=0
   if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
     say "This Hornhoof is a local build with no node image published for it, so this machine gets the latest node image, which may not match it."
   fi
+  if [ -z "$FROM_UPDATER" ]; then say "The first time, this is a large download that can take 10 to 20 minutes on a slow connection."; fi
   say "Getting the node image $IMAGE."
-  if ! "${DOCKER[@]}" pull "$IMAGE" > /dev/null; then
+  # Docker shows a person in a terminal how far the download is; anywhere else its lines would only fill the output.
+  if [ -t 1 ]; then "${DOCKER[@]}" pull "$IMAGE" || code=$?; else "${DOCKER[@]}" pull "$IMAGE" > /dev/null || code=$?; fi
+  if [ "$code" -ne 0 ]; then
     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
       say "Using the local image."
     elif [ "$IMAGE" = "$BUILD_IMAGE" ]; then
@@ -334,7 +361,7 @@ node_server() {
   if [ "$NODE_SERVER" != "$SERVER" ]; then LOCAL_SERVER=1; fi
 }
 
-# This computer's name as the company sees it.
+# This computer's name as Hornhoof lists it.
 host_name() {
   local host
   host=$(hostname 2> /dev/null | tr -cd 'A-Za-z0-9._-' | cut -c1-120)
@@ -583,8 +610,11 @@ existing_nodes() {
     done
 }
 
+# Opens a sign-in link in the browser of this computer, or on Windows hands it to install.ps1, which opens it there.
 open_link() {
-  if [ "$OS" = darwin ]; then
+  if [ -n "$FROM_WINDOWS" ]; then
+    printf '%s\n' "$1" 2> /dev/null > "$LINK_FILE" || say "Open this link in a browser: $1"
+  elif [ "$OS" = darwin ]; then
     open "$1" > /dev/null 2>&1 || say "Open this link in a browser: $1"
   elif command -v xdg-open > /dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     xdg-open "$1" > /dev/null 2>&1 || say "Open this link in a browser: $1"
@@ -632,12 +662,47 @@ late_nodes() {
   printf '%s' "$late"
 }
 
+# How to paste into the terminal this runs in, which many people do not know. A Windows console pastes with a right-click,
+# which shows its menu with Paste while install.ps1 keeps QuickEdit off; Ctrl+V there only types ^V.
+paste_hint() {
+  if [ -n "$FROM_WINDOWS" ]; then
+    printf '%s' 'To paste in this window, right-click in it; if a menu shows, choose Paste. Ctrl+V does not paste here.'
+  elif [ "$OS" = darwin ]; then
+    printf '%s' 'To paste, press Cmd+V.'
+  else
+    printf '%s' 'To paste, press Ctrl+Shift+V in most Linux terminals.'
+  fi
+}
+
+# sign_in_help <name> <provider>: what to do, said before the program's own sign-in fills the terminal. Claude's sign-in
+# gives a code to paste here; the others say what they need themselves.
+sign_in_help() {
+  local paste
+  paste=$(paste_hint)
+  say ''
+  say "$RULE"
+  say "${COLOR_STEP}Signing in to $(program_name "$2") on $1${COLOR_OFF}"
+  say '  1. The sign-in page opens in your browser by itself. If it does not, open the link that shows below.'
+  if [ "$2" = claude ]; then
+    say '  2. Sign in there, and press Authorize.'
+    say '  3. Copy the code the page shows.'
+    say "  4. Paste the code here and press Enter. $paste"
+  else
+    say '  2. Sign in there, and allow what it asks.'
+    say "  3. Follow what this window shows below. When it asks for a code or a key, paste it here and press Enter. $paste"
+  fi
+  if signs_in_hornhoof "$2"; then
+    say 'You can also sign in once in Hornhoof under Subscriptions, for all your machines.'
+    say 'This sign-in shows there too: finish it in one place only, here or there.'
+  fi
+  say "$RULE"
+}
+
 login_node() {
   local name=$1 provider watcher
   provider=${name#hornhoof-}
   provider=${provider%-*}
-  say "Signing in to $(program_name "$provider") on $name. A browser opens when a link appears."
-  if signs_in_hornhoof "$provider"; then say "You can also sign in once in Hornhoof under Subscriptions, for all your machines."; fi
+  sign_in_help "$name" "$provider"
   "${DOCKER[@]}" exec "$name" rm -f /data/login-url > /dev/null 2>&1 || true
   watch_link "$name" &
   watcher=$!
@@ -816,12 +881,22 @@ core_and_front() {
 }
 
 node_mode() {
-  local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late held=''
+  local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late held='' told='' pending=''
+  local -a plans
   detect_system
+  if [ -z "$FROM_WINDOWS" ]; then
+    step 1 'Checking this computer' 'Hornhoof runs on this computer in Docker. This checks that this computer reaches Hornhoof and that Docker works here, and installs Docker when it is missing.'
+  fi
   check_server
   ensure_docker
+  step 2 'Getting Hornhoof for this computer' 'This downloads the program Hornhoof runs on this computer. There is nothing to do but wait.'
   pull_image
   node_server
+  if [ -n "$code" ]; then
+    step 3 'Connecting this computer' 'This connects this computer to Hornhoof and starts a node, which runs the agents here, for each plan. There is nothing to do.'
+  else
+    step 3 'Updating the nodes on this computer' 'Each node here moves to the version just downloaded once what it runs has ended. There is nothing to do.'
+  fi
 
   existing=$(existing_nodes)
   for entry in $existing; do
@@ -895,6 +970,7 @@ node_mode() {
 
   # A new node of a plan signed in once in Hornhoof gets that sign-in by itself; the others go through the sign-in here
   # (it ends at once when the program is signed in already). A machine's own node has no plan to sign in to.
+  step 4 'Signing in' 'Agents use a plan once it is signed in to its account.'
   for name in $joined_names; do
     provider=${name#hornhoof-}
     provider=${provider%-*}
@@ -909,6 +985,7 @@ node_mode() {
     provider=${provider%-*}
     case " $waits " in
       *" $name "*)
+        told=1
         case "$late" in
           *" $name "*) login_node "$name" ;;
           *)
@@ -922,12 +999,21 @@ node_mode() {
         ;;
       *)
         case " $joined_names " in
-          *" $name "*) login_node "$name" ;;
-          *) if [ -z "$FROM_UPDATER" ] && ! signed_in "$name"; then login_node "$name"; fi ;;
+          *" $name "*)
+            told=1
+            login_node "$name"
+            ;;
+          *)
+            if [ -z "$FROM_UPDATER" ] && ! signed_in "$name"; then
+              told=1
+              login_node "$name"
+            fi
+            ;;
         esac
         ;;
     esac
   done
+  if [ -z "$told" ] && [ -z "$FROM_UPDATER" ]; then say 'Nothing needs a sign-in here.'; fi
 
   say ""
   say "Nodes on this machine:"
@@ -935,6 +1021,8 @@ node_mode() {
     provider=${name#hornhoof-}
     provider=${provider%-*}
     status=$(node_status "$name")
+    case "$name" in hornhoof-machine-*) ;; *) plans+=("$(program_name "$provider")") ;; esac
+    case "$status" in ready | spare) ;; *) pending=1 ;; esac
     case "$status" in
       ready) status="ready" ;;
       spare) status="spare, Codex runs on another machine of this plan now" ;;
@@ -958,6 +1046,33 @@ node_mode() {
       ;;
   esac
   if [ -n "$LEFT" ]; then fail "These nodes stay as they are:$LEFT."; fi
+  done_banner "$pending" ${plans[@]+"${plans[@]}"}
+}
+
+# done_banner <pending> <plan>...: the last lines of a run a person watches, with what runs on this computer now and that
+# the window may close.
+done_banner() {
+  local pending=$1 plans=''
+  shift
+  [ -z "$FROM_UPDATER" ] || return 0
+  while [ $# -gt 0 ]; do
+    if [ -z "$plans" ]; then
+      plans=$1
+    elif [ $# -eq 1 ]; then
+      plans="$plans and $1"
+    else
+      plans="$plans, $1"
+    fi
+    shift
+  done
+  say ''
+  if [ -n "$plans" ]; then
+    say "${COLOR_DONE}Done. Hornhoof runs on this computer, $(host_name), with $plans.${COLOR_OFF}"
+  else
+    say "${COLOR_DONE}Done. Hornhoof runs on this computer, $(host_name), for test runs.${COLOR_OFF}"
+  fi
+  if [ -n "$pending" ]; then say 'Some of them are not ready yet: the list above says what to do.'; fi
+  say 'You can close this window: the nodes keep running.'
 }
 
 # docker ps of the updater of this server's nodes on this computer, or of every server's when this script does not know its own.

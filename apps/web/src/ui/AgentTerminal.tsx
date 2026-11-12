@@ -442,12 +442,20 @@ function selectedText(term: Terminal | null) {
   return term?.hasSelection() ? term.getSelection() : '';
 }
 
-function bindCopy(term: Terminal) {
+/* Ctrl+V outside Apple's systems, where it is how people paste: xterm would send it to the program as ^V, so it goes to the
+   browser, which pastes into the terminal. On a Mac Cmd+V pastes, and Ctrl+V stays the program's key. */
+function isPasteChord(e: KeyboardEvent) {
+  const apple = /Mac|iPhone|iPad/.test(navigator.platform || '');
+  return !apple && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.code === 'KeyV' || e.key.toLowerCase() === 'v');
+}
+
+function bindClipboard(term: Terminal) {
   term.onSelectionChange(() => {
     const text = selectedText(term);
     if (text) copyText(text);
   });
   term.attachCustomKeyEventHandler(e => {
+    if (isPasteChord(e)) return false;
     const text = selectedText(term);
     if (!isCopyChord(e, text.length > 0)) return true;
     e.preventDefault();
@@ -506,9 +514,21 @@ type CopyMenuProps = {
   termRef: { current: Terminal | null };
   onClose(): void;
   label: string;
+  pasteLabel: string;
 };
 
-function CopyMenu({ menu, termRef, onClose, label }: CopyMenuProps) {
+/* What the clipboard holds goes to the program as if typed, where the person may type and the browser lets the page read it. */
+function canPaste(term: Terminal | null) {
+  return Boolean(term && !term.options.disableStdin && navigator.clipboard?.readText);
+}
+
+function pasteFromClipboard(term: Terminal | null) {
+  void navigator.clipboard.readText().then(text => {
+    if (text && term) term.paste(text);
+  }).catch(() => {});
+}
+
+function CopyMenu({ menu, termRef, onClose, label, pasteLabel }: CopyMenuProps) {
   useMenuDismiss(menu !== null, termRef, onClose);
   if (!menu) return null;
   return (
@@ -526,6 +546,20 @@ function CopyMenu({ menu, termRef, onClose, label }: CopyMenuProps) {
       >
         {label}
       </button>
+      {canPaste(termRef.current) && (
+        <button
+          className="t-copy"
+          type="button"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => {
+            pasteFromClipboard(termRef.current);
+            onClose();
+            termRef.current?.focus();
+          }}
+        >
+          {pasteLabel}
+        </button>
+      )}
     </div>
   );
 }
@@ -690,7 +724,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     term.open(container);
     keepSelecting(term);
     attachTerminalScroll(term);
-    bindCopy(term);
+    bindClipboard(term);
     fitTerminal(term, container);
     const view = testSession
       ? connectTestView(term, testSession, shows, reason => gone.current(reason))
@@ -712,7 +746,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
   return (
     <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
       <div className="t-xterm" ref={box} />
-      <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
+      <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
       {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
       <TerminalNotices t={t} asleep={asleep ? program : null} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
       {!up && (

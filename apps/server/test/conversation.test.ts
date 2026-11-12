@@ -13,6 +13,8 @@ import { as, connectNode, invitePerson, listen, openStream, sessionFrom, SETUP, 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
 const IVAN_TO_BRUNO = 'From Ivan (CEO) to Bruno (Backend engineer, Development):\n\n';
+/* Below a person's words to an employee: what that person is to it. */
+const IVAN_IS = "\n\nIvan is the company's owner (the CEO).";
 
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number; skills?: { name: string }[] };
 
@@ -730,7 +732,7 @@ describe("an employee's conversation", () => {
     expect(res.statusCode).toBe(202);
     const run = await nextRun(builtin);
     const expected = renderInstructions(app.ctx.templates, bruno, { company: 'Acme', department: 'Development', product: null });
-    expect(run).toMatchObject({ prompt: `${IVAN_TO_BRUNO}Ivan (CEO): What do you own?`, instructions: expected.text, sessionId: null });
+    expect(run).toMatchObject({ prompt: `${IVAN_TO_BRUNO}Ivan (CEO): What do you own?${IVAN_IS}`, instructions: expected.text, sessionId: null });
     expect(run.instructions).toContain('You are Bruno, the Backend engineer of the Development department at Acme.');
     /* Skills that are not core rules go as files the program reads when it needs them. */
     expect(expected.skills.length).toBeGreaterThan(0);
@@ -758,14 +760,14 @@ describe("an employee's conversation", () => {
     expect(fresh.sessionId).toBeNull();
     expect(fresh.instructions).toContain('You own the billing API.');
     expect(fresh.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
-    expect(fresh.prompt.endsWith('Ivan (CEO): And now?')).toBe(true);
+    expect(fresh.prompt.endsWith(`Ivan (CEO): And now?${IVAN_IS}`)).toBe(true);
   });
 
   it.each(['head', 'orchestrator'] as const)('keeps the %s session when a new turn of the company opens', async kind => {
     const { app, ceo, builtin, id } = await inNewCompanyTurn(kind);
     await sayTo(app, ceo, id, 'The new turn starts.');
     const recipient = kind === 'head' ? 'Bruno (Head of development, Development)' : 'Orchestrator';
-    expect(await nextRun(builtin)).toMatchObject({ sessionId: 'sess-1', prompt: `From Ivan (CEO) to ${recipient}:\n\nIvan (CEO): The new turn starts.` });
+    expect(await nextRun(builtin)).toMatchObject({ sessionId: 'sess-1', prompt: `From Ivan (CEO) to ${recipient}:\n\nIvan (CEO): The new turn starts.${kind === 'head' ? IVAN_IS : ''}` });
   });
 
   it('catches up the head in a new company turn when its instructions changed', async () => {
@@ -777,7 +779,7 @@ describe("an employee's conversation", () => {
     expect(fresh.instructions).toContain('Keep track of the billing agreements.');
     expect(fresh.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
     expect(fresh.prompt).toContain('From Ivan (CEO) to Bruno (Head of development, Development):\n> We agreed to support card payments.');
-    expect(fresh.prompt.endsWith('Ivan (CEO): The new turn starts.')).toBe(true);
+    expect(fresh.prompt.endsWith(`Ivan (CEO): The new turn starts.${IVAN_IS}`)).toBe(true);
   });
 
   it('starts a member in a clean session when a new turn of the company opens, and goes on in it during the turn', async () => {
@@ -789,7 +791,7 @@ describe("an employee's conversation", () => {
     await sayTo(app, ceo, bruno.id, 'The new turn starts.');
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();
-    expect(fresh.prompt).toBe(`${IVAN_TO_BRUNO}Ivan (CEO): The new turn starts.`);
+    expect(fresh.prompt).toBe(`${IVAN_TO_BRUNO}Ivan (CEO): The new turn starts.${IVAN_IS}`);
     await finish(builtin, fresh, 'sess-2');
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
     await sayTo(app, ceo, bruno.id, 'Still you?');
@@ -812,7 +814,7 @@ describe("an employee's conversation", () => {
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dev.id] } });
     await takePlan(app.ctx.db, 'maria@acme.com', bruno.id);
     expect((await sayTo(app, maria, bruno.id, 'Hi Bruno')).statusCode).toBe(202);
-    expect((await nextRun(builtin)).prompt).toBe('From Maria to Bruno (Backend engineer, Development):\n\nMaria: Hi Bruno');
+    expect((await nextRun(builtin)).prompt).toBe('From Maria to Bruno (Backend engineer, Development):\n\nMaria: Hi Bruno\n\nMaria is responsible for your department.');
     for (const res of [await sayTo(app, maria, seller.id, 'Hi Sam'), await app.inject({ url: `/api/agents/${seller.id}/events`, ...as(maria) })]) {
       expect(res.statusCode).toBe(403);
       expect(res.json().error.reason).toBe('agent_hidden');
