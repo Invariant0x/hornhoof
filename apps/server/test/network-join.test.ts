@@ -484,6 +484,8 @@ describe('joining the company as a machine', () => {
         VALUES (gen_random_uuid(), ${w.machine}, 5, 'a', '0/1', ${to}, ${at}::timestamptz, ${JSON.stringify({ [row!.networkId!]: slot })}::jsonb)`);
     await handover('copy_0f0f0f0f0f0f0f0f_4', '2026-11-10T10:00:00Z');
     expect(await copy()).toMatchObject({ join: 'copy_0f0f0f0f0f0f0f0f_4' });
+    /* The view a keeper asks for each few seconds names it too: that is where a copy that follows hears of it. */
+    expect(((await c.peers(keeperOf(w.machine))).json() as { copy: { leader: string; join: string | null } }).copy).toMatchObject({ leader: server!.networkId, join: 'copy_0f0f0f0f0f0f0f0f_4' });
     /* Once the copy joined, its row names that slot, and there is nothing more to join. */
     await c.db.update(machines).set({ copyName: 'copy_0f0f0f0f0f0f0f0f_4' }).where(eq(machines.id, w.machine));
     expect(await copy()).toMatchObject({ join: null });

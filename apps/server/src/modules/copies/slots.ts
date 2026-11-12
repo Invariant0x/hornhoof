@@ -42,7 +42,7 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
    it is. join: the slot this machine made for the copy when it took the server in the newest planned switch, while the
    copy's row still names an attempt below it: a copy that held everything the leader before had written joins that
    slot, and takes no row again. */
-export async function copyOrder(ctx: Ctx, row: { id: string; networkId?: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
+export async function copyOrder(ctx: Ctx, row: { id: string; networkId: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
   const slot = !row.copyName ? null : !found ? 'missing' : found.walStatus === 'lost' ? 'lost' : 'ok';

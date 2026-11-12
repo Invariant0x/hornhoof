@@ -105,7 +105,8 @@ const keyChanged = () => new ApiError(409, 'conflict', "This machine's key chang
    database to be read as a copy's, which is compared the whole way all the same once it wrote. */
 const ledOf = (led: number | undefined): number | null => (led !== undefined && led >= 1 && led <= 999_999_999 ? led : null);
 
-type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; copyOldLed: number | null; uploadState: UploadState | null };
+/* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
+type Holder = { id: string; networkId: string | null; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; copyOldLed: number | null; uploadState: UploadState | null };
 
 /* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
    machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
@@ -152,11 +153,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function machineOf(who: Asker): Promise<Holder | null> {
     if (who.own) {
       const mine = await findThisMachine(db, config);
-      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null, copyOld: null, copyOldLed: null, uploadState: null } : null;
+      return mine ? { id: mine.id, networkId: config.machineId, role: 'data', personId: null, copyName: null, copyOld: null, copyOldLed: null, uploadState: null } : null;
     }
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
-    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName, copyOld: row.copyOld, copyOldLed: row.copyOldLed, uploadState: row.uploadState };
+    return { id: row.id, networkId: row.networkId, role: row.role!, personId: row.personId, copyName: row.copyName, copyOld: row.copyOld, copyOldLed: row.copyOldLed, uploadState: row.uploadState };
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
