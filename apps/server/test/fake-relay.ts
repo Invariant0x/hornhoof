@@ -72,7 +72,8 @@ function register(routes: Map<string, FakeRoute>, name: string, client: string):
 
 function drop(routes: Map<string, FakeRoute>, name: string): void {
   const route = routes.get(name);
-  if (route && holds(routes, name)) routes.set(name, { ...route, state: 'empty', client: null, since: nowSeconds() });
+  /* A free name still names the client that made its registration, as relay.py's route_body does. */
+  if (route && holds(routes, name)) routes.set(name, { ...route, state: 'empty', since: nowSeconds() });
 }
 
 /* The record the holder's post sets, or why the relay refuses it. */

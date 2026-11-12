@@ -94,7 +94,7 @@ describe('the fake relay keeps the contract', () => {
     expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 2 });
     relay.restartFrps();
     expect(relay.relayStarted).toBeGreaterThan(1);
-    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: null, generation: 2 });
+    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: 'acme-bbbbbbbb-link', generation: 2 });
     expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 3 });
   });
 
@@ -168,7 +168,7 @@ describe('the fake relay keeps the contract', () => {
     await sync(relay, 'acme', record);
     relay.restartFrps();
     const emptied = await route(relay, 'acme');
-    expect(emptied.body).toMatchObject({ state: 'empty', client: null, generation: 1, sync: { state: 'on', epoch: 5, generation: 1 } });
+    expect(emptied.body).toMatchObject({ state: 'empty', client: 'acme-aaaaaaaa-link', generation: 1, sync: { state: 'on', epoch: 5, generation: 1 } });
     relay.register('acme', 'acme-aaaaaaaa-link');
     const next = { ...record, generation: 2 };
     expect(await sync(relay, 'acme', { ...next, epoch: 5 })).toEqual({ status: 409, body: { error: 'stale_epoch' } });
@@ -193,7 +193,8 @@ describe('the fake relay keeps the contract', () => {
     const relay = await relayWithBinding();
     relay.register('acme', 'acme-aaaaaaaa-link');
     relay.drop('acme');
-    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: null, generation: 1 });
+    /* A free name still names the client that made its registration. */
+    expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: 'acme-aaaaaaaa-link', generation: 1 });
     expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 2 });
   });
 

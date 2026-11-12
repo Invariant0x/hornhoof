@@ -24,7 +24,7 @@ describe('reading a route', () => {
     fake.register('acme', CLIENT);
     expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'held', client: CLIENT, generation: 1 });
     fake.drop('acme');
-    expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'empty', client: null, generation: 1 });
+    expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'empty', client: CLIENT, generation: 1 });
   });
 
   it('reads anything else as unknown, never as empty', async () => {
