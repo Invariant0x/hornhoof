@@ -57,7 +57,7 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     const builtinMachine = sub.kind !== 'api_key' ? null : hub.isOnline(ownBuiltin(ctx.config)) ? ownMachine(ctx.config) : await pickBuiltin(ctx, db, null);
     if (sub.kind === 'api_key' ? !builtinMachine : !online.length) throw offline();
     /* A machine that installs a build takes no check: one of the plan's other machines does, or the person hears why not. */
-    const installing = await installingMachines(db);
+    const installing = await installingMachines(db, ctx.config);
     const ready = online.filter(n => n.status === 'ready');
     const node = ready.find(n => !installing.has(n.machineId));
     if (ready.length && !node) throw updating();

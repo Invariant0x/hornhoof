@@ -319,7 +319,7 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   const places = new Map<string, Place[]>();
   /* A machine that installs its build is no place for a part: offered, it would be picked for being idle, and every
      part would wait for it while others stand free. The server's own node is never such a machine. */
-  const busy = await installingMachines(ctx.db);
+  const busy = await installingMachines(ctx.db, ctx.config);
   for (const id of new Set(companyIds)) places.set(id, (await placesOf(ctx, id)).filter(place => !place.machineId || !busy.has(place.machineId)));
   return places;
 }
@@ -923,7 +923,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
     /* No part goes to a machine that installs its build now: asked and claimed in one transaction, so the word to install
        and this part never cross. The server's own node is never held so. */
     const taken = await db.transaction(async tx => {
-      if (place.builtin ? await holdsBuiltin(tx, place.builtinMachine) : await holdsMachine(tx, place.nodeId)) return null;
+      if (place.builtin ? await holdsBuiltin(tx, ctx.config, place.builtinMachine) : await holdsMachine(tx, place.nodeId)) return null;
       const [claimed] = await tx
         .update(testParts)
         .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, builtinMachine: place.builtinMachine, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })

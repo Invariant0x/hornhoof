@@ -1,19 +1,26 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { REPLICA_FILE } from './become.js';
+import { NoteUnreadable, readNote } from './notes.js';
 
 export const HANDING_FILE = 'handing.json';
 const TAKING_FILE = 'taking.json';
+/* A note that is there and cannot be read: a switch may be under way. */
+const UNREADABLE = Symbol('unreadable');
 /* The phases in which a keeper that wrote a switch down goes on with it when it starts again. */
-const TAKING = new Set<unknown>(['go', 'promoted']);
-const HANDING = new Set<unknown>(['offered', 'stopped', 'go', 'followed']);
+const TAKING = new Set<unknown>(['go', 'promoted', UNREADABLE]);
+const HANDING = new Set<unknown>(['offered', 'stopped', 'go', 'followed', UNREADABLE]);
 
-/* The phase a file of the keeper's folder names; none when it is missing or cannot be read. */
+const Noted = z.looseObject({ phase: z.string() });
+
+/* The phase a note of the keeper's folder names; none when there is no note. */
 function phaseOf(dir: string, file: string): unknown {
   try {
-    return (JSON.parse(readFileSync(join(dir, file), 'utf8')) as { phase?: unknown }).phase;
-  } catch {
-    return undefined;
+    return readNote(join(dir, file), Noted, 'a switch of the server')?.phase;
+  } catch (err) {
+    if (err instanceof NoteUnreadable) return UNREADABLE;
+    throw err;
   }
 }
 
@@ -24,7 +31,9 @@ export type KeeperRole = 'worker' | 'follow' | 'lead' | 'taking' | 'handing';
    that it hands the server over goes on with that: both are leading keepers, read from the keeper's own folder. One
    that keeps a copy runs the follow keeper: its keeper marked it with replica.json, or its database follows another
    through an enabled subscription, as on a machine whose control folder was lost. Any other machine holds the
-   company's data itself and leads. A change of role starts the keeper anew as the other kind. */
+   company's data itself and leads. A note of a switch that is there and cannot be read counts as a switch under way:
+   the keeper then runs as the one in the middle of it, which holds until the note can be read, since it may have
+   given the server away or not yet taken it. A change of role starts the keeper anew as the other kind. */
 export async function keeperRole(env: NodeJS.ProcessEnv, controlDir: string, dir: string, hasSubscription: () => Promise<boolean>): Promise<KeeperRole> {
   if (env.HORNHOOF_ROLE === 'worker') return 'worker';
   if (TAKING.has(phaseOf(dir, TAKING_FILE))) return 'taking';

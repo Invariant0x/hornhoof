@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Term } from '../../db/net.js';
@@ -8,6 +8,9 @@ import { REPLICA_FILE } from './become.js';
 import { COPY_STATE } from './copy.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
+import { IDLE_MS, Looks } from './looks.js';
+import { TermShape, walOf } from './sql-words.js';
+import { NoteUnreadable, readNote } from './notes.js';
 import { dropSlots, markHanded } from './promote.js';
 import { HANDING_FILE } from './role.js';
 import { seedView } from './seed-view.js';
@@ -29,7 +32,6 @@ const GO_WAIT_MS = 1000;
 const WAITING_SAID_MS = 60_000;
 const FOLLOW_DB = 'hornhoof';
 
-const TermShape = z.object({ number: z.number().int(), machine: z.string(), split: z.boolean() });
 const HandingShape = z.object({
   switch: z.uuid(),
   to: z.object({ machine: z.string(), networkId: z.string(), hostname: z.string() }),
@@ -50,21 +52,10 @@ const TakeStateShape = z.union([
   z.object({ state: z.literal('aborted'), switch: z.string(), follow: TermShape, why: z.literal('no_link').nullable() }),
 ]);
 
-/* What this keeper wrote down of a switch it hands the server over in; null when there is none, or none it can read. */
-export function readHanding(dir: string, log?: (line: string) => void): Handing | null {
-  let text: string;
-  try {
-    text = readFileSync(join(dir, HANDING_FILE), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log?.(`The keeper could not read what it wrote down of handing the server over: ${reasonOf(err)}`);
-    return null;
-  }
-  try {
-    return HandingShape.parse(JSON.parse(text));
-  } catch (err) {
-    log?.(`The keeper could not read what it wrote down of handing the server over: ${reasonOf(err)}`);
-    return null;
-  }
+/* What this keeper wrote down of a switch it hands the server over in; null when there is none. A note that is there
+   and cannot be read is no word that there is none: this throws, and whoever asked decides nothing on it. */
+export function readHanding(dir: string): Handing | null {
+  return readNote(join(dir, HANDING_FILE), HandingShape, 'handing the server over');
 }
 
 /* Written whole and then moved, so a keeper that starts again never reads half of it. */
@@ -108,12 +99,16 @@ export type HanderOptions = {
   now?: () => number;
   log: (line: string) => void;
   everyMs?: number;
+  /* How often it looks while no request stands and no switch is written down. */
+  idleMs?: number;
 };
 
 type Move = { request: string; machine: string; networkId: string | null; hostname: string; state: 'preparing' | 'switching' | 'failed'; askedAt: number; endedAt: number | null; numbered: boolean; data: boolean; live: boolean };
 
 export class Hander {
-  private timer: NodeJS.Timeout | null = null;
+  private readonly looks = new Looks(() => this.look(), () => this.pace());
+  /* A request stands, or a switch is written down: there is something to look at often. */
+  private under = false;
   private working: Promise<void> | null = null;
   private stopped = false;
   /* It followed, and its keeper ends: nothing more is looked at. */
@@ -127,12 +122,27 @@ export class Hander {
   private unfindableSaid = false;
   private phase: Handing['phase'] | null;
   /* The machine this keeper hands the server to, while a switch is written down. */
-  private target: Handing['to'] | null;
+  private target: Handing['to'] | null = null;
+  /* What it wrote down of a switch is there and cannot be read: it may have given the server away, so it holds. */
+  private unreadable = false;
 
   constructor(private readonly opts: HanderOptions) {
-    const handing = readHanding(opts.dir, opts.log);
+    this.phase = null;
+    try {
+      this.noted(readHanding(opts.dir));
+    } catch (err) {
+      if (!(err instanceof NoteUnreadable)) throw err;
+      this.unreadable = true;
+    }
+    this.under = this.unreadable || this.phase !== null;
+  }
+
+  /* What the note says now, as far as the other parts of the keeper ask. */
+  private noted(handing: Handing | null): Handing | null {
     this.phase = handing?.phase ?? null;
     this.target = handing?.to ?? null;
+    this.unreadable = false;
+    return handing;
   }
 
   private now(): number {
@@ -141,21 +151,25 @@ export class Hander {
 
   async start(): Promise<void> {
     await this.look();
-    this.timer = setInterval(() => void this.look(), this.opts.everyMs ?? EVERY_MS);
-    this.timer.unref();
+    this.looks.start();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.looks.stop();
     await this.working;
+  }
+
+  /* How long until its next look: a quarter of a second while a request stands or a switch is written down, a second
+     while neither is. */
+  pace(): number {
+    return this.under ? (this.opts.everyMs ?? EVERY_MS) : (this.opts.idleMs ?? IDLE_MS);
   }
 
   /* From the moment it stopped until it follows or leads again: this keeper takes no lease, says in its hello that it
      does not lead, and keeps its front door shut and its link's client stopped. */
   holds(): boolean {
-    return this.phase === 'stopped' || this.phase === 'go' || this.phase === 'followed';
+    return this.unreadable || this.phase === 'stopped' || this.phase === 'go' || this.phase === 'followed';
   }
 
   /* The machine the server goes to, while this keeper holds for the switch. */
@@ -178,6 +192,16 @@ export class Hander {
     return this.working;
   }
 
+  /* The note as it is now. One that cannot be read ends the look, and the keeper holds until it can be. */
+  private read(): Handing | null {
+    try {
+      return this.noted(readHanding(this.opts.dir));
+    } catch (err) {
+      if (err instanceof NoteUnreadable) this.unreadable = true;
+      throw err;
+    }
+  }
+
   private keep(handing: Handing): Handing {
     writeHanding(this.opts.dir, handing);
     this.phase = handing.phase;
@@ -192,10 +216,9 @@ export class Hander {
   }
 
   private async lookOnce(): Promise<void> {
-    const handing = readHanding(this.opts.dir, this.opts.log);
-    this.phase = handing?.phase ?? null;
-    this.target = handing?.to ?? null;
+    const handing = this.read();
     const move = handing ? null : await this.move();
+    this.under = handing !== null || move !== null;
     const sample = await this.sample(handing, move);
     await this.act(nextHandStep(sample), handing, move);
   }
@@ -237,7 +260,7 @@ export class Hander {
   /* Which copies hold where this machine's log ended: the target's slot, remembered from the first look that saw it
      there, and the other copies that are ready and read now. One that still makes its first copy is none of them. */
   private async copiesAt(handing: Handing, w: string, now: number): Promise<{ atW: string[]; online: string[] }> {
-    const wal = this.opts.wal ?? this.ownWal();
+    const wal = this.opts.wal ?? walOf(this.opts.sql);
     const slots = await wal.slots(w);
     const { rows } = await this.opts.sql.query<{ networkId: string; copyName: string | null; ready: boolean }>(
       `SELECT network_id AS "networkId", copy_name AS "copyName", copy_state IS NOT DISTINCT FROM 'ready' AS ready
@@ -251,16 +274,6 @@ export class Hander {
     return { online: others.map(row => row.networkId), atW: others.filter(row => slotOf(row)?.atW).map(row => row.networkId) };
   }
 
-  private ownWal(): NonNullable<HanderOptions['wal']> {
-    const { sql } = this.opts;
-    return {
-      position: async () => (await sql.query<{ lsn: string }>('SELECT pg_current_wal_lsn()::text AS lsn')).rows[0]!.lsn,
-      slots: async w =>
-        (await sql.query<{ name: string; read: boolean; atW: boolean }>(
-          'SELECT slot_name::text AS name, active_pid IS NOT NULL AS read, COALESCE(confirmed_flush_lsn >= $1::pg_lsn, false) AS "atW" FROM pg_replication_slots WHERE database = current_database()', [w])).rows,
-    };
-  }
-
   private async act(action: HandAction, handing: Handing | null, move: Move | null): Promise<void> {
     if (action.do === 'none') return;
     if (action.do === 'offer') return move ? this.offerTo(move) : undefined;
@@ -269,7 +282,7 @@ export class Hander {
     if (!handing) return;
     if (action.do === 'stop') return this.fence(this.keep({ ...handing, phase: 'stopped', fenced: false }));
     if (action.do === 'fence') return this.fence(handing);
-    if (action.do === 'read_w') return void this.keep({ ...handing, w: await (this.opts.wal ?? this.ownWal()).position() });
+    if (action.do === 'read_w') return void this.keep({ ...handing, w: await (this.opts.wal ?? walOf(this.opts.sql)).position() });
     if (action.do === 'go') return this.go(this.keep({ ...handing, phase: 'go', copies: action.copies }));
     if (action.do === 'send_go') return this.sendGo(handing);
     if (action.do === 'ask') return this.ask(handing);

@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { DROPPED_FILE, PROMISED_FILE, SETTLED_FILE } from '../updates/control.js';
 import type { Sql } from './lease-store.js';
+import { IDLE_MS, Looks } from './looks.js';
+import { walOf, type Wal } from './sql-words.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 import { dropSlots } from './promote.js';
 import type { CopyView } from './sync.js';
@@ -49,10 +51,12 @@ export type LeadUpdateOptions = {
   now?: () => number;
   log: (line: string) => void;
   everyMs?: number;
+  /* How often it looks while no update runs. */
+  idleMs?: number;
 };
 
 export class LeadUpdate {
-  private timer: NodeJS.Timeout | null = null;
+  private readonly looks = new Looks(() => this.look(), () => this.pace());
   private working: Promise<void> | null = null;
   private stopped = false;
   private failing = false;
@@ -72,15 +76,19 @@ export class LeadUpdate {
 
   async start(): Promise<void> {
     await this.look();
-    this.timer = setInterval(() => void this.look(), this.opts.everyMs ?? EVERY_MS);
-    this.timer.unref();
+    this.looks.start();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.looks.stop();
     await this.working;
+  }
+
+  /* How long until its next look: a quarter of a second while an update runs or this keeper has one to end, a second
+     while there is none. */
+  pace(): number {
+    return this.busy() ? (this.opts.everyMs ?? EVERY_MS) : (this.opts.idleMs ?? IDLE_MS);
   }
 
   /* Whether an update runs or this keeper still has one to end: no server is moved meanwhile. */
@@ -133,14 +141,8 @@ export class LeadUpdate {
     writePrivately(join(this.opts.controlDir, file), JSON.stringify(said));
   }
 
-  private wal(): NonNullable<LeadUpdateOptions['wal']> {
-    const { sql } = this.opts;
-    return this.opts.wal ?? {
-      position: async () => (await sql.query<{ lsn: string }>('SELECT pg_current_wal_lsn()::text AS lsn')).rows[0]!.lsn,
-      slots: async w =>
-        (await sql.query<{ name: string; read: boolean; atW: boolean }>(
-          'SELECT slot_name::text AS name, active_pid IS NOT NULL AS read, COALESCE(confirmed_flush_lsn >= $1::pg_lsn, false) AS "atW" FROM pg_replication_slots WHERE database = current_database()', [w])).rows,
-    };
+  private wal(): Wal {
+    return this.opts.wal ?? walOf(this.opts.sql);
   }
 
   /* The promised copies whose slot holds where the log ended. */

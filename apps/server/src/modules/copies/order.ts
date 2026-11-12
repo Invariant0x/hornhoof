@@ -91,8 +91,8 @@ export type Roles = { grant: string[]; retire: string | null; handover: boolean 
    CEO asked, and only while no other copy is being made. The copy that was ranked out goes only once both places hold
    an up-to-date copy, never the one commits wait for, and one that only stopped qualifying stays until a machine took
    its place. target: the machine the CEO asked the server moved to, while that request stands: when it has a number
-   it gets the data at once, beside the two copies when it is neither of them, and nothing here retires it; no other
-   copy is handed over in the run that gives it the data. */
+   and may get the data now it gets it at once, beside the two copies when it is neither of them, and nothing here
+   retires it; no other copy is handed over in the run that gives it the data. */
 export function planRoles(o: {
   numbered: { id: string; number: number }[];
   data: { id: string; number: number | null; out: boolean }[];
@@ -109,7 +109,8 @@ export function planRoles(o: {
   const target = o.target != null && o.numbered.some(row => row.id === o.target) ? o.target : null;
   /* A target that is neither of the two places holds its copy beside them, and takes no seat of theirs. */
   const beside = target !== null && !top.some(row => row.id === target);
-  const forced = target !== null && !holding.has(target);
+  /* Asked for or not, a machine gets the data only while it may: one that still owes what it held, or is away, waits. */
+  const forced = target !== null && !holding.has(target) && o.eligible.has(target);
   const without = top.filter(row => !holding.has(row.id) && o.eligible.has(row.id)).map(row => row.id);
   const seats = COPIES - o.data.filter(row => !(beside && row.id === target)).length;
   const there = [...o.numbered]

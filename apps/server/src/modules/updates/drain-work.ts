@@ -1,16 +1,22 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
-import { ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
+import { ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 
+/* The work that runs on a node now. Each machine that holds the data has a built-in node of its own, so a built-in
+   node's work is what names its machine; work that names none is of the built-in node of the machine this server
+   runs on, as all of it was before machines had theirs. */
 export async function drainWork(ctx: Ctx, node: NodeIdentity) {
-  const here = node.kind === 'builtin' ? isNull(jobs.nodeId) : eq(jobs.nodeId, node.nodeId);
+  const own = node.kind === 'builtin' && node.machine === ownMachine(ctx.config);
+  const onBuiltin = (machine: typeof jobs.builtinMachine | typeof testParts.builtinMachine, id: string) => (own ? or(eq(machine, id), isNull(machine)) : eq(machine, id));
+  const here = node.kind === 'builtin' ? and(isNull(jobs.nodeId), onBuiltin(jobs.builtinMachine, node.machine)) : eq(jobs.nodeId, node.nodeId);
   const turns = await ctx.db.select({ id: jobs.id, kind: jobs.kind, companyId: jobs.companyId, task: tasks.number, agent: agents.name })
     .from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).leftJoin(agents, eq(agents.id, jobs.agentId)).where(and(eq(jobs.status, 'running'), here));
   const parts = await ctx.db.select({ id: testParts.id, companyId: testParts.companyId }).from(testParts)
-    .where(and(eq(testParts.status, 'running'), node.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, node.nodeId)));
+    .where(and(eq(testParts.status, 'running'), node.kind === 'builtin' ? and(eq(testParts.builtin, true), onBuiltin(testParts.builtinMachine, node.machine)) : eq(testParts.nodeId, node.nodeId)))
+    .orderBy(testParts.part);
   return { turns, parts, turnsLeft: turns.filter(t => t.kind === 'conversation').length, partsLeft: parts.length };
 }
 

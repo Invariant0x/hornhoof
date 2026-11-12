@@ -38,8 +38,11 @@ describe('handing the server over', () => {
     expect(nextHandStep(hand({ move: move(), now: T0 + MOVE_WAIT_MS + 1 }))).toEqual({ do: 'fail', reason: 'expired' });
   });
 
-  it('fails a request whose target left, lost its place or lost the data', () => {
-    for (const target of [null, { ...READY, numbered: false }, { ...READY, data: false }]) expect(nextHandStep(hand({ move: move(), target })), JSON.stringify(target)).toEqual({ do: 'fail', reason: 'left' });
+  it('fails a request whose target left or lost its place', () => {
+    for (const target of [null, { ...READY, numbered: false }, { ...READY, numbered: false, data: false }]) expect(nextHandStep(hand({ move: move(), target })), JSON.stringify(target)).toEqual({ do: 'fail', reason: 'left' });
+    /* A machine with a number and no copy yet is being given one: the request is stored before the ranking that gives
+       it the data, and waits for that. */
+    for (const target of [{ ...READY, data: false }, { ...READY, data: false, named: false, onStored: false, pace: false }]) expect(nextHandStep(hand({ move: move(), target })), JSON.stringify(target)).toEqual({ do: 'none' });
   });
 
   it('offers once the target is named, the relay knows it and it keeps pace', () => {

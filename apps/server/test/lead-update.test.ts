@@ -84,9 +84,12 @@ describe('the keeper of the machine that leads during an update', () => {
     expect(u.it.busy()).toBe(false);
     await u.looks(2);
     expect(u.sent).toEqual([]);
+    /* With no update it looks once a second; while one runs, four times. */
+    expect(u.it.pace()).toBe(1000);
     u.status('promise');
     expect(u.it.busy()).toBe(true);
     await u.look();
+    expect(u.it.pace()).toBe(250);
     /* Each copy is told until when the company updates, and how many migrations come. */
     const until = START + 750 + PROMISE_MS;
     expect(u.sent).toEqual([[C, { version: '0.19.0', until, migrations: 2 }], [D, { version: '0.19.0', until, migrations: 2 }]]);

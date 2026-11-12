@@ -1266,6 +1266,9 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
   requestId: string | null; nodeId: string | null; builtin: boolean;
+  /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
+     and was this server's own. */
+  builtinMachine?: string | null;
   sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
 };
 /* computer: the machine a part was laid out for by its pace; it goes there while that machine is online and may take it. */

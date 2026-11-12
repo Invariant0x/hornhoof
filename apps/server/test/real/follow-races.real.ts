@@ -67,13 +67,16 @@ const grantOf = async (id: string) => (await db.select().from(machines).where(eq
 /* Every word to install that still counts is taken back, so one test's does not hold the next one's. */
 const clearGrants = () => db.update(machines).set({ goCommit: null, goAt: null });
 
+/* This server's own machine, which is none of the workers here. */
+const OWN = { machineId: 'f0'.repeat(16) };
+
 describe('a word to install and a claim of work', () => {
   it('gives the word to one of two workers that ask at once', async () => {
     await clearGrants();
     const [w1, w2] = [await worker('one'), await worker('two')];
     const holder = await holding('SELECT pg_advisory_xact_lock($1::bigint)', [FOLLOW_LOCK]);
     const now = new Date();
-    const asks = [db.transaction(tx => tryGrant(tx, w1.id, B, now)), other.transaction(tx => tryGrant(tx, w2.id, B, now))];
+    const asks = [db.transaction(tx => tryGrant(tx, OWN, w1.id, B, now)), other.transaction(tx => tryGrant(tx, OWN, w2.id, B, now))];
     await untilWaiting(2);
     await holder.query('COMMIT');
     expect((await Promise.all(asks)).sort()).toEqual([false, true]);
@@ -94,7 +97,7 @@ describe('a word to install and a claim of work', () => {
       await tx.insert(jobs).values({ companyId, subscriptionId: plan, nodeId: w.nodeId, kind: 'conversation', status: 'running', prompt: 'work', timeoutMs: 1000 });
     });
     await holdsRow;
-    const grant = other.transaction(tx => tryGrant(tx, w.id, B, new Date()));
+    const grant = other.transaction(tx => tryGrant(tx, OWN, w.id, B, new Date()));
     await turn;
     expect(await grant).toBe(false);
     expect(await grantOf(w.id)).toBeNull();

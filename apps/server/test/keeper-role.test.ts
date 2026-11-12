@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -56,11 +56,25 @@ describe('the keeper a machine runs', () => {
     for (const phase of ['offered', 'stopped', 'go', 'followed']) {
       expect([phase, await keeperRole({}, control(), keeperDir('handing.json', phase), async () => false)]).toEqual([phase, 'handing']);
     }
-    /* A switch it gave up: it leads again. A file that cannot be read says nothing. */
+    /* A switch it gave up: it leads again. */
     expect(await keeperRole({}, control(), keeperDir('handing.json', 'aborted'), async () => false)).toBe('lead');
-    const broken = keeperDir();
-    writeFileSync(join(broken, 'handing.json'), '{');
-    expect(await keeperRole({}, control(), broken, async () => false)).toBe('lead');
+  });
+
+  it('takes a note it cannot read for a switch under way', async () => {
+    /* Nobody knows then whether the server was given away or taken: the keeper that starts holds, as in the middle of
+       a switch, and neither leads on its own word nor follows as if nothing were. */
+    const handing = keeperDir();
+    writeFileSync(join(handing, 'handing.json'), '{');
+    expect(await keeperRole({}, control(), handing, async () => false)).toBe('handing');
+    const taking = keeperDir();
+    writeFileSync(join(taking, 'taking.json'), '{');
+    expect(await keeperRole({}, control(true), taking, async () => true)).toBe('taking');
+    /* So does a note that is there and cannot be opened. */
+    const closed = keeperDir();
+    mkdirSync(join(closed, 'taking.json'));
+    expect(await keeperRole({}, control(true), closed, async () => true)).toBe('taking');
+    /* A machine that keeps no data takes part in no switch, whatever lies in its folder. */
+    expect(await keeperRole({ HORNHOOF_ROLE: 'worker' }, control(), taking, async () => false)).toBe('worker');
   });
 
   it('leads anywhere else', async () => {

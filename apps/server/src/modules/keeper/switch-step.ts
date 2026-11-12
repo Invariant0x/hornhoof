@@ -59,15 +59,16 @@ export type HandAction =
 const NONE = { do: 'none' } as const;
 
 /* With nothing written down: a request waits for its target to be the copy commits wait for, and ends when it waited
-   a day or its target left. */
+   a day or its target left: its row is gone, or it has no number any more. A machine with a number that holds no copy
+   yet is being given one, since the request is stored before the ranking that gives its machine the data. */
 function requested(s: HandSample): HandAction {
   const { move, target, now } = s;
   if (!move) return NONE;
   if (move.state === 'failed') return move.endedAt !== null && now - move.endedAt > MOVE_WAIT_MS ? { do: 'forget' } : NONE;
   if (move.state === 'switching') return { do: 'fail', reason: 'no_answer' };
   if (now - move.askedAt > MOVE_WAIT_MS) return { do: 'fail', reason: 'expired' };
-  if (!target || !target.numbered || !target.data) return { do: 'fail', reason: 'left' };
-  return s.leads && !s.updating && target.named && target.onStored && target.pace ? { do: 'offer' } : NONE;
+  if (!target || !target.numbered) return { do: 'fail', reason: 'left' };
+  return s.leads && !s.updating && target.data && target.named && target.onStored && target.pace ? { do: 'offer' } : NONE;
 }
 
 /* Stopped: the fence first, then W, then the target at W, then the other copies for a while. A go is sent while the

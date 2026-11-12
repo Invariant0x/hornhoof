@@ -124,6 +124,42 @@ describe('the follow keeper of the machine the server moves to', () => {
     expect([t.state.did, t.said.exits]).toEqual([['disable'], 1]);
   });
 
+  it('ends by itself when the answer to go never went out', async () => {
+    const t = await taker();
+    const id = randomUUID();
+    await t.post(A, 'offer', { switch: id, term: TERM, deadline: 0 });
+    /* The go is written down, and then its answer is lost: the stream is gone, so nothing is done after it. */
+    const answer = await t.it.handle(A, 'POST', '/peer/switch/go', { switch: id, w: W, copies: [] });
+    expect([answer.status, t.taking()?.phase, t.said.exits]).toEqual([200, 'go', 0]);
+    /* The same word again is answered as taken, with nothing to do after it either. */
+    expect((await t.it.handle(A, 'POST', '/peer/switch/go', { switch: id, w: W, copies: [] })).after).toBeUndefined();
+    /* Its next look ends the keeper, once: it starts again as the one that takes the server. */
+    await t.it.tick();
+    await t.it.tick();
+    expect([t.said.exits, t.taking()?.phase]).toEqual([1, 'go']);
+
+    /* A go whose subscription could not be stopped is refused as a failure, and its next look stops it and ends. */
+    const other = await taker();
+    const second = randomUUID();
+    await other.post(A, 'offer', { switch: second, term: TERM, deadline: 0 });
+    const disable = other.it['opts'].subscription.disable;
+    other.it['opts'].subscription.disable = async () => Promise.reject(new Error('the database does not answer'));
+    await expect(other.it.handle(A, 'POST', '/peer/switch/go', { switch: second, w: W, copies: [] })).rejects.toThrow('the database does not answer');
+    expect([other.taking()?.phase, other.state.enabled, other.said.exits]).toEqual(['go', true, 0]);
+    await expect(other.it.tick()).rejects.toThrow('the database does not answer');
+    expect(other.said.exits).toBe(0);
+    other.it['opts'].subscription.disable = disable;
+    await other.it.tick();
+    expect([other.state.enabled, other.state.did, other.said.exits]).toEqual([false, ['disable'], 1]);
+    /* An answer that did go out ends it there, and the look after it ends nothing twice. */
+    const usual = await taker();
+    const third = randomUUID();
+    await usual.post(A, 'offer', { switch: third, term: TERM, deadline: 0 });
+    await usual.post(A, 'go', { switch: third, w: W, copies: [] });
+    await usual.it.tick();
+    expect(usual.said.exits).toBe(1);
+  });
+
   it('takes no go after the deadline', async () => {
     const t = await taker();
     const id = randomUUID();
@@ -198,6 +234,33 @@ describe('the follow keeper of the machine the server moves to', () => {
     t.said.now += ABORTED_KEEP_MS;
     await t.it.tick();
     expect(t.taking()).toBeNull();
+  });
+});
+
+describe('a note of a switch that cannot be read', () => {
+  it('is no word that there is no switch', async () => {
+    const t = await taker();
+    const id = randomUUID();
+    await t.post(A, 'offer', { switch: id, term: TERM, deadline: 0 });
+    await t.it.handle(A, 'POST', '/peer/switch/go', { switch: id, w: W, copies: [] });
+    writeFileSync(join(t.dir, TAKING_FILE), '{');
+    /* The machine that offered gets no answer, so it stays as it is and asks again; it is never told "none". */
+    await expect(t.it.handle(A, 'GET', `/peer/switch/state?switch=${id}`, undefined)).rejects.toThrow(/cannot read/);
+    await expect(t.it.handle(A, 'POST', '/peer/switch/abort', { switch: id })).rejects.toThrow(/cannot read/);
+    expect(() => readTaking(t.dir)).toThrow(/cannot read/);
+    /* Its copy's maker takes no step meanwhile, and its look ends nothing and forgets nothing. */
+    expect(t.it.going()).toBe(true);
+    await expect(t.it.tick()).rejects.toThrow(/cannot read/);
+    expect([t.said.exits, existsSync(join(t.dir, TAKING_FILE))]).toEqual([0, true]);
+
+    /* The keeper that takes the server over does not lead on it either: it promotes nothing and takes no lease. */
+    const p = await promoter({ phase: 'go' });
+    writeFileSync(join(p.dir, TAKING_FILE), 'not json');
+    await p.it.look();
+    await p.it.look();
+    expect([p.it.leads(), p.did, p.said.exits]).toEqual([false, [], 0]);
+    expect(p.lines.filter(line => line.includes('could not go on taking the server over'))).toHaveLength(1);
+    await expect(p.it.handle(A, 'GET', `/peer/switch/state?switch=${p.id}`, undefined)).rejects.toThrow(/cannot read/);
   });
 });
 
@@ -278,6 +341,16 @@ describe('a keeper that is taking the server over', () => {
     expect([p.taking(), p.it.leads(), p.said.exits]).toEqual([null, true, 0]);
     expect(p.lines).toEqual([`This machine leads the company now, under term ${TERM.number + 1}.`]);
     expect(p.state.did).toEqual([]);
+  });
+
+  it('looks often only while it takes the server', async () => {
+    const p = await promoter({ phase: 'go' });
+    await p.it.look();
+    expect([p.it.leads(), p.it.pace()]).toEqual([false, 250]);
+    /* With nothing written down it leads as any keeper, and has little to look at. */
+    rmSync(join(p.dir, TAKING_FILE));
+    await p.it.look();
+    expect([p.it.leads(), p.it.pace()]).toEqual([true, 1000]);
   });
 
   it('gives the server back when the name does not come', async () => {

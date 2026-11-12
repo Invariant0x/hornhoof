@@ -268,6 +268,11 @@ describe('who holds a copy after a ranking', () => {
     const waiting = { numbered: [at('D', 2), at('B', 3)], data: [holds('A', 4), holds('C', 5)], ready: new Set(['A', 'C']), handoverAt: new Date(NOW.getTime() - HOUR) };
     expect(plan(waiting)).toEqual(NOTHING);
     expect(plan({ ...waiting, target: 'B' })).toEqual({ grant: ['B'], retire: null, handover: false });
+    /* A target that may get no data now, as one that still owes what it held or is away, gets none for the asking:
+       the request waits until it may. */
+    const owes = new Set(['A', 'B']);
+    expect(plan({ ...copies, data: [holds('A', 2), holds('B', 3)], eligible: owes, target: 'D' })).toEqual(NOTHING);
+    expect(plan({ ...waiting, eligible: new Set(['A', 'C', 'D']), target: 'B' })).toEqual(NOTHING);
   });
 
   it('keeps the only copy', () => {

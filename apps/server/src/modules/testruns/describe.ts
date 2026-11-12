@@ -4,7 +4,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
-import { nodeIdentity, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
@@ -50,7 +50,7 @@ export type ProductPlanningPorts = {
 };
 const planningSources = new WeakMap<Ctx, PlanningSources>(), planningPorts = new WeakMap<Ctx, ProductPlanningPorts>();
 export function setProductPlanningPorts(ctx: Ctx, ports: ProductPlanningPorts): void { planningPorts.set(ctx, ports); }
-const requestNode = (ctx: Ctx, request: TestEnvironmentRequest): NodeIdentity | null => request.builtin ? ownBuiltin(ctx.config) : request.nodeId ? nodeIdentity(request.nodeId) : null;
+const requestNode = (ctx: Ctx, request: TestEnvironmentRequest): NodeIdentity | null => request.builtin ? builtinOf(request.builtinMachine ?? ownMachine(ctx.config)) : request.nodeId ? nodeIdentity(request.nodeId) : null;
 export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | null): void {
   const node = request && requestNode(ctx, request);
   if (node && request?.requestId) ctx.hub.send(node, { type: 'tests.describe.cancel', requestId: request.requestId });
@@ -219,7 +219,7 @@ async function assignDescription(ctx: Ctx, run: Run, open: Place[], target: Targ
   if (!place) return null;
   if (request.attempts >= 3) { await descriptionFailure(ctx, run, { code: 'commit_unavailable', detail: 'The metadata node was lost repeatedly.' }); return null; }
   cancelDescription(ctx, request);
-  const assigned = { ...request, requestId: randomUUID(), nodeId: place.nodeId, builtin: place.builtin, sentAt: new Date().toISOString(), attempts: request.attempts + 1 };
+  const assigned = { ...request, requestId: randomUUID(), nodeId: place.nodeId, builtin: place.builtin, builtinMachine: place.builtin ? place.builtinMachine : null, sentAt: new Date().toISOString(), attempts: request.attempts + 1 };
   await ctx.db.update(testRuns).set({ environmentRequest: assigned }).where(pendingDescription(run.id)); return assigned;
 }
 async function currentDescriptionAssignment(ctx: Ctx, run: Run, open: Place[], target: Target): Promise<TestEnvironmentRequest> {

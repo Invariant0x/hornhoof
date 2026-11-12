@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
+import { PROMISE_MS } from '../src/modules/keeper/update-steps.js';
 import { CopyUpdating, PROMISE_FILE, readWord } from '../src/modules/keeper/updating.js';
 import { createTestSql, ownDatabases } from './helpers.js';
 
@@ -92,6 +93,7 @@ describe('a copy during an update of the machine that leads', () => {
     for (const body of [{ stop: true }, { ended: true }]) expect((await c.ask(C, body))[0]).toBe(403);
     expect((await c.ask(A, { stop: true }))[0]).toBe(200);
     /* A renewal keeps the stop. */
+    c.said.now += MINUTES;
     expect((await c.ask(A, c.promise(later + MINUTES)))[0]).toBe(200);
     expect(c.word()).toMatchObject({ stopped: true, until: later + MINUTES });
     expect((await c.ask(A, { ended: true }))[0]).toBe(200);
@@ -114,6 +116,24 @@ describe('a copy during an update of the machine that leads', () => {
     await plain.ask(A, plain.promise());
     await plain.it.tick();
     expect(plain.did).toEqual([]);
+  });
+
+  it('counts the promise on its own clock', async () => {
+    /* The leader's clock is an hour ahead of this machine's, or an hour behind: the promise holds for a quarter of an
+       hour from when this machine heard it, whatever time the leader named. */
+    for (const skew of [60 * MINUTES, -60 * MINUTES]) {
+      const c = await copy();
+      expect((await c.ask(A, c.promise(START + skew + 15 * MINUTES)))[0], String(skew)).toBe(200);
+      expect([c.word()?.until, (await c.maintenance())[0]?.until, c.it.holds()]).toEqual([START + 15 * MINUTES, START + 15 * MINUTES, true]);
+      c.said.now = START + 15 * MINUTES - 1;
+      await c.it.tick();
+      expect(c.it.holds()).toBe(true);
+      /* A renewal counts from when it came. */
+      c.said.now = START + 5 * MINUTES;
+      await c.ask(A, c.promise(START + skew + 20 * MINUTES));
+      expect(c.word()?.until).toBe(START + 20 * MINUTES);
+    }
+    expect(PROMISE_MS).toBe(15 * MINUTES);
   });
 
   it('lets a promise run out', async () => {

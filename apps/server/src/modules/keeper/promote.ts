@@ -1,12 +1,11 @@
 import type { Term } from '../../db/net.js';
 import type { Sql } from './lease-store.js';
+import { ident, literal } from './sql-words.js';
 import { PUBLICATION } from './replica.js';
 
 /* The steps by which a copy becomes the leader and the old leader joins it, each on the keeper's own session and each
    doing nothing when its work is already done, so a keeper that starts again in the middle goes on. */
 
-const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
-const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
 /* The term this database stands under, and the position its time as the leader ended at, when it handed the server over. */
 export async function termOf(sql: Sql): Promise<(Term & { handedLsn: string | null }) | null> {

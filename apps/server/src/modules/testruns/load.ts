@@ -79,7 +79,8 @@ export async function harnessPlaces(ctx: Ctx, open: RunPlace[]): Promise<RunPlac
 
 type Capability = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1 };
 const capabilities = new WeakMap<Ctx, Map<string, Capability>>();
-const nodeKey = (id: NodeIdentity): string => id.kind === 'builtin' ? 'builtin' : id.nodeId;
+/* Each machine's built-in node under its own machine, so one's word never takes the place of another's. */
+const nodeKey = (id: NodeIdentity): string => id.kind === 'builtin' ? `builtin:${id.machine}` : id.nodeId;
 export function noteTestCapabilities(ctx: Ctx, id: NodeIdentity, value: Capability): void {
   const known = capabilities.get(ctx) ?? new Map<string, Capability>(); capabilities.set(ctx, known);
   known.set(nodeKey(id), value);

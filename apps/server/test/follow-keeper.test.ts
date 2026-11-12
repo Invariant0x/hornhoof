@@ -12,6 +12,7 @@ import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey } from '../src/modules/keeper/machine-keys.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
+import { PROMISE_MS } from '../src/modules/keeper/update-steps.js';
 import { readWord } from '../src/modules/keeper/updating.js';
 import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
 import { TEST_SECRET, until } from './helpers.js';
@@ -234,6 +235,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     await until(() => f.keeper.status().leader !== null);
     await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
     const ports = await f.keeper.peerPorts();
+    /* The time the leader names is of its own clock; the copy keeps the promise a quarter of an hour by its own. */
     const promise = { version: '0.19.0', until: 1000, migrations: 2 };
     /* Another data machine, here this one itself, is promised nothing: only the machine its link names as the leader is. */
     expect(await askingAt(ports.data, f.config.dir)('POST', '/peer/updating', promise)).toEqual([403, { ok: false }]);
@@ -251,7 +253,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect([waiting.status, waiting.json()]).toMatchObject([503, { error: { reason: 'maintenance' } }]);
     expect([made(), readKeeperState(f.config.controlDir)?.mode]).toEqual([steps, 'maintenance']);
     /* The promise ran out: the app reads again, and the time with no leader counts from here. */
-    clock.now = 1000;
+    clock.now = PROMISE_MS;
     await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
     expect([readWord(f.config.controlDir), f.lines]).toEqual([null, expect.arrayContaining(["The company server's update promise ran out."])]);
     await until(async () => (await ask(f.ports.front, { path: '/tasks' }).catch(() => null))?.body === "the copy's own app: /tasks");

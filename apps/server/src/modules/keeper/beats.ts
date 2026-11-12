@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { LeaseKind, Term } from '../../db/net.js';
 import { PEER_PATHS, type Peer } from '../../net/peer-server.js';
 import type { Clocks } from './lease.js';
+import { TermShape } from './sql-words.js';
 
 /* The machines that keep the company's data tell each other each second where they stand: which one leads and under
    which term, which follow it, and which is about to take the server. Each keeper sends its beat to every other one it
@@ -30,7 +31,6 @@ export type Beat = { machine: string; host: string; stance: Stance; number: numb
 export type Heard = { beat: Beat; at: number; sent: Clocks | null };
 
 const NETWORK_ID = z.string().regex(/^[0-9a-f]{32}([0-9a-f]{32})?$/);
-const TermShape = z.object({ number: z.number().int().min(0), machine: z.string().max(64), split: z.boolean() });
 const StanceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('lead'), term: TermShape, lease: z.enum(['normal', 'split', 'maintenance']), sync: NETWORK_ID.nullable(), until: z.number() }),
   z.object({ kind: z.literal('follow'), term: TermShape.nullable() }),

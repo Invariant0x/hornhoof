@@ -99,6 +99,7 @@ export class FollowKeeper {
   private replicaFails = false;
   private wordFails = false;
   private updatingFails = false;
+  private lookFails = false;
   private stopped = false;
 
   constructor(private readonly opts: FollowKeeperOptions) {
@@ -322,7 +323,16 @@ export class FollowKeeper {
   /* One look at a time, each second: the copy's next step, the word to the app, and the role a merge reads with. */
   private look(): void {
     if (this.working || this.stopped) return;
-    this.working = this.lookOnce().finally(() => { this.working = null; });
+    this.working = this.lookOnce()
+      .then(
+        () => void (this.lookFails = false),
+        (err: unknown) => {
+          /* A look that failed is said once an outage, and the next one tries again. */
+          if (!this.lookFails) this.opts.log(`The keeper could not look after its copy: ${reasonOf(err)}`);
+          this.lookFails = true;
+        },
+      )
+      .finally(() => { this.working = null; });
   }
 
   private async lookOnce(): Promise<void> {

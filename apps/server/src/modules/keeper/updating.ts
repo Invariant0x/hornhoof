@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
+import { PROMISE_MS } from './update-steps.js';
 
 /* What a machine that keeps a copy does while the machine that leads updates: it promises to wait, so it takes
    nothing over and makes no copy again, stops applying when the leader is about to migrate, and goes on once the
@@ -10,6 +11,7 @@ import { reasonOf, writePrivately } from './machine-keys.js';
 
 export const PROMISE_FILE = 'promise.json';
 
+/* until: when the promise ends, by this machine's own clock. */
 export type UpdateWord = { leader: string; version: string; until: number; migrations: number | null; stopped: boolean; at: number };
 
 /* A version goes into a line of the log and a row of the database, so it is a plain word. */
@@ -17,7 +19,8 @@ const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
 const WordShape = z.object({
   leader: z.string(), version: z.string().regex(VERSION), until: z.number(), migrations: z.number().int().nullable(), stopped: z.boolean(), at: z.number(),
 });
-const Promise_ = z.strictObject({ version: z.string().regex(VERSION), until: z.number().positive(), migrations: z.number().int().min(0).nullable() });
+/* until: when the promise ends by the leader's clock, which this machine does not go by. */
+const Promise_ = z.strictObject({ version: z.string().regex(VERSION), until: z.number(), migrations: z.number().int().min(0).nullable() });
 const Stop = z.strictObject({ stop: z.literal(true) });
 const Ended = z.strictObject({ ended: z.literal(true) });
 
@@ -113,7 +116,9 @@ export class CopyUpdating {
     /* The leader in maintenance says in its hello that it leads no more; the promise it renews is still its own. */
     if (from !== this.opts.leader() && from !== held?.leader) return no(403);
     const now = this.clock();
-    const word: UpdateWord = { leader: from, version: said.version, until: said.until, migrations: said.migrations, stopped: held?.stopped ?? false, at: now };
+    /* The promise holds for as long as the leader gives one, counted on this machine's own clock from when it heard
+       it: the time the leader named is of the leader's clock, and two clocks that differ change nothing. */
+    const word: UpdateWord = { leader: from, version: said.version, until: now + PROMISE_MS, migrations: said.migrations, stopped: held?.stopped ?? false, at: now };
     writePrivately(join(this.opts.controlDir, PROMISE_FILE), JSON.stringify(word));
     this.word = word;
     await this.opts.sql.query(

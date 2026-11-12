@@ -7,6 +7,7 @@ import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
 import { joinSlot } from './promote.js';
 import { ensureReplica, PUBLICATION, REPLICA_ROLE } from './replica.js';
+import { ident, literal } from './sql-words.js';
 
 /* In the control folder: what the copy maker asks its updater for, the leader's schema loaded into a database here.
    The updater answers in schema/<attempt>.done or .failed, and removes the request. */
@@ -106,8 +107,6 @@ export function copyName(networkId: string, attempt: number): string {
   return `copy_${networkId.slice(0, 16).toLowerCase()}_${attempt}`;
 }
 
-const ident = (name: string): string => `"${name.replaceAll('"', '""')}"`;
-const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 /* A moment as the name of a database holds it: YYYYMMDDtHHMMSS, in UTC. */
 export const stampOf = (at: Date): string => at.toISOString().replace(/[-:]/g, '').replace('T', 't').slice(0, 15);
 

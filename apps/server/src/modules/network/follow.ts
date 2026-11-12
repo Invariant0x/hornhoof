@@ -90,26 +90,30 @@ export function installs(row: Reported, now: Date): boolean {
   return row.updateState === 'installing' && row.reportAt !== null && now.getTime() - row.reportAt.getTime() < INSTALLING_SAID_MS;
 }
 
-/* A machine that joined the company follows the server's build, whichever it is now: a worker, or one that keeps a copy
-   of the data, whose schema is the server's and which installs as a worker does. The row of the machine the server
-   itself runs on is neither. */
-const joined = and(isNotNull(machines.role), notLike(machines.machineKey, `${SERVER_KEY}%`));
-const isJoined = (row: { role: string | null; machineKey: string }): boolean => row.role !== null && !row.machineKey.startsWith(SERVER_KEY);
+/* A machine of the company follows the server's build, whichever it is now, unless it is the machine this server
+   itself runs on: a worker, one that keeps a copy of the data, whose schema is the server's and which installs as a
+   worker does, and the machine the company was installed on once the server runs on another. This server's own row
+   is told by the id its machine goes by; an install with no such id tells it by the key its install gave it. */
+type Own = { machineId: string | null };
+const follows = (own: Own) =>
+  and(isNotNull(machines.role), own.machineId ? sql<boolean>`${machines.networkId} IS DISTINCT FROM ${own.machineId}` : notLike(machines.machineKey, `${SERVER_KEY}%`));
+const isFollower = (own: Own, row: { role: string | null; machineKey: string; networkId: string | null }): boolean =>
+  row.role !== null && (own.machineId ? row.networkId !== own.machineId : !row.machineKey.startsWith(SERVER_KEY));
 
 const within = (at: Date | null, ms: number, now: Date): boolean => at !== null && now.getTime() - at.getTime() < ms;
 
 /* Tells the machine to install the build, when it may: it downloaded the build, no other worker installs now, its last
    try at this build is long enough ago, and nothing runs on it. One decision at a time for the whole company, with the
    machine's row held, so no turn and no test part starts there while it is decided. */
-export async function tryGrant(tx: Db, machineId: string, build: LeaderBuild, now: Date): Promise<boolean> {
+export async function tryGrant(tx: Db, own: Own, machineId: string, build: LeaderBuild, now: Date): Promise<boolean> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${FOLLOW_LOCK}::bigint)`);
   const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
-  if (!row || row.revokedAt || !isJoined(row)) return false;
+  if (!row || row.revokedAt || !isFollower(own, row)) return false;
   if (row.updateCommit !== build.commit || row.updateState !== 'ready') return false;
   /* A grant that ran out counts as a try that failed. */
   if (row.goCommit === build.commit && within(row.goAt, FOLLOW_RETRY_MS, now)) return false;
   if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
-  const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), joined, or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+  const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   if (others.some(other => installs(other, now))) return false;
   const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
   const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
@@ -151,12 +155,12 @@ export async function releaseHeld(ctx: Ctx): Promise<void> {
    moment it was given and is never made longer. */
 export async function followOf(ctx: Ctx, machineId: string, now = new Date()): Promise<{ build: LeaderBuild | null; go: Go | null }> {
   const build = leaderBuild(ctx);
-  const [row] = build ? await ctx.db.select().from(machines).where(and(eq(machines.id, machineId), isNull(machines.revokedAt), joined)) : [];
+  const [row] = build ? await ctx.db.select().from(machines).where(and(eq(machines.id, machineId), isNull(machines.revokedAt), follows(ctx.config))) : [];
   if (!build || !row || row.commit === build.commit) return { build: null, go: null };
   if (row.goCommit === build.commit && goodGrant(row, now)) return { build, go: goOf(row, now) };
   /* Only a server that leads and does not install an update itself lets a worker begin. */
   if (ctx.mode.current() !== 'lead' || ctx.updater.status()?.state === 'running') return { build, go: null };
-  const granted = await ctx.db.transaction(tx => tryGrant(tx, machineId, build, now));
+  const granted = await ctx.db.transaction(tx => tryGrant(tx, ctx.config, machineId, build, now));
   if (!granted) return { build, go: null };
   pumpAfter(ctx, FOLLOW_TURN_MS);
   return { build, go: goOf({ ...row, goCommit: build.commit, goAt: now }, now) };
@@ -181,9 +185,9 @@ export async function holdsMachine(tx: Pick<Db, 'select'>, nodeId: string | null
 
 /* The same for the built-in node of the machine with this network id, with that machine's row held the same way. The
    machine this server runs on follows nobody, and is never held. */
-export async function holdsBuiltin(tx: Pick<Db, 'select'>, machine: string | null | undefined, now = new Date()): Promise<boolean> {
+export async function holdsBuiltin(tx: Pick<Db, 'select'>, own: Own, machine: string | null | undefined, now = new Date()): Promise<boolean> {
   if (!machine) return false;
-  const [row] = await tx.select().from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt), joined)).for('share');
+  const [row] = await tx.select().from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt), follows(own))).for('share');
   return row !== undefined && installs(row, now);
 }
 
@@ -194,13 +198,13 @@ export async function machineInstalls(db: Pick<Db, 'select'>, nodeId: string | n
 }
 
 /* The network ids of the machines that install now, for whoever picks a built-in node. */
-export async function installingBuiltins(db: Pick<Db, 'select'>, now = new Date()): Promise<Set<string>> {
-  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+export async function installingBuiltins(db: Pick<Db, 'select'>, own: Own, now = new Date()): Promise<Set<string>> {
+  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   return new Set(rows.filter(row => installs(row, now)).map(row => row.networkId!));
 }
 
 /* The machines that install now, for whoever places work: none of it is offered to them. */
-export async function installingMachines(db: Pick<Db, 'select'>, now = new Date()): Promise<Set<string>> {
-  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+export async function installingMachines(db: Pick<Db, 'select'>, own: Own, now = new Date()): Promise<Set<string>> {
+  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   return new Set(rows.filter(row => installs(row, now)).map(row => row.id));
 }

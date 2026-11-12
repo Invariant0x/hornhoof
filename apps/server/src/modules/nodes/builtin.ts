@@ -18,7 +18,7 @@ export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null):
   if (current === own || current === null) {
     if (there(own)) return own;
   }
-  const installing = await installingBuiltins(db);
+  const installing = await installingBuiltins(db, ctx.config);
   if (current && current !== own && there(current) && !installing.has(current)) return current;
   if (there(own)) return own;
   const ready = ctx.hub.builtins().filter(machine => machine !== own && !installing.has(machine));

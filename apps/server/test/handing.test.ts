@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql as raw } from 'drizzle-orm';
@@ -300,6 +300,36 @@ describe('the keeper that hands the server over', () => {
     await followed.look();
     expect([followed.did, followed.handing()]).toEqual([['exit'], null]);
     expect(JSON.parse(readFileSync(join(followed.dir, COPY_STATE), 'utf8'))).toMatchObject({ attempt: 4, phase: 'join', slot: 'copy_a0a0a0a0a0a0a0a0_4', leader: D });
+  });
+
+  it('holds while it cannot read what it wrote down', async () => {
+    /* It gave the go, and the note of that cannot be read: it does not know that the server is still its own. */
+    const h = await hander({ handing: { phase: 'go', fenced: true, w: W, copies: [] } });
+    expect(h.it.holds()).toBe(true);
+    writeFileSync(join(h.dir, HANDING_FILE), '{');
+    await h.looks(3);
+    expect([h.it.holds(), h.did]).toEqual([true, []]);
+    expect(() => readHanding(h.dir)).toThrow(/cannot read/);
+    expect(h.lines.filter(line => line.includes('cannot read'))).toHaveLength(1);
+    /* A keeper that starts over such a note holds from its start. */
+    const again = new Hander({ ...h.it['opts'] });
+    expect(again.holds()).toBe(true);
+    /* Readable again, it goes on from what it says. */
+    writeHanding(h.dir, { switch: h.request!, to: { machine: h.d.id, networkId: D, hostname: 'studio' }, term: TERM, at: START, deadline: START + SWITCH_MS, phase: 'go', fenced: true, w: W, copies: [], slot: null, reason: null });
+    await h.look();
+    expect(h.it.holds()).toBe(true);
+    expect(h.handing()?.phase).toBe('go');
+  });
+
+  it('looks often only while a request stands', async () => {
+    const idle = await hander({ request: false });
+    await idle.look();
+    expect(idle.it.pace()).toBe(1000);
+    const asked = await hander();
+    await asked.look();
+    expect(asked.it.pace()).toBe(250);
+    const noted = await hander({ request: false, handing: { phase: 'go', fenced: true, w: W, copies: [] } });
+    expect(noted.it.pace()).toBe(250);
   });
 
   it('claims only the request it saw', async () => {

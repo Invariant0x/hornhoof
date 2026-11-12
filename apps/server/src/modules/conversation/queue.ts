@@ -859,15 +859,15 @@ async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: strin
    the tasks that go out along with it, begins a new cycle: a server that stops once the turn went out never brings the
    line's old return back, and a turn whose cycle cannot be kept is not taken. The lines when one began a cycle. */
 async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
-  return ctx.db.transaction(tx => takeCurrent(tx, job, along, sending));
+  return ctx.db.transaction(tx => takeCurrent(tx, ctx.config, job, along, sending));
 }
 
 /* The turn's machine installs its build now: the turn is not taken and waits, and goes out when the machine is done. */
 const HELD = 'held';
 
-async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
+async function takeCurrent(tx: Tx, own: { machineId: string | null }, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
   if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
-  if ((await holdsMachine(tx, sending.nodeId)) || (await holdsBuiltin(tx, sending.builtinMachine))) return HELD;
+  if ((await holdsMachine(tx, sending.nodeId)) || (await holdsBuiltin(tx, own, sending.builtinMachine))) return HELD;
   const [row] = await tx
     .update(jobs)
     .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })

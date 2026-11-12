@@ -5,7 +5,9 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { drainWork } from '../src/modules/updates/drain-work.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 import { BUILTIN } from './builtin.js';
@@ -53,6 +55,26 @@ describe('planned node updates', () => {
     const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers, payload: {} });
     expect(response.statusCode).toBe(200);
     expect(nodeDrain(app.ctx, BUILTIN)?.state).toBe('restarting');
+  });
+
+  it("counts a built-in node's own work, and none of another machine's built-in node", async () => {
+    const f = await fixture();
+    const other = 'b0'.repeat(16);
+    /* The job of the fixture names no machine: it is of this server's own built-in node, from before machines had theirs. */
+    const [there] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
+    const [dept] = await f.db.insert(departments).values({ companyId: f.company.id, name: 'Dev', roleCode: 'DEV' }).returning();
+    const [task] = await f.db.insert(tasks).values({ companyId: f.company.id, number: 901, title: 'Run the tests', departmentId: dept!.id }).returning();
+    const [run] = await f.db.insert(testRuns).values({ companyId: f.company.id, number: 1, kind: 'tests', departmentId: dept!.id, taskId: task!.id, agentId: f.agent.id, jobId: f.job.id, branch: 'main', command: 'echo ok', parts: 2, timeoutMs: 60_000, status: 'running' }).returning();
+    const part = (n: number, builtinMachine: string | null) => f.db.insert(testParts).values({ companyId: f.company.id, runId: run!.id, part: n, status: 'running', builtin: true, builtinMachine, startedAt: new Date() }).returning();
+    const [[mine], [theirs]] = [await part(1, null), await part(2, other)];
+    const own = await drainWork(f.app.ctx, BUILTIN);
+    expect([own.turns.map(turn => turn.id), own.parts.map(one => one.id), own.turnsLeft, own.partsLeft]).toEqual([[f.job.id], [mine!.id], 1, 1]);
+    const copy = await drainWork(f.app.ctx, builtinOf(other));
+    expect([copy.turns.map(turn => turn.id), copy.parts.map(one => one.id)]).toEqual([[there!.id], [theirs!.id]]);
+    /* So this server's own node restarts once its own turn ended, whatever the copy's node still runs. */
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, f.job.id));
+    await f.db.update(testParts).set({ status: 'passed' }).where(eq(testParts.id, mine!.id));
+    expect((await f.prepare()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
   });
 
   it('waits for the last running turn without interrupting it, then permits the update', async () => {

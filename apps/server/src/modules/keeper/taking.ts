@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { REPLICA_FILE } from './become.js';
 import { COPY_STATE, copyName } from './copy.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
-import { dropSubscriptions, handoverOf, makeSlots, raiseSequences, recordHandover, termOf, writeTerm } from './promote.js';
+import { IDLE_MS, Looks } from './looks.js';
+import { ident, TermShape } from './sql-words.js';
+import { NoteUnreadable, readNote } from './notes.js';
+import { applyRunning, dropSubscriptions, handoverOf, makeSlots, raiseSequences, recordHandover, termOf, writeTerm } from './promote.js';
 import { ensurePublication } from './replica.js';
 import { nextTakeStep, SWITCH_MS, takeState, type Taking, type TakeState } from './switch-step.js';
 
@@ -19,7 +22,6 @@ export const SWITCH_PATH = '/peer/switch/';
 const EVERY_MS = 250;
 const PROBE_EVERY_MS = 1000;
 
-const TermShape = z.object({ number: z.number().int(), machine: z.string(), split: z.boolean() });
 const TakingShape = z.object({
   switch: z.uuid(),
   from: z.object({ networkId: z.string(), hostname: z.string().optional() }),
@@ -39,22 +41,10 @@ const Offer = z.object({ switch: z.uuid(), term: TermShape, deadline: z.number()
 const Go = z.object({ switch: z.uuid(), w: z.string().regex(LSN), copies: z.array(z.string().regex(NETWORK_ID)).max(64) });
 const Abort = z.object({ switch: z.uuid() });
 
-/* What this keeper wrote down of a switch it takes part in as the target; null when there is none. A file that cannot
-   be read counts as none, and is said. */
-export function readTaking(dir: string, log?: (line: string) => void): Taking | null {
-  let text: string;
-  try {
-    text = readFileSync(join(dir, TAKING_FILE), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log?.(`The keeper could not read what it wrote down of taking the server over: ${reasonOf(err)}`);
-    return null;
-  }
-  try {
-    return TakingShape.parse(JSON.parse(text));
-  } catch (err) {
-    log?.(`The keeper could not read what it wrote down of taking the server over: ${reasonOf(err)}`);
-    return null;
-  }
+/* What this keeper wrote down of a switch it takes part in as the target; null when there is none. A note that is
+   there and cannot be read is no word that there is none: this throws, and whoever asked decides nothing on it. */
+export function readTaking(dir: string): Taking | null {
+  return readNote(join(dir, TAKING_FILE), TakingShape, 'taking the server over');
 }
 
 /* Written whole and then moved, so a keeper that starts again never reads half of it. */
@@ -72,7 +62,6 @@ export type OwnSubscription = { enabled(): Promise<boolean>; applying(): Promise
 
 /* The subscription of a real Postgres, by the name the copy's maker gave it; with no name there is none. */
 export function pgSubscription(sql: Sql, name: () => Promise<string | null>): OwnSubscription {
-  const ident = (text: string): string => `"${text.replaceAll('"', '""')}"`;
   const enabled = async (): Promise<boolean> => {
     const { rows } = await sql.query<{ enabled: boolean }>(
       'SELECT s.subenabled AS enabled FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() AND s.subname = $1', [await name()]);
@@ -85,10 +74,8 @@ export function pgSubscription(sql: Sql, name: () => Promise<string | null>): Ow
   return {
     enabled,
     applying: async () => {
-      const { rows } = await sql.query<{ running: boolean }>(
-        `SELECT s.subenabled AND EXISTS (SELECT 1 FROM pg_stat_subscription st WHERE st.subid = s.oid AND st.relid IS NULL AND st.pid IS NOT NULL) AS running
-           FROM pg_subscription s JOIN pg_database d ON d.oid = s.subdbid WHERE d.datname = current_database() AND s.subname = $1`, [await name()]);
-      return rows[0]?.running === true;
+      const subscription = await name();
+      return subscription !== null && (await applyRunning(sql, subscription));
     },
     disable: () => set('DISABLE'),
     enable: () => set('ENABLE'),
@@ -140,7 +127,7 @@ type Paths = {
    it recorded. Only the machine that offered is answered; with nothing written down, the machine the handover names
    as the leader before, so a new leader of any kind tells an old one that comes back late that it leads. */
 async function stateOf(p: Paths, from: string, id: string): Promise<SwitchAnswer> {
-  const mine = readTaking(p.dir, p.log);
+  const mine = readTaking(p.dir);
   const taking = mine?.switch === id ? mine : null;
   const handover = await handoverOf(p.sql, id);
   if (taking ? taking.from.networkId !== from : handover !== null && handover.term.machine !== from) return refused(403);
@@ -192,7 +179,17 @@ export type TakerOptions = {
    and its subscription stopped, the keeper ends and starts again as the one that takes over. The deadline is counted
    on this machine's own clock from the moment the offer came, so two clocks that differ change nothing. */
 export class Taker {
+  /* This keeper was told to end, once. */
+  private ended = false;
+
   constructor(private readonly opts: TakerOptions) {}
+
+  /* The keeper ends, to start again as the one that takes the server; however often this is asked, it ends once. */
+  private end(): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.opts.exit();
+  }
 
   private now(): number {
     return this.opts.now?.() ?? Date.now();
@@ -212,16 +209,28 @@ export class Taker {
     return this.abort(from, what.body);
   }
 
-  /* Each second: an offer nobody followed ends at its deadline, and a switch that was given up is forgotten in time. */
+  /* Each second: an offer nobody followed ends at its deadline, and a switch that was given up is forgotten in time.
+     A go that was taken ends this keeper also when the answer to it never went out, or its subscription could not be
+     stopped then: the go is written down, so whatever was left of it is done here. */
   async tick(): Promise<void> {
-    const taking = readTaking(this.opts.dir, this.opts.log);
+    const taking = readTaking(this.opts.dir);
+    if (taking?.phase === 'go') {
+      if (await this.opts.subscription.enabled()) await this.opts.subscription.disable();
+      return this.end();
+    }
     const step = nextTakeStep({ now: this.now(), taking, termWritten: false, registered: false, probed: false, appLeads: false });
     if (step.do === 'expire' || step.do === 'forget') forgetTaking(this.opts.dir);
   }
 
-  /* Whether a go was taken, and this keeper is to end: its subscription stays stopped from then on. */
+  /* Whether a go was taken, and this keeper is to end: its subscription stays stopped from then on. A note that
+     cannot be read counts as one, so nothing starts the subscription again on it. */
   going(): boolean {
-    return readTaking(this.opts.dir)?.phase === 'go';
+    try {
+      return readTaking(this.opts.dir)?.phase === 'go';
+    } catch (err) {
+      if (err instanceof NoteUnreadable) return true;
+      throw err;
+    }
   }
 
   private async offer(from: string, body: unknown): Promise<SwitchAnswer> {
@@ -229,7 +238,7 @@ export class Taker {
     const leader = this.opts.leader();
     if (!leader || leader.networkId !== from) return refused(403);
     if (!offer.success) return refused(409, 'not_ready');
-    const taking = readTaking(this.opts.dir, this.opts.log);
+    const taking = readTaking(this.opts.dir);
     if (taking && taking.phase !== 'aborted') {
       return taking.switch === offer.data.switch && taking.phase === 'offered' && taking.from.networkId === from ? OK : refused(409, 'not_ready');
     }
@@ -244,7 +253,7 @@ export class Taker {
 
   private async go(from: string, body: unknown): Promise<SwitchAnswer> {
     const go = Go.safeParse(body);
-    const taking = readTaking(this.opts.dir, this.opts.log);
+    const taking = readTaking(this.opts.dir);
     if (!taking || taking.from.networkId !== from) return refused(403);
     if (!go.success || taking.switch !== go.data.switch) return refused(409);
     if (taking.phase === 'go') return OK;
@@ -253,12 +262,12 @@ export class Taker {
     writeTaking(this.opts.dir, { ...taking, phase: 'go', w: go.data.w, copies: go.data.copies });
     await this.opts.subscription.disable();
     this.opts.log(`Taking the server over from ${taking.from.hostname || 'the machine that led'}.`);
-    return { ...OK, after: () => this.opts.exit() };
+    return { ...OK, after: () => this.end() };
   }
 
   private async abort(from: string, body: unknown): Promise<SwitchAnswer> {
     const abort = Abort.safeParse(body);
-    const taking = readTaking(this.opts.dir, this.opts.log);
+    const taking = readTaking(this.opts.dir);
     if (!taking || taking.from.networkId !== from) return refused(403);
     if (!abort.success || taking.switch !== abort.data.switch) return refused(409);
     /* A follow keeper writes no term: the machine that takes over does, once it started again. */
@@ -286,6 +295,8 @@ export type PromoterOptions = {
   now?: () => number;
   log: (line: string) => void;
   everyMs?: number;
+  /* How often it looks once nothing of a switch is left to do. */
+  idleMs?: number;
 };
 
 /* In a leading keeper that is taking the server over. Until it promoted, the keeper takes no lease. It starts its
@@ -294,7 +305,9 @@ export type PromoterOptions = {
    When the name does not come before the deadline it gives the server back: the old leader leads again. Once its term
    is written there is no way back, and it promotes whatever the time. */
 export class Promoter {
-  private timer: NodeJS.Timeout | null = null;
+  private readonly looks = new Looks(() => this.look(), () => this.pace());
+  /* A switch is written down that is not through yet. */
+  private under = true;
   private working: Promise<void> | null = null;
   private stopped = false;
   private started = false;
@@ -315,15 +328,19 @@ export class Promoter {
 
   async start(): Promise<void> {
     await this.look();
-    this.timer = setInterval(() => void this.look(), this.opts.everyMs ?? EVERY_MS);
-    this.timer.unref();
+    this.looks.start();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.looks.stop();
     await this.working;
+  }
+
+  /* How long until its next look: a quarter of a second while it takes the server, a second once it leads as any
+     keeper. */
+  pace(): number {
+    return this.under ? (this.opts.everyMs ?? EVERY_MS) : (this.opts.idleMs ?? IDLE_MS);
   }
 
   /* Promoted: the keeper may take its lease and start what a leading keeper runs. */
@@ -351,7 +368,7 @@ export class Promoter {
     const what = asked(method, path, body);
     if (!what) return refused(404);
     if (what.name === 'state') return stateOf(this.paths(), from, what.switch);
-    const taking = readTaking(this.opts.dir, this.opts.log);
+    const taking = readTaking(this.opts.dir);
     if (!taking || taking.from.networkId !== from) return refused(403);
     if (what.name === 'offer') return refused(409, 'not_ready');
     const named = z.object({ switch: z.uuid() }).safeParse(what.body);
@@ -367,7 +384,8 @@ export class Promoter {
 
   private async lookOnce(): Promise<void> {
     const { opts } = this;
-    const taking = readTaking(opts.dir, opts.log);
+    const taking = readTaking(opts.dir);
+    this.under = taking !== null && taking.phase !== 'promoted';
     if (!taking) {
       /* Nothing written down: the switch ended, and this keeper leads as any other. */
       this.promoted = true;

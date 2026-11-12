@@ -121,7 +121,7 @@ describe("following the server's build", () => {
     /* One machine at a time, whichever kind: the worker waits for the copy. */
     expect((await c.view(copy)).go).toMatchObject({ commit: COMMIT });
     expect((await c.view(w)).go).toBeNull();
-    expect([...(await installingMachines(c.db))]).toEqual([copy]);
+    expect([...(await installingMachines(c.db, c.config))]).toEqual([copy]);
     await c.report(copy, { commit: COMMIT, update: null });
     expect(await c.view(copy)).toMatchObject({ build: null, go: null });
     expect((await c.view(w)).go).toMatchObject({ commit: COMMIT });
@@ -137,15 +137,45 @@ describe("following the server's build", () => {
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, turn!.id));
     expect((await c.view(again)).go).toMatchObject({ commit: COMMIT });
     /* With the word given, nothing new goes to its built-in node. */
-    expect(await c.db.transaction(tx => holdsBuiltin(tx, networkId))).toBe(true);
-    expect(await c.db.transaction(tx => holdsBuiltin(tx, HOST_ID))).toBe(false);
-    expect([...(await installingBuiltins(c.db))]).toEqual([networkId]);
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, c.config, networkId))).toBe(true);
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, c.config, HOST_ID))).toBe(false);
+    expect([...(await installingBuiltins(c.db, c.config))]).toEqual([networkId]);
     await c.report(again, { commit: COMMIT, update: null });
     /* The machine the server itself runs on follows nobody. */
     await c.app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: newKey() }, remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } });
     const [server] = await c.db.select().from(machines).where(eq(machines.networkId, HOST_ID));
     await c.db.update(machines).set({ commit: OLD, updateCommit: COMMIT, updateState: 'ready' }).where(eq(machines.id, server!.id));
     expect(await followOf(c.ctx, server!.id)).toEqual({ build: null, go: null });
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, c.config, HOST_ID))).toBe(false);
+    expect([[...(await installingMachines(c.db, c.config))], [...(await installingBuiltins(c.db, c.config))]]).toEqual([[], []]);
+  });
+
+  it('lets the machine the company was installed on follow once the server runs elsewhere', async () => {
+    const c = await company();
+    /* The server moved here in a planned switch: the row the company's install made for its first machine is of a
+       machine that keeps a copy now, and this server's own row is another. */
+    const first = await c.worker('debian', { machineKey: `server:${hashToken('debian')}`, role: 'data', copyState: 'ready' });
+    await c.ready(first);
+    const said = await c.view(first);
+    expect(said).toMatchObject({ build: B, go: { commit: COMMIT } });
+    /* It takes its turn as any machine does: while it installs, its built-in node is held and no other machine begins. */
+    const [{ networkId }] = [await c.rowOf(first)];
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, c.config, networkId))).toBe(true);
+    const w = await c.worker('mac');
+    await c.ready(w);
+    expect((await c.view(w)).go).toBeNull();
+    await c.report(first, { commit: COMMIT, update: null });
+    expect((await c.view(w)).go).toMatchObject({ commit: COMMIT });
+    /* A stale word of this server's own row, left from the time it followed, holds nothing and nobody. */
+    await c.app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: newKey() }, remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } });
+    const [own] = await c.db.select().from(machines).where(eq(machines.networkId, HOST_ID));
+    await c.db.update(machines).set({ commit: OLD, goCommit: COMMIT, goAt: new Date(), updateCommit: COMMIT, updateState: 'installing', reportAt: new Date() }).where(eq(machines.id, own!.id));
+    await c.report(w, { commit: COMMIT, update: null });
+    const late = await c.worker('late');
+    await c.ready(late);
+    expect((await c.view(late)).go).toMatchObject({ commit: COMMIT });
+    expect(await c.db.transaction(tx => holdsBuiltin(tx, c.config, HOST_ID))).toBe(false);
+    expect([[...(await installingMachines(c.db, c.config))], [...(await installingBuiltins(c.db, c.config))]]).toEqual([[late], [(await c.rowOf(late)).networkId]]);
   });
 
   it('never extends a grant, and remembers a failure', async () => {
@@ -215,12 +245,12 @@ describe("following the server's build", () => {
     await c.db.update(machines).set({ reportAt: new Date(late.getTime() - 20_000) }).where(eq(machines.id, w1));
     expect(goodGrant(await c.rowOf(w1), late)).toBe(false);
     expect(installs(await c.rowOf(w1), late)).toBe(true);
-    expect((await installingMachines(c.db, late)).has(w1)).toBe(true);
+    expect((await installingMachines(c.db, c.config, late)).has(w1)).toBe(true);
     expect((await followOf(c.ctx, w2, late)).go).toBeNull();
     /* A machine that fell silent holds nothing. */
     const silent = new Date(late.getTime() + 5 * MINUTE);
     expect(installs(await c.rowOf(w1), silent)).toBe(false);
-    expect((await installingMachines(c.db, silent)).has(w1)).toBe(false);
+    expect((await installingMachines(c.db, c.config, silent)).has(w1)).toBe(false);
     expect((await followOf(c.ctx, w2, silent)).go).toMatchObject({ commit: COMMIT });
   });
 

@@ -145,7 +145,7 @@ const helloRow = (msg: Hello, now: Date) => ({
 
 /* Why the built-in node's turns are gone. A personal node's comes from its row, once the hello is known to be its own. */
 const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
-  id.kind === 'builtin' ? builtinInterruption(ctx, msg, now) : undefined;
+  id.kind === 'builtin' ? builtinInterruption(ctx, id.machine, msg, now) : undefined;
 
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
