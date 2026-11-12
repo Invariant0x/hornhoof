@@ -294,6 +294,12 @@ export class FollowKeeper {
   /* The front door and the door to the leader's database, once both listen. */
   async start(): Promise<{ front: number; door: number }> {
     const { front } = await this.worker.start();
+    /* Until a leader answers, the network is as this keeper last wrote it down: whose certificates count, which
+       machines keep the data, whom it beats with. With no leader in reach, as when the server was handed over and
+       never taken or the leader stopped, it would else serve nobody and hear nobody. What that view said of this
+       machine's copy was a leader's word of then, and is not taken. */
+    const kept = this.worker.known();
+    if (!this.view && kept) this.view = { ...kept, copy: null };
     await this.peerDoor.start();
     this.servePeers();
     const door = await this.door.listen(this.opts.ports?.door ?? KEEPER_PORTS.db);

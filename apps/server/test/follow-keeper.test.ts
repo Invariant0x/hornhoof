@@ -57,13 +57,13 @@ function emptyCluster() {
 
 /* A machine that joined, was given the data by the server, and whose keeper is started anew as one that follows: as its
    updater leaves it once the settings are written. */
-async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, before: (dir: string) => void = () => undefined) {
+async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, before: (dir: string) => void | Promise<void> = () => undefined) {
   const w = await worker(c);
   await until(async () => (await c.rowOf(w.machine)).ageKey !== null);
   await c.db.update(machines).set({ role: 'data' }).where(eq(machines.id, w.machine));
   await until(() => existsSync(join(w.config.controlDir, 'role.json')) && heldIn(w.config.dir).role === 'data');
   await w.stop();
-  before(w.config.dir);
+  await before(w.config.dir);
   const lines: string[] = [];
   const cluster = emptyCluster();
   const keeper = new FollowKeeper({
@@ -128,6 +128,17 @@ function askingAt(port: number, certDir: string) {
 }
 
 describe('the keeper of a machine that keeps a copy', () => {
+  it('opens its door to the other machines by what it kept, with no leader in reach', async () => {
+    const c = await company();
+    /* The machine that led is gone before this keeper starts, as when the server was handed over and never taken, or
+       the leader stopped: no view comes, and whoever asks this machine where it stands must still get in. */
+    const f = await follower(c, {}, () => c.stop());
+    const ports = await Promise.race([f.keeper.peerPorts(), new Promise<null>(resolve => setTimeout(() => resolve(null), 3000))]);
+    expect(ports).not.toBeNull();
+    /* Its own certificate is one of the company's, and the list it kept is the one the leader signed. */
+    expect(await askingAt(ports!.data, f.config.dir)('GET', '/peer/hello')).toMatchObject([200, { role: 'data', lead: false }]);
+  });
+
   it('takes no lease and runs no link', async () => {
     const c = await company();
     const f = await follower(c);

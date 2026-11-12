@@ -316,6 +316,12 @@ export class WorkerKeeper {
     return { front };
   }
 
+  /* What this keeper knows of the network: the leader's last answer, or, until one comes, what it kept of one before
+     it started. */
+  known(): KeeperView | null {
+    return this.view;
+  }
+
   status(): WorkerStatus {
     const held = this.certificates?.current() ?? null;
     const leader = this.leader();
