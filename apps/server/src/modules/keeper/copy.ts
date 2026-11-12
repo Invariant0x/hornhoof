@@ -34,6 +34,9 @@ const OFF_FOR_MS = 2_000;
 const FIRST_DB = 'hornhoof';
 const LEADER_DB = 'hornhoof';
 const PASSFILE = 'replica.pgpass';
+/* Whether a file is there, by its path. Its size is asked, and not the whole answer: a row is null to Postgres
+   unless every field of it is set, and a file's time of creation never is on Linux. */
+export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL AS there';
 
 /* The steps of putting a copy that was made again in the place of the old one, each written down before it runs. */
 export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'drop_db' | 'read';
@@ -378,7 +381,7 @@ export class CopyMaker {
     const dir = (await this.one<{ data_directory: string }>(sql, 'SHOW data_directory'))?.data_directory;
     if (!dir) throw new Error('the database does not say where its folder is');
     const passfile = `${dir}/${PASSFILE}`;
-    if (!(await this.one<{ there: boolean }>(sql, 'SELECT pg_stat_file($1, true) IS NOT NULL AS there', [passfile]))?.there) {
+    if (!(await this.one<{ there: boolean }>(sql, PASSFILE_THERE, [passfile]))?.there) {
       const request = join(this.opts.controlDir, SCHEMA_FILE);
       if (!existsSync(request)) writePrivately(request, JSON.stringify({ attempt: this.kept.attempt, database: this.kept.database, port: this.publisher().port, password: this.opts.password, only: 'passfile' }));
       return;

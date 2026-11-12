@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { agentRole, HIDDEN, openAgentSql } from '../../src/db/agent-sql.js';
-import { copyName } from '../../src/modules/keeper/copy.js';
+import { copyName, PASSFILE_THERE } from '../../src/modules/keeper/copy.js';
 import { keeperSql, leaseStore } from '../../src/modules/keeper/lease-store.js';
 import { REPLICA_ROLE } from '../../src/modules/keeper/replica.js';
 import { pair, type Pair } from './pair.js';
@@ -51,6 +51,10 @@ describe('a copy of the company on a second Postgres', () => {
     const fences = keeperSql(p.copyUrl('hornhoof'), { timeoutMs: 20_000 });
     try {
       expect((await leaseStore(fences, { machineId: p.networkId }).problems()).filter(line => line.startsWith('PUBLIC may still run net.'))).toEqual([]);
+      /* The maker asks whether the file with the reading role's password is there before a copy joins a new leader. */
+      const there = async (file: string) => (await fences.query<{ there: boolean }>(PASSFILE_THERE, [file])).rows[0]!.there;
+      const folder = (await fences.query<{ data_directory: string }>('SHOW data_directory')).rows[0]!.data_directory;
+      expect([await there(`${folder}/replica.pgpass`), await there(`${folder}/no-such-file`)]).toEqual([true, false]);
     } finally {
       await fences.close();
     }
