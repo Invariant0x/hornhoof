@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { Feedback } from '../src/screens/Feedback';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
 
@@ -128,6 +129,17 @@ describe('the feedback window', () => {
     expect(within(about).queryByRole('link', { name: 'Report a bug or suggest an idea' })).not.toBeInTheDocument();
     await user.click(within(about).getByRole('button', { name: 'Report a bug or suggest an idea' }));
     expect(await screen.findByRole('dialog', { name: 'Write to Hornhoof developers' })).toBeInTheDocument();
+  });
+
+  it('keeps the focus where the person types when the screen behind it is drawn again', async () => {
+    localStorage.setItem('hh-lang', 'en');
+    const { rerender } = render(<LanguageProvider><Feedback inbox={false} onClose={() => {}} /></LanguageProvider>);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Title'), 'Terminal');
+    rerender(<LanguageProvider><Feedback inbox={false} onClose={() => {}} /></LanguageProvider>);
+    await user.keyboard(' froze');
+    expect(screen.getByLabelText('Title')).toHaveFocus();
+    expect(screen.getByLabelText('Title')).toHaveValue('Terminal froze');
   });
 
   it('speaks Russian', async () => {

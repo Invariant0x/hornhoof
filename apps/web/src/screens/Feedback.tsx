@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import type { FeedbackKind, FeedbackShown } from '../types';
@@ -222,12 +222,22 @@ function SentStep({ inbox, onClose }: { inbox: boolean; onClose: () => void }) {
   );
 }
 
+/* The same function for the window's whole life, calling the latest onClose: a screen behind it drawn again with a new one
+   does not focus the window again and take the focus from what the person types. */
+function useSteady(onClose: () => void): () => void {
+  const latest = useRef(onClose);
+  useEffect(() => {
+    latest.current = onClose;
+  });
+  return useCallback(() => latest.current(), []);
+}
+
 /* The quick window for writing to Hornhoof's developers: a bug, an improvement or an idea, then exactly what goes, and
    only the press of Send sends it. inbox: this is Hornhoof's own installation, where it goes into the inbox. */
 export function Feedback({ inbox, start, onClose, onSent }: { inbox: boolean; start?: FeedbackStart; onClose: () => void; onSent?: () => void }) {
   const t = useT();
   const id = useId();
-  const box = useDialogClose(onClose);
+  const box = useDialogClose(useSteady(onClose));
   const flow = useFlow(start, onSent);
   return (
     <div className="dialog-back" onPointerDown={event => event.target === event.currentTarget && onClose()}>
