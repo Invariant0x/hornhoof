@@ -2,11 +2,11 @@
    only these tokens: colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay
    the same in every theme. src/theme-template.ts holds the same values for the samples it gives out. */
 :root {
-  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #A9B7C5;
+  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #768695;
   --ink: #0F1B27; --muted: #4C5A68;
-  --p-claude: #C2593A; --p-kimi: #1667E0; --p-glm: #3D47D6; --p-antigravity: #1E8E3E;
-  --cyan: #00A3BD; --cyan-ink: #00768A; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #1E8E4E;
-  --red: #D32F2F; --on-red: #FFFFFF;
+  --p-claude: #A84628; --p-kimi: #125BC7; --p-glm: #3D47D6; --p-antigravity: #157331;
+  --cyan: #00A3BD; --cyan-ink: #006E80; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #13753D;
+  --red: #C62828; --on-red: #FFFFFF;
   --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
   --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
   --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
@@ -17,7 +17,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
     --ink: #E3EAF1; --muted: #93A0AE;
     --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
     --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
@@ -28,7 +28,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
   --ink: #E3EAF1; --muted: #93A0AE;
   --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
   --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
@@ -78,7 +78,7 @@ h2 { font-size: 18px; }
 p { margin: 0; }
 a { color: var(--cyan-ink); }
 button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 
@@ -248,7 +248,7 @@ select:disabled { opacity: .55; }
 .link-input { display: flex; align-items: stretch; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
-.segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.segments label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
 .command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
@@ -366,11 +366,12 @@ select:disabled { opacity: .55; }
 }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
-.seg button:focus-visible { position: relative; outline: 2px solid var(--cyan); outline-offset: 2px; }
-/* The themes two by two, so the longest name keeps its line in the narrow account menu. */
-.seg.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.seg.themes button:nth-child(odd) { margin-left: 0; }
-.seg.themes button:nth-child(n+3) { margin-top: -1px; }
+.seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* The themes two by two, each a 44 px target 8 px from the next; a name too long for its button wraps by words. The custom
+   template, a fifth choice, takes the whole row. */
+.seg.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.seg.themes button { min-height: 44px; margin: 0; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.seg.themes button:nth-child(5) { grid-column: 1 / -1; }
 /* The custom theme template: what it is, whether one is on, and its three actions. The load button is a label around a
    hidden file field, so the field's focus shows on the label. */
 .theme-template { display: grid; gap: 10px; }
@@ -436,7 +437,7 @@ select:disabled { opacity: .55; }
 .hub-focus-tag { position: absolute; left: 50%; top: 162px; transform: translateX(-50%); padding: 1.5px 6px; background: var(--glow); border: 1px solid color-mix(in srgb, var(--cyan) 45%, var(--line)); font-family: var(--f-display); font-size: 9.5px; font-weight: 600; line-height: 1.2; color: var(--cyan-ink); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.hub { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
-button.hub:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+button.hub:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 4px; }
 button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .hub.on .hub-ring { stroke: var(--cyan); }
 .start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
@@ -697,7 +698,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-m.out .t-mh > i { color: var(--cyan-ink); }
 .t-mh > span { min-width: 0; overflow-wrap: anywhere; }
 .t-mh:hover > span { color: var(--cyan-ink); }
-.t-mh:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.t-mh:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .t-mf { grid-column: 2; font-size: 12px; }
 .t-mb { grid-column: 2; min-width: 0; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line2); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .t-l { display: grid; grid-template-columns: 18px 1fr; }
@@ -1348,7 +1349,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .task-search .zbtn { position: absolute; right: 0; top: 0; height: 40px; }
 .trow { display: grid; gap: 4px; width: 100%; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .trow:hover, .trow.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
-.trow:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.trow:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .trow-title { font-weight: 600; overflow-wrap: anywhere; }
 .trow-title b { font-family: var(--f-display); color: var(--cyan-ink); }
 .trow-brief { min-width: 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; white-space: normal; }

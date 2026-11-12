@@ -62,26 +62,26 @@ export function ThemeTemplate() {
     <div className="theme-template">
       <p>{t.themeTemplate.about}</p>
       <p>{status}</p>
-      <div className="settings-actions">
-        <label className="btn small ghost theme-load">
+      {/* Load is the main action, then Download, then Reset, which stays in its place and is off until a template is loaded. */}
+      <div className="form-foot">
+        <label className="btn theme-load">
           <input className="sr" type="file" accept=".json,application/json" onChange={event => void pick(event)} />
           {t.themeTemplate.load}
         </label>
-        <a className="btn small ghost" href={sample} download={`hornhoof-theme-${theme}.json`}>
+        <a className="btn ghost" href={sample} download={`hornhoof-theme-${theme}.json`}>
           {t.themeTemplate.download}
         </a>
-        {custom && (
-          <button
-            className="btn small ghost"
-            type="button"
-            onClick={() => {
-              resetTemplate();
-              setProblem(null);
-            }}
-          >
-            {t.themeTemplate.reset}
-          </button>
-        )}
+        <button
+          className="btn ghost"
+          type="button"
+          disabled={!custom}
+          onClick={() => {
+            resetTemplate();
+            setProblem(null);
+          }}
+        >
+          {t.themeTemplate.reset}
+        </button>
       </div>
       {problem && <p className="alert" role="alert">{problemText(t, problem)}</p>}
     </div>

@@ -68,11 +68,11 @@ export const BUILTIN: Record<BuiltinTheme, Palette> = {
     cut: 1,
     fonts: FONTS,
     colors: {
-      bg: '#E6EBF0', surface: '#F8FAFC', surface2: '#EEF2F6', line: '#C9D3DD', line2: '#A9B7C5', ink: '#0F1B27', muted: '#4C5A68',
-      accent: '#00A3BD', accent_ink: '#00768A', warning: '#E08A00', warning_ink: '#9A5A00', attention: '#E0307F', attention_ink: '#B0185F',
-      success: '#1E8E4E', danger: '#D32F2F', on_danger: '#FFFFFF', idle: '#C5D0DB', dot: 'rgba(30, 60, 90, .17)', glow: 'rgba(0, 163, 189, .10)',
+      bg: '#E6EBF0', surface: '#F8FAFC', surface2: '#EEF2F6', line: '#C9D3DD', line2: '#768695', ink: '#0F1B27', muted: '#4C5A68',
+      accent: '#00A3BD', accent_ink: '#006E80', warning: '#E08A00', warning_ink: '#9A5A00', attention: '#E0307F', attention_ink: '#B0185F',
+      success: '#13753D', danger: '#C62828', on_danger: '#FFFFFF', idle: '#C5D0DB', dot: 'rgba(30, 60, 90, .17)', glow: 'rgba(0, 163, 189, .10)',
       button: '#00768A', on_button: '#FFFFFF', hud: 'rgba(240, 244, 247, .88)', shadow: 'rgba(20, 40, 60, .18)',
-      provider_claude: '#C2593A', provider_kimi: '#1667E0', provider_glm: '#3D47D6', provider_antigravity: '#1E8E3E',
+      provider_claude: '#A84628', provider_kimi: '#125BC7', provider_glm: '#3D47D6', provider_antigravity: '#157331',
     },
   },
   dark: {
@@ -80,7 +80,7 @@ export const BUILTIN: Record<BuiltinTheme, Palette> = {
     cut: 1,
     fonts: FONTS,
     colors: {
-      bg: '#141A22', surface: '#1B232D', surface2: '#212B37', line: '#2C3845', line2: '#3D4C5C', ink: '#E3EAF1', muted: '#93A0AE',
+      bg: '#141A22', surface: '#1B232D', surface2: '#212B37', line: '#2C3845', line2: '#687A8F', ink: '#E3EAF1', muted: '#93A0AE',
       accent: '#46E0EF', accent_ink: '#6FE9F5', warning: '#FFB54A', warning_ink: '#FFC36E', attention: '#FF62AA', attention_ink: '#FF8CC2',
       success: '#5FD08A', danger: '#FF6B6B', on_danger: '#2A0606', idle: '#2C3744', dot: 'rgba(140, 175, 205, .15)', glow: 'rgba(70, 224, 239, .10)',
       button: '#46E0EF', on_button: '#05222A', hud: 'rgba(23, 30, 39, .84)', shadow: 'rgba(0, 0, 0, .45)',

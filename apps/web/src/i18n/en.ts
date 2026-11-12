@@ -166,7 +166,7 @@ export const en = {
   },
   /* A theme template of a person's own, kept in this browser: loaded from a JSON file, downloaded as a sample, reset. */
   themeTemplate: {
-    menu: 'Custom template…',
+    menu: 'Set up template…',
     title: 'Custom template',
     look: 'Look',
     about: 'A theme template is kept in a JSON file. It changes only colors, fonts and corner cuts, and the layout stays the same. Download the theme that is on as a sample, change its values and load it back.',
