@@ -141,7 +141,7 @@ export async function supportWorld() {
         bindingDigest: sha(`support-binding-${kind}`),
         thresholds,
         thresholdsBy: c.ids.sam,
-        validUntil: new Date('2026-11-12T00:00:00.000Z'),
+        validUntil: new Date('2036-01-01T00:00:00.000Z'),
       })
       .returning();
     const hashes = OUTBOUND_CHECK_HASHES[kind];
