@@ -365,7 +365,7 @@ export type UpdateState = (typeof UPDATE_STATES)[number];
 /* A copy of the company's database on a machine: being made, being made again beside the old one, following, or stopped
    with a reason: its disk is full, a change did not fit, its database once led the company, or the company's settings
    could not be written there. */
-export const COPY_STATES = ['making', 'remaking', 'ready', 'stopped'] as const;
+export const COPY_STATES = ['making', 'remaking', 'ready', 'stopped', 'saving'] as const;
 export type CopyState = (typeof COPY_STATES)[number];
 export const COPY_ERRORS = ['disk_full', 'apply', 'led', 'setup'] as const;
 export type CopyError = (typeof COPY_ERRORS)[number];
@@ -442,6 +442,8 @@ export const machines = pgTable(
     copyAt: timestamp('copy_at', { withTimezone: true }),
     copyName: text('copy_name'),
     copyOld: integer('copy_old'),
+    /* The term under which the old database that waits for its merge led the company; null for one that never led. */
+    copyOldLed: bigint('copy_old_led', { mode: 'number' }),
     /* When it stopped holding the company's data, and how far the upload of what it held has come. */
     dataLeftAt: timestamp('data_left_at', { withTimezone: true }),
     uploadState: text('upload_state', { enum: UPLOAD_STATES }),
@@ -464,7 +466,7 @@ export const machines = pgTable(
     /* The CASE, so a pin that is no number fails the check and not the cast. */
     check('machines_server_pin_value', sql`server_pin = 'none' OR CASE WHEN server_pin ~ '^[1-9][0-9]{0,2}$' THEN server_pin::int >= 2 ELSE false END`),
     check('machines_copy_progress_range', sql`copy_progress BETWEEN 0 AND 99`),
-    check('machines_copy_state', sql`copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped')`),
+    check('machines_copy_state', sql`copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped', 'saving')`),
     check('machines_copy_error', sql`copy_error IS NULL OR copy_error IN ('disk_full', 'apply', 'led', 'setup')`),
     check('machines_upload_state', sql`upload_state IS NULL OR upload_state IN ('waiting', 'received', 'kept')`),
     check('machines_measures_range', sql`link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0`),
@@ -1565,6 +1567,9 @@ export const publicLinks = pgTable('public_links', {
   tunnelEnc: text('tunnel_enc').notNull(),
   /* The key a change is under way to, sealed as keyEnc is. */
   nextKeyEnc: text('next_key_enc'),
+  /* A name the company never asked for: Hornhoof took it so that the company's machines can hold copies, and nobody is
+     shown it or served through it. */
+  hidden: boolean('hidden').notNull().default(false),
   createdAt: createdAt(),
 });
 

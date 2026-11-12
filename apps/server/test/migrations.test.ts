@@ -916,3 +916,60 @@ describe('migration 0114, the tables of a server move', () => {
   });
 });
 
+
+describe('migration 0115, the tables of takeovers, parked job results and the hidden link', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+  const A = '0f0f0f0f-0000-4000-8000-00000000000a';
+  const B = '0f0f0f0f-0000-4000-8000-00000000000b';
+
+  it('records the kind of each handover', async () => {
+    const db = await fullyMigrated();
+    const handover = (more = sql``, values = sql``) =>
+      db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at${more}) values (gen_random_uuid(), ${A}, 4, 'm', '0/3000000', ${B}, now()${values})`);
+    /* One that says nothing of its kind was planned. */
+    await handover();
+    expect((await db.execute(sql`select kind, heard_at, reach, noted_at, reason from net.handovers`)).rows).toEqual([{ kind: 'planned', heard_at: null, reach: null, noted_at: null, reason: null }]);
+    await handover(sql`, kind, heard_at, reach, reason`, sql`, 'takeover', now(), now(), 'disk_full'`);
+    await handover(sql`, kind, noted_at`, sql`, 'ceo', now()`);
+    expect(await codeOf(handover(sql`, kind`, sql`, 'other'`))).toBe('23514');
+    expect(await codeOf(handover(sql`, reason`, sql`, 'other'`))).toBe('23514');
+  });
+
+  it("parks a job's messages", async () => {
+    const db = await fullyMigrated();
+    const fenced = (await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'parked'`)).rows;
+    expect(fenced).toEqual([{ deferrable: true, deferred: true }]);
+    const node = { kind: 'machine', id: A };
+    const park = (kind: string) => db.execute(sql`insert into net.parked (job_id, node, kind, body) values (${B}, ${JSON.stringify(node)}::jsonb, ${kind}, '{"n":1}'::jsonb)`);
+    for (const kind of ['listed', 'started', 'event', 'done']) await park(kind);
+    expect(await codeOf(park('other'))).toBe('23514');
+    const rows = (await db.execute<{ node: object; body: object; applied_at: Date | null; at: Date | string }>(sql`select node, body, applied_at, at from net.parked where kind = 'event'`)).rows;
+    expect(rows).toHaveLength(1);
+    expect([rows[0]!.node, rows[0]!.body, rows[0]!.applied_at, rows[0]!.at === null]).toEqual([node, { n: 1 }, null, false]);
+    /* The messages of one job are found by it. */
+    expect((await db.execute(sql`select 1 from pg_indexes where schemaname = 'net' and tablename = 'parked' and indexname = 'parked_job'`)).rows).toHaveLength(1);
+  });
+
+  it('keeps the led term of an old database, hides a link, and knows a copy that saves what it led', async () => {
+    const db = await fullyMigrated();
+    const column = async (table: string, name: string) =>
+      (await db.execute<{ type: string; nullable: string; def: string | null }>(sql`select data_type as type, is_nullable as nullable, column_default as def from information_schema.columns
+        where table_schema = 'public' and table_name = ${table} and column_name = ${name}`)).rows[0];
+    expect(await column('machines', 'copy_old_led')).toEqual({ type: 'bigint', nullable: 'YES', def: null });
+    expect(await column('public_links', 'hidden')).toEqual({ type: 'boolean', nullable: 'NO', def: 'false' });
+    const [check] = (await db.execute<{ def: string }>(sql`select pg_get_constraintdef(c.oid) as def from pg_constraint c join pg_class t on t.oid = c.conrelid where t.relname = 'machines' and c.conname = 'machines_copy_state'`)).rows;
+    for (const state of ['making', 'remaking', 'ready', 'stopped', 'saving']) expect(check?.def, state).toContain(`'${state}'`);
+    expect(check?.def).not.toContain('other');
+  });
+});
