@@ -59,6 +59,9 @@ services:
       # How long a server restored after a total loss waits for a machine of the company to answer, in seconds; 600
       # when empty.
       HORNHOOF_SURVIVOR_S: ${HORNHOOF_SURVIVOR_S:-}
+      # Where a machine that takes the server over asks who answers at the company's public name: that name itself when
+      # empty. Only a test sets it, to an address that stands in for hornhoof.org.
+      HORNHOOF_LINK_PROBE: ${HORNHOOF_LINK_PROBE:-}
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.
