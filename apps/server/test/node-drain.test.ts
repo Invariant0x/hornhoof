@@ -7,7 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { builtinOf } from '../src/modules/nodes/hub.js';
-import { drainWork } from '../src/modules/updates/drain-work.js';
+import { drainPostponed, drainWork } from '../src/modules/updates/drain-work.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 import { BUILTIN } from './builtin.js';
@@ -125,6 +125,22 @@ describe('planned node updates', () => {
     expect(notice!.prompt).toContain(`${turn!.id} (#${task!.number})`);
     expect(notice!.prompt).toContain('No running work was stopped');
     expect(notice!.prompt).toContain('Run parts: none');
+    expect(notice!.prompt).not.toContain(f.job.id);
+  });
+
+  it("names the machine of another machine's built-in node to the head of Operations", async () => {
+    const f = await fixture();
+    const other = 'b0'.repeat(16);
+    const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
+    const [person] = await f.db.select({ id: people.id }).from(people);
+    await f.db.insert(machines).values({ companyId: f.company.id, personId: person!.id, machineKey: 'studio-key', hostname: 'studio', role: 'data', networkId: other });
+    const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
+    await drainPostponed(f.app.ctx, builtinOf(other), '2026-11-11T13:00:00.000Z', await drainWork(f.app.ctx, builtinOf(other)));
+    const [notice] = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
+    /* The built-in node of a machine that keeps a copy is named by its machine; this server's own stays "the built-in node". */
+    expect(notice!.prompt).toContain('the planned update of the built-in node of studio:');
+    expect(notice!.prompt).toContain(turn!.id);
     expect(notice!.prompt).not.toContain(f.job.id);
   });
 

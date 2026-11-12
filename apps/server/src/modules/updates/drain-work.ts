@@ -23,7 +23,12 @@ export async function drainWork(ctx: Ctx, node: NodeIdentity) {
 type Work = Awaited<ReturnType<typeof drainWork>>;
 
 async function machineName(ctx: Ctx, node: NodeIdentity): Promise<string> {
-  if (node.kind === 'builtin') return 'the built-in node';
+  if (node.kind === 'builtin') {
+    if (node.machine === ownMachine(ctx.config)) return 'the built-in node';
+    /* The built-in node of another machine that holds the data goes by that machine's name. */
+    const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.networkId, node.machine), isNull(machines.revokedAt)));
+    return `the built-in node of ${machine?.hostname || 'a machine'}`;
+  }
   const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
   return machine?.hostname || 'a machine';
 }
