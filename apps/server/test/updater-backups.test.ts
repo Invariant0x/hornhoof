@@ -85,6 +85,34 @@ describe('updater, backups', () => {
     }
   });
 
+  it('dumps hornhoof on a copy only', async () => {
+    /* A machine that led and follows another now: its keeper asks for its own database, to save what it did while it
+       led before its copy is made again. */
+    const copy = stand();
+    writeFileSync(join(copy.control, 'replica.json'), JSON.stringify({ since: '2026-11-11T12:00:00.000Z' }));
+    const asks = (s: typeof copy, said: object) => writeFileSync(join(s.control, 'dump.json'), JSON.stringify(said));
+    asks(copy, { id: ID, database: 'hornhoof', reason: 'fork' });
+    const r = await runOnce(copy, null, { HORNHOOF_ROLE: 'data' });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(call => call.includes('pg_dump -U hornhoof -d hornhoof'))).toHaveLength(1);
+    expect(said(join(dumps(copy), `${ID}.json`))).toMatchObject({ id: ID, reason: 'fork', migrations: 20 });
+    expect([mode(join(dumps(copy), `${ID}.sql.gz`)), existsSync(join(copy.control, 'dump.json'))]).toEqual([0o600, false]);
+    /* A copy makes no other dump: neither one for a timer nor one of another database. */
+    for (const [index, wrong] of [{}, { database: 'hornhoof', reason: 'timer' }, { database: 'hornhoof_before_20261103_210000', reason: 'fork' }, { database: 'postgres', reason: 'fork' }].entries()) {
+      const id = `0f0f0f0f-0000-4000-8000-0000000000${String(index + 40)}`;
+      asks(copy, { id, ...wrong });
+      const again = await runOnce(copy, null, { HORNHOOF_ROLE: 'data' });
+      expect([JSON.stringify(wrong), again.calls.filter(call => call.includes('pg_dump')).length]).toEqual([JSON.stringify(wrong), 1]);
+      expect(readFileSync(join(dumps(copy), `${id}.failed`), 'utf8').trim()).toBe('Not a kept database.');
+      expect(existsSync(join(copy.control, 'dump.json'))).toBe(false);
+    }
+    /* A machine that keeps no data has no database: its request stays, and nothing is dumped. */
+    const worker = stand();
+    asks(worker, { id: ID, database: 'hornhoof', reason: 'fork' });
+    const none = await runOnce(worker, null, { HORNHOOF_ROLE: 'worker', STUB_SERVICES: 'front keeper updater', STUB_RUNNING_IMAGES: '' });
+    expect([none.calls.some(call => call.includes('pg_dump')), existsSync(join(worker.control, 'dump.json'))]).toEqual([false, true]);
+  });
+
   it('says so when the database cannot be dumped, and leaves nothing half made', async () => {
     const s = stand();
     wants(s, ID);

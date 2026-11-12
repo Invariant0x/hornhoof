@@ -499,12 +499,19 @@ dump_failed() {
 }
 
 # The data keeper asks for a dump with dump.json {id}, or with {id, database, reason: "fork"} for a database a restore
-# set aside or one made of what a machine uploaded. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
+# set aside or one made of what a machine uploaded. The keeper of a machine that keeps a copy asks with
+# {id, database: "hornhoof", reason: "fork"} for its own database, when that one led the company before. The request goes once the dump is there, whole or failed; a dump that is there is not made again, so the
 # keeper asks anew under another id.
 dump_request() {
-  local id db database reason
+  local id db database reason copy=''
   [ -f "$CONTROL/dump.json" ] || return 0
-  if worker || [ -z "$SERVER_DIR" ]; then return 0; fi
+  [ -n "$SERVER_DIR" ] || return 0
+  # A machine that keeps a copy gives one dump alone: its own database, from the time it led, which its keeper saves
+  # before the copy is made again. A machine with no database gives none.
+  if worker; then
+    [ -f "$CONTROL/replica.json" ] || return 0
+    copy=1
+  fi
   id=$(jq -r '.id // empty' "$CONTROL/dump.json" 2> /dev/null || true)
   plain_id "$id" || return 0
   database=$(jq -r '.database // empty' "$CONTROL/dump.json" 2> /dev/null || true)
@@ -514,7 +521,13 @@ dump_request() {
     [ -n "$db" ] || return 0
     # The request goes also when not even the failure could be written, as on a full disk: the keeper asks anew in its
     # own time, and no pass dumps the database again by itself.
-    if [ -z "$database" ] && [ -z "$reason" ]; then
+    if [ -n "$copy" ]; then
+      if [ "$database" = hornhoof ] && [ "$reason" = fork ]; then
+        make_fork_dump "$id" "$db" hornhoof || dump_failed "$id" || drop_dump "$id"
+      else
+        dump_failed "$id" 'Not a kept database.' || drop_dump "$id"
+      fi
+    elif [ -z "$database" ] && [ -z "$reason" ]; then
       make_dump "$id" "$db" || dump_failed "$id" || drop_dump "$id"
     elif [ "$reason" = fork ] && { kept_name "$database" || upload_name "$database"; }; then
       make_fork_dump "$id" "$db" "$database" || dump_failed "$id" || drop_dump "$id"
