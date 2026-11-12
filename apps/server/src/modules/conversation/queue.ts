@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
+import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns, type AgentKind } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
@@ -556,7 +556,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 }
 
 function keepsSessionAcrossTurns(kind: string): boolean {
-  return kind === 'orchestrator' || kind === 'head';
+  return kind === 'orchestrator' || kind === 'head' || kind === 'assistant';
 }
 
 type Agent = { id: string; companyId: string; kind: string; name: string };
@@ -681,7 +681,7 @@ export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_N
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
-type PlacedAgent = { id: string; kind: 'orchestrator' | 'head' | 'worker'; nodeId: string | null; roleKey: string | null };
+type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; roleKey: string | null };
 
 /* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
@@ -973,7 +973,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
      instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
-  const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf })) : '';
+  /* An assistant's own agent reads its program's message as the program built it: its rules say who it is from. */
+  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });

@@ -17,7 +17,7 @@ async function lastSeq(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<number> {
 export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: string): Promise<string> {
   const messageId = randomUUID();
   const before = await lastSeq(ctx, agent.id);
-  const jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], assistant: { message: messageId } });
+  const jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], assistant: { message: messageId, own: agent.kind === 'assistant' } });
   const [said] = await ctx.db
     .select({ seq: agentEvents.seq })
     .from(agentEvents)

@@ -158,7 +158,8 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
     await onAgent(ctx, id, async () => {
       const [agent] = await db.select().from(agents).where(eq(agents.id, id));
       if (!agent?.subscriptionId || !theirs.includes(agent.subscriptionId)) return;
-      const stays = owner.status !== 'disabled' && (agent.kind === 'orchestrator' ? access.whole : canReach(access, await agentSpot(db, agent)));
+      /* An assistant's own agent stays on its owner's plan while its owner is on, wherever they reach. */
+      const stays = owner.status !== 'disabled' && (agent.kind === 'assistant' || (agent.kind === 'orchestrator' ? access.whole : canReach(access, await agentSpot(db, agent))));
       if (stays) return;
       await db.transaction(async tx => {
         await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));

@@ -4,8 +4,8 @@ import { hiddenParty, maskEnvelope, seesAgent, seesAgentId, type AgentViewer } f
 import { seesTask, type TaskPlace } from '../src/modules/tasks/sight.js';
 
 const listed = (departments: string[], teams: string[] = []): Access => ({ whole: false, departments: new Set(departments), teams: new Set(teams) });
-const person = (access: Access, plans: string[] = ['mine'], agents: string[] = ['seen']): AgentViewer => ({ full: false, personId: 'me', access, plans: new Set(plans), agents: new Set(agents) });
-const full: AgentViewer = { full: true, personId: 'ceo', access: WHOLE, plans: new Set(), agents: new Set() };
+const person = (access: Access, plans: string[] = ['mine'], agents: string[] = ['seen']): AgentViewer => ({ full: false, personId: 'me', access, plans: new Set(plans), agents: new Set(agents), own: new Set(), apart: new Set() });
+const full: AgentViewer = { full: true, personId: 'ceo', access: WHOLE, plans: new Set(), agents: new Set(), own: new Set(), apart: new Set() };
 const spot = { departmentId: 'dev' };
 
 describe('who sees an agent', () => {
@@ -17,6 +17,16 @@ describe('who sees an agent', () => {
     ['no plan, department reached', null, ['dev'], false],
   ] as const)('%s', (_name, subscriptionId, departments, sees) => {
     expect(seesAgent(person(listed([...departments])), { subscriptionId, spot })).toBe(sees);
+  });
+
+  it("gives an assistant's own agent to the assistant's owner alone, whatever else they see", () => {
+    const mine = { ...person(WHOLE), own: new Set(['ava']), apart: new Set(['max']) };
+    const ceo = { ...full, apart: new Set(['ava', 'max']) };
+    expect(seesAgent(mine, { subscriptionId: null, spot: { departmentId: null }, assistant: 'ava' })).toBe(true);
+    expect(seesAgent(mine, { subscriptionId: 'mine', spot: { departmentId: null }, assistant: 'max' })).toBe(false);
+    expect(seesAgent(ceo, { subscriptionId: 'mine', spot: { departmentId: null }, assistant: 'ava' })).toBe(false);
+    expect(seesAgentId(ceo, 'ava')).toBe(false);
+    expect(seesAgentId(ceo, 'anyone')).toBe(true);
   });
 
   it('gives the owner of a department every agent of it, its products and sub-units, on any plan or none, and nothing more', () => {
