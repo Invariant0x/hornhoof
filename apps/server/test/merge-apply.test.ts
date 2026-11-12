@@ -502,8 +502,21 @@ describe('a merge applied', () => {
     const again = await stand();
     const kept = await again.sides.fork();
     const [left] = await kept.db.insert(jobs).values({ ...again.on, subscriptionId: again.plan.id, prompt: 'Work', timeoutMs: 60_000, status: 'running' }).returning();
+    const copy = await again.sides.fork();
+    await copy.db.insert(jobs).values(left!);
     await again.merge(kept, { kept: true });
     expect((await again.db.select().from(jobs).where(eq(jobs.id, left!.id)))[0]).toMatchObject({ status: 'failed', error: 'Ran before the restore; how it ended was not kept.' });
+    /* A copy that followed the database from before holds the same turn as it was left. This side ended it itself when
+       it took it from that database: the copy's row says nothing new, and nobody is asked which of the two holds. */
+    const second = await again.merge(copy, { kept: true });
+    expect(await again.conflicts(second.id)).toEqual([]);
+    expect((await again.db.select().from(jobs).where(eq(jobs.id, left!.id)))[0]).toMatchObject({ status: 'failed' });
+    expect(await again.checked(copy, second.id)).toEqual({ ok: true, missing: [] });
+    /* What the copy holds otherwise than that database did is still a difference to settle. */
+    const other = await again.sides.fork();
+    await other.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, left!.id));
+    const third = await again.merge(other, { kept: true });
+    expect(await again.conflicts(third.id)).toMatchObject([{ tbl: 'jobs', kind: 'differs' }]);
   });
 
   it('leaves open what the leader holds open', async () => {

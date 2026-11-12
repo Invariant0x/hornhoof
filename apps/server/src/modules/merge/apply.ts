@@ -3,7 +3,7 @@ import { GATE_WAIT_MS, writeGate } from '../../db/gate.js';
 import { factsOf, sameShape, type Facts, type ForeignKey, type Query, type TableFacts } from './facts.js';
 import { queryOf, quote } from './leader.js';
 import {
-  compareOutcome, cutoffOf, differing, divergence, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
+  compareOutcome, cutoffOf, differing, divergence, heldAs, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
 } from './plan.js';
 import {
   backupsOf, consumedIds, handoversOf, parkedNodes, parkedOf, type ParkedNode, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
@@ -437,6 +437,8 @@ class Merge {
   /* When the restore that set this source aside left its mark here, and what this side removed since, table by table. */
   private restoredAt: string | Date | null = null;
   private readonly removed = new Map<string, { keys: Set<string>; places: Set<string>; here: Set<string> }>();
+  /* By table and key: the columns earlier merges wrote their own way here, with what their source held in them. */
+  private readonly rewrote = new Map<string, Map<string, { cols: string[]; was: Row }[]>>();
 
   constructor(
     private readonly q: Query,
@@ -553,12 +555,30 @@ class Merge {
       }
       for (const [index, x] of page.entries()) {
         let outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
+        /* A difference this side made itself is nothing to settle: an earlier merge took this very row from another
+           database that held it the same, as a copy and the database it followed do, and wrote these columns its own
+           way, as when it ended a turn nobody ran any more. */
+        if (outcome.do === 'conflict' && outcome.kind === 'differs' && (await this.ownDoing(t, x, outcome.cols))) outcome = { do: 'equal' };
         /* A row the company removed since the restore is not brought back behind its back: it is listed. */
         if (outcome.do === 'add' && rule.kind === 'rows' && (await this.removedSince(t, x))) outcome = { do: 'conflict', kind: 'changed_removed', cols: [] };
         if (outcome.do === 'equal') this.counts.equal += 1;
         else this.unit(t, rule, { key: keyOf(t, x), x, y: ys[index]!, outcome, rows: [], skipped: [], left: false });
       }
     }
+  }
+
+  /* Whether every column the source's row differs in is one an earlier merge wrote its own way on this side, from a
+     row that held there what this one holds. */
+  private async ownDoing(t: TableFacts, x: Row, cols: string[]): Promise<boolean> {
+    let known = this.rewrote.get(t.name);
+    if (!known) {
+      known = new Map();
+      const rows = await this.q<{ key: Record<string, unknown>; cols: string[]; was: Row | null }>(
+        "SELECT key, cols, was FROM net.merge_rows WHERE tbl = $1 AND how = 'rewritten' AND was IS NOT NULL AND merge <> $2::uuid", [t.name, this.merge.id]);
+      for (const row of rows) known.set(keyText(row.key), [...(known.get(keyText(row.key)) ?? []), { cols: row.cols, was: row.was! }]);
+      this.rewrote.set(t.name, known);
+    }
+    return (known.get(keyText(keyOf(t, x))) ?? []).some(before => cols.every(column => before.cols.includes(column)) && heldAs(t, x, cols, before.was));
   }
 
   /* Whether this side removed the row since the restore that set the source aside, as its own journal says. A place of

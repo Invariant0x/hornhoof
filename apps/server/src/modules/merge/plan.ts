@@ -166,6 +166,12 @@ export function compareOutcome(t: TableFacts, x: Row, y: Row | null): Outcome {
   return cols.length === 0 ? EQUAL : { do: 'conflict', kind: 'differs', cols };
 }
 
+/* Whether the source's row holds, in each of these columns, what a row held when a merge wrote those columns its own
+   way: was is that row's values as the merge kept them. */
+export function heldAs(t: TableFacts, x: Row, cols: string[], was: Row): boolean {
+  return cols.every(column => column in was && same(typeOf(t, column), x[column], was[column]));
+}
+
 /* Whether a journal row names a column: an insert and a delete name them all. */
 const names = (row: JournalRow, column: string): boolean => row.op !== 'update' || row.cols.includes(column);
 const inOrder = (rows: JournalRow[]): JournalRow[] =>
