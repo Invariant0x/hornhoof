@@ -114,6 +114,7 @@ export type ErrorReason =
   | 'improvement_platform_elsewhere'
   | 'improvement_not_platform'
   | 'feedback_changed'
+  | 'feedback_person_only'
   | 'feedback_refused'
   | 'feedback_unknown'
   | 'feedback_issued'
