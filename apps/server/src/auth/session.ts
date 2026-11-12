@@ -8,6 +8,7 @@ import { people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
+import { checkRead, READ_MS, readCookieOf, readPerson, signRead } from './read-cookie.js';
 
 export const SESSION_COOKIE = 'hh_session';
 /* A browser takes a __Host- cookie only when it is secure, has path / and no domain, so a page on another company's name
@@ -171,6 +172,74 @@ export async function handOverSession(req: FastifyRequest, reply: FastifyReply, 
   deliverIfHijacked(reply, cookies);
 }
 
+/* The person whose read cookie a request brought, where no session can be written: on a machine that only reads. */
+const readPeople = new WeakMap<FastifyRequest, Person>();
+
+/* A sign-in on a machine that only reads: the cookie that says who signed in, for twelve hours, and no session. */
+export function startReading(reply: FastifyReply, config: Config, personId: string, passwordHash: string): void {
+  const until = Date.now() + READ_MS;
+  const options = { ...sessionCookieOptions(reply.request, config, new Date(until)), expires: undefined, maxAge: READ_MS / 1000 };
+  reply.setCookie(readCookieOf(reply.request), signRead(personId, passwordHash, until, config.secret), options);
+}
+
+/* A sign-out on a machine that only reads: both cookies go, and nothing is deleted. */
+export function endReading(req: FastifyRequest, reply: FastifyReply): void {
+  reply.clearCookie(sessionCookieOf(req), clearingOptions(req));
+  reply.clearCookie(readCookieOf(req), clearingOptions(req));
+}
+
+/* The token of the session a read cookie is traded for: the same for every request that brings that cookie, and worked
+   out by nobody who does not hold this server's secret. */
+const tradedToken = (config: Config, cookie: string): string => createHmac('sha256', config.secret).update(`hornhoof read cookie trade ${cookie}`).digest('base64url');
+
+/* The session a read cookie is traded for once this machine leads, for the person and the password the cookie was
+   checked against, with the person's row locked as at any sign-in. */
+async function tradeRead(db: Db, config: Config, cookie: string, personId: string, passwordHash: string): Promise<{ token: string; expiresAt: Date } | null> {
+  const token = tradedToken(config, cookie);
+  const tokenHash = hashToken(token);
+  return db.transaction(async tx => {
+    const [still] = await tx
+      .select({ id: people.id })
+      .from(people)
+      .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
+      .for('share');
+    if (!still) return null;
+    /* A page asks for many things at once, each with the read cookie: they all get the same session. */
+    await tx.insert(sessions).values({ tokenHash, personId, expiresAt: newSessionExpiry(), beforeHostCookie: false }).onConflictDoNothing();
+    const [made] = await tx.select({ expiresAt: sessions.expiresAt }).from(sessions).where(and(eq(sessions.tokenHash, tokenHash), eq(sessions.personId, personId)));
+    return made ? { token, expiresAt: made.expiresAt } : null;
+  });
+}
+
+/* Runs for every request that brings a read cookie. On a machine that only reads, a cookie that holds for an active
+   person makes the request that person's. Once the machine leads, such a cookie is traded for a session and cleared,
+   so nobody signs in again after the server moved. A cookie that does not hold is cleared and gives nobody. */
+export async function readCookieSession(req: FastifyRequest, reply: FastifyReply, db: Db, config: Config, leads: boolean): Promise<void> {
+  const name = readCookieOf(req);
+  const value = req.cookies[name];
+  if (!value) return;
+  const id = readPerson(value);
+  const [row] = id ? await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.id, id)) : [];
+  if (!row || row.status !== 'active' || !checkRead(value, row.passwordHash, config.secret, Date.now())) {
+    reply.clearCookie(name, clearingOptions(req));
+    return;
+  }
+  const { passwordHash, ...person } = row;
+  /* A socket takes no cookie back: it is served as the person, and the next request trades. */
+  if (!leads || req.headers.upgrade) {
+    readPeople.set(req, person);
+    return;
+  }
+  const traded = await tradeRead(db, config, value, person.id, passwordHash!);
+  reply.clearCookie(name, clearingOptions(req));
+  if (!traded) return;
+  /* A session cookie this browser still had is of a database that no longer leads, or of another person. */
+  const old = req.cookies[sessionCookieOf(req)];
+  if (old && old !== traded.token) await dropSessions(db, [old]);
+  setSessionCookie(reply, config, traded.token, traded.expiresAt);
+  req.cookies[sessionCookieOf(req)] = traded.token;
+}
+
 const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.', 'signed_out');
 
 /* The person who did it, or null when the orchestrator did it for the owner. */
@@ -190,14 +259,18 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
     return { ...owner, via: inside.agentId, ...(inside.decision ? { decision: inside.decision } : {}) };
   }
   const token = req.cookies[sessionCookieOf(req)];
-  if (!token) throw notSignedIn();
-  const [person] = await db
-    .select(personColumns)
-    .from(sessions)
-    .innerJoin(people, eq(people.id, sessions.personId))
-    .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())));
-  if (!person || person.status !== 'active') throw notSignedIn();
-  return person;
+  const [person] = token
+    ? await db
+        .select(personColumns)
+        .from(sessions)
+        .innerJoin(people, eq(people.id, sessions.personId))
+        .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())))
+    : [];
+  if (person?.status === 'active') return person;
+  /* With no session of its own, the request is of the person whose read cookie it brought, where one holds. */
+  const reading = readPeople.get(req);
+  if (!reading) throw notSignedIn();
+  return reading;
 }
 
 export function requireCompanyScope(person: Person): void {

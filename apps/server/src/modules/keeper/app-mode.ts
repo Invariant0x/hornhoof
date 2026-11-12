@@ -178,10 +178,15 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const pathOf = (url: string): string => url.split('?')[0]!;
 const wantsSocket = (req: Asked): boolean => String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
 
+/* What a machine that only reads still takes: a sign-in and a sign-out, which write nothing there, and the CEO's
+   answer to the question of which copy to go on from, which goes to the keeper. */
+const READ_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait']);
+
 /* Why this mode turns the request away, or null when it lets it through. */
 export function refusalOf(mode: Mode, req: Asked): Refusal | null {
   if (mode === 'lead') return null;
   if (mode === 'off') return req.method === 'GET' && pathOf(req.url) === '/api/health' ? null : 'starting';
+  if (mode === 'read' && req.method === 'POST' && READ_POSTS.has(pathOf(req.url))) return null;
   return READS.has(req.method) && !wantsSocket(req) ? null : mode === 'read' ? 'read_only' : 'maintenance';
 }
 

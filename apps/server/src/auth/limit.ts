@@ -4,7 +4,7 @@ import { ApiError } from '../errors.js';
 /* Past this many keys, keys with no attempt in the window are dropped, so made-up emails cannot fill memory. */
 const SWEEP_AT = 1000;
 
-export type Attempts = ((key: string, now?: number) => { allowed: boolean; retryAfterS: number }) & { size(): number; windowMs: number };
+export type Attempts = ((key: string, now?: number) => { allowed: boolean; retryAfterS: number }) & { size(): number; windowMs: number; forget(key: string): void };
 
 /* Counts attempts per key in memory: 10 in any 15 minutes unless told otherwise. One per route, so login and invites do
    not share counts. */
@@ -24,7 +24,9 @@ export function limiter({ max = 10, windowMs = 15 * 60 * 1000 }: { max?: number;
     seen.set(key, recent);
     return { allowed: true, retryAfterS: 0 };
   };
-  return Object.assign(attempts, { size: () => seen.size, windowMs });
+  /* The newest attempt of that key is taken back: it was no failure. */
+  const forget = (key: string) => void seen.get(key)?.pop();
+  return Object.assign(attempts, { size: () => seen.size, windowMs, forget });
 }
 
 /* Answers 429 with Retry-After: the one refusal every limit gives. */

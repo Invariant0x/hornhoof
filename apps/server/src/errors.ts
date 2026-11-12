@@ -188,6 +188,7 @@ export type ErrorReason =
   | 'not_recovering'
   | 'no_authority'
   | 'not_owner_session'
+  | 'question_changed'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`
   | 'starting'
   | 'telegram_token'

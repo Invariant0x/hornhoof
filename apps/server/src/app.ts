@@ -77,10 +77,11 @@ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
-import { handOverSession, requirePerson } from './auth/session.js';
+import { handOverSession, readCookieSession, requirePerson } from './auth/session.js';
 import { registerRequestSources } from './modules/sources/requests.js';
 import { keyRoutes } from './modules/computer/keys.js';
 import { refreshBuild } from './modules/network/follow.js';
+import { questionRoutes } from './modules/network/question-routes.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
@@ -313,6 +314,11 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.addHook('onRequest', async (req, reply) => {
     if (ctx.mode.current() === 'lead') await handOverSession(req, reply, deps.db, deps.config);
   });
+  /* A person who signed in while this machine only read: served as themselves, and given a session once it leads. */
+  app.addHook('onRequest', async (req, reply) => {
+    const mode = ctx.mode.current();
+    if (mode !== 'off') await readCookieSession(req, reply, deps.db, deps.config, mode === 'lead');
+  });
   /* After the socket plugin, so a refused socket is closed by it. */
   app.addHook('onRequest', modeGate(ctx.mode));
   app.addHook('onRequest', async req => {
@@ -362,6 +368,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   networkRoutes(app, ctx);
+  questionRoutes(app, ctx);
   copiesRoutes(app, ctx);
   keyRoutes(app, ctx);
   backupRoutes(app, ctx);

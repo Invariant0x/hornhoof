@@ -420,6 +420,17 @@ describe('what each mode allows', () => {
     expect(ask('maintenance', 'GET', '/api/nodes/socket', 'websocket')).toBe('maintenance');
   });
 
+  it("takes a sign-in, a sign-out and the CEO's answer to a copy's question in read, and nowhere else", () => {
+    for (const path of ['/api/auth/login', '/api/auth/logout', '/api/network/question/go-on', '/api/network/question/wait']) {
+      expect(ask('read', 'POST', path), path).toBeNull();
+      expect(ask('read', 'POST', `${path}?x=1`), path).toBeNull();
+      expect(ask('maintenance', 'POST', path), path).toBe('maintenance');
+      expect(ask('off', 'POST', path), path).toBe('starting');
+      expect(ask('read', 'PUT', path), path).toBe('read_only');
+    }
+    expect(ask('read', 'POST', '/api/auth/login/more')).toBe('read_only');
+  });
+
   it('lets only the health answer through in off', () => {
     expect(ask('off', 'GET', '/api/health')).toBeNull();
     expect(ask('off', 'GET', '/api/health?x=1')).toBeNull();
@@ -487,10 +498,12 @@ describe('the app behind a keeper', () => {
     const mcp = await app.inject({ method: 'POST', url: '/mcp', payload: {}, ...as(token) });
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'a@b.test', password: 'x' } });
     const socket = await app.inject({ url: '/api/nodes/socket', headers: { upgrade: 'websocket', connection: 'upgrade' } });
-    for (const refused of [mcp, login, socket]) {
+    /* A machine that only reads still takes a sign-in, which writes nothing there. */
+    for (const refused of then === 'read' ? [mcp, socket] : [mcp, login, socket]) {
       expect(refused.statusCode).toBe(503);
       expect(refused.json().error).toMatchObject({ code: 'unavailable', reason });
     }
+    if (then === 'read') expect([login.statusCode, login.json().error.reason]).toEqual([401, 'wrong_password']);
   };
 
   it('serves reads and refuses changes in maintenance', () => refusesChanges('lead', 'maintenance', 'maintenance'));
