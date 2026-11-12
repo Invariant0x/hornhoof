@@ -4,7 +4,8 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { issueOf, openIssueOnGitHub } from '../src/modules/feedback/github-issue.js';
 import { listenIn } from '../../../test-support/ports.mjs';
-import { companies, departments } from '../src/db/schema.js';
+import { agents, companies, departments, people } from '../src/db/schema.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 /* A card of the inbox becomes an issue in invariant0x/hornhoof with one press, against a GitHub of the test's own on this
@@ -148,6 +149,17 @@ describe('turning an inbox card into an issue', () => {
     expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'company_scope_only']);
     expect(hub.seen).toEqual([]);
     expect((await app.inject({ url: '/api/feedback/inbox', ...as(ceo) })).json().cards[0].issue).toBeNull();
+  });
+
+  it('refuses an orchestrator call without a person pressing the button', async () => {
+    const { app, hub, card, saveKey } = await inbox();
+    await saveKey('invariant0x');
+    const froze = await card('Terminal froze');
+    const [agent] = await app.ctx.db.select().from(agents);
+    const [owner] = await app.ctx.db.select().from(people);
+    const refused = await app.inject({ method: 'POST', url: `/api/feedback/inbox/${froze.id}/issue`, headers: orchestratorHeaders(owner!.id, agent!.id) });
+    expect(refused.statusCode).toBe(403);
+    expect(hub.seen).toEqual([]);
   });
 
   it('opens one issue when two people press at once', async () => {

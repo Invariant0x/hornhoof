@@ -24,6 +24,9 @@ const Send = Written.extend({ digest: z.string().regex(/^[0-9a-f]{64}$/) });
 const Params = z.object({ id: z.uuid() });
 
 const notHere = () => new ApiError(404, 'not_found', 'Not found.');
+const humanOnly = (me: Person): void => {
+  if (me.via) throw new ApiError(403, 'forbidden', 'Only a person does this, from their own screen.', 'feedback_person_only');
+};
 
 /* The wait a refusal names, as the header a client reads. */
 function passWait(reply: FastifyReply, err: unknown): never {
@@ -72,6 +75,7 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/feedback', async (req, reply) => {
     const me = await requirePerson(req, db);
+    humanOnly(me);
     const body = Send.parse(req.body);
     const { finding, report, digest } = await shown(ctx, me, body);
     if (digest !== body.digest) throw new ApiError(409, 'conflict', 'What would be sent changed since you looked at it. Look at it again.', 'feedback_changed');
@@ -114,6 +118,7 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/feedback/inbox/:id/issue', async req => {
     if (!config.feedbackInbox) throw notHere();
     const me = await requireCompanyPerson(req, db);
+    humanOnly(me);
     const { id } = Params.parse(req.params);
     const card = (await listInbox(ctx, me.companyId)).find(c => c.id === id);
     if (!card) throw new ApiError(404, 'not_found', 'There is no such card in the inbox.', 'feedback_unknown');

@@ -66,6 +66,11 @@ describe('cleaning a report before it leaves', () => {
     expect(hidden('https://user:pw@github.com/invariant0x/hornhoof')).toBe('[address]');
   });
 
+  it("cleans secrets, email and home paths inside Hornhoof's own page addresses", () => {
+    const own = 'https://github.com/invariant0x/hornhoof/issues/12?token=abc123&email=ivan@acme.example&next=/home/ivan/work';
+    expect(hidden(own)).toBe('https://github.com/invariant0x/hornhoof/issues/12?token=[secret]&email=[email]&next=[path]');
+  });
+
   it('hides paths in a home folder, on Linux, macOS and Windows', () => {
     expect(hidden('opened /home/ivan/work/shop/.env at once')).toBe('opened [path] at once');
     expect(hidden('in /Users/Ivan/Library/Logs/hornhoof.log')).toBe('in [path]');

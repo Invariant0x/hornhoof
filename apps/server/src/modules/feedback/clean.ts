@@ -51,7 +51,7 @@ function ownPage(address: string): boolean {
 /* An address without the stop that ends the sentence around it. */
 const STOP = /[.,;:!?]+$/;
 
-/* The text around Hornhoof's own pages, which the rest of the cleaning never reads into, and each page kept whole. */
+/* The text around Hornhoof's own pages, whose addresses stay while their sensitive parts are cleaned like any other text. */
 function aroundOwnPages(text: string, hide: (kind: Kind) => string): { plain: string[]; kept: string[] } {
   const plain: string[] = [];
   const kept: string[] = [];
@@ -61,7 +61,7 @@ function aroundOwnPages(text: string, hide: (kind: Kind) => string): { plain: st
     const address = found[0].slice(0, found[0].length - stop.length);
     const own = ownPage(address);
     plain.push(text.slice(from, found.index) + (own ? '' : hide('address')));
-    kept.push(own ? address : '');
+    kept.push(own ? cleanOwnPage(address, hide) : '');
     from = found.index + address.length;
   }
   plain.push(text.slice(from));
@@ -77,6 +77,17 @@ function cleanPlain(text: string, hide: (kind: Kind) => string): string {
   clean = clean.replace(SETTING, (_found, name: string) => name + hide('secret'));
   clean = clean.replace(HOME_PATH, found => hide('path') + (STOP.exec(found)?.[0] ?? ''));
   return clean.replace(LONG, () => hide('secret'));
+}
+
+/* A safe origin stays whole; path segments and query or fragment parameters are cleaned separately so one setting cannot
+   consume the rest of the address and an ordinary repository path does not look like one long key. */
+function cleanOwnPage(address: string, hide: (kind: Kind) => string): string {
+  const origin = /^https:\/\/[^/?#]+/i.exec(address)?.[0] ?? '';
+  const rest = address.slice(origin.length);
+  const suffixAt = rest.search(/[?#]/);
+  const path = suffixAt < 0 ? rest : rest.slice(0, suffixAt);
+  const suffix = suffixAt < 0 ? '' : rest.slice(suffixAt);
+  return origin + path.split('/').map(part => cleanPlain(part, hide)).join('/') + suffix.split('&').map(part => cleanPlain(part, hide)).join('&');
 }
 
 export function cleanText(input: string): { text: string; hidden: Hidden } {

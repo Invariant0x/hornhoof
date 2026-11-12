@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, improvements, machines, people } from '../src/db/schema.js';
 import { fakeRelay } from './fake-relay.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
 import { as, invitePerson, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
 
 /* An installation of some company sends a bug, an improvement or an idea to Hornhoof's developers through hornhoof.org:
@@ -82,6 +83,15 @@ describe('sending feedback to Hornhoof developers', () => {
     const { app, relay } = await installation();
     expect((await app.inject({ method: 'POST', url: '/api/feedback', payload: { ...BUG, digest: '0'.repeat(64) } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/feedback', payload: { ...BUG, digest: '0'.repeat(64) }, headers: { authorization: 'Bearer tool-token-0123456789abcdef0123' } })).statusCode).toBe(401);
+    expect(relay.calls).toEqual([]);
+  });
+
+  it('refuses an orchestrator call even when it has a valid digest', async () => {
+    const { app, db, ivan, relay, preview } = await installation();
+    const { digest } = (await preview(BUG)).json();
+    const [agent] = await db.select().from(agents);
+    const sent = await app.inject({ method: 'POST', url: '/api/feedback', payload: { ...BUG, digest }, headers: orchestratorHeaders(ivan.id, agent!.id) });
+    expect(sent.statusCode).toBe(403);
     expect(relay.calls).toEqual([]);
   });
 
