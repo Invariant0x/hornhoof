@@ -213,8 +213,13 @@ describe('contrast of the built-in themes', () => {
     expect(contrast(theme, 'on_danger', 'danger')).toBeGreaterThanOrEqual(4.5);
   });
 
-  it.each(['matrix', 'cyberpunk'] as const)('keeps every coloured text, control line and focus ring readable in %s', theme => {
+  /* The focus ring is drawn in accent_ink in every theme, so it and the control line hold 3:1 even where accent is a pale fill. */
+  it.each(THEMES)('keeps every coloured text, the control line and the focus ring readable in %s', theme => {
     for (const text of TEXT) for (const ground of SURFACES) expect(contrast(theme, text, ground), `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
-    for (const line of ['line2', 'accent', 'accent_ink'] as const) for (const ground of ['bg', 'surface', 'surface2'] as const) expect(contrast(theme, line, ground), `${line} on ${ground}`).toBeGreaterThanOrEqual(3);
+    for (const line of ['line2', 'accent_ink'] as const) for (const ground of ['bg', 'surface', 'surface2'] as const) expect(contrast(theme, line, ground), `${line} on ${ground}`).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(['matrix', 'cyberpunk'] as const)('keeps the accent line readable in %s', theme => {
+    for (const ground of ['bg', 'surface', 'surface2'] as const) expect(contrast(theme, 'accent', ground), `accent on ${ground}`).toBeGreaterThanOrEqual(3);
   });
 });

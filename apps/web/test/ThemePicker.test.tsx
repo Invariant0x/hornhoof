@@ -7,6 +7,7 @@ import { Shell } from '../src/screens/Shell';
 import { initTheme } from '../src/theme';
 import { COLOR_TOKENS, parseTemplate, sampleOf, TEMPLATE_LIMIT } from '../src/theme-template';
 import { ME, mockApi, ORG } from './api-mock';
+import { decl } from './css';
 
 const root = document.documentElement;
 const NEON = { format: 'hornhoof-theme', version: 1, name: 'Neon', base: 'cyberpunk', colors: { bg: '#010203' } };
@@ -21,7 +22,7 @@ function renderShell(person = ME.person) {
   );
 }
 
-async function openTemplateWindow(user: ReturnType<typeof userEvent.setup>, names = { account: 'Account', item: 'Custom template…', title: 'Custom template' }) {
+async function openTemplateWindow(user: ReturnType<typeof userEvent.setup>, names = { account: 'Account', item: 'Set up template…', title: 'Custom template' }) {
   await user.click(screen.getByRole('button', { name: names.account }));
   await user.click(screen.getByRole('button', { name: names.item }));
   return screen.findByRole('dialog', { name: names.title });
@@ -60,7 +61,7 @@ describe('choosing a theme', () => {
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
     renderShell();
-    const dialog = await openTemplateWindow(user, { account: 'Аккаунт', item: 'Свой шаблон…', title: 'Свой шаблон' });
+    const dialog = await openTemplateWindow(user, { account: 'Аккаунт', item: 'Настроить шаблон…', title: 'Свой шаблон' });
     await user.upload(within(dialog).getByLabelText('Загрузить шаблон'), file(JSON.stringify(NEON)));
     expect(await within(dialog).findByText('Загружен ваш шаблон «Neon».')).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: 'Выгрузить шаблон' })).toBeInTheDocument();
@@ -81,7 +82,7 @@ describe('a custom template', () => {
     await user.click(screen.getByRole('button', { name: 'Account' }));
     const dialog = await openTemplateWindow(user);
     expect(within(dialog).getByText('No template is loaded. A built-in theme is on.')).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: 'Reset template' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Reset template' })).toBeDisabled();
     await user.upload(within(dialog).getByLabelText('Load template'), file(JSON.stringify(NEON)));
     expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
     expect(root.dataset.theme).toBe('cyberpunk');
@@ -132,7 +133,7 @@ describe('a custom template', () => {
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
     renderShell();
-    const dialog = await openTemplateWindow(user, { account: 'Аккаунт', item: 'Свой шаблон…', title: 'Свой шаблон' });
+    const dialog = await openTemplateWindow(user, { account: 'Аккаунт', item: 'Настроить шаблон…', title: 'Свой шаблон' });
     await user.upload(within(dialog).getByLabelText('Загрузить шаблон'), file(JSON.stringify({ ...NEON, cut: 3 })));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('cut: скос углов задается числом от 0 до 1.5.');
   });
@@ -181,5 +182,40 @@ describe('a custom template', () => {
     await user.upload(within(dialog).getByLabelText('Load template'), file(JSON.stringify(NEON)));
     expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Custom template' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('the look of the theme choice and the template window', () => {
+  it('names the menu item that opens the window apart from the fifth choice it makes', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('button', { name: 'Set up template…' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Custom template…' })).not.toBeInTheDocument();
+  });
+
+  it('puts Load first as the main action, then Download and Reset, and keeps Reset in place but off without a template', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const dialog = await openTemplateWindow(user);
+    const group = within(dialog).getByLabelText('Load template').closest('.form-foot') as HTMLElement;
+    expect(group).not.toBeNull();
+    const actions = [...group.children] as HTMLElement[];
+    expect(actions.map(a => a.textContent)).toEqual(['Load template', 'Download template', 'Reset template']);
+    expect(actions.map(a => a.classList.contains('ghost'))).toEqual([false, true, true]);
+    expect(actions.every(a => a.classList.contains('btn') && !a.classList.contains('small'))).toBe(true);
+    expect(within(group).getByRole('button', { name: 'Reset template' })).toBeDisabled();
+    await user.upload(within(dialog).getByLabelText('Load template'), file(JSON.stringify(NEON)));
+    expect(await within(dialog).findByText('Your template "Neon" is loaded.')).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: 'Reset template' })).toBeEnabled();
+  });
+
+  it('makes each theme button a 44 px target with 8 px between them, and gives the fifth one the whole row', () => {
+    expect(decl('.seg.themes', 'gap')).toBe('8px');
+    expect(decl('.seg.themes button', 'min-height')).toBe('44px');
+    expect(decl('.seg.themes button', 'padding')).toBe('8px 12px');
+    expect(decl('.seg.themes button', 'margin')).toBe('0');
+    expect(decl('.seg.themes button', 'white-space')).toBe('normal');
+    expect(decl('.seg.themes button:nth-child(5)', 'grid-column')).toBe('1 / -1');
   });
 });

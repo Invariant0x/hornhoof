@@ -222,7 +222,7 @@ test('a template loads from a file, a bad one is refused in plain words, and the
   await prepare(page, 'en', 'matrix', false);
   await page.goto('/');
   await page.getByRole('button', { name: 'Account', exact: true }).click();
-  await page.getByRole('button', { name: 'Custom template…', exact: true }).click();
+  await page.getByRole('button', { name: 'Set up template…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Custom template' });
   const download = page.waitForEvent('download');
   await dialog.getByRole('link', { name: 'Download template', exact: true }).click();

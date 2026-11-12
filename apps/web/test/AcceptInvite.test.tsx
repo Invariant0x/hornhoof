@@ -32,7 +32,7 @@ describe('AcceptInvite', () => {
     await user.type(await screen.findByLabelText('Choose a password'), 'long-enough-pass');
     await user.click(screen.getByRole('button', { name: 'Join' }));
     await user.click(await screen.findByRole('checkbox', { name: 'Kimi' }));
-    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.path === '/api/subscriptions/connect')!.body).toEqual({ providers: ['kimi'] });
     await user.click(await screen.findByRole('button', { name: 'Done' }));
     expect(onDone).toHaveBeenCalledOnce();
