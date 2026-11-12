@@ -1,10 +1,12 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
-import { ASSISTANT_PROGRAMS, type AssistantProgram, type Me, type PersonView } from '../types';
+import { PROVIDER_NAMES } from '../providers';
+import { ASSISTANT_PROGRAMS, type AssistantProgram, type AssistantView, type Me, type PersonView, type SubView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
+import { useOpenAgent } from './AgentWindowContext';
 
 type Owner = Pick<PersonView, 'id' | 'isOwner' | 'isCeoDelegate'>;
 
@@ -127,6 +129,11 @@ function SetupLines({ program, setup }: { program: AssistantProgram; setup: Setu
   );
 }
 
+/* The signing secret goes into the text for an AvaClone assistant that Hornhoof calls, at its events or skills address:
+   the program checks those calls with it. */
+const secretFor = (assistant: AssistantView | null | undefined, secret: string): string | undefined =>
+  assistant?.program === 'avaclone' && (assistant.eventsUrl || assistant.skillsUrl) ? secret : undefined;
+
 /* address: the company's address as its invite links have it. setup: the settings for OpenClaw or Hermes, or null for a
    program that takes the address and the key in its own way. */
 type Made = { key: string; signingSecret: string; address: string; setup?: Setup | null; person: PersonView };
@@ -168,8 +175,9 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
         <Secret label={t.people.signingSecret} value={shown.signingSecret} copy={t.people.copySecret} />
         {shown.setup && <SetupLines program={shown.person.assistant?.program ?? 'other'} setup={shown.setup} />}
         <div className="actions">
-          {/* The address and the key in one text, which the person sends their assistant as it is; never the signing secret. */}
-          <CopyButton text={t.people.forAssistant(shown.address, shown.key)} label={t.people.copyForAssistant} className="btn ghost" />
+          {/* The address and the key in one text, which the person sends their assistant as it is; the signing secret only for
+              a program that checks Hornhoof's calls with it. */}
+          <CopyButton text={t.people.forAssistant(shown.address, shown.key, secretFor(shown.person.assistant, shown.signingSecret))} label={t.people.copyForAssistant} className="btn ghost" />
           <button className="btn" type="button" onClick={() => setShown(null)}>{t.people.keySaved}</button>
         </div>
       </> : <>
@@ -193,14 +201,54 @@ function personChanges(person: PersonView, names: { manages: boolean; rename: bo
   return 'name' in changes || changes.title !== person.title ? changes : null;
 }
 
-/* An assistant's card: whom it acts for, its name and title for someone who manages people, its program, its events
-   address and its key. onChanged: the key changed, and the card stays open. */
-export function AssistantCard({ person, manages, rename, onChanged, onSaved, onClose }: { person: PersonView; manages: boolean; rename: boolean; onChanged: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
+/* The owner's own personal plans, the only ones the assistant's agent thinks on; null while they load, or for someone
+   who is not the owner and never picks. */
+function useOwnPlans(me: Me, owner: boolean): SubView[] | null {
+  const [plans, setPlans] = useState<SubView[] | null>(null);
+  useEffect(() => {
+    if (!owner) return;
+    let live = true;
+    api.get<{ subscriptions: SubView[] }>('/api/subscriptions').then(
+      r => live && setPlans(r.subscriptions.filter(s => s.kind === 'personal' && s.owner.id === me.person.id)),
+      () => live && setPlans([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [owner, me.person.id]);
+  return plans;
+}
+
+/* The plan the assistant's own agent thinks on, which only its owner picks, and the way to its window once it is there. */
+function OwnAgent({ plans, plan, agent, onPlan }: { plans: SubView[]; plan: string; agent: AssistantView['agent']; onPlan: (plan: string) => void }) {
   const t = useT();
+  const openAgent = useOpenAgent();
+  return <>
+    <Field label={t.people.plan} hint={plans.length ? t.people.ownAgentAbout : t.people.noOwnPlans}>
+      {p => (
+        <select {...p} value={plan} onChange={e => onPlan(e.target.value)}>
+          <option value="">{t.people.noPlan}</option>
+          {plans.map(s => <option key={s.id} value={s.id}>{PROVIDER_NAMES[s.provider]}</option>)}
+        </select>
+      )}
+    </Field>
+    {agent && <div className="actions"><button className="btn ghost" type="button" onClick={() => openAgent(agent.id)}>{t.people.openOwnAgent}</button></div>}
+  </>;
+}
+
+/* An assistant's card: whom it acts for, its name and title for someone who manages people, its program, its events and
+   skills addresses, for its owner the plan its own agent thinks on, and its key. onChanged: the key changed, and the card
+   stays open. */
+export function AssistantCard({ me, person, manages, rename, onChanged, onSaved, onClose }: { me: Me; person: PersonView; manages: boolean; rename: boolean; onChanged: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
+  const t = useT();
+  const owner = person.assistant?.owner.id === me.person.id;
+  const plans = useOwnPlans(me, owner);
   const [name, setName] = useState(person.name);
   const [title, setTitle] = useState(person.title);
   const [program, setProgram] = useState<AssistantProgram>(person.assistant?.program ?? 'avaclone');
   const [eventsUrl, setEventsUrl] = useState(person.assistant?.eventsUrl ?? '');
+  const [skillsUrl, setSkillsUrl] = useState(person.assistant?.skillsUrl ?? '');
+  const [plan, setPlan] = useState(person.assistant?.agent?.plan ?? '');
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -211,7 +259,10 @@ export function AssistantCard({ person, manages, rename, onChanged, onSaved, onC
     try {
       const changes = personChanges(person, { manages, rename }, name, title);
       if (changes) onChanged((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, changes)).person);
-      onSaved((await api.patch<{ person: PersonView }>(`/api/people/${person.id}/assistant`, { program, eventsUrl: eventsUrl.trim() || null })).person);
+      /* The plan goes only when its owner changed it: nobody else may send it. */
+      const moved = owner && plan !== (person.assistant?.agent?.plan ?? '') ? { plan: plan || null } : {};
+      const body = { program, eventsUrl: eventsUrl.trim() || null, skillsUrl: skillsUrl.trim() || null, ...moved };
+      onSaved((await api.patch<{ person: PersonView }>(`/api/people/${person.id}/assistant`, body)).person);
     } catch (err) {
       setFailure(errorText(t, err));
       setBusy(false);
@@ -226,6 +277,10 @@ export function AssistantCard({ person, manages, rename, onChanged, onSaved, onC
         {manages && rename && <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}</Field>}
         {manages && <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} />}</Field>}
         <ProgramAndAddress program={program} eventsUrl={eventsUrl} onProgram={setProgram} onEventsUrl={setEventsUrl} />
+        <Field label={t.people.skillsUrl} hint={t.people.skillsUrlHint}>
+          {p => <input {...p} type="url" value={skillsUrl} onChange={e => setSkillsUrl(e.target.value)} maxLength={500} placeholder="https://" autoComplete="off" spellCheck={false} />}
+        </Field>
+        {plans && <OwnAgent plans={plans} plan={plan} agent={person.assistant?.agent ?? null} onPlan={setPlan} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
