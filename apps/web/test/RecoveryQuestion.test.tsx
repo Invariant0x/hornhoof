@@ -62,7 +62,8 @@ describe('the question of which copy to go on from', () => {
   });
 
   it("sends the CEO's answer and looks again", async () => {
-    const waiting = { ...THREE, waiting: '2026-11-12T14:15:00.000Z' };
+    /* Until a time that has not come whenever this runs: the line shows only while he still waits. */
+    const waiting = { ...THREE, waiting: '2099-01-01T00:00:00.000Z' };
     let asked = 0;
     const { calls } = shown(null, true, 'en', {
       'GET /api/network/question': () => [200, { question: (asked += 1) > 2 ? waiting : THREE, canAnswer: true }],
