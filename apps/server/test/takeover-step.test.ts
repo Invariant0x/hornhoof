@@ -94,9 +94,14 @@ describe('the copy that watches the leader', () => {
     for (const over of lacks) {
       expect(nextWatchStep(watch(over), false), JSON.stringify(over)).toEqual({ action: { do: 'ask' }, why: 'may lack changes' });
       expect(nextWatchStep(watch(over), true), JSON.stringify(over)).toEqual({ action: { do: 'none' }, why: 'may lack changes' });
-      /* The CEO said to go on from it, not more than ten minutes ago. */
-      expect(nextWatchStep(watch({ ...over, ceo: NOW - CEO_KEEP_MS + 1 }), true)).toEqual({ action: { do: 'take', kind: 'ceo' }, why: 'the CEO said go on' });
-      expect(nextWatchStep(watch({ ...over, ceo: NOW - CEO_KEEP_MS }), true).action).toEqual({ do: 'none' });
+      /* The CEO said to go on from it, not more than ten minutes ago, and the leader was not heard since. */
+      const gone = { heard: NOW - CEO_KEEP_MS - 1000, linkAnswered: NOW - CEO_KEEP_MS - 1000 };
+      expect(nextWatchStep(watch({ ...over, ...gone, ceo: NOW - CEO_KEEP_MS + 1 }), true)).toEqual({ action: { do: 'take', kind: 'ceo' }, why: 'the CEO said go on' });
+      expect(nextWatchStep(watch({ ...over, ...gone, ceo: NOW - CEO_KEEP_MS }), true).action).toEqual({ do: 'none' });
+      /* A leader that was heard after his word, by a beat or at the link, may hold what he never saw: he is asked again. */
+      expect(nextWatchStep(watch({ ...over, ...gone, heard: NOW - SILENT_MS, ceo: NOW - SILENT_MS - 1 }), false).action).toEqual({ do: 'ask' });
+      expect(nextWatchStep(watch({ ...over, ...gone, linkAnswered: NOW - SILENT_MS, ceo: NOW - SILENT_MS - 1 }), true).action).toEqual({ do: 'none' });
+      expect(nextWatchStep(watch({ ...over, heard: null, linkAnswered: null, ceo: NOW - 1 }), true).action).toEqual({ do: 'take', kind: 'ceo' });
     }
     /* The CEO's word takes nothing while a check of the first four does not hold. */
     expect(nextWatchStep(watch({ record: null, ceo: NOW, held: true }), true).action).toEqual({ do: 'unask' });

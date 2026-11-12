@@ -119,6 +119,8 @@ export class UnitWriter {
   private closing = new Set<string>();
   /* The jobs a node said something of while their rows were away, each with the node it runs on: these stay running. */
   private running = new Map<string, ParkedNode>();
+  /* The jobs this pass added closed that the source held open: what a node says of one meanwhile opens it again. */
+  readonly closedJobs = new Set<string>();
 
   constructor(
     readonly q: Query,
@@ -140,6 +142,7 @@ export class UnitWriter {
   /* Before a pass over these units: what is open here now. running: the jobs that are left running, with their nodes. */
   async begin(writes: Unit[], running: Map<string, ParkedNode> = new Map()): Promise<void> {
     this.running = running;
+    this.closedJobs.clear();
     const [open] = await this.q<{ id: string }>("SELECT id FROM public.turns WHERE status = 'open' LIMIT 1");
     this.openTurn = open?.id ?? null;
     this.closing = new Set(writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && this.openTurn && unit.x!.status === 'open').map(unit => String(unit.x!.id)));
@@ -216,13 +219,19 @@ export class UnitWriter {
     }
     /* A job a node still runs, as it told this side while the job's row was away, is added running on that node: what
        the node said of it since is applied once the row is here. */
-    const runs = t.name === 'jobs' && (row.status === 'queued' || row.status === 'running') ? this.running.get(String(row.id)) : undefined;
+    const openJob = t.name === 'jobs' && (row.status === 'queued' || row.status === 'running');
+    const said = openJob ? this.running.get(String(row.id)) : undefined;
+    /* The source knew where it sent the job: only that node's word keeps it open, and a job it sent nowhere yet is
+       the node's that says it runs it. */
+    const placed = row.node_id !== null && row.node_id !== undefined ? row.node_id === (said?.kind === 'node' ? said.nodeId : null)
+      : row.builtin_machine !== null && row.builtin_machine !== undefined ? row.builtin_machine === (said?.kind === 'builtin' ? said.machine : null) : true;
+    const runs = said && placed ? said : undefined;
     if (runs) {
       if (row.status !== 'running') put('status', 'running');
       if (row.started_at === null || row.started_at === undefined) put('started_at', this.opts.now);
       if (runs.kind === 'node' && row.node_id !== runs.nodeId) put('node_id', runs.nodeId);
       if (runs.kind === 'builtin' && row.builtin_machine !== runs.machine) put('builtin_machine', runs.machine);
-    }
+    } else if (openJob) this.closedJobs.add(String(row.id));
     for (const closing of runs ? [] : (CLOSING[t.name] ?? [])) {
       if (!closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
       put(closing.column, closing.to);
@@ -576,10 +585,16 @@ class Merge {
     else if (outcome.do === 'change') {
       /* What only this side settles is never taken, whatever the journal proves of it. */
       const own = new Set(rule.hereOnly ?? []);
+      /* A turn both sides hold open is one run on one node, which reports to this side from now: this side's row is
+         the one that goes on, and what the two wrote of it apart, as when it started, is nothing for anyone to settle.
+         What the source alone wrote of it is left out where a row is written, as for any row this side holds open. */
+      const open = (row: Row | null): boolean => row?.status === 'queued' || row?.status === 'running';
+      const sameRun = t.name === 'jobs' && open(planned.x) && open(planned.y);
       unit.set = outcome.set.filter(column => !own.has(column));
-      const listed = [...outcome.conflict, ...outcome.set.filter(column => own.has(column))];
+      const listed = sameRun ? [] : [...outcome.conflict, ...outcome.set.filter(column => own.has(column))];
       if (unit.set.length > 0) unit.op = 'update';
       if (listed.length > 0) unit.listed = { kind: 'differs', cols: listed, there: planned.x };
+      if (sameRun && unit.set.length === 0) this.counts.equal += 1;
     } else if (outcome.do === 'conflict') unit.listed = { kind: outcome.kind, cols: outcome.cols, there: outcome.there ?? planned.x };
     else this.counts.equal += 1;
     this.units.push(unit);
@@ -611,10 +626,36 @@ class Merge {
         if (!unit.refused) await writer.attempt(unit);
       }
       this.counts.passes = pass + 1;
-      if ((await writer.references(writes)) === 0) break;
+      if ((await writer.references(writes)) === 0) {
+        await this.reopen(writer.closedJobs, running);
+        break;
+      }
       writer.spread(writes);
     }
     await q(`RELEASE SAVEPOINT ${UNITS}`);
+  }
+
+  /* A node may have told the leader of a job while this merge ran, after what was kept was read: the job was added
+     closed, and its node runs it on. From here to the commit nothing more is kept, so what was kept meanwhile is read
+     once more, and such a job is opened again on its node; whatever a node says after the commit finds the job's row.
+     known: what was kept when the merge began. */
+  private async reopen(closed: Set<string>, known: Map<string, ParkedNode>): Promise<void> {
+    if (closed.size === 0) return;
+    await this.q('LOCK TABLE net.parked IN SHARE ROW EXCLUSIVE MODE');
+    const now = parkedNodes(await parkedOf(this.q));
+    for (const id of closed) {
+      const node = now.get(id);
+      if (!node || known.has(id)) continue;
+      await this.q(
+        `UPDATE public.jobs j SET status = 'running', finished_at = NULL, error = NULL, started_at = COALESCE(j.started_at, $2::timestamptz),
+           node_id = CASE WHEN $3::text = 'node' AND j.node_id IS NULL AND j.builtin_machine IS NULL THEN $4::uuid ELSE j.node_id END,
+           builtin_machine = CASE WHEN $3::text = 'builtin' AND j.node_id IS NULL AND j.builtin_machine IS NULL THEN $5::text ELSE j.builtin_machine END
+          WHERE j.id = $1::uuid AND j.status = 'failed'
+            AND (j.node_id IS NULL OR ($3::text = 'node' AND j.node_id = $4::uuid))
+            AND (j.builtin_machine IS NULL OR ($3::text = 'builtin' AND j.builtin_machine = $5::text))`,
+        [id, this.now, node.kind, node.kind === 'node' ? node.nodeId : null, node.kind === 'builtin' ? node.machine : null],
+      );
+    }
   }
 
   /* The conflicts an earlier merge left open in the source: each may hold the only copy of a value the company wrote. */

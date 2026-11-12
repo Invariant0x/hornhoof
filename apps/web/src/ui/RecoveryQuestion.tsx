@@ -20,8 +20,9 @@ export function RecoveryQuestion({ children, again = false }: { children?: React
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
 
-  /* A server from before copies, or one that does not answer now, asks nothing. */
-  const look = useCallback(() => api.get<QuestionView>('/api/network/question').then(setView, () => setView(null)), []);
+  /* A server from before copies never answers, and so asks nothing; a look that fails changes nothing, so a question
+     that stands stays while the machine is away for a moment. */
+  const look = useCallback(() => api.get<QuestionView>('/api/network/question').then(setView, () => undefined), []);
   const asking = Boolean(view?.question);
   useEffect(() => {
     void look();

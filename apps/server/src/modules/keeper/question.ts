@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { PEER_PATHS } from '../../net/peer-server.js';
@@ -147,19 +147,30 @@ export class Recovery {
     return OK;
   }
 
-  /* The answer in the control folder, removed as it is read: a word that cannot be read is dropped, and said. */
+  /* The answer in the control folder, taken away before it is read, so one the app writes meanwhile is never removed
+     unseen. A word that cannot be read is dropped, and said; so is one older than a word holds, as a keeper finds it
+     that was away when the CEO answered. */
   private take(): RecoveryWord | null {
     const path = join(this.opts.controlDir, RECOVERY_FILE);
+    const taken = `${path}.taken`;
     let text: string;
     try {
-      text = readFileSync(path, 'utf8');
+      renameSync(path, taken);
+      text = readFileSync(taken, 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.opts.log(`The keeper could not read the CEO's answer: ${reasonOf(err)}`);
       return null;
+    } finally {
+      rmSync(taken, { force: true });
     }
-    rmSync(path, { force: true });
     try {
-      return WordShape.parse(JSON.parse(text));
+      const word = WordShape.parse(JSON.parse(text));
+      const age = this.clocks().wall - Date.parse(word.at);
+      if (!(age < CEO_KEEP_MS)) {
+        this.opts.log("The CEO's answer is too old to act on; the question is asked again.");
+        return null;
+      }
+      return word;
     } catch (err) {
       this.opts.log(`The keeper could not read the CEO's answer: ${reasonOf(err)}`);
       return null;

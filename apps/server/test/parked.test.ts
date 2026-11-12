@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
-import { agentEvents, agents, companies, jobs, machines, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, jobs, machines, nodes, people, subscriptions } from '../src/db/schema.js';
 import { applyParkedMessages, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ownBuiltin } from '../src/modules/nodes/hub.js';
 import { applyParked, mergePending, park, parkedJobs, pendingChanged } from '../src/modules/nodes/parked.js';
@@ -71,8 +71,17 @@ describe('jobs of the machine the server was taken from', () => {
     expect(await s.pending()).toBe(false);
     await s.merge('pending');
     expect(await s.pending()).toBe(true);
-    /* A machine that left the company brings nothing back. */
-    await s.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, s.old.id));
+    /* A machine that came back with a new copy and no database of before, as one that was wiped, brings nothing. */
+    await s.db.update(machines).set({ copyState: 'ready', copyAt: new Date(), copyOld: null }).where(eq(machines.id, s.old.id));
+    expect(await s.pending()).toBe(false);
+    await s.db.update(machines).set({ copyOld: 2 }).where(eq(machines.id, s.old.id));
+    expect(await s.pending()).toBe(true);
+    await s.db.update(machines).set({ copyOld: null, copyAt: new Date(at.getTime() - 1000) }).where(eq(machines.id, s.old.id));
+    expect(await s.pending()).toBe(true);
+    /* Nor does one that stopped holding the data, or left the company. */
+    await s.db.update(machines).set({ role: 'worker' }).where(eq(machines.id, s.old.id));
+    expect(await s.pending()).toBe(false);
+    await s.db.update(machines).set({ role: 'data', revokedAt: new Date() }).where(eq(machines.id, s.old.id));
     expect(await s.pending()).toBe(false);
   });
 
@@ -101,6 +110,30 @@ describe('jobs of the machine the server was taken from', () => {
     await s.hello([unknown]);
     expect(await s.parked()).toHaveLength(1);
     expect(await parkedJobs(s.db)).toEqual(new Map([[unknown, BUILTIN]]));
+  });
+
+  it("keeps a turn that waits here running on the personal node that says it runs it, and only a turn of that node's plan", async () => {
+    const s = await stand();
+    const [acme] = await s.db.select().from(companies);
+    const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
+    const plans = await s.db.insert(subscriptions).values([
+      { companyId: acme!.id, ownerPersonId: owner!.id, provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready' },
+      { companyId: acme!.id, ownerPersonId: owner!.id, provider: 'claude', kind: 'personal', label: 'Another', status: 'ready' },
+    ]).returning();
+    const [node] = await s.db.insert(nodes).values({ companyId: acme!.id, machineId: s.old.id, subscriptionId: plans[0]!.id, keyHash: 'laptop', status: 'ready', version: '0.18.10' }).returning();
+    const [other] = await s.db.insert(nodes).values({ companyId: acme!.id, machineId: s.old.id, subscriptionId: plans[1]!.id, keyHash: 'desktop', status: 'ready', version: '0.18.10' }).returning();
+    const laptop = { kind: 'node' as const, nodeId: node!.id };
+    /* Turns wait in the queue with no node: the machine that led sent these out after its last change reached here. */
+    const mine = (await s.job({ status: 'queued', startedAt: null, subscriptionId: plans[0]!.id })).id;
+    const foreign = (await s.job({ status: 'queued', startedAt: null, subscriptionId: plans[1]!.id })).id;
+    const elsewhere = (await s.job({ status: 'queued', startedAt: null, subscriptionId: plans[0]!.id, nodeId: other!.id })).id;
+    await s.handed('takeover');
+    await handleNodeMessage(s.ctx, laptop, { type: 'hello', version: '0.18.10', loggedIn: true, running: [mine, foreign, elsewhere] });
+    expect(await s.jobNow(mine)).toMatchObject({ status: 'running', nodeId: node!.id });
+    /* A turn of another plan, or one that names another node, is not this node's to run. */
+    expect(await s.jobNow(foreign)).toMatchObject({ status: 'queued', nodeId: null });
+    expect(await s.jobNow(elsewhere)).toMatchObject({ status: 'queued', nodeId: other!.id });
+    expect(s.cancelled().sort()).toEqual([foreign, elsewhere].sort());
   });
 
   it('parks what an unknown job sends', async () => {
@@ -164,7 +197,7 @@ describe('jobs of the machine the server was taken from', () => {
     expect(await applyParkedMessages(s.ctx)).toBe(0);
   });
 
-  it('applies each message once across a failure', async () => {
+  it('goes on from the message that failed', async () => {
     const s = await stand();
     await s.handed('takeover');
     const id = randomUUID();
@@ -173,11 +206,13 @@ describe('jobs of the machine the server was taken from', () => {
     await handleNodeMessage(s.ctx, BUILTIN, done(id));
     await s.job({ id, status: 'queued', startedAt: null });
     let calls = 0;
-    /* The second message fails after it wrote: what it wrote goes with it, and so does its mark. */
-    const applied = await applyParked(s.ctx, async (scoped, node, msg) => {
+    /* The second message fails: it is not marked, and nothing after it is tried. */
+    const applied = await applyParked(s.ctx, async (app, node, msg) => {
       calls += 1;
-      await handleNodeMessage(scoped, node, msg);
       if (calls === 2) throw new Error('the database went away');
+      /* The app itself handles it, so what it keeps by the app, as a wait for words, is where the app looks. */
+      expect(app).toBe(s.ctx);
+      await handleNodeMessage(app, node, msg);
     });
     expect([applied, calls]).toEqual([1, 2]);
     expect(await s.jobNow(id)).toMatchObject({ status: 'running' });

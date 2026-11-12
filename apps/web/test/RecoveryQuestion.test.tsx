@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -88,6 +88,18 @@ describe('the question of which copy to go on from', () => {
     const box = await screen.findByRole('group', { name: 'The server stopped answering' });
     await user.click(within(box).getByRole('button', { name: 'Wait for deb' }));
     expect(await within(box).findByRole('alert')).toHaveTextContent('The question changed. Look again.');
+  });
+
+  it('keeps the question while a look fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let down = false;
+    shown(ONE, true, 'en', { 'GET /api/network/question': () => (down ? [502, { error: { code: 'unavailable', message: 'down' } }] : [200, { question: ONE, canAnswer: true }]) });
+    const box = await screen.findByRole('group', { name: 'The server stopped answering' });
+    down = true;
+    await act(() => vi.advanceTimersByTimeAsync(11_000));
+    expect(box).toBeInTheDocument();
+    expect(within(box).getAllByRole('button')).toHaveLength(2);
+    vi.useRealTimers();
   });
 
   it('shows what else there is to say while nothing is asked, also on a server that knows no question', async () => {

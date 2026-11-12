@@ -75,7 +75,8 @@ export type WatchAction = { do: 'none' } | { do: 'take'; kind: 'takeover' | 'ceo
 /* The copy takes the server over only when the leader has been silent both ways, the name free and the relay steady
    long enough, and the relay's record, at the route's generation, names this copy as the one that holds every
    confirmed change, as the leader's own beats said not long ago. With all but that last, it asks the CEO, who may
-   say to go on from it. asked: its question stands. */
+   say to go on from it; his word holds for ten minutes, and only while the leader was not heard after it. asked: its
+   question stands. */
 export function nextWatchStep(s: WatchSample, asked: boolean): { action: WatchAction; why: string } {
   const quiet = (why: string): { action: WatchAction; why: string } => ({ action: asked ? { do: 'unask' } : { do: 'none' }, why });
   if (!s.ready || s.holds || s.leader === null) return quiet('not watching');
@@ -86,7 +87,10 @@ export function nextWatchStep(s: WatchSample, asked: boolean): { action: WatchAc
   if (windowOpenMs(s.window, s.now) < EMPTY_MS || relayBackMs(s.window, s.now) < RELAY_BACK_MS) return { action: { do: 'none' }, why: 'window' };
   const named = s.record?.state === 'on' && s.record.copy === s.self && s.routeGeneration !== null && s.record.generation === s.routeGeneration;
   if (named && s.syncBeat !== null && s.now - s.syncBeat < SYNC_BEAT_MS) return { action: { do: 'take', kind: 'takeover' }, why: 'checks 1-5' };
-  if (s.ceo !== null && s.now - s.ceo < CEO_KEEP_MS) return { action: { do: 'take', kind: 'ceo' }, why: 'the CEO said go on' };
+  /* The CEO's word is for the leader as it was gone when he gave it: a leader heard since, by a beat or at the link,
+     may have taken changes he never saw, so the word counts no more and he is asked again. */
+  const since = Math.max(s.heard ?? -Infinity, s.linkAnswered ?? -Infinity);
+  if (s.ceo !== null && s.ceo > since && s.now - s.ceo < CEO_KEEP_MS) return { action: { do: 'take', kind: 'ceo' }, why: 'the CEO said go on' };
   return { action: asked ? { do: 'none' } : { do: 'ask' }, why: 'may lack changes' };
 }
 

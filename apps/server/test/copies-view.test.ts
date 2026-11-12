@@ -144,6 +144,9 @@ describe("what the Machines tab says of the company's data", () => {
     await s.db.update(machines).set({ copyState: 'ready', copyAt: ago(900_000) }).where(eq(machines.id, a.id));
     expect(await ledOf(a.id)).toBeNull();
     await s.db.update(machines).set({ copyAt: ago(60_000) }).where(eq(machines.id, a.id));
+    /* Only on the word of the keeper that leads that the copy holds every change: one that lags says so instead. */
+    expect(await ledOf(a.id)).toBeNull();
+    s.keeper([{ name: a.name, state: 'sync' }, { name: b.name, state: 'pace' }]);
     expect(await ledOf(a.id)).toEqual({ until: ago(720_000).toISOString() });
     expect(await ledOf(b.id)).toBeNull();
     expect(await ledOf(s.leader.id)).toBeNull();

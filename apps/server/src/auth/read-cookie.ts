@@ -43,5 +43,6 @@ export function checkRead(value: string | undefined, passwordHash: string | null
   if (!said || passwordHash === null || Number(said.until) <= now) return false;
   const mark = Buffer.from(said.mark, 'base64url');
   const right = markOf(said.person, said.until, passwordHash, secret);
-  return mark.length === right.length && timingSafeEqual(mark, right);
+  /* One mark has one spelling: a value that decodes to it and is written another way is not the cookie that was given. */
+  return mark.length === right.length && timingSafeEqual(mark, right) && mark.toString('base64url') === said.mark;
 }

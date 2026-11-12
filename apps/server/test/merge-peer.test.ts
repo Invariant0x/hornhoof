@@ -167,13 +167,13 @@ describe("the old database of a copy on another machine", () => {
     const [sub] = await s.db.select().from(subscriptions);
     const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const NODE = builtinOf(OLD_MACHINE);
-    const ids = { told: randomUUID(), waited: randomUUID(), other: randomUUID() };
+    const ids = { told: randomUUID(), waited: randomUUID(), other: randomUUID(), claimed: randomUUID() };
     const job = (id: string, status: 'queued' | 'running') =>
       ({ id, companyId: s.acme.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation' as const, prompt: 'hi', timeoutMs: 900_000, status, startedAt: status === 'running' ? new Date() : null, builtinMachine: OLD_MACHINE });
     /* While it led alone, the old leader started two turns and queued one; of the queued one a node told it something
        while its row was away from it. */
     const old = await s.copied(async side => {
-      await side.db.insert(jobs).values([job(ids.told, 'running'), job(ids.waited, 'queued'), job(ids.other, 'running')]);
+      await side.db.insert(jobs).values([job(ids.told, 'running'), job(ids.waited, 'queued'), job(ids.other, 'running'), job(ids.claimed, 'running')]);
       await side.client.exec(`INSERT INTO net.parked (job_id, node, kind, body) VALUES ('${ids.waited}', '${JSON.stringify(NODE)}', 'listed', '{}')`);
     });
     await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster) VALUES (7, 'copy', 'copy', 'cluster-of-the-copy')`);
@@ -181,6 +181,8 @@ describe("the old database of a copy on another machine", () => {
     await park(s.db, { jobId: ids.told, node: NODE, kind: 'listed', body: {} });
     vi.spyOn(s.app.ctx.hub, 'send').mockReturnValue(true);
     await park(s.db, { jobId: ids.told, node: NODE, kind: 'done', body: { type: 'job.done', jobId: ids.told, ok: true, result: 'Done over there.', tail: '', error: null, sessionId: null } });
+    /* Another node says it runs a turn the old leader sent to its own node: the old leader knew where it sent it. */
+    await park(s.db, { jobId: ids.claimed, node: { kind: 'node', nodeId: randomUUID() }, kind: 'started', body: { type: 'job.started', jobId: ids.claimed } });
     s.door(true);
     await s.look();
     expect((await s.merges())[0]).toMatchObject({ source: `machine:${s.machine.id}:led-7`, status: 'merged' });
@@ -190,12 +192,31 @@ describe("the old database of a copy on another machine", () => {
     expect(await now(ids.told)).toMatchObject({ status: 'done', result: 'Done over there.', builtinMachine: OLD_MACHINE });
     expect(await now(ids.waited)).toMatchObject({ status: 'running', builtinMachine: OLD_MACHINE });
     expect((await now(ids.waited))!.startedAt).not.toBeNull();
-    /* A turn nobody said anything of ended with the machine that ran it. */
+    /* A turn nobody said anything of ended with the machine that ran it, and so did the one another node laid claim to. */
     expect(await now(ids.other)).toMatchObject({ status: 'failed' });
+    expect(await now(ids.claimed)).toMatchObject({ status: 'failed', nodeId: null, builtinMachine: OLD_MACHINE });
     /* What the source kept of the queued one is here too. */
     const parked = await rowsOf<{ job_id: string; kind: string }>(s.db, sql`SELECT job_id::text AS job_id, kind FROM net.parked ORDER BY at, id`);
-    expect(parked.map(row => [row.job_id, row.kind]).sort()).toEqual([[ids.told, 'done'], [ids.told, 'listed'], [ids.waited, 'listed']].sort());
+    expect(parked.map(row => [row.job_id, row.kind]).sort()).toEqual([[ids.claimed, 'started'], [ids.told, 'done'], [ids.told, 'listed'], [ids.waited, 'listed']].sort());
     expect(await applyParkedMessages(s.app.ctx)).toBe(0);
+  });
+
+  it('leaves a turn alone that both sides started, with nothing for anyone to settle', async () => {
+    const s = await stand();
+    await s.db.update(machines).set({ copyOld: 3, copyOldLed: 7 }).where(eq(machines.id, s.machine.id));
+    const [sub] = await s.db.select().from(subscriptions);
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    /* The turn waited in the queue on both sides when they parted. */
+    const [turn] = await s.db.insert(jobs).values({ companyId: s.acme.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900_000, status: 'queued' }).returning();
+    /* The old leader sent it out, and the new one took the node's word that it runs. */
+    const old = await s.copied(side => side.db.update(jobs).set({ status: 'running', startedAt: new Date('2026-11-12T14:01:00.000Z'), builtinMachine: OLD_MACHINE }).where(eq(jobs.id, turn!.id)));
+    await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster) VALUES (7, 'copy', 'copy', 'cluster-of-the-copy')`);
+    await s.db.update(jobs).set({ status: 'running', startedAt: new Date('2026-11-12T14:03:00.000Z'), builtinMachine: OLD_MACHINE }).where(eq(jobs.id, turn!.id));
+    s.door(true);
+    await s.look();
+    expect((await s.merges())[0]).toMatchObject({ status: 'merged' });
+    expect((await s.db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]).toMatchObject({ status: 'running', startedAt: new Date('2026-11-12T14:03:00.000Z') });
+    expect(await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.merge_conflicts`)).toEqual([{ n: 0 }]);
   });
 
   it('compares across a restore', async () => {

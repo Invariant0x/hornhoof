@@ -58,6 +58,20 @@ describe('signing in on a machine that only reads', () => {
     expect(await s.db.select().from(sessions)).toHaveLength(before.length + 1);
   });
 
+  it('leaves no session behind when the request that brings the read cookie signs in itself', async () => {
+    const s = await reading();
+    const read = cookieOf(await login(s.app), 'hh_read')!.value;
+    await s.say('lead');
+    const before = await s.db.select().from(sessions);
+    const signed = await s.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: SETUP.email, password: SETUP.password }, cookies: { hh_read: read } });
+    expect(signed.statusCode).toBe(200);
+    /* One session, the one the sign-in made, and the read cookie is gone. */
+    const after = await s.db.select().from(sessions);
+    expect(after).toHaveLength(before.length + 1);
+    expect((await s.me({ hh_session: cookieOf(signed, 'hh_session')!.value })).statusCode).toBe(200);
+    expect(signed.cookies.filter(cookie => cookie.name === 'hh_read').every(cookie => cookie.value === '')).toBe(true);
+  });
+
   it('refuses a wrong password, and counts sign-in tries in memory', async () => {
     const s = await reading();
     for (let n = 0; n < 10; n += 1) expect((await login(s.app, 'not the password')).statusCode).toBe(401);

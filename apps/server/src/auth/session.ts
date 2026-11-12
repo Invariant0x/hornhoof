@@ -238,6 +238,9 @@ export async function readCookieSession(req: FastifyRequest, reply: FastifyReply
   if (old && old !== traded.token) await dropSessions(db, [old]);
   setSessionCookie(reply, config, traded.token, traded.expiresAt);
   req.cookies[sessionCookieOf(req)] = traded.token;
+  /* A request that decides the session cookie itself, a sign-in, an invite or a sign-out, takes this session back, as
+     it does one a hand-over made, so none is left that no browser holds. */
+  handedOver.set(req, { from: traded.token, to: traded.token });
 }
 
 const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.', 'signed_out');

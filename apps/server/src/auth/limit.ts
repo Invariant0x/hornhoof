@@ -13,7 +13,7 @@ export function limiter({ max = 10, windowMs = 15 * 60 * 1000 }: { max?: number;
 
   const attempts = (key: string, now = Date.now()) => {
     if (seen.size > SWEEP_AT) {
-      for (const [k, times] of seen) if (times[times.length - 1]! <= now - windowMs) seen.delete(k);
+      for (const [k, times] of seen) if (times.length === 0 || times[times.length - 1]! <= now - windowMs) seen.delete(k);
     }
     const recent = (seen.get(key) ?? []).filter(t => t > now - windowMs);
     if (recent.length >= max) {
@@ -24,8 +24,12 @@ export function limiter({ max = 10, windowMs = 15 * 60 * 1000 }: { max?: number;
     seen.set(key, recent);
     return { allowed: true, retryAfterS: 0 };
   };
-  /* The newest attempt of that key is taken back: it was no failure. */
-  const forget = (key: string) => void seen.get(key)?.pop();
+  /* The newest attempt of that key is taken back: it was no failure. A key with nothing left is not kept. */
+  const forget = (key: string) => {
+    const times = seen.get(key);
+    times?.pop();
+    if (times?.length === 0) seen.delete(key);
+  };
   return Object.assign(attempts, { size: () => seen.size, windowMs, forget });
 }
 

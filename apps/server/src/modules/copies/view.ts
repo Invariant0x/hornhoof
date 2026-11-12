@@ -98,7 +98,7 @@ async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<
       /* A machine with a place, or one that holds the data, needs no reason; any other says the first thing that keeps
          it from holding a copy. */
       const reason = row.serverOrder === null && row.role !== 'data' && candidate ? unfit(candidate, fit) : null;
-      return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null, led: ledOf(row, old) }];
+      return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null, led: ledOf(row, lines.get(row.id) ?? null, old) }];
     }),
   );
 }
@@ -114,10 +114,10 @@ async function oldLeader(ctx: Ctx): Promise<OldLeader> {
   return newest ? { machine: newest.machine, at: new Date(newest.at), until: new Date(newest.heard ?? newest.at) } : null;
 }
 
-/* Said only once the copy that machine finished after the move is up to date: until then its card says what its copy
-   does. */
-function ledOf(row: Row, old: OldLeader): DataView['led'] {
-  if (!old || old.machine !== row.id || row.copyState !== 'ready' || !row.copyAt || row.copyAt <= old.at) return null;
+/* Said only while the copy that machine finished after the move is up to date, on the word of the keeper that leads:
+   until then, and whenever it sleeps or lags, its card says what its copy does. */
+function ledOf(row: Row, line: CopyLine | null, old: OldLeader): DataView['led'] {
+  if (!old || old.machine !== row.id || line?.line !== 'ready' || !row.copyAt || row.copyAt <= old.at) return null;
   return { until: old.until.toISOString() };
 }
 

@@ -123,6 +123,20 @@ describe('the question to the CEO', () => {
     expect(s.recovery.waiting()).toBeNull();
   });
 
+  it('drops a word that is too old to act on', async () => {
+    const s = stand();
+    s.word({ goOn: B, reach: '2026-11-12T14:01:40.000Z', at: new Date(WALL - CEO_KEEP_MS).toISOString() });
+    await s.recovery.tick();
+    expect([s.recovery.go(), s.there()]).toEqual([null, false]);
+    expect(s.lines.some(line => line.includes('too old'))).toBe(true);
+    s.word({ wait: true, at: 'no time at all' });
+    await s.recovery.tick();
+    expect(s.recovery.waiting()).toBeNull();
+    s.word({ goOn: B, reach: '2026-11-12T14:01:40.000Z', at: new Date(WALL - CEO_KEEP_MS + 1000).toISOString() });
+    await s.recovery.tick();
+    expect(s.recovery.go()).toBe(50_000);
+  });
+
   it('drops a word it cannot read', async () => {
     const s = stand();
     writeFileSync(join(s.controlDir, RECOVERY_FILE), '{ "goOn": ');

@@ -15,7 +15,8 @@ export type ParkedKind = 'listed' | 'started' | 'event' | 'done';
 
 const PENDING = `SELECT EXISTS (
   SELECT FROM net.handovers h JOIN public.machines m ON m.id = h.from_machine_id AND m.revoked_at IS NULL
-   WHERE h.kind IN ('takeover', 'ceo')
+   WHERE h.kind IN ('takeover', 'ceo') AND m.role = 'data'
+     AND NOT COALESCE(m.copy_state = 'ready' AND m.copy_at > h.at AND m.copy_old IS NULL, false)
      AND NOT EXISTS (SELECT FROM net.merges g
        WHERE g.source LIKE 'machine:' || m.id::text || ':led-%' AND g.created_at > h.at AND g.status IN ('merged', 'done'))
 ) AS pending`;
@@ -24,8 +25,9 @@ const CHECK_EVERY_MS = 1000;
 const checked = new WeakMap<Db, { at: number; pending: boolean }>();
 
 /* Whether the database of a machine the server was taken from still waits to be merged: a takeover, or the CEO's
-   choice of a copy, from a machine that is still the company's, with no merge of what that machine led made after it
-   and ended. Read at most once a second. */
+   choice of a copy, from a machine that still holds the company's data, with no merge of what that machine led made
+   after it and ended. A machine that came back with a new copy and no database of before, as one that was wiped,
+   brings nothing, and neither does one that left or stopped holding the data. Read at most once a second. */
 export async function mergePending(db: Db, now = Date.now()): Promise<boolean> {
   const last = checked.get(db);
   if (last && now >= last.at && now - last.at < CHECK_EVERY_MS) return last.pending;
@@ -77,9 +79,10 @@ type Handle = (ctx: Ctx, id: NodeIdentity, msg: NodeMessage) => Promise<void>;
 const applying = new WeakSet<Db>();
 
 /* Applies what was kept of each job whose row is there now: that it started, its events and its end, in the order
-   they came, each in a transaction of its own with the mark that it was applied, so none is applied twice and a job
-   whose message fails goes on from that message at the next run. Answers how many it applied. handle: what takes a
-   node's message, which is the caller's to give. */
+   they came. Each message is handled as if its node said it now, by the app as it is, and marked once that is through;
+   a job whose message fails goes on from that message at the next run. A start and an end change nothing when they
+   are handled a second time; an event the app handled right before it stopped is in the conversation twice. Answers
+   how many it applied. handle: what takes a node's message, which is the caller's to give. */
 export async function applyParked(ctx: Ctx, handle: Handle): Promise<number> {
   if (applying.has(ctx.db)) return 0;
   applying.add(ctx.db);
@@ -98,16 +101,12 @@ export async function applyParked(ctx: Ctx, handle: Handle): Promise<number> {
       if (failed.has(row.job)) continue;
       const node = Node.safeParse(row.node);
       try {
-        const did = await ctx.db.transaction(async tx => {
-          const scoped = { ...ctx, db: tx as unknown as Db };
-          const [still] = await queryOf(scoped.db)<{ id: string }>('SELECT id::text AS id FROM net.parked WHERE id = $1::uuid AND applied_at IS NULL FOR UPDATE', [row.id]);
-          if (!still) return false;
-          /* A row that names no node this Hornhoof knows is marked and left: nothing can take it. */
-          if (node.success) await handle(scoped, node.data, row.body as NodeMessage);
-          await queryOf(scoped.db)('UPDATE net.parked SET applied_at = clock_timestamp() WHERE id = $1::uuid', [row.id]);
-          return node.success;
-        });
-        if (did) applied += 1;
+        /* What handles a message keeps waits, timers and sends by the app it was given, which outlive any one
+           transaction: so it runs on the app itself, and the mark follows. A row that names no node this Hornhoof
+           knows is marked and left: nothing can take it. */
+        if (node.success) await handle(ctx, node.data, row.body as NodeMessage);
+        const marked = await q<{ id: string }>('UPDATE net.parked SET applied_at = clock_timestamp() WHERE id = $1::uuid AND applied_at IS NULL RETURNING id::text AS id', [row.id]);
+        if (node.success && marked.length > 0) applied += 1;
       } catch (err) {
         failed.add(row.job);
         ctx.log.warn({ error: loggable(err), job: row.job }, 'Could not apply what a node said of a job while its database was away. It is tried again in a minute.');

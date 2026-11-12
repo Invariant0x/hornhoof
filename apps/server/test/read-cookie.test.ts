@@ -20,6 +20,9 @@ describe('the cookie of a sign-in on a machine that only reads', () => {
     expect(checkRead([person, String(Number(until) + 1), mac].join('.'), HASH, SECRET, NOW)).toBe(false);
     expect(checkRead([person, until, `${mac.slice(0, -1)}${mac.endsWith('A') ? 'B' : 'A'}`].join('.'), HASH, SECRET, NOW)).toBe(false);
     expect(checkRead(value, HASH, randomBytes(32), NOW)).toBe(false);
+    /* One mark has one spelling: the same bytes written another way are not the cookie that was given. */
+    expect(Buffer.from(`${mac}=`, 'base64url').equals(Buffer.from(mac, 'base64url'))).toBe(true);
+    expect(checkRead([person, until, `${mac}=`].join('.'), HASH, SECRET, NOW)).toBe(false);
     expect(checkRead(value, null, SECRET, NOW)).toBe(false);
     for (const odd of [undefined, '', 'a.b', `${person}.soon.${mac}`, `not-a-person.${until}.${mac}`, `${value}.more`]) {
       expect(checkRead(odd, HASH, SECRET, NOW), String(odd)).toBe(false);

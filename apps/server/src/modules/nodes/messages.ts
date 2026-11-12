@@ -237,6 +237,24 @@ async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promis
 /* What was kept of jobs whose rows are there now is applied as if the node said it now. */
 export const applyParkedMessages = (ctx: Ctx): Promise<number> => applyParked(ctx, (scoped, id, msg) => handleNodeMessage(scoped, id, msg));
 
+/* A turn waits in the queue with no node until it is sent out. One the machine that led sent out after its last
+   change reached this copy still waits here, and the node that says it runs it is where it went: it is that node's
+   from now. Only a turn of the node's own plan, or of an API key for a machine's built-in node, is taken so; a turn
+   that names another node stays that one's. */
+async function placeWaiting(ctx: Ctx, id: NodeIdentity, ids: string[]): Promise<void> {
+  const { db } = ctx;
+  const waits = and(inArray(jobs.id, ids), eq(jobs.status, 'queued'), isNull(jobs.nodeId), isNull(jobs.builtinMachine));
+  if (id.kind === 'node') {
+    const ofPlan = eq(jobs.subscriptionId, sql`(select ${nodes.subscriptionId} from ${nodes} where ${nodes.id} = ${id.nodeId})`);
+    await db.update(jobs).set({ nodeId: id.nodeId }).where(and(waits, ofPlan));
+    return;
+  }
+  /* The server's own built-in node runs the turns that name no machine: those need no place. */
+  if (id.machine === ownMachine(ctx.config)) return;
+  const ofKeys = inArray(jobs.subscriptionId, db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  await db.update(jobs).set({ builtinMachine: id.machine }).where(and(waits, ofKeys));
+}
+
 /* The jobs a node says it runs, once its own open jobs were settled. Hornhoof ended some while the node was away, with
    a stop or a removed subscription: the node stops those now. While a merge is pending, a job this Hornhoof has no row
    of is left running and that the node lists it is kept; and one that waits here in the queue runs on that node from
@@ -244,10 +262,11 @@ export const applyParkedMessages = (ctx: Ctx): Promise<number> => applyParked(ct
 async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: Date): Promise<void> {
   if (!running.length) return;
   const { db } = ctx;
-  const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
-  const keep = new Set(open.map(j => j.id));
   const pending = await mergePending(db);
   const ids = pending ? running.filter(jobId => z.uuid().safeParse(jobId).success) : [];
+  if (ids.length) await placeWaiting(ctx, id, ids);
+  const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
+  const keep = new Set(open.map(j => j.id));
   const known = new Set(ids.length ? (await db.select({ id: jobs.id }).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
   for (const jobId of running) {
     if (keep.has(jobId)) continue;
