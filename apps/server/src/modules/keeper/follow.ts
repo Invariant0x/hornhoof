@@ -478,7 +478,14 @@ export class FollowKeeper {
      there afterwards, this keeper or its updater, would wait for that copy for good. Done once, when it works. */
   private async waitForNone(): Promise<void> {
     if (this.waitsForNone) return;
-    await waitForNoCopy(this.copySql);
+    /* Asked of the server's own database, which is always there: the copy's is not while it changes places with a
+       new one, and a keeper that started then would never get to the step that puts it back. */
+    const admin = this.opts.sql('postgres');
+    try {
+      await waitForNoCopy(admin);
+    } finally {
+      await admin.close().catch(() => undefined);
+    }
     this.waitsForNone = true;
   }
 

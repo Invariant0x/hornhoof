@@ -9,7 +9,7 @@ import { writeReplicaMarker } from './become.js';
 import type { Sql } from './lease-store.js';
 import { writePrivately } from './machine-keys.js';
 import { readHeldCrl } from './peer-link.js';
-import { PEERS_FILE } from './worker.js';
+import { PEERS_FILE, viewIn } from './worker.js';
 
 const VisitSecret = z.object({ name: z.string(), key: z.string() });
 
@@ -51,8 +51,8 @@ export async function seedView(sql: Sql, machineId: string, secret: Buffer): Pro
    holds no other; none when there is no such view. */
 function listBefore(path: string): string | null {
   try {
-    const kept = (JSON.parse(readFileSync(path, 'utf8')) as { crlPem?: unknown }).crlPem;
-    return typeof kept === 'string' && kept ? kept : null;
+    /* Read as the keeper that follows reads it. */
+    return viewIn(JSON.parse(readFileSync(path, 'utf8')))?.crlPem || null;
   } catch {
     return null;
   }

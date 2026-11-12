@@ -11,6 +11,7 @@ import { BundleStore } from '../src/modules/backups/store.js';
 import type { MakerView } from '../src/modules/backups/types.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { LED_FILE, LED_RETRY_MS, LedSaver, readLed } from '../src/modules/keeper/led.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { issueCertificate, makeAuthority } from '../src/modules/network/authority.js';
 import { createTestSql, ownDatabases } from './helpers.js';
 
@@ -28,9 +29,9 @@ function folder(): string {
 }
 
 /* The keeper of A, a machine that led under term 7 and follows B now, with its updater and the keeper of B played by the test. */
-async function saver() {
+async function saver(over: (sql: Sql) => Sql = sql => sql) {
   const [dir, controlDir] = [folder(), folder()];
-  const { sql } = await createTestSql();
+  const sql = over((await createTestSql()).sql);
   await sql.query('SET session_replication_role = replica');
   await sql.query('DELETE FROM net_local.lease; DELETE FROM net_local.state');
   await sql.query(`INSERT INTO net_local.state (term_number, term_machine, term_split, machine, cluster) VALUES (7, $1, false, $1, 'c')`, [A]);
@@ -75,6 +76,29 @@ async function saver() {
 }
 
 describe('saving the database of a machine that led', () => {
+  it('lets no commit of the database that led wait for the copy it named', async () => {
+    /* As Postgres answers: SHOW names its column after the setting, and a SELECT as the query names it. */
+    let names = 'FIRST 1 ("copy_b0b0b0b0b0b0b0b0_1")';
+    const asked: string[] = [];
+    const s = await saver(sql => ({
+      ...sql,
+      query: async <R>(text: string, params?: unknown[]) => {
+        if (text === 'SHOW synchronous_standby_names') return { rows: [{ synchronous_standby_names: names }] as R[] };
+        if (text.includes("current_setting('synchronous_standby_names')")) return { rows: [{ names }] as R[] };
+        if (text.startsWith('ALTER SYSTEM') || text.includes('pg_reload_conf')) {
+          asked.push(text);
+          if (text.includes('pg_reload_conf')) names = '';
+          return { rows: [] as R[] };
+        }
+        return sql.query<R>(text, params);
+      },
+    }));
+    await s.it.tick();
+    /* Else the updater's first statement for the dump would wait for a copy that follows this database no more. */
+    expect(asked).toEqual(['ALTER SYSTEM RESET synchronous_standby_names', 'SELECT pg_reload_conf()']);
+    expect(s.request()).toMatchObject({ database: 'hornhoof', reason: 'fork' });
+  });
+
   it('saves what it led before anything else', async () => {
     const s = await saver();
     expect([s.it.state(), s.it.done()]).toEqual([null, false]);

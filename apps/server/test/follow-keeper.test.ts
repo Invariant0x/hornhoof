@@ -145,7 +145,8 @@ describe('the keeper of a machine that keeps a copy', () => {
     });
     await follower(c, { sql });
     await until(() => asked.length === 2);
-    expect(asked).toEqual(['hornhoof: ALTER SYSTEM RESET synchronous_standby_names', 'hornhoof: SELECT pg_reload_conf()']);
+    /* Asked of the server's own database: the copy's is not there while it changes places with a new one. */
+    expect(asked).toEqual(['postgres: ALTER SYSTEM RESET synchronous_standby_names', 'postgres: SELECT pg_reload_conf()']);
     /* Once, not at each look. */
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(asked).toHaveLength(2);

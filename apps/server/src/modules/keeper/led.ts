@@ -11,7 +11,7 @@ import type { HeldCertificate } from './certificate.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { readNote } from './notes.js';
-import { dropSlots } from './promote.js';
+import { dropSlots, waitForNoCopy } from './promote.js';
 
 /* A machine that led the company and follows another now holds a database nobody else has whole: what it did while it
    led, as far as the new leader lacks it. Before its copy is made again, its keeper saves that database: its updater
@@ -135,11 +135,7 @@ export class LedSaver {
     const [state] = (await sql.query<{ number: string }>(`SELECT term_number::text AS number FROM net_local.state s WHERE to_jsonb(s) ->> 'handed_lsn' IS NULL`)).rows;
     if (!state) return null;
     await dropSlots(sql);
-    const [named] = (await sql.query<{ names: string }>('SHOW synchronous_standby_names')).rows;
-    if (named?.names) {
-      await sql.query('ALTER SYSTEM RESET synchronous_standby_names');
-      await sql.query('SELECT pg_reload_conf()');
-    }
+    await waitForNoCopy(sql);
     const led = this.keep({ id: randomUUID(), term: Number(state.number), asked: null, sealed: false, recorded: false, failed: null, at: this.now().toISOString() });
     this.opts.log('This machine led the company before: what it did then is saved before its copy is made again.');
     return led;
