@@ -10,7 +10,7 @@ import { replicaPassword } from '../keeper/replica.js';
 import { complete, fastWay } from './check.js';
 import { dropChoice, readChoice, type KeptDatabases } from './kept.js';
 import { queryOf } from './leader.js';
-import { KEPT_NAME, MACHINE_SOURCE, peerSource, setAside, UPLOAD_NAME, type MergeSource } from './source.js';
+import { KEPT_NAME, MACHINE_SOURCE, MACHINE_SOURCE_SQL, peerSource, setAside, UPLOAD_NAME, type MergeSource } from './source.js';
 import { taskFor } from './task.js';
 import { timeWords } from './words.js';
 
@@ -161,21 +161,22 @@ export class Merger {
     });
   }
 
-  /* A copy that was made again says which attempt's old database waits on its machine: a merge for each that has none
-     yet. One that was merged is done once its machine named another attempt, or none, or left: the machine itself
-     drops the database, and the leader drops nothing. Only a machine that holds the data is asked: no door leads to
-     the database of one that stopped holding it. */
+  /* A copy that was made again says which attempt's old database waits on its machine, and under which term that
+     database led, when it did: a merge for each that has none yet. One that was merged is done once its machine named
+     another, or none, or left: the machine itself drops the database, and the leader drops nothing. Only a machine
+     that holds the data is asked: no door leads to the database of one that stopped holding it. */
   private async copies(): Promise<void> {
     const q = queryOf(this.ctx.db);
     await q(
       `INSERT INTO net.merges (source, label, status, machine)
-       SELECT 'machine:' || m.id::text || ':' || m.copy_old::text, m.hostname || '''s copy from before it was made again', 'pending', m.id FROM public.machines m
+       SELECT ${MACHINE_SOURCE_SQL}, m.hostname || CASE WHEN m.copy_old_led IS NULL THEN '''s copy from before it was made again' ELSE '''s database from when it led' END, 'pending', m.id
+         FROM public.machines m
         WHERE m.revoked_at IS NULL AND m.copy_old IS NOT NULL AND m.role = 'data'
        ON CONFLICT (source) DO NOTHING`,
     );
     await q(
       `UPDATE net.merges g SET status = 'done', done_at = now() WHERE g.source LIKE 'machine:%' AND g.status = 'merged'
-         AND NOT EXISTS (SELECT 1 FROM public.machines m WHERE m.id = g.machine AND m.revoked_at IS NULL AND g.source = 'machine:' || m.id::text || ':' || m.copy_old::text)`,
+         AND NOT EXISTS (SELECT 1 FROM public.machines m WHERE m.id = g.machine AND m.revoked_at IS NULL AND g.source = ${MACHINE_SOURCE_SQL})`,
     );
   }
 
@@ -266,7 +267,9 @@ export class Merger {
     await q('UPDATE net.merges SET tried_at = $2::timestamptz, tries = tries + 1 WHERE id = $1::uuid', [row.id, now]);
     try {
       /* What a machine uploaded is a copy as much as one read on its machine. */
-      if ((port !== undefined || row.source.startsWith(UPLOAD)) && (await this.byIds(row, port))) return;
+      /* A database that led wrote, so it is never taken by its ids alone. */
+      const led = MACHINE_SOURCE.exec(row.source)?.[2] !== undefined;
+      if (!led && (port !== undefined || row.source.startsWith(UPLOAD)) && (await this.byIds(row, port))) return;
       if (row.status === 'pending') await this.apply(row, port);
       await this.check(row, port);
     } catch (err) {

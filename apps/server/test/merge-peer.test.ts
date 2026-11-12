@@ -12,7 +12,7 @@ import * as apply from '../src/modules/merge/apply.js';
 import { fastWay } from '../src/modules/merge/check.js';
 import * as facts from '../src/modules/merge/facts.js';
 import { Merger } from '../src/modules/merge/merger.js';
-import type { MergeSource } from '../src/modules/merge/source.js';
+import { MACHINE_SOURCE, type MergeSource } from '../src/modules/merge/source.js';
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
 import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
@@ -131,6 +131,29 @@ describe("the old database of a copy on another machine", () => {
     /* Leading again since, with no handover after it, it may hold what nobody else does. */
     await old.client.exec('UPDATE net_local.state SET handed_to = NULL, handed_lsn = NULL, handed_at = NULL');
     expect(await fastWay(s.db, await pgliteSource(old.client, 'the copy')).finally(() => old.client.exec('ROLLBACK'))).toEqual({ way: 'whole', restoreAt: null });
+  });
+
+  it('merges a led database under its own source', async () => {
+    const s = await stand();
+    await s.db.update(machines).set({ copyOld: 3, copyOldLed: 7 }).where(eq(machines.id, s.machine.id));
+    /* What it held when the server was taken from it holds nothing of its own: only its ids would be read. */
+    await s.copied();
+    s.door(true);
+    await s.look();
+    const [merge, ...more] = await s.merges();
+    expect(more).toEqual([]);
+    expect(merge).toMatchObject({ source: `machine:${s.machine.id}:led-7`, label: "ivan-mac's database from when it led", status: 'merged', machine: s.machine.id });
+    /* It led, so it is compared the whole way. */
+    expect(merge!.path).not.toBeNull();
+    expect(await copyOrder(s.app.ctx, { ...s.machine, copyOld: 3, copyOldLed: 7 })).toMatchObject({ old: 'merged' });
+    /* The machine dropped that database: its report names none. */
+    await s.db.update(machines).set({ copyOld: null, copyOldLed: null }).where(eq(machines.id, s.machine.id));
+    await s.look();
+    expect((await s.merges())[0]).toMatchObject({ status: 'done', error: null });
+
+    expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:led-7`)).toBe(true);
+    expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:3`)).toBe(true);
+    expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:led-0`)).toBe(false);
   });
 
   it('compares across a restore', async () => {

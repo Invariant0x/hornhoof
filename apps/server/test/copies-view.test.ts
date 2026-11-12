@@ -61,6 +61,9 @@ describe("what the Machines tab says of the company's data", () => {
     expect(await s.lineOf(full.id)).toEqual({ line: 'stopped', why: 'disk_full' });
     expect(await s.lineOf(setup.id)).toEqual({ line: 'stopped', why: 'setup' });
     expect(await s.lineOf(stopped.id)).toEqual({ line: 'stopped', why: null });
+    /* A machine that led saves what it did before its copy is made again. */
+    const saving = await s.copy('m-saving', { copyState: 'saving', copyAt: ago(1000) });
+    expect(await s.lineOf(saving.id)).toEqual({ line: 'saving' });
     /* A machine that was just given the data and has said nothing of a copy yet is making one, not asleep. */
     const fresh = await s.copy('m-fresh', { copyName: null }, false);
     expect(await s.lineOf(fresh.id)).toEqual({ line: 'making', progress: 0 });
@@ -105,10 +108,10 @@ describe("what the Machines tab says of the company's data", () => {
       .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'left', hostname: 'm-left', kind: 'computer', role: 'worker', networkId: 'd'.repeat(64), reportAt: NOW, dataLeftAt: ago(86_400_000), uploadState: 'waiting' })
       .returning();
     const views = await dataViews(s.app.ctx, NOW);
-    expect(views.get(s.leader.id)).toEqual({ number: 1, why: 'server', pin: null, unfit: null, copy: null, leftAt: null });
+    expect(views.get(s.leader.id)).toEqual({ number: 1, why: 'server', pin: null, unfit: null, copy: null, leftAt: null, led: null });
     expect(views.get(held.id)).toMatchObject({ number: 2, why: null, unfit: null, copy: { line: 'catching_up' }, leftAt: null });
-    expect(views.get(next!.id)).toEqual({ number: 4, why: 'next', pin: null, unfit: null, copy: null, leftAt: null });
-    expect(views.get(small!.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'memory', memory: 2 * 2 ** 30 }, copy: null, leftAt: null });
+    expect(views.get(next!.id)).toEqual({ number: 4, why: 'next', pin: null, unfit: null, copy: null, leftAt: null, led: null });
+    expect(views.get(small!.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'memory', memory: 2 * 2 ** 30 }, copy: null, leftAt: null, led: null });
     expect(views.get(left!.id)).toMatchObject({ number: null, copy: null, leftAt: ago(86_400_000).toISOString() });
   });
 
@@ -123,7 +126,31 @@ describe("what the Machines tab says of the company's data", () => {
     const views = await dataViews(s.app.ctx, NOW);
     /* The key of the words is the one the ranking stored, whatever it is. */
     expect(views.get(pinned.id)).toMatchObject({ number: 3, why: 'always.best_link', pin: 3 });
-    expect(views.get(out!.id)).toEqual({ number: null, why: 'out', pin: 'none', unfit: null, copy: null, leftAt: null });
+    expect(views.get(out!.id)).toEqual({ number: null, why: 'out', pin: 'none', unfit: null, copy: null, leftAt: null, led: null });
+  });
+
+  it('notes the old leader once it is up to date', async () => {
+    const s = await stand();
+    const a = await s.copy('mac', { copyState: 'making', copyProgress: 10 });
+    const b = await s.copy('deb', { copyState: 'ready', copyAt: NOW });
+    const handed = (from: string, at: Date, heard: Date | null) =>
+      s.db.execute(sql`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, kind, heard_at)
+        VALUES (gen_random_uuid(), ${from}, 7, 'a', '0/1', ${s.leader.id}, ${at.toISOString()}::timestamptz, 'takeover', ${heard?.toISOString() ?? null}::timestamptz)`);
+    const ledOf = async (id: string) => (await dataViews(s.app.ctx, NOW)).get(id)?.led;
+    /* The server was taken from mac, which was last heard two minutes before. */
+    await handed(a.id, ago(600_000), ago(720_000));
+    expect(await ledOf(a.id)).toBeNull();
+    /* A copy it finished before it led says nothing of now. */
+    await s.db.update(machines).set({ copyState: 'ready', copyAt: ago(900_000) }).where(eq(machines.id, a.id));
+    expect(await ledOf(a.id)).toBeNull();
+    await s.db.update(machines).set({ copyAt: ago(60_000) }).where(eq(machines.id, a.id));
+    expect(await ledOf(a.id)).toEqual({ until: ago(720_000).toISOString() });
+    expect(await ledOf(b.id)).toBeNull();
+    expect(await ledOf(s.leader.id)).toBeNull();
+    /* A later handover, from another machine and with no time it was last heard: only that one is the old leader. */
+    await handed(b.id, ago(120_000), null);
+    expect(await ledOf(a.id)).toBeNull();
+    expect(await ledOf(b.id)).toEqual({ until: ago(120_000).toISOString() });
   });
 
   it('names every copy', async () => {

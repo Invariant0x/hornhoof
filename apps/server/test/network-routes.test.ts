@@ -283,6 +283,17 @@ describe('the network routes the keeper calls', () => {
     const ready = { state: 'ready', progress: null, error: null, at: '2026-11-11T12:00:00.000Z', name: 'copy_0f0f0f0f0f0f0f0f_2', old: { attempt: 1 } };
     expect((await report({ copy: ready }, copy.id)).statusCode).toBe(204);
     expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyProgress: null, copyAt: new Date('2026-11-11T12:00:00.000Z'), copyOld: 1 });
+    /* A machine that led says which term's database waits there, while it saves it and while its copy is made again. */
+    const saving = { state: 'saving', progress: null, error: null, at: null, name: 'copy_0f0f0f0f0f0f0f0f_2', old: { attempt: 2, led: 7 } };
+    expect((await report({ copy: saving }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'saving', copyOld: 2, copyOldLed: 7 });
+    expect((await report({ copy: { ...saving, state: 'remaking', progress: 5, name: 'copy_0f0f0f0f0f0f0f0f_3' } }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'remaking', copyOld: 2, copyOldLed: 7 });
+    expect((await report({ copy: ready }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyOld: 1, copyOldLed: null });
+    expect((await report({ copy: { ...ready, old: null } }, copy.id)).statusCode).toBe(204);
+    expect(await rowOf(copy.id)).toMatchObject({ copyOld: null, copyOldLed: null });
+    expect((await report({ copy: ready }, copy.id)).statusCode).toBe(204);
     /* A report that says nothing of the copy keeps what the row has. */
     expect((await report({ uptimeS: 3 }, copy.id)).statusCode).toBe(204);
     expect(await rowOf(copy.id)).toMatchObject({ copyState: 'ready', copyName: 'copy_0f0f0f0f0f0f0f0f_2' });

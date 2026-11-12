@@ -15,6 +15,7 @@ const WORDS = {
     here: 'Move the server here', yes: 'Move the server', cancel: 'Cancel', stop: 'Cancel the move',
     ask: (host: string) => `Move the company server to ${host}? Hornhoof stops for a short while as it moves; your work is kept.`,
     waiting: (host: string) => `${host} takes the server once its copy is up to date (40%)`,
+    led: (host: string) => new RegExp(`^${host} ran the server until .+ and is up to date again\\.$`), saving: 'Copy: saving what it did while it led',
     updating: 'Hornhoof is updating. Move the server once the update ended.',
   },
   ru: {
@@ -26,6 +27,7 @@ const WORDS = {
     here: 'Перенести сервер сюда', yes: 'Перенести сервер', cancel: 'Отмена', stop: 'Отменить перенос',
     ask: (host: string) => `Перенести сервер компании на ${host}? Пока он переезжает, Hornhoof ненадолго остановится; ваша работа сохранится.`,
     waiting: (host: string) => `${host} возьмет сервер, как только ее копия станет актуальной (40%)`,
+    led: (host: string) => new RegExp(`^Машина ${host} держала сервер до .+, ее копия снова актуальна\\.$`), saving: 'Копия: сохраняет то, что сделано, пока она держала сервер',
     updating: 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.',
   },
 };
@@ -51,8 +53,9 @@ const BUILTIN: BuiltinView = { online: true, load: null, running: { agents: [], 
 
 type Sent = { path: string; body: unknown };
 
-/* refuse: the answer to a choice or to a move; none takes it. move: what the server says of a move of the server. */
-async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', refuse?: { status: number; reason: string }, move: MoveView | null = null): Promise<Sent[]> {
+/* refuse: the answer to a choice or to a move; none takes it. move: what the server says of a move of the server.
+   machines: the machines the tab shows. */
+async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', refuse?: { status: number; reason: string }, move: MoveView | null = null, machines = MACHINES): Promise<Sent[]> {
   const sent: Sent[] = [];
   await serveApi(page);
   await page.addInitScript(({ language, theme }) => {
@@ -65,7 +68,7 @@ async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 
     sent.push({ path: new URL(route.request().url()).pathname, body: route.request().method() });
     return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 202, json: { state: 'preparing' } });
   });
-  await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: true, move, canMove: true, copies: { leader: 'rack-01', copies: [{ hostname: 'ivan-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
+  await page.route('**/api/machines', route => route.fulfill({ json: { machines, builtin: BUILTIN, priority: true, move, canMove: true, copies: { leader: 'rack-01', copies: [{ hostname: 'ivan-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
   await page.route('**/api/machines/*/priority', route => {
     sent.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
     return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 204 });
@@ -197,6 +200,28 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(target.getByRole('button', { name: w.here, exact: true })).toHaveCount(0);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-waiting')), fullPage: true });
+  });
+
+  test(`notes the machine the server moved from, and one that saves what it led, ${place}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height });
+    /* The server was taken from the machine with the long name, whose copy is up to date again; the one before it
+       still saves what it did. */
+    const after = MACHINES.map(m =>
+      m.id === 'm3' ? { ...m, data: placed({ number: 3, why: 'pinned', pin: 3, copy: { line: 'ready' }, led: { until: '2026-11-12T14:02:00.000Z' } }) }
+        : m.id === 'm2' ? { ...m, data: placed({ number: 2, why: 'always.best_link', copy: { line: 'saving' } }) } : m);
+    await openMachines(page, language, theme, undefined, null, after);
+    await open(page, LONG);
+    const old = card(page, LONG);
+    const [note, here] = [old.getByText(w.led(LONG)), old.getByRole('button', { name: w.here, exact: true })];
+    await expect(note).toBeVisible();
+    await expect(here).toBeVisible();
+    for (const one of [note, here]) expect(await within(one, old)).toBe(true);
+    await open(page, 'ivan-studio');
+    const saving = card(page, 'ivan-studio').getByText(w.saving, { exact: true });
+    await expect(saving).toBeVisible();
+    expect(await within(saving, card(page, 'ivan-studio'))).toBe(true);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: info.outputPath(shot('move-led')), fullPage: true });
   });
 
   test(`sends the CEO's choice and words a refusal, ${place}`, async ({ page }, info) => {

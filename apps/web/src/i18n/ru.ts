@@ -609,6 +609,7 @@ export const ru: Messages = {
     copy: {
       making: percent => `Копия: создается, ${percent}%`,
       remaking: percent => `Копия: создается заново, ${percent}%`,
+      saving: 'Копия: сохраняет то, что сделано, пока она держала сервер',
       ready: 'Копия: актуальна',
       behind: minutes => `Копия: отстает на ${minutes} мин`,
       catchingUp: 'Копия: догоняет',
@@ -675,6 +676,7 @@ export const ru: Messages = {
       stop: 'Отменить перенос',
       waiting: (host, progress) => (progress === null ? `${host} возьмет сервер, как только ее копия станет актуальной.` : `${host} возьмет сервер, как только ее копия станет актуальной (${progress}%)`),
       switching: host => `Сервер переезжает на ${host}.`,
+      led: (host, time) => `Машина ${host} держала сервер до ${time}, ее копия снова актуальна.`,
       failed: (leader, reason) => `Сервер остался на ${leader}: ${reason}`,
       reason: {
         no_answer: host => `${host} не ответила.`,

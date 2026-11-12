@@ -275,6 +275,7 @@ describe('the words of copies', () => {
       expect(text, key).not.toBe(english[key]);
     }
     for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    expect([english.saving, russian.saving]).toEqual(['Copy: saving what it did while it led', 'Копия: сохраняет то, что сделано, пока она держала сервер']);
   });
 
   /* Every string of the server order, with the groups inside it, each function called with words of its own. */
@@ -288,13 +289,14 @@ describe('the words of copies', () => {
       Object.fromEntries([...flat(dict.machines.move), ...REASONS.map((reason): [string, string] => [`errors.${reason}`, typeof dict.errors[reason] === 'function' ? (dict.errors[reason] as (host: string) => string)('a') : (dict.errors[reason] as string)])]);
     const [english, russian] = [words(en), words(ru)];
     expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
-    expect(Object.keys(english)).toEqual(expect.arrayContaining(['here', 'ask', 'yes', 'cancel', 'stop', 'waiting', 'switching', 'failed', 'reason.no_answer', 'reason.not_ready', 'reason.behind', 'reason.no_link', 'reason.expired', 'reason.left', ...REASONS.map(reason => `errors.${reason}`)]));
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['here', 'ask', 'yes', 'cancel', 'stop', 'waiting', 'switching', 'failed', 'reason.no_answer', 'reason.not_ready', 'reason.behind', 'reason.no_link', 'reason.expired', 'reason.left', 'led', ...REASONS.map(reason => `errors.${reason}`)]));
     for (const [key, text] of Object.entries(russian)) {
       expect(text.length, key).toBeGreaterThan(0);
       expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
       expect(text, key).not.toBe(english[key]);
     }
     for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    expect([en.machines.move.led('d', '14:02'), ru.machines.move.led('d', '14:02')]).toEqual(['d ran the server until 14:02 and is up to date again.', 'Машина d держала сервер до 14:02, ее копия снова актуальна.']);
     /* The share is said only while there is one. */
     expect([en.machines.move.waiting('d', 40), en.machines.move.waiting('d', null)]).toEqual(['d takes the server once its copy is up to date (40%)', 'd takes the server once its copy is up to date.']);
     expect([ru.machines.move.waiting('d', 40), ru.machines.move.waiting('d', null)]).toEqual(['d возьмет сервер, как только ее копия станет актуальной (40%)', 'd возьмет сервер, как только ее копия станет актуальной.']);

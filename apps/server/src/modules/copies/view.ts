@@ -13,6 +13,8 @@ const BEHIND_MS = 60_000;
 /* How a machine's copy of the company's data does, as its card says it. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
+  /* It led, and saves what it did then before its copy is made again. */
+  | { line: 'saving' }
   | { line: 'ready' }
   | { line: 'catching_up' }
   | { line: 'behind'; minutes: number }
@@ -22,8 +24,11 @@ export type CopyLine =
 /* A machine's part in holding the company's data. number, why: its place in the order and the key of the words for it,
    as the ranking stored it. pin: the place the CEO gave it by hand, or 'none' when he keeps it from the server. unfit:
    why it cannot take the server. copy: how its copy does; none for the leader. leftAt: when it stopped holding the
-   data. */
-export type DataView = { number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
+   data. led: until when it ran the server, for the machine the server last moved from, once its copy is up to date
+   again. */
+export type DataView = {
+  number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null; led: { until: string } | null;
+};
 
 /* Who holds the company: the leader's name, the machines that keep a copy, three while one is handed over, the one
    commits wait for marked, and since when only the leader holds the changes, when copies there were and none is up to
@@ -60,6 +65,7 @@ function lineOf(row: Row, o: { now: Date; pulseAt: number | null; reads: boolean
   /* A machine that was given the data and has said nothing of a copy yet is at the start of making one. */
   if (row.copyState === null) return { line: 'making', progress: 0 };
   if (row.copyState === 'making' || row.copyState === 'remaking') return { line: row.copyState, progress: row.copyProgress ?? 0 };
+  if (row.copyState === 'saving') return { line: 'saving' };
   if (row.copyState === 'stopped') return { line: 'stopped', why: row.copyError === 'disk_full' || row.copyError === 'setup' ? row.copyError : null };
   const reported = row.reportAt !== null && o.now.getTime() - row.reportAt.getTime() <= REPORT_FRESH_MS;
   if (!o.reads || !reported) return { line: 'asleep', since: row.copyAt?.toISOString() ?? null };
@@ -85,15 +91,34 @@ async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<
   const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
   const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link), now };
   const byId = new Map((await candidates(db, now, { shares: false })).map(candidate => [candidate.id, candidate]));
+  const old = await oldLeader(ctx);
   return new Map(
     rows.map(row => {
       const candidate = byId.get(row.id);
       /* A machine with a place, or one that holds the data, needs no reason; any other says the first thing that keeps
          it from holding a copy. */
       const reason = row.serverOrder === null && row.role !== 'data' && candidate ? unfit(candidate, fit) : null;
-      return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null }];
+      return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null, led: ledOf(row, old) }];
     }),
   );
+}
+
+type OldLeader = { machine: string; at: Date; until: Date } | null;
+
+/* The machine the server last moved from, when it moved, and until when that machine ran it: the last time it was
+   heard, when the server was taken from it, else the move itself. */
+async function oldLeader(ctx: Ctx): Promise<OldLeader> {
+  const [newest] = await queryOf(ctx.db)<{ machine: string; at: Date | string; heard: Date | string | null }>(
+    'SELECT from_machine_id::text AS machine, at, heard_at AS heard FROM net.handovers ORDER BY at DESC, id DESC LIMIT 1',
+  );
+  return newest ? { machine: newest.machine, at: new Date(newest.at), until: new Date(newest.heard ?? newest.at) } : null;
+}
+
+/* Said only once the copy that machine finished after the move is up to date: until then its card says what its copy
+   does. */
+function ledOf(row: Row, old: OldLeader): DataView['led'] {
+  if (!old || old.machine !== row.id || row.copyState !== 'ready' || !row.copyAt || row.copyAt <= old.at) return null;
+  return { until: old.until.toISOString() };
 }
 
 /* The tab's line of who holds the company; null while no machine keeps a copy. */

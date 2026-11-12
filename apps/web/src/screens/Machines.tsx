@@ -361,6 +361,7 @@ function copyText(t: Messages, language: Language, copy: NonNullable<DataView['c
   switch (copy.line) {
     case 'making': return c.making(copy.progress);
     case 'remaking': return c.remaking(copy.progress);
+    case 'saving': return c.saving;
     case 'ready': return c.ready;
     case 'catching_up': return c.catchingUp;
     case 'behind': return c.behind(copy.minutes);
@@ -423,6 +424,7 @@ type Moving = { move: MoveView | null; canMove: boolean };
    can be pressed, and a refusal is said under the buttons. */
 function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataView; moving: Moving; refresh: () => Promise<void> }) {
   const t = useT();
+  const { language } = useLanguage();
   const words = t.machines.move;
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -457,9 +459,13 @@ function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataV
       : target.state === 'switching' ? words.switching(row.hostname)
         : words.failed(target.leader, words.reason[target.reason ?? 'no_answer'](row.hostname))
     : null;
-  if (!said && !offered) return null;
+  /* The machine the server last moved from says so once its copy is up to date again, whoever reads the card. */
+  const until = data.led ? clock(language, data.led.until) : null;
+  const led = until ? words.led(row.hostname, until) : null;
+  if (!said && !offered && !led) return null;
   const question = words.ask(row.hostname);
   return <>
+    {led && <p className="machine-note">{led}</p>}
     {said && <p className="machine-note">{said}</p>}
     {target?.state === 'preparing' && canMove && <button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button>}
     {offered && !asking && <button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button>}

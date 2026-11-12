@@ -138,6 +138,16 @@ describe('the order of the machines that may hold the data', () => {
     expect(unfit(a, { ...OPTS, link: false })).toEqual({ why: 'no_link' });
   });
 
+  it('ranks the new leader first after a takeover and the old one as any', () => {
+    /* B took the server from A, which was number 1 and is a copy now; C scores above A. */
+    const old = { createdAt: daysAgo(10), role: 'data' as const };
+    const a = candidate('a', { ...old, server: true, number: 1, ...POINTS[70] });
+    const b = candidate('b', { ...old, number: 2, share: 0.2 });
+    const c = candidate('c', { createdAt: daysAgo(10), number: 3, ...POINTS[90] });
+    expect(numbers([a, b, c], { leader: 'b' })).toEqual({ b: 1, c: 2, a: 3 });
+    expect(ranked([a, b, c], { leader: 'b' }).b).toEqual({ number: 1, why: 'server' });
+  });
+
   it('ranks by the score once established', () => {
     /* A and B are nearly always there and measure little else; C is there half the time and has the most points. */
     const sparse = { linkRttMs: null, linkMbps: null, internetRttMs: null, internetMbps: null, createdAt: daysAgo(10) };

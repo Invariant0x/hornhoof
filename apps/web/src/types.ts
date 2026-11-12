@@ -695,14 +695,17 @@ export type Unfit =
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
   | { line: 'making' | 'remaking'; progress: number }
-  | { line: 'ready' | 'catching_up' }
+  | { line: 'ready' | 'catching_up' | 'saving' }
   | { line: 'behind'; minutes: number }
   | { line: 'asleep'; since: string | null }
   | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
 
-/* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, and when it
-   stopped holding the data. */
-export type DataView = { number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null };
+/* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
+   stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its
+   copy is up to date again. Older servers omit that last one. */
+export type DataView = {
+  number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null; led?: { until: string } | null;
+};
 
 /* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
    when only the leader holds the changes. */

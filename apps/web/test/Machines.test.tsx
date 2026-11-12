@@ -585,6 +585,7 @@ describe('Machines', () => {
     const lines: [object, string][] = [
       [{ number: 2, copy: { line: 'remaking', progress: 10 } }, 'Copy: being made again, 10%'],
       [{ number: 2, copy: { line: 'ready' } }, 'Copy: up to date'],
+      [{ number: 2, copy: { line: 'saving' } }, 'Copy: saving what it did while it led'],
       [{ number: 3, copy: { line: 'behind', minutes: 4 } }, 'Copy: 4 min behind'],
       [{ number: 2, copy: { line: 'catching_up' } }, 'Copy: catching up'],
       [{ number: 2, copy: { line: 'asleep', since: null } }, 'Copy: asleep'],
@@ -699,6 +700,25 @@ describe('Machines', () => {
     return { calls, view: render(<LanguageProvider><Machines me={more.me ?? ME} /></LanguageProvider>) };
   };
   const PAT: Me = { ...ME, person: { ...ME.person, isOwner: false } };
+
+  it.each([
+    ['en', (time: string) => `host-2 ran the server until ${time} and is up to date again.`, 'Move the server here'],
+    ['ru', (time: string) => `Машина host-2 держала сервер до ${time}, ее копия снова актуальна.`, 'Перенести сервер сюда'],
+  ] as const)('notes the machine the server moved from, beside the move, in %s', async (language, note, here) => {
+    const until = '2026-11-12T14:02:00.000Z';
+    const { view } = moving(null, { language, over: [{}, { copy: { line: 'ready' }, led: { until } }] });
+    const second = await openCard('host-2');
+    const line = within(second).getByText(note(clock(language, until)!));
+    /* The note and the button stand in the same part of the card. */
+    expect(within(line.closest('section')!).getByRole('button', { name: here })).toBeInTheDocument();
+    expect(within(card('host-3')).queryByText(/ran the server|держала сервер/)).not.toBeInTheDocument();
+    view.unmount();
+    /* Someone who may not move the server reads the note all the same. */
+    moving(null, { language, me: PAT, canMove: false, over: [{}, { copy: { line: 'ready' }, led: { until } }] });
+    const again = await openCard('host-2');
+    expect(within(again).getByText(note(clock(language, until)!))).toBeInTheDocument();
+    expect(within(again).queryByRole('button', { name: here })).not.toBeInTheDocument();
+  });
 
   it('asks before it moves the server', async () => {
     const { calls } = moving(null, { routes: { 'POST /api/machines/p3/move': [202, { state: 'preparing' }] } });

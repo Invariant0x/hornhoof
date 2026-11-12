@@ -62,7 +62,8 @@ const ReportBody = z.object({
       error: z.enum(COPY_ERRORS).nullable(),
       at: z.iso.datetime().nullable(),
       name: z.string().regex(/^copy_[0-9a-f]{16}_[1-9][0-9]{0,8}$/).nullable(),
-      old: z.object({ attempt: z.number().int().min(1) }).nullable(),
+      /* led: the number of the term its old database led under, when it led. */
+      old: z.object({ attempt: z.number().int().min(1), led: z.number().int().min(0).optional() }).nullable(),
     })
     .optional(),
   /* A machine that stopped holding the data holds nothing of it any more. */
@@ -100,7 +101,11 @@ const ComputerAnswer = z.object({ exit: z.number().int().min(0).max(255), output
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
-type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; uploadState: UploadState | null };
+/* The term a machine says its old database led under, as the merge's source can name it: any other number leaves the
+   database to be read as a copy's, which is compared the whole way all the same once it wrote. */
+const ledOf = (led: number | undefined): number | null => (led !== undefined && led >= 1 && led <= 999_999_999 ? led : null);
+
+type Holder = { id: string; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; copyOldLed: number | null; uploadState: UploadState | null };
 
 /* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
    machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
@@ -147,11 +152,11 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function machineOf(who: Asker): Promise<Holder | null> {
     if (who.own) {
       const mine = await findThisMachine(db, config);
-      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null, copyOld: null, uploadState: null } : null;
+      return mine ? { id: mine.id, role: 'data', personId: null, copyName: null, copyOld: null, copyOldLed: null, uploadState: null } : null;
     }
     const row = await networkMachine(db, who.machine);
     if (!row) throw notAMachine();
-    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName, copyOld: row.copyOld, uploadState: row.uploadState };
+    return { id: row.id, role: row.role!, personId: row.personId, copyName: row.copyName, copyOld: row.copyOld, copyOldLed: row.copyOldLed, uploadState: row.uploadState };
   }
 
   /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
@@ -237,10 +242,10 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const copied =
         copy === undefined || who.own || row?.role !== 'data'
           ? {}
-          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? row?.copyName ?? null, copyOld: copy.old?.attempt ?? null };
+          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? row?.copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led) };
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
-      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null } : {};
+      const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null } : {};
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...copied, ...left, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* The next copy on that machine starts above the last, by the name the row keeps. Should a keeper ever count
          from 1 again all the same, the merges of its old copies give their names up here, and one the leader never

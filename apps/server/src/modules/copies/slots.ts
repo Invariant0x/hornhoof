@@ -3,6 +3,7 @@ import type { Db } from '../../db/client.js';
 import type { UploadState } from '../../db/schema.js';
 import type { CopyOrder } from '../keeper/copy.js';
 import { queryOf } from '../merge/leader.js';
+import { machineSource } from '../merge/source.js';
 import { findThisMachine } from '../network/store.js';
 
 /* A replication slot of the server's Postgres. pid: the connection that reads it now, none while nobody does.
@@ -41,7 +42,7 @@ export const slotPrefix = (networkId: string): string => `copy_${networkId.slice
    it is. join: the slot this machine made for the copy when it took the server in the newest planned switch, while the
    copy's row still names an attempt below it: a copy that held everything the leader before had written joins that
    slot, and takes no row again. */
-export async function copyOrder(ctx: Ctx, row: { id: string; networkId?: string | null; copyName: string | null; copyOld?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
+export async function copyOrder(ctx: Ctx, row: { id: string; networkId?: string | null; copyName: string | null; copyOld?: number | null; copyOldLed?: number | null; uploadState?: UploadState | null }): Promise<CopyOrder> {
   const q = queryOf(ctx.db);
   const found = row.copyName ? (await ctx.replication.slots()).find(slot => slot.name === row.copyName) : null;
   const slot = !row.copyName ? null : !found ? 'missing' : found.walStatus === 'lost' ? 'lost' : 'ok';
@@ -49,7 +50,7 @@ export async function copyOrder(ctx: Ctx, row: { id: string; networkId?: string 
   const [counted] = await q<{ n: number }>('SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations');
   /* How far the leader is with the old database a copy that was made again still holds: until it is merged, or left
      out, the copy keeps it. A merge that has no row yet gets one within the minute. */
-  const [merge] = row.copyOld ? await q<{ status: string }>('SELECT status FROM net.merges WHERE source = $1', [`machine:${row.id}:${row.copyOld}`]) : [];
+  const [merge] = row.copyOld ? await q<{ status: string }>('SELECT status FROM net.merges WHERE source = $1', [machineSource({ id: row.id, copyOld: row.copyOld, copyOldLed: row.copyOldLed })]) : [];
   const old = !row.copyOld ? null : merge?.status === 'merged' ? 'merged' : merge?.status === 'done' ? 'done' : 'waiting';
   const upload = !row.uploadState ? null : row.uploadState === 'kept' ? 'wipe' : row.uploadState;
   const attempt = /_(\d+)$/.exec(row.copyName ?? '')?.[1];

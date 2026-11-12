@@ -16,8 +16,13 @@ export const KEPT_NAME = /^hornhoof_before_[A-Za-z0-9_]{1,47}$/;
 export const UPLOAD_NAME = /^hornhoof_upload_([0-9a-f]{16})_([0-9]{8}t[0-9]{6})$/;
 /* A database of the leader's own Postgres that a merge reads: one a restore kept, or one made of an upload. */
 export const setAside = (name: string): boolean => KEPT_NAME.test(name) || UPLOAD_NAME.test(name);
-/* The source of a copy's old database: the row of its machine, and the attempt whose database it is. */
-export const MACHINE_SOURCE = /^machine:([0-9a-f-]{36}):([1-9][0-9]{0,8})$/;
+/* The source of a copy's old database: the row of its machine, and the attempt whose database it is, or, for a
+   database that led, the number of the term it led under. */
+export const MACHINE_SOURCE = /^machine:([0-9a-f-]{36}):(led-)?([1-9][0-9]{0,8})$/;
+/* The source a machine's row names now, in SQL over public.machines as m and in the app. */
+export const MACHINE_SOURCE_SQL = "'machine:' || m.id::text || ':' || CASE WHEN m.copy_old_led IS NULL THEN m.copy_old::text ELSE 'led-' || m.copy_old_led::text END";
+export const machineSource = (row: { id: string; copyOld: number; copyOldLed?: number | null }): string =>
+  `machine:${row.id}:${row.copyOldLed ? `led-${row.copyOldLed}` : row.copyOld}`;
 /* The copy's own database, which a machine reads until its new copy has taken that place, and the role that only reads. */
 const COPY_DB = 'hornhoof';
 

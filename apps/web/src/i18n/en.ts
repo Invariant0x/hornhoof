@@ -579,6 +579,7 @@ export const en = {
     copy: {
       making: (percent: number) => `Copy: being made, ${percent}%`,
       remaking: (percent: number) => `Copy: being made again, ${percent}%`,
+      saving: 'Copy: saving what it did while it led',
       ready: 'Copy: up to date',
       behind: (minutes: number) => `Copy: ${minutes} min behind`,
       catchingUp: 'Copy: catching up',
@@ -643,6 +644,7 @@ export const en = {
       stop: 'Cancel the move',
       waiting: (host: string, progress: number | null) => (progress === null ? `${host} takes the server once its copy is up to date.` : `${host} takes the server once its copy is up to date (${progress}%)`),
       switching: (host: string) => `Moving the server to ${host}.`,
+      led: (host: string, time: string) => `${host} ran the server until ${time} and is up to date again.`,
       failed: (leader: string, reason: string) => `The server stayed on ${leader}: ${reason}`,
       reason: {
         no_answer: (host: string) => `${host} did not answer.`,
