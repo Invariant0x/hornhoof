@@ -8,6 +8,37 @@ Hornhoof is a system for running AI agents as one company. It works with any mod
 
 It is your own virtual cloud. It runs on the computers you connect, one or many, yours or your team's. No cloud provider, no third-party servers, no account to make. Free and open source.
 
+<div align="center">
+<table>
+  <tbody><tr>
+    <td align="center" colspan="7"><strong>AI plans and API keys</strong></td>
+  </tr></tbody>
+  <tbody><tr>
+    <td align="center" valign="top"><img src=".github/assets/logos/claude-code.svg" width="32" height="32" alt="Claude Code" /><br/><sub>Claude Code</sub></td>
+    <td align="center" valign="top"><img src=".github/assets/logos/codex.svg" width="32" height="32" alt="Codex" /><br/><sub>Codex</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/kimi-dark.svg" /><img src=".github/assets/logos/kimi.svg" width="32" height="32" alt="Kimi Code" /></picture><br/><sub>Kimi Code</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/zai-dark.svg" /><img src=".github/assets/logos/zai.svg" width="32" height="32" alt="GLM from Z.ai" /></picture><br/><sub>GLM<br/>(Z.ai)</sub></td>
+    <td align="center" valign="top"><img src=".github/assets/logos/antigravity.svg" width="32" height="32" alt="Google Antigravity" /><br/><sub>Google<br/>Antigravity</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/anthropic-dark.svg" /><img src=".github/assets/logos/anthropic.svg" width="32" height="32" alt="Anthropic API" /></picture><br/><sub>Anthropic<br/>API</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/openai-dark.svg" /><img src=".github/assets/logos/openai.svg" width="32" height="32" alt="OpenAI API" /></picture><br/><sub>OpenAI<br/>API</sub></td>
+  </tr></tbody>
+  <tbody><tr>
+    <td align="center" colspan="3"><strong>Personal assistants</strong></td>
+    <td align="center"><strong>Chat</strong></td>
+    <td align="center" colspan="3"><strong>Computers</strong></td>
+  </tr></tbody>
+  <tbody><tr>
+    <td align="center" valign="top"><img src=".github/assets/logos/avaclone.svg" width="32" height="32" alt="AvaClone" /><br/><sub>AvaClone</sub></td>
+    <td align="center" valign="top"><img src=".github/assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw" /><br/><sub>OpenClaw</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/hermes-agent-dark.svg" /><img src=".github/assets/logos/hermes-agent.svg" width="32" height="32" alt="Hermes Agent" /></picture><br/><sub>Hermes<br/>Agent</sub></td>
+    <td align="center" valign="top"><img src=".github/assets/logos/telegram.svg" width="32" height="32" alt="Telegram" /><br/><sub>Telegram</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/macos-dark.svg" /><img src=".github/assets/logos/macos.svg" width="32" height="32" alt="macOS" /></picture><br/><sub>macOS</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/linux-dark.svg" /><img src=".github/assets/logos/linux.svg" width="32" height="32" alt="Linux" /></picture><br/><sub>Linux</sub></td>
+    <td align="center" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/logos/windows-dark.svg" /><img src=".github/assets/logos/windows.svg" width="32" height="32" alt="Windows through WSL 2" /></picture><br/><sub>Windows<br/>(WSL 2)</sub></td>
+  </tr></tbody>
+</table>
+</div>
+
 ## Hornhoof is for you if
 
 - ✅ You have many Claude Code or Codex windows open and no longer remember which one does what.
