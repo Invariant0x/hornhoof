@@ -294,7 +294,7 @@ describe('joining the company as a machine', () => {
     expect(plain).not.toHaveProperty('link');
     expect(plain.machine).toBe(w.machine);
     const secure = viewOf(await c.renew(w, {}, OVER_HTTPS));
-    expect(secure.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: expect.stringMatching(TICKET), visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null });
+    expect(secure.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: expect.stringMatching(TICKET), visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null, hidden: false });
     /* The header from any other address is somebody's own words. */
     expect(viewOf(await c.renew(w, {}, { remoteAddress: '203.0.113.9', headers: { 'x-forwarded-proto': 'https' } }))).not.toHaveProperty('link');
 
@@ -343,7 +343,7 @@ describe('joining the company as a machine', () => {
     expect(said).toMatchObject({ machine: w.machine, authorityPem: w.authorityPem, revoked: [] });
     expect(said.crlPem).toContain('BEGIN X509 CRL');
     expect(said.data).toEqual([{ machine: own.machine, networkId: HOST_ID, hostname: 'debian', addresses: ['192.168.1.7'], peerPort: 8180, webPort: 8080, number: null, copyName: null }]);
-    expect(said.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: own.link.appSecret, visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null });
+    expect(said.link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'hornhoof.test', serverPort: 443, appSecret: own.link.appSecret, visitorKey: c.relay.visitorKeys.get('acme'), dataSecret: null, hidden: false });
     /* The data machine's own view keeps what it had, and lists the data machines too. */
     expect(Object.keys(own.link).sort()).toEqual(['appSecret', 'dataSecret', 'name']);
     expect(own.data).toEqual(said.data);

@@ -13,6 +13,9 @@ export type PassOptions = {
   unreachable: (req: http.IncomingMessage) => Refusal;
   /* What this hop answers by itself, with nothing passed on. Null: the request goes to the target. An upgrade always goes. */
   own?: (req: http.IncomingMessage) => Refusal | null;
+  /* What this hop turns away whichever way it was asked, a request or an upgrade, before anything else is looked at.
+     Null: it is not turned away. */
+  closed?: (req: http.IncomingMessage) => Refusal | null;
   connectMs?: number;
   /* For how long a request whose connect to the target fails is held and tried again, counted from when it came. Nothing
      of the request is read before the target connects. 0 or not given: it is answered unreachable at once. Whoever sent
@@ -336,7 +339,7 @@ export function passThrough(opts: PassOptions): Handlers {
   return {
     request: (req, res) => {
       const asker = askerOfRequest(req, res);
-      const own = opts.own?.(req);
+      const own = opts.closed?.(req) ?? opts.own?.(req);
       if (!own) return void pass(opts, req, asker);
       req.resume();
       asker.refuse(own);
@@ -346,7 +349,10 @@ export function passThrough(opts: PassOptions): Handlers {
          this and the reading start here, before anything is awaited, so that a client gone by then is seen. */
       socket.on('error', ignore);
       const takeEarly = holdEarlyBytes(socket, head);
-      void pass(opts, req, askerOfUpgrade(req, socket, takeEarly));
+      const asker = askerOfUpgrade(req, socket, takeEarly);
+      const shut = opts.closed?.(req);
+      if (shut) return void asker.refuse(shut);
+      void pass(opts, req, asker);
     },
   };
 }

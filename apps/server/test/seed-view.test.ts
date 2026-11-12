@@ -51,9 +51,12 @@ describe('the view a machine that led builds from its own database', () => {
       machine: d.a.id, role: 'data', authorityPem: 'the authority', revoked: ['aa01', 'bb02'],
       /* The other machines that hold the data, with where their keepers said they are. */
       data: [{ machine: d.b.id, networkId: B, hostname: 'studio', addresses: ['10.0.0.2', '192.168.1.2'], peerPort: 7444, webPort: 8081, number: 2, copyName: 'copy_b0b0b0b0b0b0b0b0_3' }],
-      link: { name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'relay.hornhoof.test', serverPort: 443, appSecret: 'app secret', visitorKey: 'visitor key', dataSecret: 'data secret' },
+      link: { name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'relay.hornhoof.test', serverPort: 443, appSecret: 'app secret', visitorKey: 'visitor key', dataSecret: 'data secret', hidden: false },
       build: null, go: null, copy: null,
     });
+    /* A hidden name goes to the machines with its secrets, marked as one nobody follows the address of. */
+    await d.db.update(publicLinks).set({ hidden: true });
+    expect((await seedView(d.sql, A, SECRET)).link).toMatchObject({ name: 'acme', hidden: true, appSecret: 'app secret', dataSecret: 'data secret' });
     /* As B sees it. */
     expect(await seedView(d.sql, B, SECRET)).toMatchObject({ machine: d.b.id, data: [{ machine: d.a.id, networkId: A, hostname: 'rack', number: 1, copyName: null }] });
   });

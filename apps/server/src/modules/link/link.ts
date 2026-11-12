@@ -7,7 +7,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { machines, publicLinks } from '../../db/schema.js';
-import { ApiError, loggable } from '../../errors.js';
+import { loggable } from '../../errors.js';
 import { linkMode, readLinkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
 import { Settings, type TunnelSettings } from './tunnel.js';
@@ -20,9 +20,11 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
    link's address from it. frpc itself goes by what the keeper reads from the database. */
 export const TUNNEL_FILE = 'tunnel.json';
 
+/* The company's link as people have it. A hidden name, which Hornhoof took by itself so the company's machines can
+   keep copies, is no link to anyone: no page is served under it, and Settings offers to turn a link on. */
 export async function linkOf(db: Db): Promise<LinkView | null> {
-  const [row] = await db.select({ name: publicLinks.name, url: publicLinks.url }).from(publicLinks).limit(1);
-  return row ?? null;
+  const [row] = await db.select({ name: publicLinks.name, url: publicLinks.url, hidden: publicLinks.hidden }).from(publicLinks).limit(1);
+  return row && !row.hidden ? { name: row.name, url: row.url } : null;
 }
 
 /* The address people and machines reach this Hornhoof at: its public link once it has one, PUBLIC_URL otherwise. */
@@ -30,9 +32,9 @@ export async function publicUrl(db: Db, config: Config): Promise<string> {
   return (await linkOf(db))?.url ?? config.publicUrl;
 }
 
-/* Keeps a link the relay just gave, in place of the one before. */
-export async function saveLink(tx: Db | Tx, config: Config, companyId: string, bound: Bound): Promise<void> {
-  const row = { name: bound.name, url: bound.url, keyEnc: encryptSecret(bound.key, config.secret), tunnelEnc: encryptSecret(JSON.stringify(bound.tunnel), config.secret) };
+/* Keeps a link the relay just gave, in place of the one before. hidden: a name the machines use and people do not. */
+export async function saveLink(tx: Db | Tx, config: Config, companyId: string, bound: Bound, hidden = false): Promise<void> {
+  const row = { name: bound.name, url: bound.url, hidden, keyEnc: encryptSecret(bound.key, config.secret), tunnelEnc: encryptSecret(JSON.stringify(bound.tunnel), config.secret) };
   /* A new link has a key no machine that left ever knew, so a change of key that was under way has nothing left to do. */
   await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, nextKeyEnc: null, createdAt: new Date() } });
 }
@@ -40,7 +42,10 @@ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, b
 async function settingsWith(db: Db, config: Config, modeOf: typeof linkMode): Promise<TunnelSettings | null> {
   const [row] = await db.select().from(publicLinks).limit(1);
   if (!row) return null;
-  return Settings.parse({ url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await modeOf(db, config) });
+  return Settings.parse({
+    url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await modeOf(db, config),
+    hidden: row.hidden,
+  });
 }
 
 /* What the keeper runs frpc with. A failed read of any table throws and never reads as a change, so frpc stays as it is. */
@@ -85,27 +90,47 @@ export class PublicLinks {
   }
 
   /* A link with this name, or a random one: the new link comes first, then the old one goes. A name the company has
-     already changes nothing. */
+     already changes nothing. A name over a hidden one replaces it, as any rename does. */
   set(companyId: string, name?: string): Promise<LinkView> {
+    return this.inTurn(() => this.change(companyId, name, false));
+  }
+
+  /* A hidden name for a company that has no link at all: the relay picks it, and nobody but the company's machines
+     ever uses it. True once the company has a link row, hidden or not; false while the relay does not give one. */
+  ensureHidden(companyId: string): Promise<boolean> {
     return this.inTurn(async () => {
-      const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
-      if (old && name === old.name) return { name: old.name, url: old.url };
-      const bound = await this.relay.bind(name);
+      const [old] = await this.ctx.db.select({ name: publicLinks.name }).from(publicLinks).where(eq(publicLinks.companyId, companyId));
+      if (old) return true;
       try {
-        await saveLink(this.ctx.db, this.ctx.config, companyId, bound);
+        await this.change(companyId, undefined, true);
+        return true;
       } catch (err) {
-        await this.letGo(bound.name, bound.key);
-        throw err;
+        this.ctx.log.warn({ error: loggable(err) }, "Could not make the company's hidden name at the relay yet.");
+        return false;
       }
-      await this.writeSettings();
-      this.ctx.tls?.kick();
-      if (old) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
-      return { name: bound.name, url: bound.url };
     });
   }
 
+  /* Asks the relay for the new name, keeps it, and lets the old one go. In turn with every other change. */
+  private async change(companyId: string, name: string | undefined, hidden: boolean): Promise<LinkView> {
+    const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
+    if (old && !hidden && !old.hidden && name === old.name) return { name: old.name, url: old.url };
+    const bound = await this.relay.bind(hidden ? undefined : name);
+    try {
+      await saveLink(this.ctx.db, this.ctx.config, companyId, bound, hidden);
+    } catch (err) {
+      await this.letGo(bound.name, bound.key);
+      throw err;
+    }
+    await this.writeSettings();
+    this.ctx.tls?.kick();
+    if (old) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
+    return { name: bound.name, url: bound.url };
+  }
+
   /* The relay lets the link go first, so a link it still holds is never forgotten here. While another machine keeps a
-     copy the link stays: the copies and the server tell each other through it who holds the latest changes. */
+     copy, the copies and the server tell each other through a name at the relay who holds the latest changes: the
+     public name goes, and a hidden one takes its place first. A hidden name stays while it is needed. */
   remove(companyId: string): Promise<void> {
     return this.inTurn(async () => {
       const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
@@ -113,7 +138,10 @@ export class PublicLinks {
       const { db, config } = this.ctx;
       const others = sql`${machines.networkId} IS DISTINCT FROM ${config.machineId}`;
       const [copy] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
-      if (copy) throw new ApiError(409, 'conflict', 'Machines keep copies of the company through its link, so it stays.', 'link_needed');
+      if (copy) {
+        if (!old.hidden) await this.change(companyId, undefined, true);
+        return;
+      }
       await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
       await this.ctx.db.delete(publicLinks).where(eq(publicLinks.companyId, companyId));
       await this.writeSettings();

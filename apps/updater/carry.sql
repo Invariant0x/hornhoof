@@ -11,7 +11,7 @@ SELECT jsonb_build_object(
   'invites', COALESCE((SELECT jsonb_agg(token_hash) FROM invites WHERE used_at IS NULL AND expires_at > now()), '[]'::jsonb),
   'machines', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'revoked', revoked_at IS NOT NULL, 'lendsTests', lends_tests, 'keepsBackups', keeps_backups,
       'role', role, 'dataLeftAt', data_left_at, 'uploadState', upload_state)) FROM machines), '[]'::jsonb),
-  'link', (SELECT jsonb_build_object('name', name, 'url', url, 'keyEnc', key_enc, 'nextKeyEnc', next_key_enc, 'tunnelEnc', tunnel_enc, 'createdAt', created_at) FROM public_links LIMIT 1),
+  'link', (SELECT jsonb_build_object('name', name, 'url', url, 'hidden', hidden, 'keyEnc', key_enc, 'nextKeyEnc', next_key_enc, 'tunnelEnc', tunnel_enc, 'createdAt', created_at) FROM public_links LIMIT 1),
   'peerSecrets', COALESCE((SELECT jsonb_agg(jsonb_build_object('kind', kind, 'secretEnc', secret_enc)) FROM peer_secrets), '[]'::jsonb),
   'serials', COALESCE((SELECT jsonb_agg(serial) FROM certificates WHERE revoked_at IS NOT NULL), '[]'::jsonb),
   'recoveryKeys', COALESCE((SELECT jsonb_agg(jsonb_build_object(

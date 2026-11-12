@@ -109,7 +109,9 @@ export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date)
 /* number: its place in taking the server, 1 for the one that leads. copyName: the name its copy's subscription goes by. */
 export type DataMachine = { machine: string; networkId: string; hostname: string | null; addresses: string[]; peerPort: number | null; webPort: number | null; number: number | null; copyName: string | null };
 /* dataSecret: the secret of the data machines' other service, the way to the data, for a machine that holds it too. */
-export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string; dataSecret: string | null };
+/* hidden: a name the company's machines use and people do not: nothing but who holds the lease is answered at it, so
+   no machine follows its address. A server from before hidden names says nothing of it. */
+export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string; dataSecret: string | null; hidden?: boolean };
 /* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
    keeps the link it has. */
 /* copy: what the leader says of this machine's copy, or of what it owes after it stopped keeping one; null for a
@@ -180,7 +182,7 @@ export async function workerLink(ctx: Ctx, withData = false): Promise<WorkerLink
   const visitorKey = await visitorKeyOf(ctx);
   if (!server.success || !appSecret || !visitorKey) return undefined;
   const dataSecret = withData ? await peerSecret(ctx.db, ctx.config, 'data', true) : null;
-  return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey, dataSecret };
+  return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey, dataSecret, hidden: settings.hidden === true };
 }
 
 /* What a worker knows of the network: who it is, whom to trust and whom not, where the data machines are, and the link.

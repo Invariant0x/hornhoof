@@ -566,11 +566,18 @@ export class WorkerKeeper {
     return state.refused || Date.parse(held.until) <= now || now - this.noSessionSince >= (this.opts.renewAfterMs ?? RENEW_AFTER_MS);
   }
 
+  /* The address of the company's link, for what people and machines reach the company's pages at; none for a hidden
+     name, at which only who holds the lease is answered. */
+  private openLink(): string | null {
+    const link = this.view?.link;
+    return link && !link.hidden ? link.url : null;
+  }
+
   /* Where a renewal is posted, in order: where the machine joined, the company's link when it is another address and
      speaks TLS, and the web port of each data machine. */
   private renewPlaces(): string[] {
     const { joinServer } = this.opts.config;
-    const link = this.view?.link?.url;
+    const link = this.openLink();
     const viaLink = link?.startsWith('https://') && new URL(link).origin !== joinServer ? [new URL(link).origin] : [];
     const direct = (this.view?.data ?? []).flatMap(machine => (machine.webPort ? machine.addresses.map(address => `http://${address}:${machine.webPort}`) : []));
     return [...new Set([joinServer, ...viaLink, ...direct])];
@@ -767,7 +774,7 @@ export class WorkerKeeper {
   }
 
   private noLeader(req: http.IncomingMessage): Refusal {
-    return noLeaderAnswer(req, { data: this.view?.data ?? [], linkUrl: this.view?.link?.url ?? null });
+    return noLeaderAnswer(req, { data: this.view?.data ?? [], linkUrl: this.openLink() });
   }
 
   /* Where the company's server is going, as this machine knows it: for a while after it lost the leader, to the copy

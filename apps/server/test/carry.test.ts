@@ -90,7 +90,7 @@ describe('the carry of a restore', () => {
     expect(machine(was!.id)).toMatchObject({ role: 'worker', uploadState: 'waiting' });
     expect(new Date(machine(was!.id).dataLeftAt!).getTime()).toBe(left.getTime());
     /* The link whole, each secret as it is stored: sealed. */
-    expect(carry.link).toMatchObject({ name: 'acme', url: 'https://acme.hornhoof.org', keyEnc: 'sealed-key', nextKeyEnc: 'sealed-next', tunnelEnc: 'sealed-tunnel' });
+    expect(carry.link).toMatchObject({ name: 'acme', url: 'https://acme.hornhoof.org', hidden: false, keyEnc: 'sealed-key', nextKeyEnc: 'sealed-next', tunnelEnc: 'sealed-tunnel' });
     expect(new Date(carry.link!.createdAt).getTime()).toBe(made.getTime());
     expect([...carry.peerSecrets!].sort((a, b) => a.kind.localeCompare(b.kind))).toEqual([{ kind: 'app', secretEnc: 'sealed-app' }, { kind: 'data', secretEnc: 'sealed-data' }]);
   });

@@ -14,7 +14,7 @@ const VisitSecret = z.object({ name: z.string(), key: z.string() });
 /* The link as a data machine uses it, from what the database keeps of it: none without a link, or while one of its
    three secrets is not stored. A secret that does not open under this machine's secret throws. */
 async function linkOf(sql: Sql, secret: Buffer): Promise<WorkerLink | null> {
-  const [link] = (await sql.query<{ name: string; url: string; tunnel: string }>('SELECT name, url, tunnel_enc AS tunnel FROM public.public_links LIMIT 1')).rows;
+  const [link] = (await sql.query<{ name: string; url: string; tunnel: string; hidden: boolean }>('SELECT name, url, tunnel_enc AS tunnel, hidden FROM public.public_links LIMIT 1')).rows;
   if (!link) return null;
   const kept = (await sql.query<{ kind: string; secret: string }>('SELECT kind, secret_enc AS secret FROM public.peer_secrets')).rows;
   const opened = new Map(kept.map(row => [row.kind, decryptSecret(row.secret, secret)]));
@@ -22,7 +22,7 @@ async function linkOf(sql: Sql, secret: Buffer): Promise<WorkerLink | null> {
   const visit = VisitSecret.safeParse(JSON.parse(opened.get('visit') ?? 'null'));
   const [appSecret, dataSecret] = [opened.get('app'), opened.get('data')];
   if (!server.success || !visit.success || visit.data.name !== link.name || !appSecret || !dataSecret) return null;
-  return { name: link.name, url: link.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey: visit.data.key, dataSecret };
+  return { name: link.name, url: link.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey: visit.data.key, dataSecret, hidden: link.hidden === true };
 }
 
 /* The view of the network a machine that led builds for itself as it starts to follow another, from what its own

@@ -629,7 +629,7 @@ export const en = {
         memory: 'Docker here gets less than 4 GB of memory.',
         scope: (person: string, departments: number | undefined) =>
           `the company's data stays only on machines of people who see the whole company, and ${person} ${departments === undefined ? 'does not' : departments === 0 ? 'sees no department' : departments === 1 ? 'sees one department' : `sees ${departments} departments`}.`,
-        noLink: 'the company has no link at hornhoof.org; turn it on in Settings.',
+        noLink: "the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
         measuring: 'measuring this machine.',
         disk: (free: string, need: string) => `${free} GB free; it needs ${need} GB.`,
         fsync: (ms: string) => `the disk saves slowly (${ms} ms); it needs under 50 ms.`,
@@ -1723,7 +1723,6 @@ export const en = {
     leader: (host: string) => `${host} runs the company server. Move the server to another machine first.`,
     server_install: (host: string) => `The company was installed on ${host}, so it cannot be disconnected.`,
     unfit: 'This machine cannot take the server.',
-    link_needed: 'Machines keep copies of the company through its link, so it stays.',
     try_again: 'Try again in a minute.',
     newer_build: 'This backup was made by a newer Hornhoof. Update first.',
     not_held: 'No machine that is online holds this backup now.',

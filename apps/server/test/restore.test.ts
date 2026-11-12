@@ -284,6 +284,11 @@ describe('a restore from a backup', () => {
     /* The link's key is the one the relay takes now, with a change that was under way, and the secrets are today's. */
     expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'acme', keyEnc: 'newer-key', nextKeyEnc: 'newer-next', tunnelEnc: 'newer-tunnel', createdAt: new Date(made) }]);
     expect((await db.select().from(peerSecrets)).map(row => `${row.kind}=${row.secretEnc}`).sort()).toEqual(['app=newer-app', 'data=newer-data', 'visit=newer-visit']);
+    /* A hidden name stays hidden across a restore, and a public link stays public over a hidden row. */
+    await applyCarry(s.app.ctx, { ...carry, link: { ...carry.link!, name: 'x9', hidden: true } });
+    expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'x9', hidden: true, keyEnc: 'newer-key' }]);
+    await applyCarry(s.app.ctx, carry);
+    expect(await db.select().from(publicLinks)).toMatchObject([{ name: 'acme', hidden: false }]);
     /* A company that has no link now gets none back with an older bundle. */
     await applyCarry(s.app.ctx, { ...carry, link: null, peerSecrets: [] });
     expect(await db.select().from(publicLinks)).toEqual([]);

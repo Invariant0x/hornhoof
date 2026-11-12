@@ -36,4 +36,26 @@ describe('what the keeper of a machine that keeps a copy is started with', () =>
       expect(() => followConfig(ENV, undefined, broken)).toThrow(line);
     }
   });
+
+  it("never follows a hidden link's address", () => {
+    /* At a hidden name only who holds the lease is answered: the server is reached at a machine that holds the data. */
+    const dir = folder();
+    const link = { name: 'x9', url: 'https://x9.hornhoof.test', hidden: true };
+    const data = [
+      { machine: 'm0', networkId: ENV.HORNHOOF_MACHINE_ID, addresses: ['192.168.1.9'], webPort: 8080 },
+      { machine: 'm1', networkId: 'b0'.repeat(16), addresses: [], webPort: 8080 },
+      { machine: 'm2', networkId: 'c0'.repeat(16), addresses: ['192.168.1.7', '10.0.0.7'], webPort: 8081 },
+    ];
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link, data }));
+    expect(followConfig(ENV, undefined, dir).joinServer).toBe('http://192.168.1.7:8081');
+    /* With no link at all, the same. */
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link: null, data }));
+    expect(followConfig(ENV, undefined, dir).joinServer).toBe('http://192.168.1.7:8081');
+    /* And a link people use still comes first. */
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link: { ...link, hidden: false }, data }));
+    expect(followConfig(ENV, undefined, dir).joinServer).toBe('https://x9.hornhoof.test');
+    /* Nobody but itself to reach: as with no server. */
+    writeFileSync(join(dir, PEERS_FILE), JSON.stringify({ machine: 'm0', role: 'data', link, data: data.slice(0, 2) }));
+    expect(() => followConfig(ENV, undefined, dir)).toThrow("HORNHOOF_JOIN_SERVER is not the address of the company's server.");
+  });
 });

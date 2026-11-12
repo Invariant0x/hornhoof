@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -83,7 +83,7 @@ async function company() {
   const patch = (access: object = listed, id = p!.id) => app.inject({ method: 'PATCH', url: `/api/people/${id}`, payload: { access }, ...as(ceo) });
   const personOf = async (id = p!.id) => (await db.select().from(people).where(eq(people.id, id)))[0]!;
   const keyChanges = () => relay.calls.filter(call => call === 'POST /api/v1/links/acme/key').length;
-  return { app, db, config, relay, ceo, maria, companyId: acme!.id, p: p!, owner: owner!, d, w, e, seen, rowOf, linkRow, keyOf, secrets, patch, personOf, keyChanges, listed };
+  return { app, db, config, control, relay, ceo, maria, companyId: acme!.id, p: p!, owner: owner!, d, w, e, seen, rowOf, linkRow, keyOf, secrets, patch, personOf, keyChanges, listed };
 }
 
 const slotOf = (networkId: string, attempt = 1, pid: number | null = 4242): CopySlot => ({ name: `copy_${networkId.slice(0, 16)}_${attempt}`, pid, walStatus: 'reserved', confirmed: '0/3000000' });
@@ -327,20 +327,34 @@ describe("a machine whose owner no longer sees the whole company", () => {
     await until(async () => (await c.linkRow()).nextKeyEnc === null && (await c.keyOf()) !== before);
   });
 
-  it('keeps the link while copies need it', async () => {
+  it('hides the name when the public link goes while copies need it', async () => {
     const c = await company();
     c.app.ctx.replication = fakeReplication(c.seen).replication;
     const remove = () => c.app.inject({ method: 'DELETE', url: '/api/link', ...as(c.ceo) });
-    const calls = c.relay.calls.length;
-    const res = await remove();
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error).toMatchObject({ reason: 'link_needed', message: 'Machines keep copies of the company through its link, so it stays.' });
-    expect(c.relay.calls.length).toBe(calls);
-    expect(await c.linkRow()).toMatchObject({ name: 'acme' });
+    const shown = async () => (await c.app.inject({ url: '/api/link', ...as(c.ceo) })).json().link as { name: string } | null;
+    expect(await shown()).toMatchObject({ name: 'acme' });
+    expect((await remove()).statusCode).toBe(204);
+    /* The public name is let go, and a name of the relay's own choosing takes its place for the machines alone. */
+    const hidden = await c.linkRow();
+    expect(hidden).toMatchObject({ hidden: true });
+    expect(hidden.name).not.toBe('acme');
+    expect([c.relay.bindings.has('acme'), c.relay.bindings.has(hidden.name)]).toEqual([false, true]);
+    /* To people there is no link, and Settings offers to turn one on; the tunnel's settings say whose name it is. */
+    expect(await shown()).toBeNull();
+    expect(JSON.parse(readFileSync(join(c.control, 'tunnel.json'), 'utf8'))).toMatchObject({ name: hidden.name, hidden: true });
+    /* Removed again, it stays: the copies still need it. */
+    expect((await remove()).statusCode).toBe(204);
+    expect(await c.linkRow()).toMatchObject({ name: hidden.name, hidden: true });
+    /* A public link turned on over it replaces it, as any rename does. */
+    expect((await c.app.inject({ method: 'PUT', url: '/api/link', payload: { name: 'acme' }, ...as(c.ceo) })).statusCode).toBe(200);
+    expect(await c.linkRow()).toMatchObject({ name: 'acme', hidden: false });
+    expect([c.relay.bindings.has('acme'), c.relay.bindings.has(hidden.name)]).toEqual([true, false]);
+    expect(await shown()).toMatchObject({ name: 'acme' });
     /* With no other machine holding the data it goes as before. */
     await c.db.update(machines).set({ role: 'worker' }).where(eq(machines.role, 'data')).catch(() => undefined);
     await c.db.update(machines).set({ role: 'data' }).where(eq(machines.networkId, MACHINE_ID));
     expect((await remove()).statusCode).toBe(204);
     expect(c.relay.bindings.has('acme')).toBe(false);
+    expect(await c.db.select().from(publicLinks)).toEqual([]);
   });
 });

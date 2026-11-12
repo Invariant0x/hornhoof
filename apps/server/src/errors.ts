@@ -173,7 +173,6 @@ export type ErrorReason =
   | 'server_install'
   | 'only_copy'
   | 'unfit'
-  | 'link_needed'
   | 'try_again'
   | 'not_data'
   | 'no_age_key'

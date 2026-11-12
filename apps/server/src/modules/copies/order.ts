@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { machines, people, personAccess, publicLinks, teams } from '../../db/schema.js';
@@ -185,7 +185,9 @@ export function readyCopies(ctx: Ctx, rows: { id: string; copyName: string | nul
    nothing is written. */
 export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean; ceo?: boolean } = {}): Promise<{ changed: number; scored: boolean }> {
   const { db, config } = ctx;
-  if (!(await findThisMachine(db, config))) return { changed: 0, scored: false };
+  const own = await findThisMachine(db, config);
+  if (!own) return { changed: 0, scored: false };
+  await hiddenName(ctx, own.id);
   const { changed, scored, leave, retire, top } = await place(ctx, now, opts);
   /* A machine that holds the data and whose person no longer sees the whole company, as a restore of an older backup
      can bring one back, gives the data up as it does when the scope is taken. */
@@ -199,6 +201,23 @@ export async function rank(ctx: Ctx, now = new Date(), opts: { rescore?: boolean
   }
   if (retire) await retireCopy(ctx, retire, top, now);
   return { changed, scored };
+}
+
+/* The machines that keep copies and the server tell each other at hornhoof.org who holds the latest changes, under
+   the company's name there. A company with no link gets a hidden name for that, which nobody but its machines ever
+   uses, as soon as another machine with the company's core is there to keep a copy; a company of one machine asks
+   hornhoof.org for nothing. While hornhoof.org does not answer there is none, no machine gets a copy, and the next
+   ranking asks again. */
+async function hiddenName(ctx: Ctx, own: string): Promise<void> {
+  const { db } = ctx;
+  const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
+  if (link) return;
+  const [other] = await db
+    .select({ companyId: machines.companyId })
+    .from(machines)
+    .where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), ne(machines.id, own), eq(machines.kind, 'computer')))
+    .limit(1);
+  if (other) await ctx.links.ensureHidden(other.companyId);
 }
 
 /* Asked again right before the cut, since the keeper may have named this copy the one commits wait for meanwhile:

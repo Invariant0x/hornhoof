@@ -206,6 +206,7 @@ const LEASE_PATH = '/api/network/lease';
 const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
 const PROOF_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 const BAD_NONCE = JSON.stringify({ error: { code: 'validation', message: 'nonce must be 16 to 128 letters, digits, - or _.' } });
+const HIDDEN_NAME: Refusal = { status: 404, headers: PROOF_HEADERS, body: JSON.stringify({ ok: false }) };
 
 /* The nonce of a request for the lease proof, undefined for any other request, null for a nonce this machine would not send. */
 function proofNonce(req: http.IncomingMessage): string | null | undefined {
@@ -916,9 +917,12 @@ export class Keeper {
      app's, like any other. */
   private door(headers: PassOptions['headers'], opts: { link?: boolean } = {}): http.Server {
     const own = (req: http.IncomingMessage) => (opts.link ? this.leaseProof(req) : null) ?? switchAnswer(req, () => this.switchWord());
+    /* A hidden name is the machines' alone: at its door the keeper says who holds the lease, and nothing else is
+       answered or passed on, a socket no more than a page. */
+    const closed = opts.link ? (req: http.IncomingMessage) => (this.settingsNow?.hidden && proofNonce(req) === undefined ? HIDDEN_NAME : null) : undefined;
     /* While the app restarts a request is held for it. An update takes minutes, so in maintenance it is answered at once. */
     const holding = (req: http.IncomingMessage) => (this.mode() === 'maintenance' ? maintenanceAnswer(req) : null);
-    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own, holdMs: this.opts.holdMs ?? KEEPER_HOLD_MS, holdEveryMs: this.opts.holdEveryMs, holding }));
+    const door = serve(passThrough({ target: this.opts.app, headers, unreachable: req => this.appIsDown(req), own, closed, holdMs: this.opts.holdMs ?? KEEPER_HOLD_MS, holdEveryMs: this.opts.holdEveryMs, holding }));
     this.doors.push(door);
     return door;
   }

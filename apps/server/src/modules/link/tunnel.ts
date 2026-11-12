@@ -8,6 +8,8 @@ export const Settings = z.object({
   key: z.string(),
   tunnel: z.record(z.string(), z.unknown()),
   mode: z.enum(['http', 'https']),
+  /* A name the company's machines use and people do not: its door answers who holds the lease, and nothing else. */
+  hidden: z.boolean().optional(),
 });
 export type TunnelSettings = z.infer<typeof Settings>;
 

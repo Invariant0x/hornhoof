@@ -632,6 +632,26 @@ describe('install.sh', () => {
     expect(r.out).not.toContain('secret');
   });
 
+  it('takes no hidden name for a link nodes joined through', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        /* A name the company's machines use to tell each other who leads: no node ever joined through it. */
+        STUB_TUNNEL_SETTINGS: '{"url":"https://x9k2.hornhoof.test","name":"x9k2","key":"secret","tunnel":{"serverAddr":"hornhoof.test"},"mode":"http","hidden":true}',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-glm-33333333=https://x9k2.hornhoof.test',
+      },
+    });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs.map(c => c.match(/--name (\S+)/)![1])).toEqual(['hornhoof-claude-1c07dac4']);
+    expect(r.out).not.toContain('secret');
+  });
+
   it('moves only the nodes it knows when the tunnel settings say nothing usable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');

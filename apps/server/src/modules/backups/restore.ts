@@ -122,7 +122,8 @@ async function carryLink(db: Db, companyId: string, carry: Carry): Promise<void>
   await db.transaction(async tx => {
     if (carry.link === null) await tx.delete(publicLinks);
     else if (carry.link) {
-      const row = { name: carry.link.name, url: carry.link.url, keyEnc: carry.link.keyEnc, nextKeyEnc: carry.link.nextKeyEnc, tunnelEnc: carry.link.tunnelEnc, createdAt: new Date(carry.link.createdAt) };
+      /* A carry of a build from before hidden names says nothing of it: that link was a public one. */
+      const row = { name: carry.link.name, url: carry.link.url, hidden: carry.link.hidden === true, keyEnc: carry.link.keyEnc, nextKeyEnc: carry.link.nextKeyEnc, tunnelEnc: carry.link.tunnelEnc, createdAt: new Date(carry.link.createdAt) };
       await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: row });
     }
     if (!carry.peerSecrets) return;

@@ -1258,10 +1258,13 @@ machine_lines() {
 }
 
 # The address of the server's public link at hornhoof.org, from the tunnel settings the app writes once the company
-# has one; empty without a link. Only a plain https address counts.
+# has one; empty without a link. Only a plain https address counts. A hidden name, which only the company's machines
+# use to tell each other who leads, is no link: nothing ever joined through it.
 public_link() {
-  local url
-  url=$("$@" exec -T app cat /control/tunnel.json 2> /dev/null | sed -n 's/^{"url":"\([^"]*\)".*/\1/p' || true)
+  local settings url
+  settings=$("$@" exec -T app cat /control/tunnel.json 2> /dev/null || true)
+  case "$settings" in *'"hidden":true'*) return 0 ;; esac
+  url=$(printf '%s' "$settings" | sed -n 's/^{"url":"\([^"]*\)".*/\1/p')
   case "$url" in
     https://*[!A-Za-z0-9.:/-]*) ;;
     https://?*) printf '%s' "$url" ;;

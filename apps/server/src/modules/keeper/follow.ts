@@ -315,9 +315,11 @@ export class FollowKeeper {
     return row ? { networkId: row.networkId, hostname: row.hostname ?? '' } : null;
   }
 
-  /* The address of the company's link as this keeper's view names it, when it is https: its scheme and host. */
+  /* The address of the company's link as this keeper's view names it, when it is https: its scheme and host. None for
+     a hidden name, at which only who holds the lease is answered. */
   private linkOrigin(): string | null {
     try {
+      if (this.view?.link?.hidden) return null;
       const url = new URL(this.view?.link?.url ?? '');
       return url.protocol === 'https:' ? url.origin : null;
     } catch {

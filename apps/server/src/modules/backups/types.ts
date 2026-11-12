@@ -62,6 +62,6 @@ export type Carry = {
   /* The company's link as the relay takes it now, each secret sealed as it is stored; null: it has none now. And the
      secrets of the peer services, sealed the same way. Left out by an updater of the build before, and then the
      restored database keeps what the bundle has. */
-  link?: { name: string; url: string; keyEnc: string; nextKeyEnc: string | null; tunnelEnc: string; createdAt: string } | null;
+  link?: { name: string; url: string; hidden?: boolean; keyEnc: string; nextKeyEnc: string | null; tunnelEnc: string; createdAt: string } | null;
   peerSecrets?: { kind: string; secretEnc: string }[];
 };

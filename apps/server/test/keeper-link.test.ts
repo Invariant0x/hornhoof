@@ -510,6 +510,36 @@ describe('the lease proof on the link', () => {
     expect(got).toEqual([]);
   });
 
+  it('answers only the lease on a hidden name, and passes nothing on', async () => {
+    const { db, config, companyId } = await companyWithLink();
+    /* A name Hornhoof took for the company's machines alone. */
+    const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
+    await saveLink(db, config, companyId, { name: 'acme', url: `https://${HOST}`, key: 'k'.repeat(32), tunnel }, true);
+    expect(await tunnelSettings(db, config)).toMatchObject({ name: 'acme', hidden: true });
+    const { target, got } = await notingApp();
+    const { ports, keeper } = await keeperOn(db, {}, { app: target });
+    await until(async () => (await ask(ports.linkHttp, '/')).status === 404);
+    for (const path of ['/', '/api/health', '/api/network/switch', '/api/network/leases?nonce=x']) {
+      const refused = await ask(ports.linkHttp, path);
+      expect([refused.status, JSON.parse(refused.body)], path).toEqual([404, { ok: false }]);
+    }
+    expect((await ask(ports.linkHttp, '/api/me', 'POST')).status).toBe(404);
+    expect((await askOver(await overTls(ports.linkTls), { path: '/tasks' })).status).toBe(404);
+    /* A socket is turned away as a page is. */
+    const socket = new WebSocket(`ws://127.0.0.1:${ports.linkHttp}/api/nodes/socket`);
+    socket.on('error', () => undefined);
+    const [, refusal] = (await once(socket, 'unexpected-response')) as [http.ClientRequest, http.IncomingMessage];
+    expect(refusal.statusCode).toBe(404);
+    refusal.destroy();
+    socket.terminate();
+    /* Who holds the lease is still said, on both doors, and the front door serves the company as ever. */
+    const proof = { machine: MACHINE_ID, term: keeper.term(), nonce: NONCE };
+    expect(JSON.parse((await ask(ports.linkHttp, LEASE)).body)).toEqual(proof);
+    expect(JSON.parse((await askOver(await overTls(ports.linkTls), { path: LEASE })).body)).toEqual(proof);
+    expect((await ask(ports.front, '/')).body).toBe('the app');
+    expect(got).toEqual(['GET /']);
+  });
+
   it('answers no term while it holds no lease', async () => {
     const { db } = await companyWithLink();
     const lease = fakeLease({ take: () => Promise.reject(new Error('the database is away')) });

@@ -219,6 +219,7 @@ describe('binding the company to a public link', () => {
       key,
       tunnel: expect.objectContaining({ serverAddr: 'hornhoof.test', serverPort: 443, protocol: 'wss' }),
       mode: 'http',
+      hidden: false,
     });
     /* The link's key is for the tunnel container alone. */
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
@@ -410,7 +411,7 @@ describe('taking over a link made before', () => {
     const url = `https://${NAME}.${hostname}`;
     expect(lines.join('\n')).toContain(url);
     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json().link).toEqual({ name: NAME, url });
-    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' }, mode: 'http' });
+    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' }, mode: 'http', hidden: false });
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
 
     /* The key it keeps is the one that frees the link. */

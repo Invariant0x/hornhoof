@@ -10,7 +10,9 @@ import { candidates, planRoles, rank, Ranking, rankOf } from '../src/modules/cop
 import { onlineShare } from '../src/modules/network/join.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { unfit, type Candidate } from '../src/modules/copies/qualify.js';
-import { setUpCompany, testApp, until } from './helpers.js';
+import { Relay } from '../src/modules/link/relay.js';
+import { fakeRelay } from './fake-relay.js';
+import { as, setUpCompany, testApp, until } from './helpers.js';
 
 const GIB = 2 ** 30;
 const NOW = new Date('2026-11-11T12:00:00Z');
@@ -316,7 +318,7 @@ const newKey = (): string => generateKeyPairSync('ed25519').publicKey.export({ t
 
 async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID, ...env });
-  await setUpCompany(app);
+  const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   const [maria] = await db.insert(people).values({ companyId: acme!.id, name: 'Maria', email: 'maria@acme.test', status: 'active', scopeKind: 'company' }).returning();
@@ -335,7 +337,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   };
   const places = async () =>
     Object.fromEntries((await db.select().from(machines).where(isNotNull(machines.networkId)).orderBy(asc(machines.createdAt))).map(row => [row.hostname || 'server', [row.serverOrder, row.serverWhy, row.role]]));
-  return { app, db, config, ctx: app.ctx, ownerId: owner!.id, mariaId: maria!.id, joined, places };
+  return { app, db, config, ctx: app.ctx, ceo, ownerId: owner!.id, mariaId: maria!.id, joined, places };
 }
 
 describe('the ranking on the server', () => {
@@ -365,6 +367,35 @@ describe('the ranking on the server', () => {
     expect(await c.places()).toMatchObject({ m1: [2, expect.any(String), 'data'], m2: [3, expect.any(String), 'data'] });
     expect(await rank(c.ctx, undefined, { rescore: true })).toEqual({ changed: 2, scored: true });
     expect(await c.places()).toMatchObject({ m2: [2, expect.any(String), 'data'], m1: [3, expect.any(String), 'data'], m3: [4, 'next', 'worker'] });
+  });
+
+  it('makes a hidden name for a company with no link, once another machine is there to keep a copy', async () => {
+    const relay = await fakeRelay();
+    const c = await company({ RELAY_URL: relay.url });
+    await c.db.delete(publicLinks);
+    const binds = (at: { calls: string[] }) => at.calls.filter(call => call.startsWith('POST ') && call.endsWith('/bindings')).length;
+    /* A company of one machine asks hornhoof.org for nothing. */
+    expect(await rank(c.ctx)).toMatchObject({ scored: true });
+    expect([binds(relay), await c.db.select().from(publicLinks)]).toEqual([0, []]);
+    /* With a machine that may keep a copy, and hornhoof.org away: no name, and no copy. */
+    await c.joined(c.ownerId, 3);
+    await relay.close();
+    await rank(c.ctx);
+    expect(await c.db.select().from(publicLinks)).toEqual([]);
+    expect(await c.places()).toMatchObject({ m1: [null, null, 'worker'] });
+    /* Once hornhoof.org answers: a name of its own choosing, hidden, and the machine gets its place. */
+    const back = await fakeRelay();
+    (c.ctx.links as unknown as { relay: Relay }).relay = new Relay(back.url);
+    await rank(c.ctx);
+    const [link] = await c.db.select().from(publicLinks);
+    expect(link).toMatchObject({ hidden: true });
+    expect(back.bindings.has(link!.name)).toBe(true);
+    expect((await c.places()).m1![0]).toBe(2);
+    expect((await c.app.inject({ url: '/api/link', ...as(c.ceo) })).json().link).toBeNull();
+    /* The next ranking asks for nothing more. */
+    expect(binds(back)).toBe(1);
+    await rank(c.ctx);
+    expect(binds(back)).toBe(1);
   });
 
   it('gives no place to a machine that does not fit, and none at all without the row of this server', async () => {
