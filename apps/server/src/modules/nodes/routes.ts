@@ -375,7 +375,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const machine = await ownMachine(me, id);
     /* The machine the company was installed on is no computer someone joined, and the one that leads does not leave. */
     if (isServerInstall(machine.machineKey)) {
-      throw new ApiError(409, 'conflict', `The company was installed on ${machine.hostname || 'this machine'}, so it cannot be disconnected.`, 'server_install');
+      throw new ApiError(409, 'conflict', `The company was installed on ${machine.hostname || 'this machine'}, so it cannot be disconnected.`, 'server_install', { host: machine.hostname });
     }
     await refuseLeader(db, config, [id]);
     await disconnectMachines(ctx, [id]);

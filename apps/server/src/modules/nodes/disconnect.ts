@@ -19,7 +19,7 @@ export async function refuseLeader(db: Db, config: Config, machineIds: string[])
   const leader = machineIds.length > 0 ? await findThisMachine(db, config) : null;
   if (!leader || !machineIds.includes(leader.id)) return;
   const [row] = await db.select({ hostname: machines.hostname }).from(machines).where(eq(machines.id, leader.id));
-  throw new ApiError(409, 'conflict', `${row?.hostname || 'This machine'} runs the company server. Move the server to another machine first.`, 'leader');
+  throw new ApiError(409, 'conflict', `${row?.hostname || 'This machine'} runs the company server. Move the server to another machine first.`, 'leader', { host: row?.hostname ?? '' });
 }
 
 /* Stops these machines' nodes: open jobs fail, the parts of test runs they ran wait for another machine, sockets close,

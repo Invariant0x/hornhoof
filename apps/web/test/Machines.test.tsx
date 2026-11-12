@@ -692,6 +692,125 @@ describe('Machines', () => {
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1)).toEqual({ method: 'PUT', path: '/api/machines/p3/priority', body: { pin: 4 } }));
   });
 
+  /* The tab as the CEO sees it, with what the server says of a move. */
+  const moving = (move: object | null, more: { canMove?: boolean; me?: Me; over?: object[]; routes?: Parameters<typeof mockApi>[0]; language?: string } = {}) => {
+    localStorage.setItem('hh-lang', more.language ?? 'en');
+    const calls = lists({ 'GET /api/machines': [200, { machines: four(more.over), builtin: null, priority: true, move, canMove: more.canMove ?? true }], ...more.routes });
+    return { calls, view: render(<LanguageProvider><Machines me={more.me ?? ME} /></LanguageProvider>) };
+  };
+  const PAT: Me = { ...ME, person: { ...ME.person, isOwner: false } };
+
+  it('asks before it moves the server', async () => {
+    const { calls } = moving(null, { routes: { 'POST /api/machines/p3/move': [202, { state: 'preparing' }] } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    const here = within(fourth).getByRole('button', { name: 'Move the server here' });
+    await user.click(here);
+    /* The question stands in the button's place, with the focus on its first answer. */
+    expect(within(fourth).getByText('Move the company server to host-4? Hornhoof stops for a short while as it moves; your work is kept.')).toBeInTheDocument();
+    expect(within(fourth).queryByRole('button', { name: 'Move the server here' })).not.toBeInTheDocument();
+    expect(within(fourth).getByRole('button', { name: 'Move the server' })).toHaveFocus();
+    /* Cancel asks nothing of the server, and the focus is back on the button. */
+    await user.click(within(fourth).getByRole('button', { name: 'Cancel' }));
+    expect(within(fourth).getByRole('button', { name: 'Move the server here' })).toHaveFocus();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    await user.click(within(fourth).getByRole('button', { name: 'Move the server here' }));
+    const loads = calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length;
+    await user.click(within(fourth).getByRole('button', { name: 'Move the server' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: '/api/machines/p3/move', body: undefined }]));
+    /* Then the tab is read again. */
+    await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length).toBeGreaterThan(loads));
+  });
+
+  it('shows no move where it cannot be', async () => {
+    const here = (node: HTMLElement) => within(node).queryByRole('button', { name: 'Move the server here' });
+    /* Not on the server's own card, nor on a machine kept from the server or one that cannot take it. */
+    const first = moving(null, { over: [{}, {}, { number: null, why: 'out', pin: 'none' }, { number: null, why: null, unfit: { why: 'phone' } }] });
+    await screen.findByRole('table');
+    expect([here(card('host-1')), here(card('host-3')), here(card('host-4'))]).toEqual([null, null, null]);
+    expect(here(card('host-2'))).toBeInTheDocument();
+    first.view.unmount();
+    /* Not for someone who is not the CEO, nor where the server says the CEO cannot ask now. */
+    for (const more of [{ me: PAT, canMove: false }, { canMove: false }]) {
+      const view = moving(null, more);
+      expect(here(await openCard('host-2'))).toBeNull();
+      view.view.unmount();
+    }
+    /* Not while the server is moving. */
+    moving({ machine: 'p3', state: 'switching', reason: null, leader: 'host-1', progress: null });
+    expect(here(await openCard('host-2'))).toBeNull();
+  });
+
+  it('shows the move to everyone', async () => {
+    const view = moving({ machine: 'p3', state: 'switching', reason: null, leader: 'host-1', progress: null }, { me: PAT, canMove: false });
+    const fourth = await openCard('host-4');
+    expect(within(fourth).getByText('Moving the server to host-4.')).toBeInTheDocument();
+    expect(within(card('host-2')).queryByText('Moving the server to host-4.')).not.toBeInTheDocument();
+    view.view.unmount();
+    moving({ machine: 'p3', state: 'preparing', reason: null, leader: 'host-1', progress: 40 }, { me: PAT, canMove: false });
+    const waiting = await openCard('host-4');
+    expect(within(waiting).getByText('host-4 takes the server once its copy is up to date (40%)')).toBeInTheDocument();
+    expect(within(waiting).queryByRole('button', { name: 'Cancel the move' })).not.toBeInTheDocument();
+  });
+
+  it('says how the move goes', async () => {
+    const preparing = { machine: 'p3', state: 'preparing', reason: null, leader: 'host-1', progress: 40 };
+    const first = moving(preparing, { routes: { 'DELETE /api/machines/p3/move': [204] } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    expect(within(fourth).getByText('host-4 takes the server once its copy is up to date (40%)')).toBeInTheDocument();
+    expect(within(fourth).queryByRole('button', { name: 'Move the server here' })).not.toBeInTheDocument();
+    /* While one machine waits to take the server, another may still be asked in its place. */
+    expect(within(card('host-2')).getByRole('button', { name: 'Move the server here' })).toBeInTheDocument();
+    await user.click(within(card('host-4')).getByRole('button', { name: 'Cancel the move' }));
+    await vi.waitFor(() => expect(first.calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/machines/p3/move', body: undefined }]));
+    first.view.unmount();
+    const lines: [object, string][] = [
+      [{ ...preparing, progress: null }, 'host-4 takes the server once its copy is up to date.'],
+      [{ ...preparing, state: 'switching' }, 'Moving the server to host-4.'],
+      [{ ...preparing, state: 'failed', reason: 'behind' }, 'The server stayed on host-1: host-4 did not get the last changes within a minute.'],
+      [{ ...preparing, state: 'failed', reason: 'no_link' }, "The server stayed on host-1: host-4 could not take the company's link at hornhoof.org."],
+    ];
+    for (const [move, line] of lines) {
+      const view = moving(move);
+      expect(within(await openCard('host-4')).getByText(line), line).toBeInTheDocument();
+      view.view.unmount();
+    }
+    /* After a failure the CEO may ask again. */
+    moving(lines[2]![0]);
+    expect(within(await openCard('host-4')).getByRole('button', { name: 'Move the server here' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Move the server here', 'Move the server', 'Hornhoof is updating. Move the server once the update ended.', 'The server is moving to host-3 now.'],
+    ['ru', 'Перенести сервер сюда', 'Перенести сервер', 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.', 'Сервер как раз переезжает на host-3.'],
+  ])("shows a move's refusal in %s", async (language, here, yes, updating, switching) => {
+    const refused = (reason: string, details?: object) => [409, { error: { code: 'conflict', reason, message: 'Refused.', ...(details ? { details } : {}) } }] as [number, unknown];
+    const first = moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('updating') } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    await user.click(within(fourth).getByRole('button', { name: here }));
+    await user.click(within(fourth).getByRole('button', { name: yes }));
+    /* Said in the part itself, as an alert. */
+    await vi.waitFor(() => expect(within(fourth).getByText(updating)).toHaveAttribute('role', 'alert'));
+    expect(within(fourth).getByText(updating).closest('.prio')).not.toBeNull();
+    /* The question stays, to be asked again or called off. */
+    expect(within(fourth).getByRole('button', { name: yes })).toBeEnabled();
+    first.view.unmount();
+    moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('switching', { host: 'host-3' }) } });
+    const again = await openCard('host-4');
+    await user.click(within(again).getByRole('button', { name: here }));
+    await user.click(within(again).getByRole('button', { name: yes }));
+    await vi.waitFor(() => expect(within(again).getByText(switching)).toHaveAttribute('role', 'alert'));
+  });
+
+  it("keeps the company's install connected", async () => {
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[1]!, serverInstall: true }, MACHINES[0]!], builtin: null }] });
+    render(<Machines me={ME} />);
+    expect(within(await openCard('build-box')).queryByRole('button', { name: 'Disconnect build-box' })).not.toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByRole('button', { name: 'Disconnect ivan-mbp' })).toBeInTheDocument();
+  });
+
   it.each([
     ['en', [
       'Cannot take the server: it is a phone.',

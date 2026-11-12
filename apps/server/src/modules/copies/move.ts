@@ -20,10 +20,11 @@ export type MoveView = { machine: string; state: MoveState; reason: MoveReason |
 
 const nameOf = (hostname: string): string => hostname || 'This machine';
 const unknown = () => new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
-const alreadyLeader = (hostname: string) => new ApiError(409, 'conflict', `${nameOf(hostname)} runs the company server already.`, 'already_leader');
-const noNumber = (hostname: string) => new ApiError(409, 'conflict', `${nameOf(hostname)} cannot take the server now.`, 'no_number');
+/* Each names its machine apart from its words, for a screen that says them in its own language. */
+const alreadyLeader = (hostname: string) => new ApiError(409, 'conflict', `${nameOf(hostname)} runs the company server already.`, 'already_leader', { host: hostname });
+const noNumber = (hostname: string) => new ApiError(409, 'conflict', `${nameOf(hostname)} cannot take the server now.`, 'no_number', { host: hostname });
 const updating = () => new ApiError(409, 'conflict', 'Hornhoof is updating. Move the server once the update ended.', 'updating');
-const switching = (hostname: string) => new ApiError(409, 'conflict', `The server is moving to ${hostname || 'another machine'} now.`, 'switching');
+const switching = (hostname: string) => new ApiError(409, 'conflict', `The server is moving to ${hostname || 'another machine'} now.`, 'switching', { host: hostname });
 const noRequest = () => new ApiError(404, 'not_found', 'Nobody asked to move the server to this machine.');
 const tryAgain = () => new ApiError(503, 'unavailable', 'Try again in a minute.', 'try_again');
 

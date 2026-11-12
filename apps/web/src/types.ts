@@ -625,9 +625,22 @@ export type RestoreWarning = { machines: { name: string; owner: string }[]; peop
 /* A server set up anew that was given a recovery file: the backups sent to it so far. */
 export type RecoveryView = { company: string; link: string | null; bundles: { id: string; dumpedAt: string; reason: string; size: number; from: string }[]; restore: RestoreStatus | null };
 
+/* The CEO's request to move the server to another machine, and how far it is. machine: the machine asked to take it;
+   leader: the name of the machine that led when it was asked; progress: how far that machine's copy is, while it is
+   not up to date. */
+export type MoveView = {
+  machine: string;
+  state: 'preparing' | 'switching' | 'failed';
+  reason: 'no_answer' | 'not_ready' | 'behind' | 'no_link' | 'expired' | 'left' | null;
+  leader: string;
+  progress: number | null;
+};
+
 export type MachineView = {
   id: string;
   hostname: string;
+  /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
+  serverInstall?: boolean;
   os: string;
   arch: string;
   owner: { id: string; name: string };

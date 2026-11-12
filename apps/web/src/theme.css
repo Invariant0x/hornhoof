@@ -1619,6 +1619,8 @@ th.k-prio .sorth { white-space: nowrap; }
 .pm-opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .pm-opt input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
 .pm-opt input:disabled, .pm-opt:has(input:disabled) { cursor: not-allowed; }
+/* The question about moving the server takes the part's whole width, its answers under the words when they do not fit. */
+.prio > .ask, .prio > .alert, .prio > .machine-note { justify-self: stretch; }
 
 /* A block in parts: a small heading with a rule, then its meters, facts or list. Both cards use them. */
 .part { display: grid; gap: 8px; min-width: 0; }

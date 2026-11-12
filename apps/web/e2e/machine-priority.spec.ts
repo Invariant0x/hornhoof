@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { BuiltinView, DataView, MachineView, Org } from '../src/types';
+import type { BuiltinView, DataView, MachineView, MoveView, Org } from '../src/types';
 import { ME, box, serveApi } from './api';
 
 const GIB = 1024 ** 3;
@@ -12,6 +12,10 @@ const WORDS = {
     scope: "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Marat sees 2 departments.",
     line: 'If machine 1 goes away, machine 2 takes the server, then 3.', outChoice: 'Does not take the server', pick: (host: string) => `Priority of ${host}`,
     onlyCopy: (host: string) => `${host} holds the only up-to-date copy; give another machine a place first.`,
+    here: 'Move the server here', yes: 'Move the server', cancel: 'Cancel', stop: 'Cancel the move',
+    ask: (host: string) => `Move the company server to ${host}? Hornhoof stops for a short while as it moves; your work is kept.`,
+    waiting: (host: string) => `${host} takes the server once its copy is up to date (40%)`,
+    updating: 'Hornhoof is updating. Move the server once the update ended.',
   },
   ru: {
     tab: 'Машины', open: 'Открыть карточку', priority: 'Приоритет',
@@ -19,6 +23,10 @@ const WORDS = {
     scope: 'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Marat видит 2 отдела.',
     line: 'Если машина 1 пропадет, сервер возьмет машина 2, за ней 3.', outChoice: 'Не берет сервер', pick: (host: string) => `Приоритет ${host}`,
     onlyCopy: (host: string) => `${host} хранит единственную актуальную копию; сначала дайте место другой машине.`,
+    here: 'Перенести сервер сюда', yes: 'Перенести сервер', cancel: 'Отмена', stop: 'Отменить перенос',
+    ask: (host: string) => `Перенести сервер компании на ${host}? Пока он переезжает, Hornhoof ненадолго остановится; ваша работа сохранится.`,
+    waiting: (host: string) => `${host} возьмет сервер, как только ее копия станет актуальной (40%)`,
+    updating: 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.',
   },
 };
 
@@ -43,8 +51,8 @@ const BUILTIN: BuiltinView = { online: true, load: null, running: { agents: [], 
 
 type Sent = { path: string; body: unknown };
 
-/* refuse: the answer to a choice; none takes it. */
-async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', refuse?: { status: number; reason: string }): Promise<Sent[]> {
+/* refuse: the answer to a choice or to a move; none takes it. move: what the server says of a move of the server. */
+async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 'dark', refuse?: { status: number; reason: string }, move: MoveView | null = null): Promise<Sent[]> {
   const sent: Sent[] = [];
   await serveApi(page);
   await page.addInitScript(({ language, theme }) => {
@@ -53,7 +61,11 @@ async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 
   }, { language, theme });
   const org: Org = { company: ME.company, orchestrator: null, agents: { total: 0, working: 0 }, people: [], departments: [] };
   await page.route('**/api/org', route => route.fulfill({ json: org }));
-  await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: true, copies: { leader: 'rack-01', copies: [{ hostname: 'ivan-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
+  await page.route('**/api/machines/*/move', route => {
+    sent.push({ path: new URL(route.request().url()).pathname, body: route.request().method() });
+    return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 202, json: { state: 'preparing' } });
+  });
+  await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: true, move, canMove: true, copies: { leader: 'rack-01', copies: [{ hostname: 'ivan-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
   await page.route('**/api/machines/*/priority', route => {
     sent.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
     return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 204 });
@@ -138,6 +150,53 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(card(page, 'marat-pc').getByRole('radio')).toHaveCount(0);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('unfit')), fullPage: true });
+  });
+
+  test(`asks before it moves the server, and says how a move goes, ${place}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height });
+    const sent = await openMachines(page, language, theme, { status: 409, reason: 'updating' });
+    await open(page, LONG);
+    const target = card(page, LONG);
+    const here = target.getByRole('button', { name: w.here, exact: true });
+    await expect(here).toBeVisible();
+    expect(await within(here, target)).toBe(true);
+    await here.click();
+    /* The question takes the button's place, with its answers inside the card and the focus on the first. */
+    const question = target.getByText(w.ask(LONG));
+    const [yes, cancel] = [target.getByRole('button', { name: w.yes, exact: true }), target.getByRole('button', { name: w.cancel, exact: true })];
+    await expect(question).toBeVisible();
+    await expect(yes).toBeFocused();
+    for (const one of [question, yes, cancel]) expect(await within(one, target)).toBe(true);
+    /* Each answer is large enough to press with a finger, and the two do not lie on each other. */
+    const [a, b] = [await box(yes), await box(cancel)];
+    expect(Math.min(a.height, b.height)).toBeGreaterThanOrEqual(44);
+    expect(a.x + a.width <= b.x + 1 || a.y + a.height <= b.y + 1).toBe(true);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: info.outputPath(shot('move-ask')), fullPage: true });
+    /* A refusal is said under the answers, inside the card. */
+    await yes.click();
+    const refusal = target.getByText(w.updating);
+    await expect(refusal).toBeVisible();
+    expect(await within(refusal, target)).toBe(true);
+    expect(sent).toEqual([{ path: '/api/machines/m3/move', body: 'POST' }]);
+    await page.screenshot({ path: info.outputPath(shot('move-refused')), fullPage: true });
+    /* Cancel gives the focus back to the button. */
+    await cancel.click();
+    await expect(here).toBeFocused();
+  });
+
+  test(`shows a move that waits for its copy, ${place}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height });
+    await openMachines(page, language, theme, undefined, { machine: 'm3', state: 'preparing', reason: null, leader: 'rack-01', progress: 40 });
+    await open(page, LONG);
+    const target = card(page, LONG);
+    const [line, stop] = [target.getByText(w.waiting(LONG)), target.getByRole('button', { name: w.stop, exact: true })];
+    await expect(line).toBeVisible();
+    await expect(stop).toBeVisible();
+    for (const one of [line, stop]) expect(await within(one, target)).toBe(true);
+    await expect(target.getByRole('button', { name: w.here, exact: true })).toHaveCount(0);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: info.outputPath(shot('move-waiting')), fullPage: true });
   });
 
   test(`sends the CEO's choice and words a refusal, ${place}`, async ({ page }, info) => {

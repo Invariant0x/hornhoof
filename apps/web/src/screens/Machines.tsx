@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, SubView, TlsView, Unfit } from '../types';
+import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -310,7 +310,8 @@ function MachineSettings({ machine: m, editable, addable, busy, controls }: { ma
     <div className="machine-actions">
       {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
       {m.needsCore && !busy && <button className="act" type="button" onClick={() => controls.makeCore(m)}>{t.machines.makeCore(m.hostname)}</button>}
-      {editable && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
+      {/* The machine the company was installed on is no computer someone joined: it is not disconnected. */}
+      {editable && !m.serverInstall && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
     </div>
     {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
   </>;
@@ -412,10 +413,73 @@ function PriorityChoice({ row, data, last, refresh }: { row: MachineRow; data: D
   </>;
 }
 
+/* What the server says of moving it to another machine, and whether this person may ask for that. */
+type Moving = { move: MoveView | null; canMove: boolean };
+
+/* The move of the server, on a machine's card. On the machine asked to take it, everyone who sees the part reads how
+   far the move is: its copy being made, the server moving, or why it stayed. The CEO may call a move off while the
+   copy is made, and may ask a machine that has a number to take the server: the question stands in the button's
+   place, the focus on its first answer, and Cancel gives the focus back to the button. While an answer is sent nothing
+   can be pressed, and a refusal is said under the buttons. */
+function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataView; moving: Moving; refresh: () => Promise<void> }) {
+  const t = useT();
+  const words = t.machines.move;
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const hereButton = useRef<HTMLButtonElement>(null);
+  const yesButton = useRef<HTMLButtonElement>(null);
+  const backToButton = useRef(false);
+  useEffect(() => {
+    if (asking) yesButton.current?.focus();
+    else if (backToButton.current) hereButton.current?.focus();
+    backToButton.current = false;
+  }, [asking]);
+  const { move, canMove } = moving;
+  const target = move?.machine === row.id ? move : null;
+  const mayTake = data.number !== null && data.number >= 2 && data.pin !== 'none';
+  const offered = canMove && mayTake && move?.state !== 'switching' && (!target || target.state === 'failed');
+  const send = async (call: () => Promise<unknown>) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await call();
+      setAsking(false);
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const said = target
+    ? target.state === 'preparing' ? words.waiting(row.hostname, target.progress)
+      : target.state === 'switching' ? words.switching(row.hostname)
+        : words.failed(target.leader, words.reason[target.reason ?? 'no_answer'](row.hostname))
+    : null;
+  if (!said && !offered) return null;
+  const question = words.ask(row.hostname);
+  return <>
+    {said && <p className="machine-note">{said}</p>}
+    {target?.state === 'preparing' && canMove && <button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button>}
+    {offered && !asking && <button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button>}
+    {offered && asking && (
+      <div className="ask">
+        <span className="entry-main">{question}</span>
+        <div className="entry-actions" role="group" aria-label={question}>
+          <button ref={yesButton} className="btn" type="button" disabled={busy} onClick={() => void send(() => api.post(`/api/machines/${row.id}/move`))}>{words.yes}</button>
+          <button className="btn ghost" type="button" disabled={busy} onClick={() => { backToButton.current = true; setFailure(null); setAsking(false); }}>{words.cancel}</button>
+        </div>
+      </div>
+    )}
+    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+  </>;
+}
+
 /* The Priority part of a card: the machine's number and why it has it, or a dash and why it has none; for the CEO, on
-   every machine that may take the server but the one it runs on, the choice of its place; then how its copy does and
-   when it stopped holding the data. last: the highest number there is. */
-function PriorityPart({ row, me, last, refresh }: { row: MachineRow; me: Me; last: number; refresh: () => Promise<void> }) {
+   every machine that may take the server but the one it runs on, the choice of its place and the move of the server;
+   then how its copy does and when it stopped holding the data. last: the highest number there is. */
+function PriorityPart({ row, me, last, moving, refresh }: { row: MachineRow; me: Me; last: number; moving: Moving; refresh: () => Promise<void> }) {
   const t = useT();
   const { language } = useLanguage();
   const p = t.machines.priority;
@@ -429,9 +493,12 @@ function PriorityPart({ row, me, last, refresh }: { row: MachineRow; me: Me; las
   /* Number 1 is wherever the server runs, and moves only with the server: nothing to choose there. */
   if (placeOf(row) === 1) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span><small>{p.line}</small></div>{below}</Part>;
   if (!data) return null;
-  if (data.unfit) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit, row.hostname))}</span></span></div>{below}</Part>;
+  const moved = <MovePart row={row} data={data} moving={moving} refresh={refresh} />;
+  if (data.unfit) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit, row.hostname))}</span></span>{moved}</div>{below}</Part>;
   const out = data.pin === 'none';
-  if (data.number === null && !out) return notes.length ? <Part title={t.cards.priority}>{below}</Part> : null;
+  /* A machine with no place says nothing here, unless the server was asked to move to it and stayed. */
+  const asked = moving.move?.machine === row.id;
+  if (data.number === null && !out) return notes.length || asked ? <Part title={t.cards.priority}>{asked && <div className="prio">{moved}</div>}{below}</Part> : null;
   const why = out ? p.why.out : whyText(t, data.why);
   return (
     <Part title={t.cards.priority}>
@@ -439,6 +506,7 @@ function PriorityPart({ row, me, last, refresh }: { row: MachineRow; me: Me; las
         <span className="prio-n">{out ? <span className="pdash" aria-hidden="true" /> : <span className="pn">{data.number}</span>}<span>{why}</span></span>
         {me.person.isOwner && <PriorityChoice row={row} data={data} last={last} refresh={refresh} />}
         <small>{p.line}</small>
+        {moved}
       </div>
       {below}
     </Part>
@@ -487,7 +555,7 @@ function MachineAccess({ view, controls }: { view: ComputerAccessView; controls:
   );
 }
 
-function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: { shown: boolean; last: number }; controls: MachineControls }) {
+function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: { shown: boolean; last: number; moving: Moving }; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
   const m = row.source;
@@ -513,7 +581,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
         {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
-        {order.shown ? <PriorityPart row={row} me={me} last={order.last} refresh={controls.refresh} /> : m && row.server && <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span></div></Part>}
+        {order.shown ? <PriorityPart row={row} me={me} last={order.last} moving={order.moving} refresh={controls.refresh} /> : m && row.server && <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span></div></Part>}
         {row.access && <MachineAccess view={row.access} controls={controls} />}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
@@ -538,6 +606,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [copies, setCopies] = useState<CopiesView | null>(null);
   /* Whether this person sees the order the server passes on in. */
   const [priority, setPriority] = useState(false);
+  const [moving, setMoving] = useState<Moving>({ move: null, canMove: false });
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
@@ -557,7 +626,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const load = useCallback(async () => {
     try {
       const [hosts, list] = await Promise.all([
-        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean }>('/api/machines'),
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
         loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
       ]);
@@ -566,6 +635,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setBuiltin(hosts.builtin ?? null);
       setCopies(hosts.copies ?? null);
       setPriority(hosts.priority === true);
+      setMoving({ move: hosts.move ?? null, canMove: hosts.canMove === true });
       setSubs(list.subscriptions);
     } catch (err) {
       setFailure(err);
@@ -700,7 +770,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
-          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)) }} controls={{
+          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
             picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />

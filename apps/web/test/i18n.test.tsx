@@ -282,6 +282,25 @@ describe('the words of copies', () => {
     Object.entries(part).flatMap(([key, value]): [string, string][] =>
       typeof value === 'function' ? [[under + key, (value as (...words: unknown[]) => string)('a', 2, 'c')]] : typeof value === 'string' ? [[under + key, value]] : flat(value as object, `${under}${key}.`));
 
+  it('words the move of the server in both languages', () => {
+    const REASONS = ['already_leader', 'no_number', 'updating', 'switching', 'moving', 'leader', 'server_install'] as const;
+    const words = (dict: typeof en) =>
+      Object.fromEntries([...flat(dict.machines.move), ...REASONS.map((reason): [string, string] => [`errors.${reason}`, typeof dict.errors[reason] === 'function' ? (dict.errors[reason] as (host: string) => string)('a') : (dict.errors[reason] as string)])]);
+    const [english, russian] = [words(en), words(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['here', 'ask', 'yes', 'cancel', 'stop', 'waiting', 'switching', 'failed', 'reason.no_answer', 'reason.not_ready', 'reason.behind', 'reason.no_link', 'reason.expired', 'reason.left', ...REASONS.map(reason => `errors.${reason}`)]));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    /* The share is said only while there is one. */
+    expect([en.machines.move.waiting('d', 40), en.machines.move.waiting('d', null)]).toEqual(['d takes the server once its copy is up to date (40%)', 'd takes the server once its copy is up to date.']);
+    expect([ru.machines.move.waiting('d', 40), ru.machines.move.waiting('d', null)]).toEqual(['d возьмет сервер, как только ее копия станет актуальной (40%)', 'd возьмет сервер, как только ее копия станет актуальной.']);
+    expect([en.errors.leader('d'), ru.errors.leader('d')]).toEqual(['d runs the company server. Move the server to another machine first.', 'На d работает сервер компании. Сначала перенесите сервер на другую машину.']);
+  });
+
   it('words the server order in both languages', () => {
     const order = (dict: typeof en) => Object.fromEntries([...flat(dict.machines.priority), ['errors.leader_pin', dict.errors.leader_pin], ['errors.unfit', dict.errors.unfit]]);
     const [english, russian] = [order(en), order(ru)];

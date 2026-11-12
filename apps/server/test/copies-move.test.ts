@@ -101,7 +101,10 @@ describe("the CEO's request to move the server", () => {
 
     expect((await c.post(c.d.id)).statusCode).toBe(202);
     await c.db.execute(sql`UPDATE net.move SET state = 'switching'`);
-    expect(c.refusal(await c.post(c.a.id))).toEqual([409, 'switching', 'The server is moving to d now.']);
+    const moving = await c.post(c.a.id);
+    expect(c.refusal(moving)).toEqual([409, 'switching', 'The server is moving to d now.']);
+    /* The machine is named apart from the words, for a screen that says them in another language. */
+    expect((moving.json() as { error: { details: unknown } }).error.details).toEqual({ host: 'd' });
     expect(await c.moves()).toMatchObject([{ machine_id: c.d.id, state: 'switching' }]);
 
     /* The CEO alone, on his own session. */

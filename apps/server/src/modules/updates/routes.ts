@@ -101,7 +101,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     /* An update would stop the copy the server is to move with. */
     const moving = await movingTo(ctx.db);
-    if (moving !== null) throw new ApiError(409, 'conflict', `The server is moving to ${moving || 'another machine'}. Update once it moved.`, 'moving');
+    if (moving !== null) throw new ApiError(409, 'conflict', `The server is moving to ${moving || 'another machine'}. Update once it moved.`, 'moving', { host: moving });
     const id = randomUUID();
     claimUpdater(ctx, id);
     try {
