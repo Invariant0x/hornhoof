@@ -122,7 +122,7 @@ export const people = pgTable(
   ],
 );
 
-export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'other'] as const;
+export const ASSISTANT_PROGRAMS = ['avaclone', 'openclaw', 'hermes', 'other'] as const;
 export type AssistantProgram = (typeof ASSISTANT_PROGRAMS)[number];
 
 /* What an assistant runs as and how it is reached: its program, the address Hornhoof wakes it at, and its key, kept only as
@@ -141,7 +141,7 @@ export const assistants = pgTable(
     createdAt: createdAt(),
   },
   t => [
-    check('assistants_program', sql`${t.program} IN ('avaclone', 'openclaw', 'other')`),
+    check('assistants_program', sql`${t.program} IN ('avaclone', 'openclaw', 'hermes', 'other')`),
     check('assistants_key_whole', sql`num_nonnulls(${t.keyHash}, ${t.keyCreatedAt}, ${t.wakeSecretEnc}) IN (0, 3)`),
   ],
 );

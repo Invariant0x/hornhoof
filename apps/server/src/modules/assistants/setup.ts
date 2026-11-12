@@ -11,6 +11,7 @@ import { ASSISTANT_PROGRAMS, assistants, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
+import { settingsFor } from './programs.js';
 
 /* Where Hornhoof wakes the assistant: a web address of the program, which the people who set it up chose. */
 const EventsUrl = z.url({ protocol: /^https?$/ }).max(500).nullable();
@@ -95,18 +96,24 @@ export function assistantSetupRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* Makes the key and the signing secret, or makes them again: the ones before stop working at once. Shown only here, with
-     the company's address as its invite links have it, for the program to call. */
+     the company's address as its invite links have it, for the program to call, and the settings that connect the program
+     where it takes them in a file of its own. */
   app.post('/api/people/:id/key', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const person = await managedAssistant(db, me, id);
     const key = fresh(KEY_PREFIX);
     const signingSecret = fresh(SECRET_PREFIX);
-    await db.update(assistants).set({ keyHash: hashToken(key), keyCreatedAt: new Date(), wakeSecretEnc: encryptSecret(signingSecret, ctx.config.secret) }).where(eq(assistants.personId, id));
+    const [row] = await db
+      .update(assistants)
+      .set({ keyHash: hashToken(key), keyCreatedAt: new Date(), wakeSecretEnc: encryptSecret(signingSecret, ctx.config.secret) })
+      .where(eq(assistants.personId, id))
+      .returning({ program: assistants.program, eventsUrl: assistants.eventsUrl });
     /* What waits for the owner already is told to the assistant once it has a key. */
     ctx.assistants.collect(me.companyId);
+    const address = await publicUrl(db, ctx.config);
     reply.code(201);
-    return { key, signingSecret, address: await publicUrl(db, ctx.config), person: await personView(db, person) };
+    return { key, signingSecret, address, setup: settingsFor(row!.program, { address, key, secret: signingSecret, woken: Boolean(row!.eventsUrl) }), person: await personView(db, person) };
   });
 
   app.delete('/api/people/:id/key', async req => {

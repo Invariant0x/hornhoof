@@ -708,6 +708,13 @@
       "when": 1794429926472,
       "tag": "0101_repo_hosts",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1794448160078,
+      "tag": "0102_assistant_hermes",
+      "breakpoints": true
     }
   ]
 }

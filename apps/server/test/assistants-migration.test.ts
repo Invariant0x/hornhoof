@@ -30,6 +30,26 @@ describe('personal assistants migration', () => {
     expect((await db.execute(sql`select count(*)::int as n from requests where answered_by_assistant_id is not null`)).rows).toEqual([{ n: 0 }]);
   });
 
+  it('takes Hermes as a program, and keeps the assistants of before with theirs', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0101_repo_hosts') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+    const helper = async (name: string) => (await db.execute<{ id: string }>(sql`insert into people (company_id, name, status, scope_kind, is_agent, assistant_of) values (${company}, ${name}, 'active', 'listed', true, ${owner}) returning id`)).rows[0]!.id;
+    const ava = await helper('Ava');
+    await db.execute(sql`insert into assistants (person_id, company_id, program) values (${ava}, ${company}, 'openclaw')`);
+    const max = await helper('Max');
+    await expect(db.execute(sql`insert into assistants (person_id, company_id, program) values (${max}, ${company}, 'hermes')`)).rejects.toThrow();
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    await db.execute(sql`insert into assistants (person_id, company_id, program) values (${max}, ${company}, 'hermes')`);
+    expect((await db.execute(sql`select program from assistants order by program`)).rows).toEqual([{ program: 'hermes' }, { program: 'openclaw' }]);
+    await expect(db.execute(sql`update assistants set program = 'somebot' where person_id = ${max}`)).rejects.toThrow();
+  });
+
   it('keeps an assistant tied to an owner, without a password, and every person with an email', async () => {
     const db = drizzle(await freshInstall());
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;

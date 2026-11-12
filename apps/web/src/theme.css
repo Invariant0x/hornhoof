@@ -477,6 +477,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* A key keeps a readable width: where the row is too narrow for it and its Copy, Copy goes under it. */
 .assistant-key .command { display: flex; flex-wrap: wrap; }
 .assistant-key .command code { flex: 1 1 24ch; min-width: 0; }
+/* The program's settings keep their lines and indents, and a long line wraps inside the card. */
+.assistant-key .command pre { flex: 1 1 24ch; min-width: 0; margin: 0; }
+.assistant-key .command pre code { white-space: pre-wrap; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
 .ptable th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }

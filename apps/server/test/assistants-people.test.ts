@@ -56,6 +56,67 @@ describe('an assistant in People', () => {
     expect((await c.db.select().from(assistants).where(eq(assistants.personId, ava.id)))[0]).toMatchObject({ keyHash: null, wakeSecretEnc: null, keyCreatedAt: null });
   });
 
+  it("gives OpenClaw and Hermes their settings with a new key: Hornhoof's MCP server, and the webhook when Hornhoof wakes them", async () => {
+    const c = await aclCompany();
+    const made = async (program: string, eventsUrl?: string) => {
+      const ava = (await addAssistant(c, 'ceo', c.ids.ceo, { program, eventsUrl })).json().person;
+      return (await keyOf(c, 'ceo', ava.id)).json();
+    };
+    expect((await made('avaclone', 'https://ava.example/hornhoof')).setup).toBeNull();
+    expect((await made('other')).setup).toBeNull();
+
+    const claw = await made('openclaw', 'http://127.0.0.1:18789/hooks/wake');
+    expect(claw.setup).toEqual({
+      file: '~/.openclaw/openclaw.json',
+      text: [
+        '{',
+        '  mcp: {',
+        '    servers: {',
+        '      hornhoof: {',
+        `        url: "${claw.address}/api/assistant/mcp",`,
+        '        transport: "streamable-http",',
+        `        headers: { Authorization: "Bearer ${claw.key}" },`,
+        '      },',
+        '    },',
+        '  },',
+        '  hooks: {',
+        '    enabled: true,',
+        `    token: "${claw.signingSecret}",`,
+        '  },',
+        '}',
+      ].join('\n'),
+    });
+    const quiet = await made('openclaw');
+    expect(quiet.setup.text).toContain(`Authorization: "Bearer ${quiet.key}"`);
+    expect(quiet.setup.text).not.toContain('hooks');
+    expect(quiet.setup.text).not.toContain(quiet.signingSecret);
+
+    const hermes = await made('hermes', 'http://127.0.0.1:8644/webhooks/hornhoof');
+    expect(hermes.setup).toEqual({
+      file: '~/.hermes/config.yaml',
+      text: [
+        'mcp_servers:',
+        '  hornhoof:',
+        `    url: "${hermes.address}/api/assistant/mcp"`,
+        '    headers:',
+        `      Authorization: "Bearer ${hermes.key}"`,
+        'platforms:',
+        '  webhook:',
+        '    enabled: true',
+        '    extra:',
+        '      routes:',
+        '        hornhoof:',
+        `          secret: "${hermes.signingSecret}"`,
+        '          prompt: "New events wait for you in Hornhoof after number {after}. Read them with the Hornhoof tool read_events, with after {after}, and tell your owner what they need to know."',
+        '          deliver: telegram',
+        '          mirror_to_session: true',
+      ].join('\n'),
+    });
+    const hermesQuiet = await made('hermes');
+    expect(hermesQuiet.setup.text).not.toContain('platforms');
+    expect(hermesQuiet.setup.text).not.toContain(hermesQuiet.signingSecret);
+  });
+
   it('changes its program and events address, which must be a web address', async () => {
     const c = await aclCompany();
     const ava = (await addAssistant(c, 'ceo', c.ids.ceo)).json().person;

@@ -144,9 +144,9 @@ export class Assistants {
   }
 
   /* A new event of the assistant is kept: its long polls hear it, and while the work runs, its events address is woken. */
-  readonly told: Told = (assistantId, seq) => {
+  readonly told: Told = (assistantId, seq, kind) => {
     for (const hear of this.ears.get(assistantId) ?? []) hear();
-    if (this.started) this.wakes.wake(assistantId, seq - 1);
+    if (this.started) this.wakes.wake(assistantId, seq - 1, kind);
   };
 
   /* The assistant's events after a number. When there are none yet, it waits up to ms for one, or until the asker goes. A
