@@ -667,7 +667,7 @@ describe("each machine's place in the company's network", () => {
     const held = async (token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json() as Held;
     const mine = await held(ceo);
     const of = (list: Held, id: string) => list.machines.find(machine => machine.id === id)!;
-    expect(of(mine, mac).data).toEqual({ number: 2, why: null, pin: null, unfit: null, copy: { line: 'making', progress: 40 }, leftAt: null });
+    expect(of(mine, mac).data).toEqual({ number: 2, why: null, pin: null, unfit: null, copy: { line: 'making', progress: 40 }, leftAt: null, led: null });
     /* The card of the computer the server itself runs on says what the server's own row says. */
     expect(of(mine, host).data).toMatchObject({ number: 1, why: 'server', unfit: null, copy: null });
     /* A machine of someone who does not see the whole company holds no copy, and its card says why. */
