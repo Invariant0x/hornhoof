@@ -199,14 +199,22 @@ function requestError(status: number, message: string, url: string) {
   return body('validation', `The text is too large to send in one request. ${next}`, 'attachment_invalid');
 }
 
+/* A refusal as the caller reads it, its status and its body, for an ApiError or input that does not parse; null for any
+   other error. */
+export function refusal(err: unknown): { status: number; body: ReturnType<typeof body> } | null {
+  if (err instanceof ApiError) return { status: err.status, body: body(err.code, err.message, err.reason, err.details) };
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    const where = first?.path.length ? first.path.join('.') + ': ' : '';
+    return { status: 400, body: body('validation', where + (first?.message ?? 'Invalid input.')) };
+  }
+  return null;
+}
+
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
   app.setErrorHandler((err: FastifyError | Error, req, reply) => {
-    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
-    if (err instanceof ZodError) {
-      const first = err.issues[0];
-      const where = first?.path.length ? first.path.join('.') + ': ' : '';
-      return reply.status(400).send(body('validation', where + (first?.message ?? 'Invalid input.')));
-    }
+    const refused = refusal(err);
+    if (refused) return reply.status(refused.status).send(refused.body);
     const status = 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500;
     if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));
     req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');

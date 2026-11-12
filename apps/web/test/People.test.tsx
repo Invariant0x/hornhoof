@@ -485,6 +485,67 @@ describe("a person's assistant", () => {
     expect(calls.filter(c => c.path === '/api/people/h1/key').map(c => c.method)).toEqual(['POST', 'DELETE']);
   });
 
+  it.each([
+    ['en', 'Edit Ava', 'Create key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY'],
+    ['ru', 'Изменить Ava', 'Создать ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY'],
+  ])("copies the company's address and the key as one text for the assistant, without the signing secret, in %s", async (language, edit, create, button, text) => {
+    localStorage.setItem('hh-lang', language);
+    mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: KEYED }] });
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: edit }));
+    await user.click(screen.getByRole('button', { name: create }));
+    await user.click(await screen.findByRole('button', { name: button }));
+    expect(copied).toEqual([text]);
+    localStorage.clear();
+  });
+
+  it.each([
+    ['en', 'Edit Ava', 'Create key', 'Settings for OpenClaw', 'Add these lines to ~/.openclaw/openclaw.json', 'Copy settings'],
+    ['ru', 'Изменить Ava', 'Создать ключ', 'Настройки для OpenClaw', 'Добавьте эти строки в ~/.openclaw/openclaw.json', 'Скопировать настройки'],
+  ])('shows the settings that connect OpenClaw with a new key, and copies them whole, in %s', async (language, edit, create, heading, where, button) => {
+    localStorage.setItem('hh-lang', language);
+    const claw: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, program: 'openclaw' } };
+    const setup = { file: '~/.openclaw/openclaw.json', text: '{\n  mcp: {\n    servers: { hornhoof: { url: "https://acme.hornhoof.app/api/assistant/mcp" } },\n  },\n}' };
+    mockApi({ ...lists([...PEOPLE, { ...AVA, assistant: { ...AVA.assistant!, program: 'openclaw' } }]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', setup, person: claw }] });
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: edit }));
+    await user.click(screen.getByRole('button', { name: create }));
+    expect(await screen.findByText(heading)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(where.replace(/[.~/]/g, '\\$&')))).toBeInTheDocument();
+    expect(screen.getByText(/servers: \{ hornhoof/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: button }));
+    expect(copied).toEqual([setup.text]);
+    localStorage.clear();
+  });
+
+  it('shows no settings for a program that takes the address and the key itself', async () => {
+    mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', setup: null, person: KEYED }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    await user.click(screen.getByRole('button', { name: 'Create key' }));
+    expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy settings' })).not.toBeInTheDocument();
+  });
+
+  it('says where OpenClaw and Hermes take their wakes, under the events address', async () => {
+    mockApi({ ...lists([...PEOPLE, AVA]) });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
+    expect(screen.queryByText(/:18789\/hooks\/wake/)).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Program'), 'OpenClaw');
+    expect(screen.getByText(/http:\/\/192\.168\.1\.5:18789\/hooks\/wake/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Program'), 'Hermes Agent');
+    expect(screen.getByText(/http:\/\/192\.168\.1\.5:8644\/webhooks\/hornhoof/)).toBeInTheDocument();
+  });
+
   it('saves its program and events address, with its title for someone who manages people', async () => {
     const saved: PersonView = { ...AVA, title: 'Helper', assistant: { ...AVA.assistant!, program: 'other', eventsUrl: 'https://ava.example.com/h' } };
     const calls = mockApi({

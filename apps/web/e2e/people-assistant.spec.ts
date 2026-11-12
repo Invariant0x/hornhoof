@@ -9,7 +9,7 @@ const WHOLE = { whole: true, departments: [], teams: [] };
 const NONE = { whole: false, departments: [], teams: [] };
 const AVA: PersonView = {
   id: 'h1', name: 'Ava', email: null, title: 'Personal assistant', status: 'active', isOwner: false, access: NONE,
-  assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'avaclone', eventsUrl: 'https://ava.example.com/hornhoof/events', key: null },
+  assistant: { owner: { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg' }, program: 'openclaw', eventsUrl: 'http://192.168.1.5:18789/hooks/wake', key: null },
 };
 /* The CEO, a person with a long name, and her assistant, with a key made already. */
 const PEOPLE: PersonView[] = [
@@ -17,7 +17,14 @@ const PEOPLE: PersonView[] = [
   { id: 'p2', name: 'Maximiliana Wolkenstein-Rodenegg', email: 'max@acme.com', title: 'CMO', status: 'active', isOwner: false, access: WHOLE },
   { ...AVA, assistant: { ...AVA.assistant!, key: { createdAt: '2026-11-11T10:00:00.000Z' } } },
 ];
-const MADE = { key: `hha_${'K7x-Qp'.repeat(7)}a`, signingSecret: `hhs_${'s3_Vb9'.repeat(7)}z`, person: PEOPLE[2] };
+const KEY = `hha_${'K7x-Qp'.repeat(7)}a`;
+const SECRET = `hhs_${'s3_Vb9'.repeat(7)}z`;
+/* OpenClaw's settings as the server gives them, with their longest lines: the address and the key. */
+const SETUP = {
+  file: '~/.openclaw/openclaw.json',
+  text: ['{', '  mcp: {', '    servers: {', '      hornhoof: {', '        url: "https://acme.hornhoof.app/api/assistant/mcp",', '        transport: "streamable-http",', `        headers: { Authorization: "Bearer ${KEY}" },`, '      },', '    },', '  },', '  hooks: {', '    enabled: true,', `    token: "${SECRET}",`, '  },', '}'].join('\n'),
+};
+const MADE = { key: KEY, signingSecret: SECRET, address: 'https://acme.hornhoof.app', setup: SETUP, person: PEOPLE[2] };
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 
 /* The People screen as the CEO meets it, with the errors the page logs. */
@@ -103,6 +110,12 @@ for (const lang of ['en', 'ru'] as const) {
           expect((await box(shown)).width, 'a key keeps a readable width beside its Copy').toBeGreaterThan((await box(card)).width * 0.4);
         }
         await inside(card.getByRole('button', { name: t.people.copySecret, exact: true }), card, 'Copy signing secret');
+        await inside(card.getByRole('button', { name: t.people.copyForAssistant, exact: true }), card, 'Copy for the assistant');
+        const setup = card.locator('pre', { hasText: 'streamable-http' });
+        await expect(card.getByText(t.people.setupFor('OpenClaw'), { exact: true })).toBeVisible();
+        await setup.scrollIntoViewIfNeeded();
+        await inside(setup, card, "OpenClaw's settings");
+        await inside(card.getByRole('button', { name: t.people.copySetup, exact: true }), card, 'Copy settings');
         expect(await noSideScroll(page), 'no sideways scroll with the key').toBe(true);
         await card.getByRole('button', { name: t.people.keySaved, exact: true }).click();
         await expect(key).toHaveCount(0);

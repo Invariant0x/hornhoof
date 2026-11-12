@@ -66,7 +66,7 @@ async function tellOne(ctx: Ctx, companyId: string, assistantId: string, owner: 
     const seq = await storeEvent(ctx.db, { companyId, assistantId, kind: 'request', data: { request: view } }, async tx => {
       await tx.insert(assistantRequests).values({ assistantId, requestId: view.id });
     });
-    told(assistantId, seq);
+    told(assistantId, seq, 'request');
   }
   const gone = known.filter(id => !open.some(r => r.id === id));
   if (!gone.length) return;
@@ -75,7 +75,7 @@ async function tellOne(ctx: Ctx, companyId: string, assistantId: string, owner: 
     const seq = await storeEvent(ctx.db, { companyId, assistantId, kind: 'request_closed', data: { requestId: id, status } }, async tx => {
       await tx.delete(assistantRequests).where(and(eq(assistantRequests.assistantId, assistantId), eq(assistantRequests.requestId, id)));
     });
-    told(assistantId, seq);
+    told(assistantId, seq, 'request_closed');
   }
 }
 

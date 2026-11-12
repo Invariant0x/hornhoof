@@ -199,8 +199,11 @@ describe('binding the company to a public link', () => {
 });
 
 describe('the public link as the address of this Hornhoof', () => {
-  it('goes into machine commands, invite links and install.sh, and PUBLIC_URL comes back when it goes', async () => {
+  it("goes into machine commands, invite links, an assistant's key and install.sh, and PUBLIC_URL comes back when it goes", async () => {
     const { app, ceo, put } = await company({ PUBLIC_URL: 'http://localhost:8080' });
+    const me = (await app.inject({ url: '/api/me', ...as(ceo) })).json().person;
+    const ava = (await app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name: 'Ava', owner: me.id, program: 'avaclone' }, ...as(ceo) })).json().person;
+    const keyFor = async () => (await app.inject({ method: 'POST', url: `/api/people/${ava.id}/key`, ...as(ceo) })).json();
     await put({ name: 'acme' });
     const connect = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     expect(connect.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh \| bash -s -- --join /);
@@ -211,9 +214,11 @@ describe('the public link as the address of this Hornhoof', () => {
     const reinvited = await app.inject({ method: 'POST', url: `/api/people/${invited.json().person.id}/invite`, ...as(ceo) });
     expect(reinvited.json().inviteUrl).toMatch(/^https:\/\/acme\.hornhoof\.test\/invite\//);
     expect((await app.inject({ url: '/install.sh' })).body).toContain('SERVER="${HORNHOOF_SERVER:-https://acme.hornhoof.test}"');
+    expect(await keyFor()).toMatchObject({ address: 'https://acme.hornhoof.test', key: expect.stringMatching(/^hha_/) });
 
     await app.inject({ method: 'DELETE', url: '/api/link', ...as(ceo) });
     expect((await app.inject({ url: '/install.sh' })).body).toContain('SERVER="${HORNHOOF_SERVER:-http://localhost:8080}"');
+    expect((await keyFor()).address).toBe('http://localhost:8080');
   });
 
   it("takes changes from the link's own pages, even when the tunnel names another host", async () => {
