@@ -362,7 +362,10 @@ export class Keeper {
     this.hander = opts.handing
       ? opts.handing({
           front: { close: () => this.shutFront(), open: () => this.openFront() },
-          tunnel: { start: () => void (this.linkHeld = false), stop: async () => void (this.linkHeld = true) },
+          /* The name goes with the server. Should the server stay after all, the way back in takes the name again
+             itself and notes at which registration: a client started on the word of an earlier way in would hold
+             the name at one the way back never noted, which it must take for another machine's and let go. */
+          tunnel: { start: () => void (this.linkHeld = false), stop: async () => void ((this.linkHeld = true), (this.entryTunnel = false)) },
           lease: { fence: async () => void (await opts.lease?.fence()) },
           leads: () => this.mode() === 'lead',
           term: () => this.term(),
