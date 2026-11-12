@@ -168,9 +168,13 @@ jobs:
           TESTS_SINCE: ${{ needs.mark.outputs.base }}
         run: node scripts/tests-mark.mjs --leave
 
-  # The ACME tests run against Pebble, Let's Encrypt's test CA, in Docker, and stay out of the suite above.
+  # The tests against real Postgres and against Pebble, Let's Encrypt's test CA, start their servers in Docker and stay
+  # out of the suite above. Our own test runners have no Docker daemon, so this job runs only where the repository
+  # variable REAL_RUNS_ON names a runner that has one, and is left out while it names none: until then
+  # `npm run test:real` is run by hand before a merge, and its result is named in the pull request.
   test-real:
-    runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    if: ${{ vars.REAL_RUNS_ON != '' }}
+    runs-on: ${{ vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
