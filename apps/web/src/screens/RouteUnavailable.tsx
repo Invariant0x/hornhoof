@@ -10,7 +10,9 @@ export function unavailableFailure(failure: unknown): boolean {
 
 export function departmentIsMissing({ deptId, org, orgFailure, company, personId }: { deptId: string | null; org: Org | null; orgFailure: unknown; company: boolean; personId: string }): boolean {
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  const reachedDepartment = company || Boolean(dept?.people.some(person => person.id === personId));
+  /* A person who reaches more than one department stands next to the CEO, with the departments they reach. */
+  const deputy = org?.people.find(person => person.id === personId);
+  const reachedDepartment = company || Boolean(dept?.people.some(person => person.id === personId)) || Boolean(deptId && deputy?.departments?.includes(deptId));
   return deptId !== null && (unavailableFailure(orgFailure) || (org !== null && (!dept || !reachedDepartment)));
 }
 

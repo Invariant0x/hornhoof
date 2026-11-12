@@ -544,6 +544,21 @@ describe('external task wait', () => {
     expect(messages.filter(e => e.kind === 'message').map(e => e.data)).toContainEqual(expect.objectContaining({ text: 'Images are ready.', task: { id: task.id, number: task.number } }));
   });
 
+  it('refuses a wait when a message on its task came into the turn after the call to wait did, and takes the next one', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.tools();
+    const heard = async () => (await c.db.select({ seq: sql<number>`coalesce(max(${agentEvents.seq}), 0)` }).from(agentEvents).where(eq(agentEvents.agentId, c.worker.id)))[0]!.seq;
+    const called = await heard();
+    const sent = await (await c.tools(c.head.id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } });
+    expect(sent.isError).toBeFalsy();
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until }, undefined, called)).rejects.toMatchObject({ reason: 'task_invalid', message: expect.stringContaining(`A message on #${task.number} came`) });
+    expect((await c.read(task.id)).externalWait).toBeNull();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until });
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+  });
+
   it('lets a team worker doing a small subtask and its head both message each other with task', async () => {
     const c = await messaging();
     const [team] = await c.db.insert(teams).values({ companyId: c.company.id, departmentId: c.department.id, name: 'Urgent fixes' }).returning();

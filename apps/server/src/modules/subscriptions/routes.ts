@@ -12,7 +12,7 @@ import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
-import { lockCommandOwner } from '../nodes/codes.js';
+import { endRemovedPlanCommands, lockCommandOwner } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { createInstallCommand } from '../nodes/command.js';
 import { builtinOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
@@ -123,6 +123,7 @@ async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promi
     const row = had.find(s => s.provider === p);
     return row ? [row] : [];
   });
+  await endRemovedPlanCommands(tx, kept.filter(s => s.removedAt !== null).map(s => s.id));
   const removedNodes = await clearPlanNodes(tx, kept.map(s => s.id));
   const fresh = providers.filter(p => !kept.some(s => s.provider === p));
   const rows = fresh.length
@@ -294,6 +295,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         .update(subscriptions)
         .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
+      await endRemovedPlanCommands(tx, [sub.id]);
       await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
       await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
       /* Its sign-in, sealed to its nodes, goes with it. */

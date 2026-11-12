@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -70,12 +70,28 @@ const markRecord = (wait: ExternalWait, stage: 'waiting' | 'check_back') => asyn
   if (wait.operation) await setWaitStage(tx, { taskId: task.id, kind: 'external', sourceKey: waitForSourceKey(wait.operation), stage });
 };
 
-/* A holder can end its turn while an external system works; the task keeps its workflow status. */
-export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now?: Date): Promise<Moved> {
+/* A holder can end its turn while an external system works; the task keeps its workflow status. heard: the last of the
+   holder's events when its call to wait came, so that words which come into its turn while the call waits its line are known. */
+export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now?: Date, heard?: number): Promise<Moved> {
   const at = now ?? new Date();
-  const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at));
+  const called = heard ?? (await lastEventOf(ctx, agentId));
+  const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at, called));
   await checkWaitHealth(ctx, at);
   return moved;
+}
+
+/* The last of the agent's events, which a call to wait counts words on its task from. */
+export async function lastEventOf(ctx: Ctx, agentId: string): Promise<number> {
+  const [last] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
+  return last?.seq ?? 0;
+}
+
+/* Words on the task that came after the call to wait: into the running turn, they cannot have been read before it. */
+async function newMessage(ctx: Ctx, agentId: string, taskId: string, heard: number): Promise<boolean> {
+  const [message] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(and(
+    eq(agentEvents.agentId, agentId), gt(agentEvents.seq, heard), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'task'->>'id' = ${taskId}`,
+  )).limit(1);
+  return Boolean(message);
 }
 
 /* Whether words on the task wait for its holder, the end of a run among them: in a turn, or still in the outbox. */
@@ -95,11 +111,12 @@ const keepNotice = (notice: Awaited<ReturnType<typeof requestedWaitNotice>>) => 
   if (notice) await recordRequestedNotice(tx, notice);
 };
 
-async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now: Date): Promise<Moved> {
+async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now: Date, heard: number): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   requireHolder(task, agentId);
   await waitingTaskTurn(ctx.db, agentId, taskId);
   if (await unreadMessage(ctx, agentId, taskId)) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
+  if (await newMessage(ctx, agentId, taskId, heard)) throw refuse(409, 'task_invalid', `A message on #${task.number} came while you asked to wait. Read it, and wait again if you still need to.`);
   const wait = waitOf(input, now);
   const run = input.run ? { run: await namedRun(ctx, task, agentId, input.run) } : {};
   const externalWait = { ...wait, ...run, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
