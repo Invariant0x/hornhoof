@@ -168,6 +168,8 @@ describe('turns on a machine that went away', () => {
     const [told] = await heard();
     expect(told!.prompt).toContain(`Bruno's turn on #${task.number} "Checkout API" runs on the server's own machine, which Hornhoof cannot reach since`);
     expect(told!.prompt).toContain(`The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with Bruno.`);
+    /* With when to hand it on, said where it is needed: the standing rules of a head have room for one line of it. */
+    expect(told!.prompt).toContain(`Hand #${task.number} to someone else only if it cannot wait for that machine: someone is blocked by it, or it was promised for a date. A new holder starts from what was handed in or pushed; what stayed only on that machine stays there until it is back.`);
     /* Told once, however long the machine stays away. */
     await c.round(new Date(away + 6 * MIN));
     await c.round(new Date(away + 90 * MIN));

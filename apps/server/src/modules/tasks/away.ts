@@ -89,7 +89,9 @@ export async function turnAway(ctx: Ctx, job: Job, node: NodeIdentity, since: nu
   const [who, where] = [agent?.name ?? 'An employee', named(ctx, node, host)];
   const text =
     `Hornhoof: ${who}'s turn on #${task.number} "${task.title}" runs on ${where}, which Hornhoof cannot reach since ${when(at)}. ` +
-    `The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with ${who}.`;
+    `The work on that machine is kept, not lost, and the turn goes on when the machine comes back. #${task.number} stays with ${who}. ` +
+    `Hand #${task.number} to someone else only if it cannot wait for that machine: someone is blocked by it, or it was promised for a date. ` +
+    'A new holder starts from what was handed in or pushed; what stayed only on that machine stays there until it is back.';
   await note(ctx, task, job, 'away', host, at, `${who}'s turn runs on ${where}, which Hornhoof cannot reach since ${when(at)}. The work there is kept.`, text);
   return true;
 }
