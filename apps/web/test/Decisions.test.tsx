@@ -83,7 +83,7 @@ describe('the deputy CEO on People', () => {
   const people: PersonView[] = [PEOPLE[0]!, { ...PEOPLE[1]!, isCeoDelegate: false }, { ...PEOPLE[1]!, id: 'p4', name: 'Dave', email: 'dave@acme.com', title: 'Designer', isCeoDelegate: true }, PEOPLE[2]!];
   /* Lena is active and works in Development alone. */
   const lena: PersonView = { ...PEOPLE[1]!, id: 'p5', name: 'Lena', email: 'lena@acme.com', title: 'Analyst', isCeoDelegate: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
-  const about = "Takes the decisions only the CEO takes and sees the whole company. Only you change the deputy's access, status and sign-in.";
+  const about = "Takes the CEO's decisions and sees the whole company. Only you change their access, status and sign-in.";
   const routes = (list: PersonView[] = people): Parameters<typeof mockApi>[0] => ({ 'GET /api/people': [200, { people: list }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
   /* What the server answers when asked for a deputy without the whole company. */
   const refused = { error: { code: 'conflict', message: 'Only an active person with access to the whole company can be the CEO delegate.' } };
@@ -139,9 +139,9 @@ describe('the deputy CEO on People', () => {
     const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
     expect(deputy).not.toBeChecked();
     expect(deputy).toHaveAccessibleDescription(about);
-    /* In the same form as the access, right after it. */
-    const access = screen.getByRole('group', { name: 'Access' });
-    expect(access.nextElementSibling).toBe(deputy.closest('label'));
+    /* In the same form as the access, in the row right after it. */
+    const access = screen.getByRole('group', { name: 'Company access' });
+    expect(access.nextElementSibling).toBe(deputy.closest('.field'));
     await user.click(deputy);
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(calls.filter(c => c.method !== 'GET')).toEqual([
@@ -281,7 +281,7 @@ describe('the deputy CEO on People', () => {
     expect(mark).toHaveAttribute('title', 'Заместитель CEO');
     expect(mark).toHaveTextContent(/^Зам$/);
     await user.click(screen.getByRole('button', { name: 'Изменить Maria' }));
-    expect(screen.getByRole('switch', { name: 'Заместитель CEO' })).toHaveAccessibleDescription('Принимает решения, которые принимает только CEO, и видит всю компанию. Доступ, статус и вход заместителя меняете только вы.');
+    expect(screen.getByRole('switch', { name: 'Заместитель CEO' })).toHaveAccessibleDescription('Принимает решения за CEO и видит всю компанию. Его доступ, статус и вход меняете только вы.');
   });
 
   /* The CEO's choice for the window (#166): switching the deputy on gives the whole company and hides the departments, and

@@ -128,17 +128,17 @@ colors:
     surface: '#F8FAFC'
     surface2: '#EEF2F6'
     line: '#C9D3DD'
-    line2: '#A9B7C5'
+    line2: '#768695'
     ink: '#0F1B27'
     muted: '#4C5A68'
     accent: '#00A3BD'
-    accent_ink: '#00768A'
+    accent_ink: '#006E80'
     warning: '#E08A00'
     warning_ink: '#9A5A00'
     attention: '#E0307F'
     attention_ink: '#B0185F'
-    success: '#1E8E4E'
-    danger: '#D32F2F'
+    success: '#13753D'
+    danger: '#C62828'
     on_danger: '#FFFFFF'
     idle: '#C5D0DB'
     dot: 'rgba(30, 60, 90, .17)'
@@ -147,13 +147,13 @@ colors:
     on_button: '#FFFFFF'
     hud: 'rgba(240, 244, 247, .88)'
     shadow: 'rgba(20, 40, 60, .18)'
-    provider_claude: '#C2593A'
-    provider_kimi: '#1667E0'
+    provider_claude: '#A84628'
+    provider_kimi: '#125BC7'
     provider_glm: '#3D47D6'
-    provider_antigravity: '#1E8E3E'
+    provider_antigravity: '#157331'
     on_attention: '#FFFFFF'   # GAP: 4.29:1 on attention in light
     scrim: 'rgba(10, 20, 30, .35)'
-    scrollbar_thumb: '#A9B7C5'   # PROPOSAL: the value of line2, not in the code
+    scrollbar_thumb: '#768695'   # PROPOSAL: the value of line2, not in the code
     scrollbar_track: '#F8FAFC'   # PROPOSAL: the value of surface, not in the code
     color_scheme: 'light'
   dark:
@@ -161,7 +161,7 @@ colors:
     surface: '#1B232D'
     surface2: '#212B37'
     line: '#2C3845'
-    line2: '#3D4C5C'
+    line2: '#687A8F'
     ink: '#E3EAF1'
     muted: '#93A0AE'
     accent: '#46E0EF'
@@ -186,7 +186,7 @@ colors:
     provider_antigravity: '#6DD58C'
     on_attention: '#FFFFFF'   # GAP: 2.77:1 on attention in dark
     scrim: 'rgba(10, 20, 30, .35)'
-    scrollbar_thumb: '#3D4C5C'   # PROPOSAL: the value of line2, not in the code
+    scrollbar_thumb: '#687A8F'   # PROPOSAL: the value of line2, not in the code
     scrollbar_track: '#1B232D'   # PROPOSAL: the value of surface, not in the code
     color_scheme: 'dark'
 fonts:

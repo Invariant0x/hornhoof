@@ -25,21 +25,21 @@ All colours are tokens in `:root` of `theme.css`. Light is the default. Dark app
 | `--surface` | `#F8FAFC` | `#1B232D` | Panels, cards, tables |
 | `--surface2` | `#EEF2F6` | `#212B37` | Controls: `.act`, `select`, inputs; `.alert`; row hover |
 | `--line` | `#C9D3DD` | `#2C3845` | Quiet lines and frames |
-| `--line2` | `#A9B7C5` | `#3D4C5C` | Control borders, stronger frames, map lines |
+| `--line2` | `#768695` | `#687A8F` | Control borders, stronger frames, map lines |
 | `--ink` | `#0F1B27` | `#E3EAF1` | Main text |
 | `--muted` | `#4C5A68` | `#93A0AE` | Secondary text, the most used text colour |
-| `--p-claude` | `#C2593A` | `#F08A66` | Claude mark, `.pm.claude` |
-| `--p-kimi` | `#1667E0` | `#5E9BFF` | Kimi mark, `.pm.kimi` |
+| `--p-claude` | `#A84628` | `#F08A66` | Claude mark, `.pm.claude` |
+| `--p-kimi` | `#125BC7` | `#5E9BFF` | Kimi mark, `.pm.kimi` |
 | `--p-glm` | `#3D47D6` | `#8D95FF` | GLM mark, `.pm.glm` |
-| `--p-antigravity` | `#1E8E3E` | `#6DD58C` | Antigravity mark, `.pm.antigravity` |
+| `--p-antigravity` | `#157331` | `#6DD58C` | Antigravity mark, `.pm.antigravity` |
 | `--cyan` | `#00A3BD` | `#46E0EF` | Accent for fills, lines, active borders and focus. Not for small text |
-| `--cyan-ink` | `#00768A` | `#6FE9F5` | Accent as text: links, chosen items, `accent-color` |
+| `--cyan-ink` | `#006E80` | `#6FE9F5` | Accent as text: links, chosen items, `accent-color` |
 | `--amber` | `#E08A00` | `#FFB54A` | Warning fill and line |
 | `--amber-ink` | `#9A5A00` | `#FFC36E` | Warning text |
 | `--pink` | `#E0307F` | `#FF62AA` | Attention fill and line: `.alert` line, `.bar.max` |
 | `--pink-ink` | `#B0185F` | `#FF8CC2` | Error and danger text |
-| `--ok` | `#1E8E4E` | `#5FD08A` | Success text and line |
-| `--red` | `#D32F2F` | `#FF6B6B` | Alarm fill, line and text |
+| `--ok` | `#13753D` | `#5FD08A` | Success text and line |
+| `--red` | `#C62828` | `#FF6B6B` | Alarm fill, line and text |
 | `--on-red` | `#FFFFFF` | `#2A0606` | Text on `--red` |
 | `--idle` | `#C5D0DB` | `#2C3744` | Empty track, `.spinner` ring, panel bar lights |
 | `--dot` | `rgba(30, 60, 90, .17)` | `rgba(140, 175, 205, .15)` | Dots of the map grid |
@@ -57,25 +57,25 @@ Computed with the WCAG 2 formula from the values above. Only tokens that `theme.
 |---|---|---|---|---|---|---|
 | `--ink` | 14.51 | 16.64 | 15.47 | 14.41 | 13.06 | 11.81 |
 | `--muted` | 5.90 | 6.76 | 6.29 | 6.56 | 5.95 | 5.38 |
-| `--p-claude` | **3.66** | **4.20** | **3.90** | 7.11 | 6.44 | 5.82 |
-| `--p-kimi` | **4.32** | 4.96 | 4.61 | 6.34 | 5.74 | 5.19 |
+| `--p-claude` | 4.90 | 5.62 | 5.23 | 7.11 | 6.44 | 5.82 |
+| `--p-kimi` | 5.23 | 6.00 | 5.58 | 6.34 | 5.74 | 5.19 |
 | `--p-glm` | 5.70 | 6.54 | 6.08 | 6.56 | 5.94 | 5.37 |
-| `--p-antigravity` | **3.51** | **4.02** | **3.74** | 9.62 | 8.72 | 7.88 |
+| `--p-antigravity` | 4.96 | 5.69 | 5.29 | 9.62 | 8.72 | 7.88 |
 | `--cyan` | **2.51** | **2.88** | **2.68** | 10.97 | 9.94 | 8.99 |
-| `--cyan-ink` | **4.42** | 5.07 | 4.72 | 12.20 | 11.06 | 10.00 |
+| `--cyan-ink` | 4.94 | 5.67 | 5.27 | 12.20 | 11.06 | 10.00 |
 | `--amber` | **2.24** | **2.57** | **2.39** | 9.96 | 9.03 | 8.16 |
 | `--amber-ink` | 4.56 | 5.23 | 4.87 | 11.06 | 10.03 | 9.06 |
 | `--pink` | **3.57** | **4.10** | **3.81** | 6.31 | 5.72 | 5.17 |
 | `--pink-ink` | 5.57 | 6.39 | 5.94 | 8.15 | 7.38 | 6.68 |
-| `--ok` | **3.48** | **3.99** | **3.71** | 9.06 | 8.21 | 7.42 |
-| `--red` | **4.15** | 4.76 | **4.43** | 6.30 | 5.71 | 5.16 |
+| `--ok` | 4.81 | 5.51 | 5.13 | 9.06 | 8.21 | 7.42 |
+| `--red` | 4.69 | 5.37 | 5.00 | 6.30 | 5.71 | 5.16 |
 
 Fixed pairs:
 
 | Pair | Light | Dark |
 |---|---|---|
 | `--on-btn` on `--btn` | 5.31 | 10.38 |
-| `--on-red` on `--red` | 4.98 | 6.71 |
+| `--on-red` on `--red` | 5.62 | 6.71 |
 | `--ink` on `--hud` over `--bg` | 15.60 | 13.95 |
 | `--muted` on `--hud` over `--bg` | 6.34 | 6.35 |
 
@@ -84,17 +84,17 @@ Lines against what they stand on. The limit of 3:1 is for controls; `--line` onl
 | Line | On | Light | Dark |
 |---|---|---|---|
 | `--line` | `--surface` | **1.45** | **1.33** |
-| `--line2` | `--surface` | **1.95** | **1.80** |
-| `--line2` | `--surface2` | **1.82** | **1.63** |
+| `--line2` | `--surface` | 3.57 | 3.60 |
+| `--line2` | `--surface2` | 3.32 | 3.25 |
 | `--cyan` | `--surface` | **2.88** | 9.94 |
 | `--cyan` | `--bg` | **2.51** | 10.97 |
-| `--cyan-ink` | `--surface` | 5.07 | 11.06 |
+| `--cyan-ink` | `--surface` | 5.67 | 11.06 |
 
-**GAP.** Tokens with bold cells are used as text today. This table shows the token against each surface, not an audit of which pair appears on which screen. Do not use a bold pair for new small text. Examples: `--ok` is the text of `.status.active` at 12 px, 3.99 on `--surface` in the light theme; `--cyan-ink` is the link colour, 4.42 on `--bg` in the light theme.
+**GAP.** Tokens with bold cells are used as text today. This table shows the token against each surface, not an audit of which pair appears on which screen. Do not use a bold pair for new small text. Example: `--pink` is the text of `.t-card-tag` at 12.5 px, 4.10 on `--surface` in the light theme. The text tokens of the light theme not in bold took the values the head of Design set on #777, so they hold 4.5:1 on every surface.
 
-**GAP.** `--line2` is the border of controls and stays under 3:1 on its surfaces in both themes.
+`--line2`, the border of controls, holds 3:1 on its surfaces in both themes, with the values the head of Design set on #777.
 
-**GAP.** The general `:focus-visible` draws its outline in `--cyan`, which is under 3:1 on `--surface` and `--bg` in the light theme. `.btn`, the close button of a panel and some other buttons moved to `--cyan-ink`; other rules, such as `theme.css:1241`, stay on `--cyan`.
+Every focus ring in `theme.css` is drawn in `--cyan-ink`, the general `:focus-visible` among them, as #777 asks: it holds 3:1 on every surface where `--cyan` does not.
 
 **GAP.** 7 uses of raw colours sit outside the tokens in `theme.css`. Where: `rgba(10, 20, 30, .35)` in `.dialog-back`, `#15191F` in `.t-term`, `#dcdcdc` in `.t-load`, `#2b323b` in `.t-load .spinner`, `#fff` in `.nav-count`. The whole product has 35: see `hornhoof-themes.md`, section 8.
 
@@ -109,6 +109,7 @@ These are set on components, not themes: `--cut`, `--c2`, `--edge`, `--strip-roo
 | `--f-display` | `'Tektur', 'Onest', system-ui, sans-serif` | Headings, buttons, tabs |
 | `--f-body` | `'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif` | Body text |
 | `--f-mono` | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Commands, code, keys |
+| `--cut-k` | `1` | Not type: how far corners are cut, 0 square, 1 the usual cut. Each theme sets it, Matrix 0 |
 
 Fonts are imported in `apps/web/src/main.tsx`:
 
@@ -161,6 +162,8 @@ There are no spacing tokens. Uses per value in `margin`, `padding` and `gap` in 
 | Side panel content | 16 px top, 18 px sides, 20 px bottom, 18 px between blocks | `.ac-body` |
 | Notebook | 14 px 16 px | `.notebook` |
 | Panel on a page | 20 px, 14 px between blocks | `.panel > .edge-in` |
+| Form card | 24 px, 16 px between blocks; 16 px and 14 px where the card is under 480 px wide. Its head: 4 px from title to note, 12 px to its line | `.form-card > .edge-in`, `.form-head` |
+| Form grid | Label column 180 px, 12 px to the field, 12 px between rows, hint 4 px under the field; where the form is under 480 px wide, the label stands 6 px over the field. The foot: 12 px over it to a 1 px `--line` | `.form-grid`, `.form-grid > .form-foot` |
 | Dialog | 18 px, 12 px between blocks | `.dialog` |
 | Card | 28 px, 18 px between blocks | `.card > .edge-in` |
 | Table cell | 12 px 14 px, header 10 px 14 px | `.ptable td`, `.ptable th` |
@@ -218,7 +221,9 @@ The focus of `.btn` is set in `theme.css:81`. It has not been checked on a pictu
 | `.field` with label, input or select, `.hint`, `.bad` | Stack with 6 px gap | focus: `--cyan` border and `0 0 0 3px var(--glow)` | `ui/Field.tsx` |
 | `select` | Own arrow, `--surface2` fill, keeps one line | focus as above; disabled opacity .55 | `theme.css`, `ui/AgentCard.tsx` |
 | `.choice`, `.segments` | Radio cards and segments, `.on` is chosen | `.on`; segments show focus on the label | `screens/Setup.tsx` |
-| `label.check` | Checkbox with text | | `screens/Setup.tsx`, `screens/People.tsx` |
+| `label.check` | Checkbox with text | | `screens/Setup.tsx` |
+| `.check-card` | A switch on its own frame, from 44 px, beside its label in a form's grid | | `screens/People.tsx` |
+| `.kind-switch`, `.kind-card` | Who joins: a person or a personal AI assistant, two radio cards with a 20 px icon, side by side, one over the other where the form is narrow; `.on` is chosen | `.on`; focus ring on the card | `screens/PeopleAssistant.tsx` |
 | `textarea` | Styled per place, no shared class | focus in `textarea.ac-text` | `ui/Notebook.tsx`, `ui/NewTask.tsx`, `ui/TaskPanel.tsx` |
 
 ### Statuses and messages
@@ -229,7 +234,10 @@ The focus of `.btn` is set in `theme.css:81`. It has not been checked on a pictu
 | `.status.invited`, `.status.needs_login`, `.status.needs_setup`, `.status.waiting_machine`, `.status.limit` | Wait or act: `--amber-ink` | `screens/People.tsx`, `screens/Subscriptions.tsx` |
 | `.status.offline`, `.status.builtin_offline` | Off: `--muted` | `screens/Subscriptions.tsx` |
 | `.badge` | Small mark, `--pink-ink`; `.badge.lead` `--btn` fill; `.badge.old` `--amber-ink` | `screens/Machines.tsx`, `screens/People.tsx` |
-| `.alert` | Message with a 3 px `--pink` line on the left, on `--surface2` | `ui/AgentCard.tsx`, `screens/People.tsx` |
+| `.alert` | Message with a 3 px `--pink` line on the start side, on `--surface2` | `ui/AgentCard.tsx`, `screens/People.tsx` |
+| `.warn-line` | Warning on its own line with its sign, a 3 px `--amber` line on the start side, `--amber-ink` text | `ui/StaffCard.tsx` |
+| `.busy-swap` | The words of a main button and what it says while it works, the hidden one keeping the button's width; the button has `aria-busy` | `ui/BusyLabel.tsx` |
+| `.secret`, `.secret-code` | Something shown once: its note, the code right under it in `--f-mono`, left to right, and its buttons under the code | `screens/People.tsx`, `screens/PeopleAssistant.tsx` |
 | `.field .bad`, `.update-error` | Error text, `--pink-ink` | `ui/Field.tsx`, `ui/UpdateBanner.tsx` |
 | `.spinner` | 16 px ring, `--idle` with a `--cyan` arc | `ui/UpdateProgress.tsx`, `ui/AgentTerminal.tsx` |
 | `.bar` | 4 px progress on `--idle`: `--cyan`, `.hi` `--amber`, `.max` `--pink` | `ui/Bar.tsx` |
@@ -244,7 +252,7 @@ The focus of `.btn` is set in `theme.css:81`. It has not been checked on a pictu
 |---|---|---|
 | `.edge`, `.edge-in`, `.edge.accent` | Cut frame: outer layer is the line, inner layer the fill | `ui/Edge.tsx` |
 | `.card`, `.card.wide` | Form card with the mark, on the sign-in, setup and invitation screens | `ui/Card.tsx` |
-| `.panel`, `.panel-form` | Section of a page, two columns over 760 px | `screens/People.tsx`, `ui/ConnectPanel.tsx` |
+| `.panel`, `.form-card`, `.form-grid` | Section of a page; a card with a form and its head; the grid of a form, see section 3 | `screens/People.tsx`, `ui/ConnectPanel.tsx` |
 | `.dialog`, `.dialog-back` | Centered window on a dim layer | `screens/Settings.tsx`, `screens/Versions.tsx` |
 | `.side-panel`, `.acard`, `.t-bar`, `.ac-body` | Side panel with bar and scrolling body | `ui/SidePanels.tsx` |
 | `.dv-drawer` | Department drawer | `screens/Department.tsx` |

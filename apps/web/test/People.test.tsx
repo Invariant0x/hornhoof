@@ -476,7 +476,7 @@ describe("a person's assistant", () => {
     expect(screen.getByText('hhs_SECRET')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy key' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy signing secret' })).toBeInTheDocument();
-    expect(screen.getByText(/Shown only now/)).toBeInTheDocument();
+    expect(screen.getByText('Copy the key and the signing secret now: they are shown only once.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Hide key' }));
     expect(screen.queryByText('hha_KEY')).not.toBeInTheDocument();
     expect(screen.getByText(/^Key made on/)).toBeInTheDocument();
@@ -672,7 +672,7 @@ describe('the forms to add and edit people', () => {
     const user = userEvent.setup();
     await openInvite(user);
     await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
-    expect(screen.getByLabelText('Owner')).toHaveAccessibleDescription('The person this assistant works for.');
+    expect(screen.getByLabelText('Owner')).toHaveAccessibleDescription('Person on whose behalf this assistant operates.');
     expect(screen.getByLabelText('Events address')).toHaveAccessibleDescription('Optional. Here Hornhoof tells the program that something is new.');
     await user.type(screen.getByLabelText('Assistant name'), 'Ava');
     const create = screen.getByRole('button', { name: 'Create assistant' });

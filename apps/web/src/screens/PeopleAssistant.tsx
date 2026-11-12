@@ -2,9 +2,11 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { ASSISTANT_PROGRAMS, type AssistantProgram, type Me, type PersonView } from '../types';
+import { BusyLabel } from '../ui/BusyLabel';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
+import { AgentIcon, EditIcon, KeyIcon, PersonIcon } from '../ui/icons';
 
 type Owner = Pick<PersonView, 'id' | 'isOwner' | 'isCeoDelegate'>;
 
@@ -20,18 +22,31 @@ export function looksAfter(me: Me, assistant: PersonView, people: PersonView[]):
   return Boolean(owner) && setsUpFor(me, owner!);
 }
 
-/* The tick that turns the invite form into the form of an assistant, and back. */
-export function AgentTick({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/* Who joins: a person or a personal AI assistant, two cards with their icons, one of them chosen. Choosing turns the invite
+   form into the form of an assistant, and back. The radios are native, so the arrow keys move between them. */
+export function KindSwitch({ agent, onChange }: { agent: boolean; onChange: (agent: boolean) => void }) {
   const t = useT();
   const id = useId();
+  const kinds = [
+    { agent: false, key: 'person', icon: <PersonIcon />, name: t.people.kindPerson, about: t.people.kindPersonHint },
+    { agent: true, key: 'agent', icon: <AgentIcon />, name: t.people.kindAssistant, about: t.people.kindAssistantHint },
+  ];
   return (
-    <label className="check">
-      <input type="checkbox" checked={on} onChange={e => onChange(e.target.checked)} aria-labelledby={`${id}-name`} aria-describedby={`${id}-about`} />
-      <span>
-        <b id={`${id}-name`}>{t.people.isAssistant}</b>
-        <small id={`${id}-about`}>{t.people.isAssistantAbout}</small>
-      </span>
-    </label>
+    <div className="kind-switch" role="radiogroup" aria-label={t.people.kind}>
+      {kinds.map(kind => {
+        const on = kind.agent === agent;
+        return (
+          <label key={kind.key} className={on ? 'kind-card on' : 'kind-card'}>
+            <input className="sr" type="radio" name={id} checked={on} onChange={() => onChange(kind.agent)} aria-labelledby={`${id}-${kind.key}`} aria-describedby={`${id}-${kind.key}-about`} />
+            {kind.icon}
+            <span>
+              <b id={`${id}-${kind.key}`}>{kind.name}</b>
+              <small id={`${id}-${kind.key}-about`}>{kind.about}</small>
+            </span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 
@@ -47,8 +62,9 @@ function ProgramAndAddress({ program, eventsUrl, onProgram, onEventsUrl }: { pro
   </>;
 }
 
-/* own: the person adds their own assistant, so there is nobody to choose. tick: the switch back to inviting a person. */
-export function NewAssistant({ me, people, own, tick, initial, onMade, onClose }: { me: Me; people: PersonView[]; own: boolean; tick?: ReactNode; initial: { name: string; title: string }; onMade: (person: PersonView) => void; onClose: () => void }) {
+/* own: the person adds their own assistant, so there is nobody to choose. kind: the switch back to inviting a person, under
+   the heading the invite form has, so switching moves nothing above it. */
+export function NewAssistant({ me, people, own, heading, kind, initial, onMade, onClose }: { me: Me; people: PersonView[]; own: boolean; heading: string; kind?: ReactNode; initial: { name: string; title: string }; onMade: (person: PersonView) => void; onClose: () => void }) {
   const t = useT();
   const [name, setName] = useState(initial.name);
   const [title, setTitle] = useState(initial.title);
@@ -73,35 +89,41 @@ export function NewAssistant({ me, people, own, tick, initial, onMade, onClose }
   }
 
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.people.newAssistant}</h2>
-      <form onSubmit={e => void submit(e)} className="panel-form">
-        {tick}
-        <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title">{kind ? <PersonIcon /> : <AgentIcon />}{heading}</h2>
+      </div>
+      <form onSubmit={e => void submit(e)} className="form-grid">
+        {kind}
+        <Field label={t.people.assistantName}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} />}</Field>
         {!own && (
-          <Field label={t.people.assistantOwner}>
+          <Field label={t.people.assistantOwner} hint={t.people.assistantOwnerHint}>
             {p => <select {...p} value={owner} onChange={e => setOwner(e.target.value)}>{owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select>}
           </Field>
         )}
         <ProgramAndAddress program={program} eventsUrl={eventsUrl} onProgram={setProgram} onEventsUrl={setEventsUrl} />
         {failure && <p className="alert" role="alert">{failure}</p>}
-        <div className="actions">
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || !name.trim()}>
+            <BusyLabel busy={busy} idle={t.people.createAssistant} working={t.common.creating} />
+          </button>
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || !name.trim()}>{t.people.addAssistant}</button>
         </div>
       </form>
     </Edge>
   );
 }
 
+/* One value shown once: its name, the value, and its Copy under it at the end of the line. */
 function Secret({ label, value, copy }: { label: string; value: string; copy: string }) {
+  const id = useId();
   return (
-    <div className="field">
-      <span className="label">{label}</span>
-      <div className="command">
-        <code>{value}</code>
-        <CopyButton text={value} label={copy} />
+    <div className="secret" role="group" aria-labelledby={id}>
+      <span className="secret-title" id={id}>{label}</span>
+      <code className="secret-code">{value}</code>
+      <div className="form-foot">
+        <CopyButton text={value} label={copy} main />
       </div>
     </div>
   );
@@ -141,17 +163,20 @@ function KeySection({ person, onChanged }: { person: PersonView; onChanged: (per
       <h3 id={`${id}-key`}>{t.people.key}</h3>
       <p className="muted">{t.people.keyAbout}</p>
       {shown ? <>
-        <p>{t.people.keyShownOnce}</p>
+        <div className="secret">
+          <p className="secret-title">{t.people.keyIssued}</p>
+          <p className="muted">{t.people.keyShownOnce}</p>
+        </div>
         <Secret label={t.people.key} value={shown.key} copy={t.people.copyKey} />
         <Secret label={t.people.signingSecret} value={shown.signingSecret} copy={t.people.copySecret} />
-        <div className="actions"><button className="btn" type="button" onClick={() => setShown(null)}>{t.people.keySaved}</button></div>
+        <div className="form-foot"><button className="btn ghost" type="button" onClick={() => setShown(null)}>{t.people.hideKey}</button></div>
       </> : <>
-        <p>{made ? t.people.keyMade(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(made.createdAt))) : t.people.noKey}</p>
-        <div className="actions">
+        <p className="key-line"><KeyIcon />{made ? t.people.keyMade(new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(new Date(made.createdAt))) : t.people.noKey}</p>
+        <div className="entry-actions">
           {made ? <>
-            <button className="btn ghost" type="button" disabled={busy} onClick={() => void create()}>{t.people.replaceKey}</button>
-            <button className="btn ghost" type="button" disabled={busy} onClick={() => void revoke()}>{t.people.revokeKey}</button>
-          </> : <button className="btn" type="button" disabled={busy} onClick={() => void create()}>{t.people.createKey}</button>}
+            <button className="act" type="button" disabled={busy} onClick={() => void create()}>{t.people.replaceKey}</button>
+            <button className="act danger" type="button" disabled={busy} onClick={() => void revoke()}>{t.people.revokeKey}</button>
+          </> : <button className="btn" type="button" disabled={busy} onClick={() => void create()}>{t.people.issueKey}</button>}
         </div>
       </>}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
@@ -192,17 +217,21 @@ export function AssistantCard({ person, manages, rename, onChanged, onSaved, onC
   }
 
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.people.editHeading(person.name)}</h2>
-      <p className="muted">{t.people.actsFor(person.assistant?.owner.name ?? '')}</p>
-      <form onSubmit={e => void submit(e)} className="panel-form">
-        {manages && rename && <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}</Field>}
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title"><EditIcon />{t.people.editHeading(person.name)}</h2>
+        <p className="muted">{t.people.actsFor(person.assistant?.owner.name ?? '')}</p>
+      </div>
+      <form onSubmit={e => void submit(e)} className="form-grid">
+        {manages && rename && <Field label={t.people.assistantName}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}</Field>}
         {manages && <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} />}</Field>}
         <ProgramAndAddress program={program} eventsUrl={eventsUrl} onProgram={setProgram} onEventsUrl={setEventsUrl} />
         {failure && <p className="alert" role="alert">{failure}</p>}
-        <div className="actions">
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || (manages && rename && !name.trim())}>
+            <BusyLabel busy={busy} idle={t.common.save} working={t.common.saving} />
+          </button>
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || (manages && rename && !name.trim())}>{t.common.save}</button>
         </div>
       </form>
       <KeySection person={person} onChanged={onChanged} />

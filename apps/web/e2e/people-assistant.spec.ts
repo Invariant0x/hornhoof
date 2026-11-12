@@ -63,7 +63,7 @@ async function inside(inner: Locator, outer: Locator, what: string) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
-      test(`an assistant is listed with its owner, added with a tick and its key shown once, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+      test(`an assistant is listed with its owner, added by its card in the choice and its key shown once, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const errors = await openPeople(page, lang, theme, width);
         const table = page.locator('table.ptable');
@@ -81,8 +81,8 @@ for (const lang of ['en', 'ru'] as const) {
         expect(await noSideScroll(page), 'no sideways scroll with the list').toBe(true);
 
         await page.getByRole('button', { name: t.people.invitePerson, exact: true }).click();
-        await page.getByRole('checkbox', { name: t.people.isAssistant, exact: true }).check();
-        const form = page.locator('.panel', { has: page.getByRole('button', { name: t.people.addAssistant, exact: true }) });
+        await page.getByRole('radio', { name: t.people.kindAssistant, exact: true }).check();
+        const form = page.locator('.panel', { has: page.getByRole('button', { name: t.people.createAssistant, exact: true }) });
         await expect(form.getByLabel(t.people.assistantOwner, { exact: true })).toBeVisible();
         await expect(form.getByLabel(t.people.program, { exact: true })).toBeVisible();
         await form.screenshot({ path: info.outputPath(`assistant-new-${width}-${lang}-${theme}.png`) });
@@ -100,11 +100,11 @@ for (const lang of ['en', 'ru'] as const) {
         await card.screenshot({ path: info.outputPath(`assistant-key-${width}-${lang}-${theme}.png`) });
         await inside(key, card, 'the key');
         for (const shown of [key, card.getByText(MADE.signingSecret, { exact: true })]) {
-          expect((await box(shown)).width, 'a key keeps a readable width beside its Copy').toBeGreaterThan((await box(card)).width * 0.4);
+          expect((await box(shown)).width, 'a key keeps a readable width, its Copy under it').toBeGreaterThan((await box(card)).width * 0.4);
         }
         await inside(card.getByRole('button', { name: t.people.copySecret, exact: true }), card, 'Copy signing secret');
         expect(await noSideScroll(page), 'no sideways scroll with the key').toBe(true);
-        await card.getByRole('button', { name: t.people.keySaved, exact: true }).click();
+        await card.getByRole('button', { name: t.people.hideKey, exact: true }).click();
         await expect(key).toHaveCount(0);
         expect(errors).toEqual([]);
       });

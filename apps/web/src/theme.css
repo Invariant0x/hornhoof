@@ -132,6 +132,7 @@ select {
 select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 select:disabled { opacity: .55; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
+.field-control { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
 .field > label, .field > .label { font-size: 13px; font-weight: 500; color: var(--muted); }
 .field input {
   height: 40px; padding: 0 12px;
@@ -142,7 +143,7 @@ select:disabled { opacity: .55; }
 .field input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .field .hint { font-size: 12px; color: var(--muted); }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
-.alert { padding: 10px 12px; border-left: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
+.alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
 .agent-window-error { margin-top: 68px; }
 
 /* Centered card screens: setup, log in, invite */
@@ -208,13 +209,12 @@ select:disabled { opacity: .55; }
 .segments label:first-of-type { margin-left: 0; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
-/* A switch with its line and a hint under it, like opening Hornhoof on the internet, or the deputy in a person's window. */
-.card label.check, .panel-form label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
-.card label.check input, .panel-form label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
-.card label.check span, .panel-form label.check span, .dv-list label.check span { display: grid; gap: 2px; }
-.card label.check b, .panel-form label.check b, .dv-list label.check b { font-weight: 600; }
-.card label.check small, .panel-form label.check small, .dv-list label.check small { font-size: 12px; color: var(--muted); }
-.panel-form label.check { grid-column: 1 / -1; }
+/* A switch with its line and a hint under it, like opening Hornhoof on the internet. */
+.card label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
+.card label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.card label.check span, .dv-list label.check span { display: grid; gap: 2px; }
+.card label.check b, .dv-list label.check b { font-weight: 600; }
+.card label.check small, .dv-list label.check small { font-size: 12px; color: var(--muted); }
 /* The narrow column for the name, link and sign-in code, so they stay readable inside the wide template step. */
 .setup-lead { display: grid; gap: 14px; max-width: 440px; }
 /* The company templates on the first screen: a grid of cards, each with a mini department scheme drawn as an SVG. */
@@ -503,17 +503,64 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
-.panel-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.panel-form .alert, .panel-form .actions { grid-column: 1 / -1; }
-.panel-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .panel .actions { display: flex; justify-content: flex-end; }
-/* An assistant's key on its card: a line on it, the key and secret once made, and its buttons on one row that wraps whole. */
-.assistant-key { display: grid; gap: 10px; padding-block-start: 14px; border-block-start: 1px solid var(--line); }
+/* A card with a form, as Design drew it for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
+   and 14 where the card itself is narrow. Its head is the heading with its icon and a line under it. Only sizes and gaps are
+   set here, so every theme lays it out the same. */
+.panel.form-card { container: form-card / inline-size; }
+.panel.form-card > .edge-in { padding: 24px; gap: 16px; }
+@container form-card (max-width: 479px) { .panel.form-card > .edge-in { padding: 16px; gap: 14px; } }
+.form-head { display: grid; gap: 4px; padding-block-end: 12px; border-block-end: 1px solid var(--line); }
+.form-title { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: break-word; }
+.form-title > .ic, .t-card.staff h4 > .ic { width: 20px; height: 20px; }
+/* The grid of a form: each label in a 180 px column beside its field, 12 px apart and 12 px between rows, the field's hint
+   4 px under it. Where the form itself is narrow, the label stands over its field, 6 px above it. */
+.form-grid { container: form / inline-size; display: grid; gap: 12px; min-width: 0; }
+.form-grid .field { grid-template-columns: 180px minmax(0, 1fr); gap: 12px; align-items: start; }
+.form-grid .field > :is(label, .label) { padding-block-start: 10px; font-weight: 600; color: var(--ink); overflow-wrap: break-word; }
+.form-grid .field-control { gap: 4px; }
+.form-grid > .alert { margin: 0; }
+.form-grid > .form-foot { margin-block-start: 4px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
+/* Keys, addresses, mail and Telegram names read left to right in every language, in the code font. */
+.form-grid input:is([type="email"], [type="url"], .mono) { direction: ltr; font-family: var(--f-mono); font-size: 13px; }
+/* Who joins: a person or a personal AI assistant, two cards side by side, one over the other where the form is narrow. */
+.kind-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.kind-card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
+.kind-card > .ic { width: 20px; height: 20px; color: var(--muted); }
+.kind-card > span { display: grid; gap: 4px; min-width: 0; }
+.kind-card b { font-weight: 600; overflow-wrap: break-word; }
+.kind-card small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.kind-card.on { border-color: var(--cyan); background: var(--glow); }
+.kind-card.on > .ic, .kind-card.on b { color: var(--cyan-ink); }
+.kind-card:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+@container form (max-width: 479px) {
+  .form-grid .field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .form-grid .field > :is(label, .label) { padding-block-start: 0; }
+  .kind-switch { grid-template-columns: minmax(0, 1fr); }
+}
+/* A switch on a frame of its own beside its label, like the deputy in a person's window. */
+.check-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
+.check-card input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.check-card > span { display: grid; gap: 4px; min-width: 0; }
+.check-card b { font-weight: 600; overflow-wrap: break-word; }
+.check-card small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.access .field-control { padding-block-start: 8px; }
+/* What a main button says while its action runs: both words stay in it, the hidden one keeping its width. */
+.busy-swap { display: inline-grid; justify-items: center; }
+.busy-swap > * { grid-area: 1 / 1; }
+.busy-swap > [aria-hidden="true"] { visibility: hidden; }
+/* Something shown once, such as an invite link or a new key: its note, the code right under it, its buttons under that. */
+.secret { display: grid; gap: 8px; min-width: 0; }
+.secret-title { font-weight: 600; }
+.secret-code { display: block; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); font-family: var(--f-mono); font-size: 12px; line-height: 1.55; direction: ltr; text-align: left; overflow-wrap: anywhere; }
+/* An assistant's key on its card: a line on it, the key and secret once made, and its buttons under the line. */
+.assistant-key { display: grid; gap: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
 .assistant-key h3, .assistant-key p { margin: 0; }
-.assistant-key .actions { flex-wrap: wrap; gap: 10px; }
-/* A key keeps a readable width: where the row is too narrow for it and its Copy, Copy goes under it. */
-.assistant-key .command { display: flex; flex-wrap: wrap; }
-.assistant-key .command code { flex: 1 1 24ch; min-width: 0; }
+.key-line { display: flex; align-items: center; gap: 8px; }
+.key-line > .ic { color: var(--cyan-ink); }
+/* A warning on its own line, with its sign at the start. */
+.warn-line { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); color: var(--amber-ink); overflow-wrap: break-word; }
+.warn-line > .ic { margin-block-start: 3px; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
 .ptable th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -558,7 +605,6 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .tabs button { padding: 0 10px; }
-  .panel-form { grid-template-columns: 1fr; }
   .ptable thead { display: none; }
   .ptable, .ptable tbody, .ptable tr, .ptable td { display: block; width: 100%; }
   .ptable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -593,11 +639,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
 .signin p { margin: 0; font-size: 12.5px; }
 .signin .t-term { height: 360px; }
-.key-form { display: grid; gap: 8px; max-width: 520px; }
-.key-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.key-form input { font: inherit; font-family: var(--f-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 6px 8px; }
-.key-form p { margin: 0; font-size: 12.5px; }
-.key-form a { color: var(--cyan-ink); }
+.key-form { max-width: 640px; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
 .test { display: grid; gap: 6px; }
@@ -606,13 +648,14 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
 .command-box { display: grid; gap: 8px; }
 .trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
-.connect-form { display: grid; gap: 14px; }
-.connect-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; border: 0; padding: 0; margin: 0; }
-.plan { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: center; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
+/* The plans to connect: a card each, with its tick, its mark, its name and what it takes. */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.plan { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 44px; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
 .plan.on { border-color: var(--cyan); }
 .plan input { grid-row: span 2; }
-.plan span { font-size: 12px; }
+.plan .pm { grid-row: span 2; width: 20px; height: 20px; }
+.plan b { overflow-wrap: break-word; }
+.plan span { font-size: 12px; overflow-wrap: break-word; }
 
 /* Machines: the pool in figures, then the table. The figures go in columns, each label over its value. */
 .pool > .edge-in { padding: 16px 20px; }
@@ -1127,12 +1170,20 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 
 /* The staff card: a line per person with where it runs and its model. */
 .t-card-brief { margin: 0 0 4px; color: var(--muted); }
-.staff-row { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
-.staff-row:first-of-type { border-top: 0; }
+.staff-row { display: grid; gap: 8px; padding: 10px 0; border-block-start: 1px solid var(--line); }
+.staff-row:first-of-type { border-block-start: 0; }
 .t-card .staff-row label { padding: 0; }
-.t-card.staff .t-card-tag { color: var(--cyan-ink); }
-.staff-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-left: 30px; min-width: 0; }
-.staff-pick select { width: 100%; min-width: 0; height: 32px; padding: 0 28px 0 8px; background-color: var(--surface); font-size: 13px; }
+.t-card.staff h4 { display: flex; align-items: center; gap: 8px; }
+/* The head and a required role are marked with a badge that wraps by words, never cut. */
+.staff-row .badge { margin-inline-start: 8px; white-space: normal; overflow-wrap: break-word; vertical-align: 1px; }
+.badge.head { color: var(--amber-ink); }
+.badge.req { color: var(--cyan-ink); }
+.staff-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-inline-start: 30px; min-width: 0; }
+.t-card .staff-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 0; min-width: 0; cursor: default; }
+.staff-field > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.staff-pick select { width: 100%; min-width: 0; height: 40px; padding: 0 28px 0 12px; background-color: var(--surface); font-size: 13px; }
+.t-card.staff > .warn-line { margin-block-end: 4px; }
+.t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
   .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
@@ -1140,20 +1191,18 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .dv-acts { left: 16px; right: 16px; bottom: 124px; flex-wrap: wrap; }
   .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
-  .staff-pick { margin-left: 0; }
+  .staff-pick { margin-inline-start: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }
 
 /* Access: whole company, or departments with their teams below them. */
-.access { grid-column: 1 / -1; display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
-.access legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.access .hint { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.access .hint { margin: 0; font-size: 12px; color: var(--muted); }
 .access .bad { margin: 0; font-size: 12px; color: var(--pink-ink); }
-.access label { display: inline-flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.access .field-control label { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; overflow-wrap: break-word; }
 .access label:has(input:disabled) { cursor: default; color: var(--muted); }
 .access input { width: 16px; height: 16px; margin: 0; accent-color: var(--cyan); }
 .access-list, .access-list ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.access-list ul { padding-left: 24px; }
+.access-list ul { padding-inline-start: 24px; }
 
 /* The tracker: what waits for people, then the turns with their tasks. */
 .tasks { max-width: 1040px; margin: 0 auto; padding: 84px 16px 48px; display: grid; gap: 22px; }

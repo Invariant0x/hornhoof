@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n';
 
-export function CopyButton({ text, label }: { text: string; label?: string }) {
+/* main: the button is the main action of its group, as under a one-time code. */
+export function CopyButton({ text, label, main = false }: { text: string; label?: string; main?: boolean }) {
   const t = useT();
   const [done, setDone] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -25,7 +26,7 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
     }
   }
   return (
-    <button className="btn small ghost" type="button" onClick={() => void copy()} aria-label={label ?? t.common.copy}>
+    <button className={main ? 'btn' : 'btn small ghost'} type="button" onClick={() => void copy()} aria-label={label ?? t.common.copy}>
       {done ? t.common.copied : (label ?? t.common.copy)}
     </button>
   );

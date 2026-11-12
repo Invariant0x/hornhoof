@@ -129,7 +129,7 @@ describe('StaffCard', () => {
       expect(box).toBeDisabled();
       await user.click(box);
       expect(box).toBeChecked();
-      expect(within(box.closest('label')!).getByText('Required')).toBeInTheDocument();
+      expect(within(box.closest('label')!).getByText('Required role')).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Subscription for Program operator' })).toBeEnabled();
       await user.click(screen.getByRole('button', { name: 'Hire (2)' }));
       await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { people: { role: string }[] }).people.map(p => p.role)).toContain('OPS-PROGRAM'));
@@ -140,7 +140,7 @@ describe('StaffCard', () => {
       opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-PROGRAM', checked: true }, { role: 'OPS-FIX', checked: true }] });
       const box = await screen.findByRole('checkbox', { name: /Reliability engineer/ });
       expect(box).toBeEnabled();
-      expect(within(box.closest('label')!).queryByText('Required')).not.toBeInTheDocument();
+      expect(within(box.closest('label')!).queryByText('Required role')).not.toBeInTheDocument();
       await user.click(box);
       expect(box).not.toBeChecked();
       expect(screen.getByRole('combobox', { name: 'Subscription for Reliability engineer' })).toBeDisabled();
@@ -202,7 +202,7 @@ describe('StaffCard', () => {
       card();
       const box = await screen.findByRole('checkbox', { name: /Backend engineer/ });
       expect(box).toBeEnabled();
-      expect(screen.queryByText('Required')).not.toBeInTheDocument();
+      expect(screen.queryByText('Required role')).not.toBeInTheDocument();
     });
 
     it('says it in Russian too', async () => {

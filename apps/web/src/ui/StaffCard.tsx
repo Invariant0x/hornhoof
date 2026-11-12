@@ -3,7 +3,9 @@ import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, MaterialStampView, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
-import { Decides, frozenBy } from './DecidedBy';
+import { BusyLabel } from './BusyLabel';
+import { DecidedByNote, frozenBy } from './DecidedBy';
+import { AlertIcon, StaffIcon } from './icons';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
@@ -78,8 +80,8 @@ function StaffPersonBadges({ r, language, t }: { r: Row; language: Language; t: 
   const { required, holder, kind } = r.role;
   return (
     <>
-      {kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
-      {required && <em className="t-card-tag">{t.staff.required}</em>}
+      {kind === 'head' && <span className="badge head">{t.dept.head}</span>}
+      {required && <span className="badge req">{t.staff.required}</span>}
       {r.line.name && <small>{r.role.title[language]}</small>}
       {holder && <small>{t.staff.present(holder)}</small>}
     </>
@@ -102,26 +104,32 @@ function StaffPerson({ r, name, frozen, language, t, onChecked }: { r: Row; name
 function StaffChoices({ r, name, sub, off, subscriptions, t, update }: { r: Row; name: string; sub?: Serving; off: boolean; subscriptions: Serving[]; t: Messages; update(change: Partial<Row>): void }) {
   return (
     <div className="staff-pick">
-      <select aria-label={t.staff.runsOnOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update({ subscription: e.target.value || null, model: '' })}>
-        <option value="">{t.agent.noSubscription}</option>
-        {byProvider(subscriptions, s => s.provider).map(([p, subs]) => (
-          <optgroup key={p} label={PROVIDER_NAMES[p]}>
-            {subs.map(s => (
-              <option key={s.id} value={s.id}>
-                {servingLabel(s)}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      <select aria-label={t.staff.modelOf(name)} value={r.model} disabled={off || !sub} onChange={e => update({ model: e.target.value })}>
-        <option value="">{t.agent.default}</option>
-        {sub?.models.map(m => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
+      <label className="staff-field">
+        <span>{t.staff.subscription}</span>
+        <select aria-label={t.staff.subscriptionOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update({ subscription: e.target.value || null, model: '' })}>
+          <option value="">{t.agent.noSubscription}</option>
+          {byProvider(subscriptions, s => s.provider).map(([p, subs]) => (
+            <optgroup key={p} label={PROVIDER_NAMES[p]}>
+              {subs.map(s => (
+                <option key={s.id} value={s.id}>
+                  {servingLabel(s)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      <label className="staff-field">
+        <span>{t.staff.model}</span>
+        <select aria-label={t.staff.modelOf(name)} value={r.model} disabled={off || !sub} onChange={e => update({ model: e.target.value })}>
+          <option value="">{t.agent.default}</option>
+          {sub?.models.map(m => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -207,9 +215,11 @@ function hireButtonText(t: Messages, isProposal: boolean, chosenCount: number, s
   return closeWithoutHiring ? t.staff.closeCard : t.staff.hire(chosenCount);
 }
 
+/* Hire first, then Correct and Hide, in one group at the end of the line; what was done stands on its own line above it. */
 function StaffHireControls({
   locked,
   canHire,
+  busy,
   showCorrect,
   showHide,
   sent,
@@ -222,6 +232,7 @@ function StaffHireControls({
 }: {
   locked?: DecidedBy;
   canHire: boolean;
+  busy: boolean;
   showCorrect: boolean;
   showHide: boolean;
   sent: boolean;
@@ -232,25 +243,34 @@ function StaffHireControls({
   onCorrect?: () => void;
   onHide?: () => void;
 }) {
-  return (
-    <div className="f">
-      <Decides locked={locked}>
-        <button className="btn" type="button" disabled={!canHire} onClick={onHire}>
-          {hireLabel}
-        </button>
-        {showCorrect && (
-          <button className="btn ghost" type="button" onClick={onCorrect}>
-            {t.card.correct}
-          </button>
-        )}
-      </Decides>
-      {showHide && (
-        <button className="btn ghost" type="button" onClick={onHide}>
-          {t.card.hide}
+  /* Someone who may not take the card reads who takes it, on its own line, in place of Hire and Correct. */
+  const decides = !locked && (
+    <>
+      <button className="btn" type="button" aria-busy={busy} disabled={!canHire} onClick={onHire}>
+        <BusyLabel busy={busy} idle={hireLabel} working={t.staff.hiring} />
+      </button>
+      {showCorrect && (
+        <button className="btn ghost" type="button" onClick={onCorrect}>
+          {t.card.correct}
         </button>
       )}
-      {sent && <span className="t-card-state">{chosenCount > 0 ? t.staff.hired : t.card.applied}</span>}
-    </div>
+    </>
+  );
+  return (
+    <>
+      {sent && <p className="t-card-state" role="status">{chosenCount > 0 ? t.staff.hired : t.card.applied}</p>}
+      {locked && <DecidedByNote by={locked} />}
+      {(decides || showHide) && (
+        <div className="form-foot">
+          {decides}
+          {showHide && (
+            <button className="btn ghost" type="button" onClick={onHide}>
+              {t.card.hide}
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -277,7 +297,7 @@ function canClickHire(roster: Roster | null, sent: boolean, busy: boolean, sendi
 
 function StaffNoServingNote({ roster, sent, t }: { roster: Roster | null; sent: boolean; t: Messages }) {
   if (!lacksDepartmentSubscription(roster, sent)) return null;
-  return <p className="t-card-brief">{t.staff.noServing}</p>;
+  return <p className="warn-line"><AlertIcon />{t.staff.noServing}</p>;
 }
 
 function canShowStaffCorrect(sent: boolean, isProposal: boolean, onCorrect: (() => void) | undefined): boolean {
@@ -300,7 +320,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
 
   return (
     <div className={sent ? 't-card staff done' : 't-card staff'}>
-      <h4>{t.staff.title(department.name)}</h4>
+      <h4><StaffIcon />{t.staff.title(department.name)}</h4>
       {proposal?.brief && <p className="t-card-brief">{proposal.brief}</p>}
       <ProposalMaterialsSection state={proposalMaterials} />
       <StaffNoServingNote roster={roster} sent={sent} t={t} />
@@ -315,6 +335,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
       <StaffHireControls
         locked={locked}
         canHire={canClickHire(roster, sent, busy, sending.length)}
+        busy={busy}
         showCorrect={canShowStaffCorrect(sent, isProposal, onCorrect)}
         showHide={!sent && Boolean(onHide)}
         sent={sent}

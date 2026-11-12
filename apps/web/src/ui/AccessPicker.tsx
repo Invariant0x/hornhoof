@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { deptLabel, useT, type Messages } from '../i18n';
 import type { AccessInput, AccessView, Org } from '../types';
 
@@ -22,9 +23,11 @@ export function accessText(t: Messages, a: AccessView, org: Org | null): string 
 
 export const accessEmpty = (v: AccessInput) => !('whole' in v) && !v.departments.length && !v.teams.length;
 
-/* Whole company, or departments with their teams below them. A ticked department includes its teams. */
+/* Whole company, or departments with their teams below them. A ticked department includes its teams. A row of a form's grid:
+   its name in the label column, the ticks beside it. */
 export function AccessPicker({ org, value, onChange }: { org: Org | null; value: AccessInput; onChange(v: AccessInput): void }) {
   const t = useT();
+  const id = useId();
   const whole = 'whole' in value;
   const list = 'whole' in value ? { departments: [], teams: [] } : value;
   const depts = org?.departments ?? [];
@@ -43,43 +46,45 @@ export function AccessPicker({ org, value, onChange }: { org: Org | null; value:
   }
 
   return (
-    <fieldset className="access">
-      <legend>{t.people.access}</legend>
-      <p className="hint">{t.people.accessHint}</p>
-      <label>
-        <input type="checkbox" checked={whole} onChange={e => onChange(e.target.checked ? { whole: true } : { departments: [], teams: [] })} />
-        {t.people.wholeCompany}
-      </label>
-      {!whole && (
-        <ul className="access-list">
-          {depts.map(d => {
-            const on = list.departments.includes(d.id);
-            return (
-              <li key={d.id}>
-                <label>
-                  <input type="checkbox" checked={on} onChange={e => pick(toggle(list.departments, d.id, e.target.checked), new Set(list.teams))} />
-                  {deptLabel(t, d)}
-                </label>
-                {/* Its head reads Hornhoof's whole database, so this tick reaches more than the department. */}
-                {d.templateKey === 'operations' && <p className="hint">{t.people.opsReadsAll}</p>}
-                {d.teams.length > 0 && (
-                  <ul>
-                    {d.teams.map(team => (
-                      <li key={team.id}>
-                        <label>
-                          <input type="checkbox" checked={on || list.teams.includes(team.id)} disabled={on} onChange={e => pick(new Set(list.departments), toggle(list.teams, team.id, e.target.checked))} />
-                          {team.name}
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {accessEmpty(value) && <p className="bad">{t.people.accessEmpty}</p>}
-    </fieldset>
+    <div className="field access" role="group" aria-labelledby={`${id}-access`}>
+      <span className="label" id={`${id}-access`}>{t.people.access}</span>
+      <div className="field-control">
+        <label>
+          <input type="checkbox" checked={whole} onChange={e => onChange(e.target.checked ? { whole: true } : { departments: [], teams: [] })} />
+          {t.people.wholeCompany}
+        </label>
+        {!whole && (
+          <ul className="access-list">
+            {depts.map(d => {
+              const on = list.departments.includes(d.id);
+              return (
+                <li key={d.id}>
+                  <label>
+                    <input type="checkbox" checked={on} onChange={e => pick(toggle(list.departments, d.id, e.target.checked), new Set(list.teams))} />
+                    {deptLabel(t, d)}
+                  </label>
+                  {/* Its head reads Hornhoof's whole database, so this tick reaches more than the department. */}
+                  {d.templateKey === 'operations' && <p className="hint">{t.people.opsReadsAll}</p>}
+                  {d.teams.length > 0 && (
+                    <ul>
+                      {d.teams.map(team => (
+                        <li key={team.id}>
+                          <label>
+                            <input type="checkbox" checked={on || list.teams.includes(team.id)} disabled={on} onChange={e => pick(new Set(list.departments), toggle(list.teams, team.id, e.target.checked))} />
+                            {team.name}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="hint">{t.people.accessHint}</p>
+        {accessEmpty(value) && <p className="bad">{t.people.accessEmpty}</p>}
+      </div>
+    </div>
   );
 }
