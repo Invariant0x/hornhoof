@@ -15,7 +15,7 @@ const copy = (over: Partial<CopySample> = {}): CopySample => ({
 });
 const C = copy();
 const D = copy({ machine: 'd', networkId: D_ID, number: 3, name: 'copy_d0d0d0d0d0d0d0d0_1' });
-const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, target: null, ...over });
+const sample = (over: Partial<SyncSample> = {}): SyncSample => ({ now: 0, others: [C], listed: 1, setting: null, route: ROUTE, record: OFF, oldestWaitMs: null, slowForMs: 0, namedBytes5s: 0, target: null, hold: false, ...over });
 const memory = (over: Partial<SyncMemory> = {}): SyncMemory => ({ w: null, posting: false, flag: null, checkpointed: false, blocked: false, ...over });
 const step = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => nextSyncStep(sample(s), memory(m));
 const said = (s: Partial<SyncSample> = {}, m: Partial<SyncMemory> = {}) => {
@@ -144,6 +144,29 @@ describe('the next step of the sync controller', () => {
     expect(said({ ...named, target: D_ID }, { w: '0/1' }).action).toEqual(NONE);
     /* With the request gone, the lower number takes the place again. */
     expect(said(named, { w: '0/1' }).action).toEqual(POST_OFF);
+  });
+
+  it('hold: clears the setting once off is stored', () => {
+    expect(said({ hold: true, setting: C.name, record: OFF }, { w: '0/1' })).toEqual({ action: CLEAR, flag: 'relay_off', renew: true });
+  });
+
+  it('hold: posts off while the setting stands', () => {
+    expect(said({ hold: true, setting: C.name, record: ON_C }, { w: '0/1' })).toEqual({ action: POST_OFF, flag: 'copy', renew: true });
+  });
+
+  it('hold: posts off when no setting stands and the relay does not say off yet', () => {
+    expect(said({ hold: true, record: ON_C })).toEqual({ action: POST_OFF, flag: null, renew: true });
+    expect(said({ hold: true, record: older })).toEqual({ action: POST_OFF, flag: null, renew: true });
+  });
+
+  it('holds sync off', () => {
+    /* A copy keeps pace, and still none is named while migrations run. */
+    expect(said({ hold: true, record: OFF })).toEqual({ action: NONE, flag: 'relay_off', renew: true });
+    expect(said({ hold: false, record: OFF })).toEqual({ action: { do: 'set', name: C.name }, flag: 'relay_off', renew: true });
+    /* While an answer of the relay is on its way nothing is done, held or not. */
+    expect(said({ hold: true, setting: C.name, record: OFF }, { posting: true, flag: 'copy' }).action).toEqual(NONE);
+    /* Where this machine keeps the data alone there is nothing to hold. */
+    expect(said({ hold: true, listed: 0, others: [], record: OFF })).toEqual({ action: NONE, flag: 'alone', renew: true });
   });
 
   it('never clears an empty setting', () => {

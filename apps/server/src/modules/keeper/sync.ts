@@ -124,6 +124,8 @@ export class SyncController {
   private pulsedAt = -Infinity;
   private target: string | null = null;
   private targetAt = -Infinity;
+  private holding = false;
+  private heldNow = false;
   private postLine = '';
   private last: { listed: number; copies: CopyView[]; named: string | null } = { listed: 0, copies: [], named: null };
 
@@ -175,6 +177,18 @@ export class SyncController {
   /* What the relay holds of which machine has the latest changes, as last read or stored. */
   record(): SyncRecord | null {
     return this.stored;
+  }
+
+  /* Commits wait for no copy from the next look on, until this is taken back: for an update whose migrations run. */
+  hold(on: boolean): void {
+    this.holding = on;
+    if (!on) this.heldNow = false;
+  }
+
+  /* Whether the hold took: it is on, the relay stored that this machine alone holds the latest changes at the route's
+     generation of now, and the setting names nobody. As the last look found it. */
+  held(): boolean {
+    return this.holding && this.heldNow;
   }
 
   /* The generation of the company's route while this keeper's own client holds it, as last read. */
@@ -267,7 +281,9 @@ export class SyncController {
       this.targetAt = now;
       this.target = await catalog.moveTarget();
     }
+    this.heldNow = this.holding && setting === null && this.route !== null && this.stored?.state === 'off' && this.stored.generation === this.route.generation;
     return {
+      hold: this.holding,
       now, others, listed: machines.length, setting, route: this.route, record: this.stored, oldestWaitMs,
       slowForMs: this.slowSince === null ? 0 : now - this.slowSince,
       namedBytes5s: named ? this.bytesOver(named.machine, now) : 0,

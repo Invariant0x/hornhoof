@@ -13,7 +13,8 @@
 # name of a database in capitals, as a real one keeps it in small letters, whatever it was asked.
 # STUB_TABLES and STUB_COLUMNS: the tables and the columns of the company's three schemas, as "schema.table" and
 # "schema.table.column". STUB_LED words name the databases that once led the company. STUB_STATE/volume-gone is there
-# once the database's volume is removed.
+# once the database's volume is removed. STUB_STATE/slots holds the replication slots of the database, one a line; a
+# drop empties it unless STUB_SLOTS_STAY is set.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 word() {
   local key=$1 w
@@ -138,8 +139,18 @@ case "$1 $2" in
     case "$*" in
       # Each copy says which one it is. STUB_DUMP=fail: the database cannot be saved.
       # Of the database named after -d; one whose connections are off cannot be dumped.
+      # The copies' slots: how many there are, and their going.
+      *'count(*) FROM pg_replication_slots'*) if [ -f "$STUB_STATE/slots" ]; then grep -c . "$STUB_STATE/slots" || true; else echo 0; fi ;;
+      *pg_drop_replication_slot*) [ -n "${STUB_SLOTS_STAY:-}" ] || : > "$STUB_STATE/slots" ;;
+      *'pg_terminate_backend(active_pid)'*) ;;
       *pg_dump*)
         [ "${STUB_DUMP:-ok}" = fail ] && { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
+        # STUB_STOP_IN=backup stops the updater at its first dump, once: the dump runs in a shell of the updater's.
+        if [ "${STUB_STOP_IN:-}" = backup ] && [ ! -f "$STUB_STATE/stopped" ]; then
+          touch "$STUB_STATE/stopped"
+          kill -9 "$(ps -o ppid= -p "$PPID" | tr -d ' ')" "$PPID"
+          exit 1
+        fi
         of=$(db_named "$@")
         [ -f "$(db_file "$of")" ] && [ ! -f "$STUB_STATE/closed-$of" ] || { echo 'pg_dump: error: database is not accepting connections' >&2; exit 1; }
         copy=$(($(cat "$STUB_STATE/copies" 2> /dev/null || echo 0) + 1))
@@ -380,6 +391,9 @@ want=\$(for w in ${STUB_MIGRATIONS:-}; do [ "\${w%%=*}" = "$tag" ] && printf '%s
 case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
 SCRIPT
             ;;
+          # The journal of that build's migrations: as many entries as the build applies.
+          *:/app/apps/server/drizzle/meta/_journal.json)
+            jq -n --argjson n "$(word "$tag" ${STUB_MIGRATIONS:-} | grep -E '^[0-9]+$' || echo 0)" '{entries: [range($n) | {idx: .}]}' > "$3" ;;
           # The build's name in a comment, so services_in can tell whose file it is.
           *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
           # The overlay a worker adds. STUB_NO_OVERLAY names builds that have none.

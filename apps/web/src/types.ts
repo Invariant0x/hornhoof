@@ -768,7 +768,7 @@ export type JobView = {
 
 /* A published build of Hornhoof, from the registry. */
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
-export type UpdateStep = 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
+export type UpdateStep = 'backup' | 'pull' | 'promise' | 'install' | 'health' | 'rollback' | 'finished';
 export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };

@@ -107,13 +107,26 @@ async function run(script: string, flag: string, s: Stand, env: Record<string, s
   return { code, out: stdout + stderr, calls, status };
 }
 
-/* One pass of an updater over request.json. */
-function pass(script: string, s: Stand, request: object | null, env: Record<string, string>) {
+/* What the server's keeper answers its updater with, in the control folder: whether the copies promised to wait,
+   whether the dump may be taken, and that the copies' slots went before a restore. */
+export type KeeperSays = { promised?: object | null; settled?: object | null; dropped?: object | null };
+export function keeperSays(s: Stand, id: string, says: KeeperSays = {}): void {
+  const files = { 'promised.json': says.promised, 'settled.json': says.settled, 'slots-dropped.json': says.dropped };
+  for (const [name, said] of Object.entries(files)) {
+    if (said !== null) writeFileSync(join(s.control, name), JSON.stringify({ id, ok: true, ...said }));
+  }
+}
+
+/* One pass of an updater over request.json. The keeper answers each of the updater's questions about this request
+   with yes, as on a server whose copies are in step, unless the test answers them itself: keeper false. */
+function pass(script: string, s: Stand, request: object | null, env: Record<string, string>, opts: { keeper?: boolean } = {}) {
   if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
+  const id = (request as { id?: unknown } | null)?.id;
+  if (typeof id === 'string' && opts.keeper !== false) keeperSays(s, id);
   return run(script, '--once', s, env);
 }
 
-export const runOnce = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(SCRIPT, s, request, env);
+export const runOnce = (s: Stand, request: object | null, env: Record<string, string> = {}, opts: { keeper?: boolean } = {}) => pass(SCRIPT, s, request, env, opts);
 /* The updater from before revision 2, which starts the update that moves an install in. */
 export const runRev1 = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(REV1, s, request, env);
 /* The helper container this build's installer starts when an older updater runs it. */

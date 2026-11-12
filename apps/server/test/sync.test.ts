@@ -304,6 +304,30 @@ describe('the sync controller', () => {
     expect(s.state.setting).toBe(C.copyName);
   });
 
+  it('holds sync off for as long as it is told', async () => {
+    const s = await stand();
+    await s.looks(2);
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 3, 1000);
+    s.state.replication[0]!.syncState = 'sync';
+    await s.looks(4);
+    expect([s.state.setting, s.record()?.state, s.controller.held()]).toEqual([C.copyName, 'on', false]);
+    /* Held: off is stored first, then the setting goes, and only then does it say so. */
+    s.controller.hold(true);
+    expect(s.controller.held()).toBe(false);
+    await s.look();
+    expect([s.record()?.state, s.state.setting, s.controller.held()]).toEqual(['off', C.copyName, false]);
+    await s.looks(2);
+    expect([s.state.setting, s.controller.held(), s.controller.flag()]).toEqual([null, true, 'relay_off']);
+    /* The copy keeps pace all the while, and is not named. */
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 3, 1000);
+    expect([s.state.setting, s.controller.held()]).toEqual([null, true]);
+    /* Let go, it names the copy again as any that keeps pace. */
+    s.controller.hold(false);
+    expect(s.controller.held()).toBe(false);
+    await s.looks(2);
+    expect(s.state.setting).toBe(C.copyName);
+  });
+
   it('writes no pulse where it does not lead', async () => {
     const s = await stand({ leads: false });
     await s.looks(8, 1000);

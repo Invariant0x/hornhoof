@@ -31,7 +31,8 @@ export type CopySample = { machine: string; networkId: string; number: number; n
    company's link while this keeper's own client holds it. record: what the relay holds of who has the latest changes,
    as last read or stored. oldestWaitMs: for how long the oldest commit has waited on the named copy. slowForMs: for
    how long every look saw a commit wait over SLOW_WAIT_MS. namedBytes5s: what the named copy took in the last five
-   seconds. target: the network id of the machine the server is asked to move to, when it is one of the others. */
+   seconds. target: the network id of the machine the server is asked to move to, when it is one of the others. hold:
+   commits are to wait for no copy, as while an update's migrations run. */
 export type SyncSample = {
   now: number;
   others: CopySample[];
@@ -43,6 +44,7 @@ export type SyncSample = {
   slowForMs: number;
   namedBytes5s: number;
   target: string | null;
+  hold: boolean;
 };
 
 /* What the controller keeps between looks. w: how far the leader had written once the setting held. posting: an answer
@@ -95,6 +97,12 @@ function decide(s: SyncSample, m: SyncMemory): { action: SyncAction; flag: Flag 
   const offStored = s.route !== null && s.record?.state === 'off' && s.record.generation === s.route.generation;
   const dropped = (flag: Flag = 'copy'): { action: SyncAction; flag: Flag } => (offStored ? { action: CLEAR, flag: 'relay_off' } : { action: POST_OFF, flag });
   if (m.posting) return { action: NONE, flag: m.flag };
+  /* Held: the setting goes, once the relay stored that this machine alone holds the latest changes, and no copy is
+     named until the hold ends. Where this machine keeps the data alone there is nothing to hold. */
+  if (s.hold && s.listed > 0) {
+    if (s.setting !== null) return dropped();
+    return offStored ? { action: NONE, flag: 'relay_off' } : { action: POST_OFF, flag: null };
+  }
   if (s.listed === 0) {
     if (s.setting !== null) return dropped();
     return s.record?.state === 'on' ? { action: POST_OFF, flag: 'alone' } : { action: NONE, flag: 'alone' };

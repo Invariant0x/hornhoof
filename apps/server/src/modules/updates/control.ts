@@ -8,11 +8,23 @@ export type UpdaterStatus = {
   version: string;
   commit?: string;
   state: 'running' | 'done' | 'failed' | 'rolled_back';
-  /* wait: a worker downloaded the build and waits for its turn to install it. */
-  step: 'backup' | 'pull' | 'wait' | 'install' | 'health' | 'rollback' | 'finished';
+  /* wait: a worker downloaded the build and waits for its turn to install it. promise: the keeper asks the machines
+     that keep copies to wait for the update. */
+  step: 'backup' | 'pull' | 'promise' | 'wait' | 'install' | 'health' | 'rollback' | 'finished';
   log: string;
   at: string;
+  /* How many migrations of the new build the database has not applied; null when that cannot be told. */
+  migrations?: number | null;
+  /* Going back puts the database of before the update in place again. */
+  restore?: boolean;
 };
+
+/* What the keeper of the machine that leads answers its updater with, in the control folder, each { id, ok, why? } of
+   the update it is about, written whole and then moved: whether the copies promised to wait, whether the dump holds
+   everything they confirmed, and that the copies' slots went before a restore. */
+export const PROMISED_FILE = 'promised.json';
+export const SETTLED_FILE = 'settled.json';
+export const DROPPED_FILE = 'slots-dropped.json';
 
 export type UpdaterView = { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
 

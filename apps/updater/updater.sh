@@ -83,6 +83,17 @@ UPDATER_IMAGE="${IMAGE}-updater"
 # The revision each installer hears and the note of an update keeps.
 UPDATER_REV=2
 HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
+# How long, in seconds, the server's keeper has to say that the copies promised to wait, that they hold every change
+# the database is saved with, and that their slots went before a database is put back.
+PROMISE_WAIT="${HORNHOOF_PROMISE_WAIT:-30}"
+SETTLE_WAIT="${HORNHOOF_SETTLE_WAIT:-120}"
+DROP_WAIT="${HORNHOOF_DROP_WAIT:-60}"
+# What a company server's update says of the database besides its step: how many migrations of the new build it has
+# not applied, empty when that cannot be told, and whether going back puts the saved database in its place. Both stand
+# in every status from the moment the update knows them.
+MIGRATIONS=''
+RESTORE=''
+SAYS_MIGRATIONS=''
 # How long this build's updater may take to say it goes on with an update it takes over.
 TAKE_OVER_WAIT="${HORNHOOF_TAKE_OVER_WAIT:-60}"
 TAKEN_OVER="This build's updater goes on with the update."
@@ -164,7 +175,9 @@ write_status() {
   STEP=$2
   jq -n --arg id "$ID" --arg version "$VERSION" --arg state "$STATE" --arg step "$STEP" \
     --arg log "$(printf '%s' "$LOG" | tail -n 40)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{id: $id, version: $version, state: $state, step: $step, log: $log, at: $at}' > "$CONTROL/status.json.new"
+    --arg says "$SAYS_MIGRATIONS" --arg migrations "$MIGRATIONS" --arg restore "$RESTORE" \
+    '{id: $id, version: $version, state: $state, step: $step, log: $log, at: $at}
+      + (if $says == "" then {} else {migrations: (if $migrations == "" then null else ($migrations | tonumber) end), restore: ($restore == "1")} end)' > "$CONTROL/status.json.new"
   mv "$CONTROL/status.json.new" "$CONTROL/status.json"
 }
 
@@ -521,7 +534,83 @@ unpack() {
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
   fi
+  # A company server counts the migrations the build brings by its journal; a build without one is no failure.
+  worker || docker cp "$cid:/app/apps/server/drizzle/meta/_journal.json" "$dir/journal.json" > /dev/null 2>&1 || true
   docker rm "$cid" > /dev/null 2>&1 || true
+}
+
+# migrations_to_run <journal> <applied>: how many migrations of the new build the database has not applied; nothing
+# when either count cannot be told, or the database has more than the build knows.
+migrations_to_run() {
+  local known
+  known=$(jq -r '.entries | length' "$1" 2> /dev/null || true)
+  plain_number "$known" && plain_number "$2" || return 0
+  [ "$known" -lt "$2" ] || printf '%s' "$((known - $2))"
+}
+
+# keeper_said <file> <field>: a field of the answer the server's keeper left for this very update; fails while there
+# is none of this update.
+keeper_said() {
+  [ "$(jq -r '.id // empty' "$CONTROL/$1" 2> /dev/null || true)" = "$ID" ] || return 1
+  jq -r ".$2 // empty" "$CONTROL/$1" 2> /dev/null || true
+}
+
+# The machines that keep a copy of the company promise to wait for the update: the server's keeper asks them, and says
+# here whether each did. With none promised, or no word of the keeper's, the update ends before anything changed.
+promise_copies() {
+  local waited=0 ok why
+  step promise "Asking the copies to wait for the update."
+  while [ "$waited" -lt "$PROMISE_WAIT" ]; do
+    if ok=$(keeper_said promised.json ok); then
+      [ "$ok" != true ] || return 0
+      why=$(keeper_said promised.json why || true)
+      stop_with failed "${why:-A machine that keeps a copy did not promise to wait}, so nothing changed."
+      return 1
+    fi
+    waited=$((waited + 1))
+    sleep 1
+  done
+  stop_with failed "The keeper did not answer, so nothing changed."
+  return 1
+}
+
+# The database is saved only once the keeper said the copies hold every change it is saved with. The step is backup by
+# now, so the keeper holds the lease in maintenance and the app's sessions have ended.
+settle_wait() {
+  local waited=0 ok
+  while [ "$waited" -lt "$SETTLE_WAIT" ]; do
+    if ok=$(keeper_said settled.json ok); then
+      [ "$ok" != true ] || return 0
+      break
+    fi
+    waited=$((waited + 1))
+    sleep 1
+  done
+  stop_with failed "The copies did not confirm the last changes, so nothing changed."
+  return 1
+}
+
+# Before the saved database is put back, nothing of a copy may hold the one in use: the keeper stops the copies and
+# drops their slots, and says so. With or without its word, the updater ends whatever still reads a slot and drops
+# every slot itself, again every two seconds, until none is left. Fails when one will not go.
+drop_slots() {
+  local db waited=0 left
+  while [ "$waited" -lt "$DROP_WAIT" ] && ! keeper_said slots-dropped.json ok > /dev/null; do
+    waited=$((waited + 1))
+    sleep 1
+  done
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || return 1
+  waited=0
+  while true; do
+    left=$(docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM pg_replication_slots' 2> /dev/null | tr -d ' ') || left=''
+    [ "$left" != 0 ] || return 0
+    [ "$waited" -lt "$DROP_WAIT" ] || return 1
+    docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE active_pid IS NOT NULL' > /dev/null 2>&1 || true
+    docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE active_pid IS NULL' > /dev/null 2>&1 || true
+    waited=$((waited + 2))
+    sleep 2
+  done
 }
 
 # Every image the compose file of the new build names, the update's own by digest, with the server's .env filling in
@@ -675,6 +764,9 @@ update() {
   TARGET=''
   BEFORE=''
   BACKUP=''
+  MIGRATIONS=''
+  RESTORE=''
+  SAYS_MIGRATIONS=''
 
   # The build to go back to: the one running now, by its commit, or the one .env pins; and the images it runs, by the
   # digests Docker keeps for them, or by that build's tag.
@@ -709,8 +801,17 @@ update() {
     install_new
     return 0
   fi
-  step backup "Saving the database."
   BEFORE=$(applied)
+  MIGRATIONS=$(migrations_to_run "$WORK/$TAG/journal.json" "$BEFORE")
+  SAYS_MIGRATIONS=1
+  promise_copies || return 0
+  save_and_install
+}
+
+# The database is saved, once the copies hold every change it is saved with, and the new build goes in.
+save_and_install() {
+  step backup "Saving the database."
+  settle_wait || return 0
   backup || {
     stop_with failed "Could not save the database, so nothing changed."
     return 0
@@ -780,6 +881,13 @@ go_back() {
   step rollback "Going back to $PREVIOUS."
   if ! worker && [ "$(applied)" != "$BEFORE" ]; then
     say "$VERSION changed the database, so it goes back to the copy saved before the update."
+    RESTORE=1
+    SAYS_MIGRATIONS=1
+    write_status running rollback
+    drop_slots || {
+      stop_with failed "Could not drop the copies' slots, so the database was not put back. Run install.sh server in $SERVER_DIR, and see docker compose logs keeper." finished
+      return 0
+    }
     keep_link
     restore || {
       stop_with failed "Could not put the database back from backups/$(basename "$BACKUP"). Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
@@ -824,6 +932,10 @@ read_status() {
   STEP=$(jq -r '.step // empty' "$CONTROL/status.json")
   LOG="$(jq -r '.log // empty' "$CONTROL/status.json")
 "
+  # What it said of the database, when it had said anything: an update of an updater from before says nothing.
+  SAYS_MIGRATIONS=$(jq -r 'if has("migrations") then "1" else "" end' "$CONTROL/status.json" 2> /dev/null || true)
+  MIGRATIONS=$(jq -r '.migrations // empty | tostring' "$CONTROL/status.json" 2> /dev/null | tr -cd '0-9' || true)
+  RESTORE=$(jq -r 'if .restore == true then "1" else "" end' "$CONTROL/status.json" 2> /dev/null || true)
 }
 
 # Whether this build's installer handed the update over: an older updater got as far as its copy of the database, which
@@ -856,7 +968,17 @@ go_on() {
   say "The updater stopped during the update and goes on with it."
   [ "$STEP" != backup ] || start_app "$(compose ps -aq app 2> /dev/null || true)"
   case "$STEP" in
-    backup | pull | wait) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
+    # Stopped at the dump of an update that asked the copies: no migration ran yet, and the keeper's word about the
+    # dump stands, since the step never left backup. It goes on from there, with nothing downloaded or asked again.
+    backup)
+      if [ -n "$SAYS_MIGRATIONS" ]; then
+        BEFORE=$(applied)
+        save_and_install
+      else
+        update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST"
+      fi
+      ;;
+    pull | promise | wait) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
     install)
       step install "Installing $VERSION."
       install_new

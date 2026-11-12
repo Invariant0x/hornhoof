@@ -1559,7 +1559,7 @@ export const en = {
     starting: 'Getting the update ready',
     restarting: 'Hornhoof is restarting. The page reloads by itself.',
     maintenance: 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.',
-    steps: { backup: 'saving the database', pull: 'downloading', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
+    steps: { backup: 'saving the database', pull: 'downloading', promise: 'asking the copies to wait', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
     result: (s: { state: string; version: string }, current: string) =>
       s.state === 'done'
         ? `Updated to ${s.version}.`

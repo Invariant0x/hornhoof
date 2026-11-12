@@ -69,6 +69,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/requests': DECISIONS,
   '/api/nodes/commands': { commands: [] },
   '/api/machines/access': { views: [] },
+  /* What the CEO's reminder of the recovery file asks at the start: nothing to remind of. */
+  '/api/backups/recovery': { recoveryNeeded: false, linkChanged: false },
   '/api/machines/here': { machine: null, view: null },
   '/api/turns': { turns: [TURN] },
   '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },

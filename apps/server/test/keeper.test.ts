@@ -393,6 +393,33 @@ describe('the keeper', () => {
     await expect(send(other, { path: '/' })).rejects.toMatchObject({ code: 'ECONNREFUSED' });
   });
 
+  it('gives its part of an update what it goes by, and moves no server while it is busy', async () => {
+    type Parts = Parameters<NonNullable<KeeperOptions['updating']>>[0];
+    const given: Parts[] = [];
+    const said = { busy: false };
+    const order: string[] = [];
+    const updating: KeeperOptions['updating'] = parts => (given.push(parts), { start: async () => void order.push('update part started'), stop: async () => undefined, busy: () => said.busy });
+    const moves: (() => boolean)[] = [];
+    const handing: KeeperOptions['handing'] = parts => (moves.push(parts.updating), { start: async () => void order.push('handing part started'), stop: async () => undefined, holds: () => false });
+    const k = await keeperOn(await echoHeaders(), { updating, handing, everyMs: 20 });
+    const parts = given[0]!;
+    await until(() => wordIn(k.dir) === 'lead');
+    expect([parts.leads(), parts.maintenance(), moves[0]!()]).toEqual([true, false, false]);
+    /* The part of the update starts before the one that hands the server over looks. */
+    expect(order).toEqual(['update part started', 'handing part started']);
+    /* While the updater installs, the lease is in maintenance. */
+    statusSays(k.dir, 'running', 'backup');
+    await until(() => wordIn(k.dir) === 'maintenance');
+    expect([parts.leads(), parts.maintenance()]).toEqual([false, true]);
+    /* No server is moved while an update is on, in whatever step, or while its keeper still has it to end. */
+    expect(moves[0]!()).toBe(true);
+    statusSays(k.dir, 'done', 'finished');
+    await until(() => wordIn(k.dir) === 'lead');
+    expect(moves[0]!()).toBe(false);
+    said.busy = true;
+    expect(moves[0]!()).toBe(true);
+  });
+
   it('keeps leading and serving when its own folder cannot be written', async () => {
     const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: 'a1b2c3d4'.repeat(4) });
     const notAFolder = join(folder(), 'keeper');

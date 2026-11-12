@@ -108,6 +108,8 @@ export type KeeperOptions = {
   takingEveryMs?: number;
   /* This keeper's part of a planned switch of the server away from this machine. */
   handing?: (parts: HandingParts) => HandingPart;
+  /* This keeper's part of an update while other machines keep copies. */
+  updating?: (parts: UpdatingParts) => UpdatingPart;
 };
 
 /* The company's link as this keeper's own frpc logs in at the relay: its name, its key, the id that client goes by,
@@ -127,6 +129,19 @@ export type HandingParts = {
   /* The keeper of another data machine, by its network id, on this keeper's session to it. */
   peer: (networkId: string) => { request(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs?: number): Promise<{ status: number; body: unknown } | null> };
   updating: () => boolean;
+};
+
+/* What this keeper does for an update while other machines keep copies, made with what the keeper gives it. busy: an
+   update runs, or it still has one to end. */
+export type UpdatingPart = { start(): Promise<void>; stop(): Promise<void>; busy(): boolean };
+export type UpdatingParts = {
+  sync: SyncController | null;
+  peer: HandingParts['peer'];
+  /* The name a machine goes by, none for one this database does not hold. */
+  hostname: (networkId: string) => Promise<string>;
+  /* Whether this keeper leads under a normal lease, and whether its lease is in maintenance. */
+  leads: () => boolean;
+  maintenance: () => boolean;
 };
 
 /* What takes the server over for this keeper: it leads once this machine's database is promoted, or at once where
@@ -246,6 +261,7 @@ export class Keeper {
   private readonly sync: SyncController | null;
   private readonly taker: TakingPart | null;
   private readonly hander: HandingPart | null;
+  private readonly updater: UpdatingPart | null;
   /* The front door, and where it listens, so that a switch may shut it and open it again. */
   private frontDoor: http.Server | null = null;
   private frontAt: { port: number; host: string } | null = null;
@@ -293,6 +309,11 @@ export class Keeper {
     this.taker = opts.taking
       ? opts.taking({ tunnel: { start: () => void (this.linkHeld = false), stop: async () => void (this.linkHeld = true) }, appLeads: () => this.mode() === 'lead', link: () => this.ownLink() })
       : null;
+    const peer: HandingParts['peer'] = networkId => ({ request: (method, path, body, timeoutMs) => this.links?.ask(networkId, method, path, body, timeoutMs) ?? Promise.resolve(null) });
+    /* Made before the sync controller's first look: one that starts in the middle of an update names no copy. */
+    this.updater = opts.updating
+      ? opts.updating({ sync: this.sync, peer, hostname: networkId => this.hostnameOf(networkId), leads: () => this.mode() === 'lead', maintenance: () => this.mode() === 'maintenance' })
+      : null;
     this.hander = opts.handing
       ? opts.handing({
           front: { close: () => this.shutFront(), open: () => this.openFront() },
@@ -301,8 +322,9 @@ export class Keeper {
           leads: () => this.mode() === 'lead',
           term: () => this.term(),
           sync: this.sync,
-          peer: networkId => ({ request: (method, path, body, timeoutMs) => this.links?.ask(networkId, method, path, body, timeoutMs) ?? Promise.resolve(null) }),
-          updating: () => updaterRunning(opts.config.controlDir),
+          peer,
+          /* No server is moved while an update runs, in whatever step, or while its keeper still has one to end. */
+          updating: () => updaterRunning(opts.config.controlDir) || (this.updater?.busy() ?? false),
         })
       : null;
     this.holder = new LeaseHolder({
@@ -453,6 +475,7 @@ export class Keeper {
     this.carrier?.start();
     if (this.identity) void this.takeBackups();
     if (read) await this.servePeers(read, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
+    await this.updater?.start();
     await this.hander?.start();
     if (!takingNow) afterLead();
     else {
@@ -486,6 +509,7 @@ export class Keeper {
     this.stopped = true;
     await this.taker?.stop();
     await this.hander?.stop();
+    await this.updater?.stop();
     await this.sync?.stop();
     if (this.backupsTimer) clearTimeout(this.backupsTimer);
     await Promise.all([this.backups?.stop(), this.carrier?.stop(), this.links?.stop(), this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
@@ -534,6 +558,13 @@ export class Keeper {
       ...this.opts.copies,
     });
     this.links.start();
+  }
+
+  /* The name the machine of that network id goes by; none for one this database does not hold. */
+  private async hostnameOf(networkId: string): Promise<string> {
+    if (!this.opts.db) return '';
+    const [row] = await this.opts.db.select({ hostname: machines.hostname }).from(machines).where(eq(machines.networkId, networkId));
+    return row?.hostname ?? '';
   }
 
   /* The id the keeper of that machine runs under; none for a row this database does not hold. */

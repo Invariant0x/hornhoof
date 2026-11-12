@@ -34,6 +34,7 @@ async function dataKeeper(): Promise<Running> {
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
   const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
   const { Hander } = await import('./modules/keeper/handing.js');
+  const { LeadUpdate } = await import('./modules/keeper/lead-update.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
   /* Where this machine's database listens, for the peers that keep data too. */
@@ -88,6 +89,18 @@ async function dataKeeper(): Promise<Running> {
                 return base ? probeLink(base, nonce) : null;
               },
               tunnel: parts.tunnel, subscription: pgSubscription(sql, subscribed), appLeads: parts.appLeads, exit, log,
+            });
+          }
+        : undefined,
+    /* Its part of an update while other machines keep copies: they promise to wait, and the dump is taken once they
+       hold every change. */
+    updating:
+      config.databaseUrl && config.machineId && sync
+        ? parts => {
+            if (!parts.sync) return { start: async () => undefined, stop: async () => undefined, busy: () => false };
+            return new LeadUpdate({
+              dir: KEEPER_DIR, controlDir: config.controlDir, sql: keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }),
+              sync: parts.sync, peer: parts.peer, hostname: parts.hostname, leads: parts.leads, maintenance: parts.maintenance, log,
             });
           }
         : undefined,

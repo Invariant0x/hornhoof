@@ -1588,7 +1588,7 @@ export const ru: Messages = {
     starting: 'Готовлю обновление',
     restarting: 'Hornhoof перезапускается. Страница обновится сама.',
     maintenance: 'Обслуживание: Hornhoof ставит обновление и не принимает изменений, пока оно не закончится.',
-    steps: { backup: 'сохраняю базу', pull: 'скачиваю', install: 'устанавливаю', health: 'жду ответа нового сервера', rollback: 'возвращаю прежнюю версию', finished: 'готово' },
+    steps: { backup: 'сохраняю базу', pull: 'скачиваю', promise: 'прошу копии подождать', install: 'устанавливаю', health: 'жду ответа нового сервера', rollback: 'возвращаю прежнюю версию', finished: 'готово' },
     result: (s, current) =>
       s.state === 'done'
         ? `Обновлено до ${s.version}.`

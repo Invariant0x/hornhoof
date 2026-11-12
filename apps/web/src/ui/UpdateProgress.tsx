@@ -2,8 +2,8 @@ import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 import type { UpdateStep } from '../types';
 
-/* The four steps of an update, in the order the updater takes them. */
-const STEPS: UpdateStep[] = ['pull', 'backup', 'install', 'health'];
+/* The five steps of an update, in the order the updater takes them. */
+const STEPS: UpdateStep[] = ['pull', 'promise', 'backup', 'install', 'health'];
 
 type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean; maintenance?: boolean };
 
@@ -21,7 +21,7 @@ function stepLabel(t: Messages, step: UpdateStep | null, starting: boolean, at: 
   return t.updates.stepOf(at + 1, STEPS.length, t.updates.steps[step]);
 }
 
-/* A turning ring and a bar of the four steps: the ones behind are filled, the one under way moves. */
+/* A turning ring and a bar of the five steps: the ones behind are filled, the one under way moves. */
 export function UpdateProgress({ version, step, starting = false, offline = false, maintenance = false }: Props) {
   const t = useT();
   const back = step === 'rollback';
