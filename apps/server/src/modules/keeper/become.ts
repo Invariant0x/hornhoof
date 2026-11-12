@@ -11,6 +11,16 @@ import { reasonOf, writePrivately } from './machine-keys.js';
    own migrations stay away. role.json: the secrets for the updater, which writes them into the settings and starts the
    database; it removes the file. role.failed: one line from the updater when it could not. */
 export const REPLICA_FILE = 'replica.json';
+
+/* The mark of a machine that keeps a copy, in the control folder: written whole and then moved, for any reader, since
+   it holds no secret. Its updater and its app read it too. */
+export function writeReplicaMarker(controlDir: string, now: number = Date.now()): void {
+  const path = join(controlDir, REPLICA_FILE);
+  const partial = `${path}.${process.pid}.tmp`;
+  writeFileSync(partial, JSON.stringify({ since: new Date(now).toISOString() }));
+  chmodSync(partial, 0o644);
+  renameSync(partial, path);
+}
 export const ROLE_FILE = 'role.json';
 export const ROLE_FAILED = 'role.failed';
 export const ROLE_RETRY_MS = 3_600_000;
@@ -119,13 +129,9 @@ export class Becoming {
     return secrets.data;
   }
 
-  /* Written whole and then moved, for any reader: it holds no secret. It comes before the request, so the updater never
-     starts a database here whose schema the machine's own migrations could reach. */
+  /* It comes before the request, so the updater never starts a database here whose schema the machine's own
+     migrations could reach. */
   private writeMarker(): void {
-    const path = this.file(REPLICA_FILE);
-    const partial = `${path}.${process.pid}.tmp`;
-    writeFileSync(partial, JSON.stringify({ since: new Date(this.now()).toISOString() }));
-    chmodSync(partial, 0o644);
-    renameSync(partial, path);
+    writeReplicaMarker(this.opts.controlDir, this.now());
   }
 }

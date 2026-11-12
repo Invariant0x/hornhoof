@@ -199,7 +199,7 @@ describe('what the leader does in each row', () => {
   const NOW = 400_000;
   const T = clocks(NOW);
   const entry = (over: Partial<EntrySample> = {}): EntrySample => ({
-    now: T, needed: true, self: A, ownTerm: TERM, latest: TERM, b: null, asked: null, window: NO_WINDOW, route: null, registering: null, client: CLIENT, tunnel: false, flag: false, ...over,
+    now: T, needed: true, self: A, ownTerm: TERM, latest: TERM, b: null, asked: null, window: NO_WINDOW, route: null, registering: null, client: CLIENT, tunnel: false, flag: false, gaveUp: false, ...over,
   });
   const promised = { networkId: B, answered: NOW - 300, answer: { stance: { kind: 'follow' as const, term: NEXT }, sent: clocks(NOW - 600) } };
 
@@ -247,7 +247,13 @@ describe('what the leader does in each row', () => {
   it('tells its own last registration from a takeover between the windows', () => {
     /* It registered again after the relay restarted, at 8, and then crashed: the name is free and still its own. */
     expect(nextEntryStep(entry({ route: { state: 'empty', client: CLIENT, generation: 8, sent: clocks(NOW - 200) } }))).toEqual({ do: 'wait', why: "the relay's window" });
-    /* The name free at 8, last registered by B's client: B took over meanwhile, and this keeper follows. */
-    expect(nextEntryStep(entry({ route: { state: 'empty', client: 'acme-b0b0b0b0', generation: 8, sent: clocks(NOW - 200) } }))).toEqual({ do: 'follow' });
+    /* The name held by B's client at 8: B took over meanwhile, and this keeper follows. */
+    expect(nextEntryStep(entry({ route: { state: 'held', client: 'acme-b0b0b0b0', generation: 8, sent: clocks(NOW - 200) } }))).toEqual({ do: 'follow' });
+    /* Free at 8 and last registered by B's client: B took it and let it go. Until B says what it does, this keeper
+       waits; a beat of B's that says it leads makes it follow, and one that says it follows lets it come back in. */
+    const lastB = { state: 'empty' as const, client: 'acme-b0b0b0b0', generation: 8, sent: clocks(NOW - 200) };
+    expect(nextEntryStep(entry({ route: lastB }))).toEqual({ do: 'wait', why: 'the machine that took the name last' });
+    expect(nextEntryStep(entry({ route: lastB, latest: { number: 8, machine: B, split: false } }))).toEqual({ do: 'follow' });
+    expect(nextEntryStep(entry({ route: lastB, gaveUp: true, b: promised, flag: true }))).toEqual({ do: 'take', sent: clocks(NOW - 600), term: NEXT });
   });
 });

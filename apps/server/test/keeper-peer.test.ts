@@ -586,6 +586,20 @@ describe('the peer link in the keeper', () => {
     expect([keeper.linkWanted(), p.did]).toEqual([true, []]);
   });
 
+  it('holds no name before it knows whether its lease takes a proof', async () => {
+    const c = await company();
+    const now = fastClock();
+    const said = { needed: true, link: 'silent' as 'self' | 'other' | 'silent', name: { state: 'empty', client: OWN_CLIENT, generation: 7 } as Name };
+    const p = proving(now, said);
+    /* Its database cannot be asked yet, as while it recovers: whether another machine holds a finished copy is not known. */
+    p.proofs.needed = async () => Promise.reject(new Error('the database is starting up'));
+    const lease = fakeLease();
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    /* It takes no lease on a guess, and its link's client does not run either: a keeper with no lease holds no name. */
+    expect([lease.calls.filter(call => call.method === 'take'), keeper.linkWanted(), keeper.mode()]).toEqual([[], false, 'read']);
+  });
+
   /* The leader's Postgres as far as the sync controller asks it, with one copy listed or none. */
   function syncCatalog(copy: { machine: string; networkId: string } | null) {
     const state = { setting: null as string | null, pulses: 0, listed: copy !== null };

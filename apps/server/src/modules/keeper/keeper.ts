@@ -22,7 +22,7 @@ import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
 import { Beats, type Beat } from './beats.js';
 import { Reentry } from './entry.js';
-import { LeaseProofs, PROMISE_PATH } from './proofs.js';
+import { LeaseProofs } from './proofs.js';
 import type { Poll } from './takeover-step.js';
 import { LeaseHolder } from './lease-holder.js';
 import type { BundleSecrets } from '../backups/bundle.js';
@@ -295,6 +295,8 @@ export class Keeper {
   private neededNow: boolean | null;
   /* The way back to leading wants the link's client to run, to take the company's name. */
   private entryTunnel = false;
+  /* The generation of the company's name at which this keeper's own client last held it. */
+  private heldGeneration: number | null = null;
   private proofsTimer: NodeJS.Timeout | null = null;
   /* The front door, and where it listens, so that a switch may shut it and open it again. */
   private frontDoor: http.Server | null = null;
@@ -383,7 +385,7 @@ export class Keeper {
           ownTerm: proofs.ownTerm,
           beats: this.beating,
           b: () => this.recordNamed(),
-          ask: (networkId, term) => this.links?.ask(networkId, 'POST', PROMISE_PATH, { term }, PROMISE_ASK_MS) ?? Promise.resolve(null),
+          ask: (networkId, term) => this.links?.ask(networkId, 'POST', PEER_PATHS.promise, { term }, PROMISE_ASK_MS) ?? Promise.resolve(null),
           poll: async () => {
             const link = this.ownLink();
             return link ? proofs.poll(link) : null;
@@ -391,6 +393,10 @@ export class Keeper {
           client: () => this.ownLink()?.client ?? null,
           tunnel: { start: () => void (this.entryTunnel = true), stop: () => void (this.entryTunnel = false), runs: () => this.entryTunnel },
           flag: () => (this.sync ? this.sync.flag() !== null : true),
+          clientOf: networkId => {
+            const link = this.ownLink();
+            return link ? linkClientId(link.name, networkId) : null;
+          },
           follow: proofs.follow,
           now: opts.now,
           log: opts.log,
@@ -485,7 +491,12 @@ export class Keeper {
      the route at; none while it names none, or was stored at another generation. */
   private syncNamed(): string | null {
     const record = this.sync?.record();
-    return record?.state === 'on' && record.copy && record.generation === this.sync?.generation() ? record.copy : null;
+    /* The generation this keeper's own client last held the name at. A relay that cannot be asked now says nothing
+       new of it: the record this keeper stored at that generation is still its own word, so the copy it names can
+       vouch for the lease exactly while hornhoof.org is out of reach. */
+    const generation = this.sync?.generation();
+    if (generation !== null && generation !== undefined) this.heldGeneration = generation;
+    return record?.state === 'on' && record.copy && record.generation === this.heldGeneration ? record.copy : null;
   }
 
   /* The copy the relay's record names as the one that holds every change, whichever generation it was stored at: the
@@ -500,7 +511,10 @@ export class Keeper {
      while after a lease ended with another machine listed. */
   linkWanted(): boolean {
     if (this.linkHeld) return false;
-    if (this.neededNow) return this.holder.standing() !== null || this.entryTunnel;
+    /* A keeper that is taking the server over registers the name as its taking part says. */
+    if (this.taking) return true;
+    /* Not known yet counts as needed: no name is taken on a guess. */
+    if (this.neededNow !== false) return this.holder.standing() !== null || this.entryTunnel;
     return performance.now() >= this.linkPausedUntil;
   }
 

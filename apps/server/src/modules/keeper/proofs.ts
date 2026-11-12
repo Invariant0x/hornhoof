@@ -10,7 +10,6 @@ import { above } from './takeover-step.js';
    follows it. With neither for ten seconds its lease lapses, and with a sign that another machine leads it ends at
    once. */
 
-export const PROMISE_PATH = '/peer/promise';
 const EVERY_MS = 1000;
 const PROBE_MS = 2000;
 /* The copy states of a machine whose copy finished at least once. */
@@ -20,6 +19,9 @@ const FINISHED = ['ready', 'remaking', 'stopped', 'saving'];
    newest handover names as the leader before: that one holds a database that led. Until then a machine leads as one
    that keeps the data alone does, with no proof. */
 export async function othersFinished(sql: Sql, networkId: string): Promise<boolean> {
+  /* A database of the build before the network has no copies to speak of, and none of the tables this asks. */
+  const [known] = (await sql.query<{ there: boolean }>(HAS_COPIES)).rows;
+  if (!known?.there) return false;
   const { rows } = await sql.query<{ there: boolean }>(
     `SELECT EXISTS (
        SELECT FROM machines m
@@ -30,6 +32,10 @@ export async function othersFinished(sql: Sql, networkId: string): Promise<boole
   );
   return rows[0]?.there === true;
 }
+
+/* Whether this database knows of copies and handovers at all. */
+const HAS_COPIES = `SELECT to_regclass('net.handovers') IS NOT NULL
+  AND (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name IN ('role', 'copy_state', 'network_id', 'revoked_at')) = 4 AS there`;
 
 const sameTerm = (a: Term | null, b: Term | null): boolean => a !== null && b !== null && a.number === b.number && a.machine === b.machine && a.split === b.split;
 const newer = (a: Clocks | null, b: Clocks | null): Clocks | null => (a && (!b || a.mono >= b.mono) ? a : b);

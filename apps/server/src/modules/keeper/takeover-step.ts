@@ -96,13 +96,14 @@ export function nextWatchStep(s: WatchSample, asked: boolean): { action: WatchAc
    answered and its newest answer. asked: when this keeper last asked b for its promise. route: the last known answer
    about the company's name, its client the maker of its generation, held or empty. registering: the generation it
    saw when it started its own registration. client: its own link client's id. tunnel: its link client runs. flag:
-   its sync controller has a flag to lead under. */
+   its sync controller has a flag to lead under. gaveUp: the machine whose client registered the name last says now,
+   in a beat, that it follows: it took the name and gave the server up. */
 export type EntrySample = {
   now: Clocks; needed: boolean; self: string; ownTerm: Term | null; latest: Term | null;
   b: { networkId: string; answered: number | null; answer: { stance: Stance; sent: Clocks } | null } | null;
   asked: number | null; window: Window;
   route: { state: 'held' | 'empty'; client: string | null; generation: number; sent: Clocks } | null;
-  registering: number | null; client: string; tunnel: boolean; flag: boolean;
+  registering: number | null; client: string; tunnel: boolean; flag: boolean; gaveUp: boolean;
 };
 export type EntryAction =
   | { do: 'wait'; why: string } | { do: 'take'; sent: Clocks; term: Term } | { do: 'ask'; term: Term }
@@ -113,17 +114,23 @@ export function above(a: Term, b: Term | null): boolean {
   return b === null || a.number > b.number || (a.number === b.number && a.machine > b.machine);
 }
 
-/* How a keeper that led and holds no lease comes back in. It follows as soon as anything says another machine led
-   since. With its copy answering, it leads again only on that copy's promise of the next term; with the copy silent,
-   only through the relay's window, on a registration of its own at exactly the generation after the one it saw: its
-   own name at any later generation proves nothing, since another machine may have registered between. */
+/* How a keeper that led and holds no lease comes back in. It follows as soon as a machine says it leads under a
+   higher term, or another machine's client holds the company's name. A name that is free and was registered last by
+   another machine says nothing of who leads: that machine may lead with its client down for a moment, or may have
+   given the server up. Until it says which, this keeper neither follows nor leads; once it says it follows, the name
+   counts as free again. With its copy answering, the keeper leads again only on that copy's promise of the next term;
+   with the copy silent, only through the relay's window, on a registration of its own at exactly the generation after
+   the one it saw: its own name at any later generation proves nothing, since another machine may have registered
+   between. */
 export function nextEntryStep(s: EntrySample): EntryAction {
   const next: Term = { number: Math.max(s.ownTerm?.number ?? 0, s.latest?.number ?? 0) + 1, machine: s.self, split: false };
   if (!s.needed) return { do: 'take', sent: s.now, term: next };
   if (s.latest && s.latest.machine !== s.self && above(s.latest, s.ownTerm)) return { do: 'follow' };
-  if (s.route && s.route.client !== null && s.route.client !== s.client) return { do: 'follow' };
+  const theirs = s.route !== null && s.route.client !== null && s.route.client !== s.client;
+  if (theirs && s.route!.state === 'held') return { do: 'follow' };
   const said = s.b?.answer ?? null;
   if (said?.stance.kind === 'lead') return { do: 'follow' };
+  if (theirs && !s.gaveUp) return { do: 'wait', why: 'the machine that took the name last' };
   const fresh = said && withinLease(said.sent, s.now) ? said : null;
   const promised = fresh?.stance.kind === 'follow' ? fresh.stance.term : null;
   const grant = promised && promised.machine === s.self && !promised.split && above(promised, s.ownTerm) ? promised : null;
@@ -141,7 +148,7 @@ export function nextEntryStep(s: EntrySample): EntryAction {
   if (s.b && s.b.answered !== null && s.now.mono - s.b.answered < UNREACHED_MS) {
     return s.asked === null || s.now.mono - s.asked >= ASK_AGAIN_MS ? { do: 'ask', term: next } : { do: 'wait', why: 'asked B' };
   }
-  const free = s.route?.state === 'empty' && s.route.client === s.client;
+  const free = s.route?.state === 'empty' && (s.route.client === s.client || (theirs && s.gaveUp));
   if (free && windowOpenMs(s.window, s.now.mono) >= EMPTY_MS && relayBackMs(s.window, s.now.mono) >= RELAY_BACK_MS) return { do: 'register', generation: s.route!.generation };
   return { do: 'wait', why: "the relay's window" };
 }

@@ -20,6 +20,10 @@ import { above, nextWatchStep, nextWindow, NO_WINDOW, promiseAnswer, TAKE_MS, ty
 export const FOLLOWED_FILE = 'followed.json';
 const EVERY_MS = 1000;
 const ASK_MS = 2000;
+/* The leader silent this long: from here hornhoof.org and the company's link are asked each second. */
+const ASK_FROM_MS = 3000;
+/* While the leader is heard, hornhoof.org is asked this seldom, only to know when its relay started. */
+const SELDOM_MS = 60_000;
 const Followed = z.object({ term: TermShape });
 
 /* The term this copy follows, as it wrote it down; none when it wrote none, or when the note cannot be read: a copy
@@ -79,7 +83,9 @@ export class Watcher {
   private held = true;
   private generation: number | null = null;
   private record: SyncRecord | null = null;
+  /* When the leader was last heard leading: a beat of it that said so, or a promise this copy gave it. */
   private lastBeat: number | null = null;
+  private polledAt: number | null = null;
   private linkAnswered: number | null = null;
   private syncBeat: number | null = null;
   private asked = false;
@@ -134,7 +140,12 @@ export class Watcher {
     const asked = body !== null && typeof body === 'object' && 'term' in body ? (body as { term: unknown }).term : undefined;
     if (asked === undefined) return { status: 400, body: { ok: false } };
     const answer = promiseAnswer({ asker: from, term: asked, followed: this.term, attempting: this.decided });
-    if (answer.grant) this.follow(answer.grant);
+    if (answer.grant) {
+      this.follow(answer.grant);
+      /* The leader may lead on this promise for a lease's time: it counts as hearing it lead now, so this copy takes
+         nothing over meanwhile. */
+      this.lastBeat = this.clocks().mono;
+    }
     return { status: 200, body: this.opts.beat() };
   }
 
@@ -161,10 +172,19 @@ export class Watcher {
   private async look(): Promise<void> {
     const { opts } = this;
     const leader = opts.leader();
-    const poll = await this.poll();
     const last = leader ? opts.beats.last(leader.networkId) : null;
-    const heardLeader = last !== null && (this.lastBeat === null || last.at > this.lastBeat);
-    if (last) this.lastBeat = last.at;
+    /* Only a beat that says the leader leads, or hands the server over, is the leader leading: a keeper that beats on
+       with no lease, as one whose disk is full, would lead and does not. */
+    const leads = last !== null && (last.beat.stance.kind === 'lead' || last.beat.stance.kind === 'handing');
+    const heardLeader = leads && (this.lastBeat === null || last.at > this.lastBeat);
+    if (heardLeader) this.lastBeat = last.at;
+    /* While the leader is heard nothing of the relay decides anything: it is asked once a minute, to know when it
+       started. Once the leader is silent for a few seconds it is asked each second. */
+    const before = this.clocks().mono;
+    const asking = before - Math.max(this.lastBeat ?? this.started, this.started) >= ASK_FROM_MS;
+    const due = asking || this.polledAt === null || before - this.polledAt >= SELDOM_MS;
+    const poll = due ? await this.poll() : null;
+    if (due) this.polledAt = before;
     this.window = nextWindow(this.window, poll, heardLeader);
     if (poll?.route.known) {
       this.held = poll.route.state === 'held';
@@ -172,7 +192,7 @@ export class Watcher {
       this.record = poll.route.sync;
     }
     if (last && last.beat.stance.kind === 'lead' && last.beat.stance.lease === 'normal' && last.beat.stance.sync === opts.self.networkId) this.syncBeat = Math.max(this.syncBeat ?? -Infinity, last.at);
-    if (leader) void this.probe(leader.networkId);
+    if (leader && asking) void this.probe(leader.networkId);
     const now = this.clocks();
     const sample: WatchSample = {
       now: now.mono, started: this.started, window: this.window, held: this.held, leader: leader?.networkId ?? null, heard: this.lastBeat, linkAnswered: this.linkAnswered,
@@ -187,11 +207,18 @@ export class Watcher {
     if (action.do !== 'take' || !leader) return;
     /* Decided in this same turn, before anything is awaited: from here it promises nothing. */
     this.decided = true;
-    await opts.take({
-      switch: randomUUID(), from: { networkId: leader.networkId }, term: this.highest(leader.networkId), at: now.wall, deadline: now.wall + TAKE_MS, phase: 'go',
-      w: null, copies: null, slots: null, why: null, kind: action.kind,
-      heard: last ? now.wall - (now.mono - last.at) : null, reach: opts.reach(), full: last?.beat.full ?? false, generation: this.generation ?? undefined,
-    });
+    try {
+      await opts.take({
+        switch: randomUUID(), from: { networkId: leader.networkId }, term: this.highest(leader.networkId), at: now.wall, deadline: now.wall + TAKE_MS, phase: 'go',
+        w: null, copies: null, slots: null, why: null, kind: action.kind,
+        heard: this.lastBeat === null ? null : now.wall - (now.mono - this.lastBeat), reach: opts.reach(), full: last?.beat.full ?? false, generation: this.generation ?? undefined,
+      });
+    } catch (err) {
+      /* Nothing was written down: it is not taking the server, and its window starts over. */
+      this.decided = false;
+      this.window = { ...this.window, since: null };
+      throw err;
+    }
   }
 
   /* The route of the company's name and the relay's health, asked at once; none without a link. */

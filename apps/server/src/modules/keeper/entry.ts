@@ -2,7 +2,7 @@ import type { Term } from '../../db/net.js';
 import { parseBeat, type Beats, type Stance } from './beats.js';
 import type { Clocks } from './lease.js';
 import { reasonOf } from './machine-keys.js';
-import { above, nextEntryStep, nextWindow, NO_WINDOW, type EntrySample, type Poll, type Window } from './takeover-step.js';
+import { above, nextEntryStep, nextWindow, NO_WINDOW, UNREACHED_MS, type EntrySample, type Poll, type Window } from './takeover-step.js';
 
 /* How a keeper that would lead and holds no lease comes back in, once another machine holds a copy that finished: it
    never takes a term on its own word. Each second it looks at the company's name at hornhoof.org and at what the
@@ -32,6 +32,8 @@ export type ReentryOptions = {
   tunnel: { start(): void; stop(): void; runs(): boolean };
   /* Whether the sync controller has a flag to lead under. */
   flag: () => boolean;
+  /* The id of the link client of another machine that keeps data, as its keeper makes it; none without a link. */
+  clientOf?: (networkId: string) => string | null;
   /* The keeper follows from here on: it writes down whom, and ends, to start again as one that follows. */
   follow: () => Promise<void>;
   now?: () => Clocks;
@@ -122,6 +124,17 @@ export class Reentry {
     return latest;
   }
 
+  /* Whether the machine whose client registered the name last says, in a beat of the last seconds, that it follows:
+     it took the name and gave the server up. */
+  private gaveUp(route: EntrySample['route'], now: Clocks): boolean {
+    const { clientOf, beats } = this.opts;
+    if (!route?.client || !clientOf) return false;
+    for (const [networkId, heard] of beats.all()) {
+      if (clientOf(networkId) === route.client) return heard.beat.stance.kind === 'follow' && now.mono - heard.at < UNREACHED_MS;
+    }
+    return false;
+  }
+
   /* The copy's newest word: its answer to a beat, or to the ask for its promise. */
   private copy(): EntrySample['b'] {
     const networkId = this.opts.b();
@@ -139,6 +152,9 @@ export class Reentry {
     const poll = client ? await opts.poll() : null;
     this.window = nextWindow(this.window, poll, false);
     if (poll?.route.known) this.route = { state: poll.route.state, client: poll.route.client, generation: poll.route.generation, sent: poll.sent };
+    /* A look that does not know its own link client cannot tell its own registration from another machine's: it
+       decides nothing by the name, and what it saw of it before is looked at again once the link is known. */
+    const route = client ? this.route : null;
     if (this.fresh && this.route) {
       /* The registration it just made is the one at the generation the name stands at, when the name is its own. */
       if (this.route.state === 'held' && this.route.client === client) this.registering = this.route.generation - 1;
@@ -148,17 +164,18 @@ export class Reentry {
     const now = this.clocks();
     const step = nextEntryStep({
       now, needed: true, self: opts.self, ownTerm, latest: this.latest(ownTerm), b: this.copy(), asked: this.asked, window: this.window,
-      route: this.route, registering: this.registering, client: client ?? '', tunnel: opts.tunnel.runs(), flag: opts.flag(),
+      route, registering: this.registering, client: client ?? '', tunnel: opts.tunnel.runs(), flag: opts.flag(), gaveUp: this.gaveUp(route, now),
     });
     if (step.do === 'take') return void (this.granted = { sent: step.sent, term: step.term });
     /* What let it lead a look ago lets it lead no more. */
     this.granted = null;
     if (step.do === 'wait') return this.say(`This machine does not lead yet: it waits for ${step.why}.`);
     if (step.do === 'follow') {
-      this.followed = true;
       opts.tunnel.stop();
-      this.say('Another machine leads now, or the name moved on; this machine follows.');
-      return opts.follow();
+      /* Written down first: only then does this keeper stop looking. One that could not write it tries again. */
+      await opts.follow();
+      this.followed = true;
+      return this.say('Another machine leads now, or the name moved on; this machine follows.');
     }
     if (step.do === 'register') {
       this.registering = step.generation;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Term } from '../src/db/net.js';
 import type { Beat, Heard } from '../src/modules/keeper/beats.js';
 import type { Clocks } from '../src/modules/keeper/lease.js';
-import { LeaseProofs, PROMISE_PATH, othersFinished } from '../src/modules/keeper/proofs.js';
+import { LeaseProofs, othersFinished } from '../src/modules/keeper/proofs.js';
 import { createTestSql, ownDatabases } from './helpers.js';
 
 /* One test writes machines and handovers with nothing behind them, which a truncate does not undo. */
@@ -44,7 +44,7 @@ function proofs() {
 describe('the proofs a leader keeps its lease by', () => {
   it('proves by the link', async () => {
     const p = proofs();
-    expect([PROMISE_PATH, p.it.proof(), p.it.ended()]).toEqual(['/peer/promise', null, null]);
+    expect([p.it.proof(), p.it.ended()]).toEqual([null, null]);
     await p.it.tick();
     /* This machine answered its own nonce: the name led here when the question went out. */
     expect(p.it.proof()).toEqual(clocks(1000));
@@ -158,7 +158,16 @@ describe('whether a lease takes a proof', () => {
     await sql.query(`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, kind) VALUES (gen_random_uuid(), $1, 7, $2, '0/1', $3, now(), 'takeover')`, [other, B, own]);
     expect(await othersFinished(sql, A)).toBe(true);
     /* Only the newest one counts. */
+    const older = sql;
     await sql.query(`INSERT INTO net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at) VALUES (gen_random_uuid(), $1, 8, $2, '0/2', $3, now() + interval '1 minute')`, [own, A, other]);
     expect(await othersFinished(sql, A)).toBe(false);
+    /* A database of the build before the network knows no copies and no handovers: there a lease takes no proof. */
+    await row(other, B, { copy: 'ready' });
+    expect(await othersFinished(older, A)).toBe(true);
+    await older.query('ALTER TABLE net.handovers RENAME TO handovers_of_later');
+    expect(await othersFinished(older, A)).toBe(false);
+    await older.query('ALTER TABLE net.handovers_of_later RENAME TO handovers');
+    await older.query('ALTER TABLE machines RENAME COLUMN copy_state TO copy_state_of_later');
+    expect(await othersFinished(older, A)).toBe(false);
   });
 });

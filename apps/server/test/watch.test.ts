@@ -23,6 +23,8 @@ const on = (copy: string, generation = 7): SyncRecord => ({ state: 'on', copy, e
 function watching(script: {
   beats?: (t: number) => boolean; route?: (t: number) => { state: 'held' | 'empty'; generation: number }; record?: (t: number) => SyncRecord;
   up?: (t: number) => boolean; holds?: boolean; ready?: boolean; lost?: boolean; followed?: Term | null; onTake?: (w: Watcher) => void;
+  /* From that second on the leader's keeper beats on with no lease, and says its disk is full. */
+  idleFrom?: number;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-watch-'));
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -30,6 +32,8 @@ function watching(script: {
   const said = { t: -301 };
   const lasts = new Map<string, Heard>();
   const takes: { at: number; taking: Taking }[] = [];
+  const polls: number[] = [];
+  const probes: number[] = [];
   const asks: { at: number; on: boolean }[] = [];
   const lines: string[] = [];
   const leads: Beat = { machine: A, host: 'debian', stance: { kind: 'lead', term: TERM, lease: 'normal', sync: B, until: 0 }, number: 1, reach: null, ready: true, full: false };
@@ -39,12 +43,13 @@ function watching(script: {
     link: () => ({ name: 'acme', key: 'k'.repeat(32) }),
     relay: {
       route: async (): Promise<Route> => {
+        polls.push(said.t);
         const seen = (script.route ?? ((t: number) => ({ state: t >= 25 ? ('empty' as const) : ('held' as const), generation: 7 })))(said.t);
         return { known: true, ...seen, client: null, since: 0, relayStarted: 100, evictionBound: 30, sync: (script.record ?? (() => on(B)))(said.t) };
       },
       health: async () => ({ up: script.up?.(said.t) ?? true, relayStarted: 100 }),
     },
-    probe: async nonce => ((script.beats ?? ((t: number) => t <= 0))(said.t) ? { machine: A, nonce } : null),
+    probe: async nonce => (probes.push(said.t), (script.beats ?? ((t: number) => t <= 0))(said.t) && !(script.idleFrom !== undefined && said.t >= script.idleFrom) ? { machine: A, nonce } : null),
     beats: { last: id => lasts.get(id) ?? null, all: () => lasts },
     beat: own,
     /* Its maker wrote down which machine the copy was made on; the link may name nobody by now. */
@@ -63,13 +68,14 @@ function watching(script: {
   const until = async (second: number) => {
     while (said.t < second) {
       said.t += 1;
-      if ((script.beats ?? ((t: number) => t <= 0))(said.t) && !script.lost) lasts.set(A, { beat: leads, at: said.t * S, sent: null });
+      const idle = script.idleFrom !== undefined && said.t >= script.idleFrom;
+      if ((script.beats ?? ((t: number) => t <= 0))(said.t) && !script.lost) lasts.set(A, { beat: idle ? { ...leads, stance: { kind: 'idle', term: TERM }, full: true } : leads, at: said.t * S, sent: null });
       await it.tick();
       /* The answer of the probe sent in this look is there by the next. */
       await new Promise<void>(resolve => setImmediate(resolve));
     }
   };
-  return { it, dir, said, takes, asks, lines, until, lasts, leads };
+  return { it, dir, said, takes, asks, lines, until, lasts, leads, polls, probes };
 }
 
 describe('the copy that watches the machine it follows', () => {
@@ -110,6 +116,54 @@ describe('the copy that watches the machine it follows', () => {
     const w = watching({ lost: true, beats: () => false, route: () => ({ state: 'held', generation: 7 }) });
     await w.until(120);
     expect([w.takes, w.asks]).toEqual([[], []]);
+  });
+
+  it('takes over from a leader whose keeper beats on without a lease', async () => {
+    /* The leader's disk filled: its lease lapsed and its name went, while its keeper still says each second that it
+       would lead. That is not the leader leading. */
+    const w = watching({ beats: () => true, idleFrom: 1 });
+    await w.until(60);
+    expect(w.takes).toHaveLength(1);
+    expect(w.takes[0]!.at).toBe(37);
+    /* It took over from a leader that said its disk is full, last heard leading at 0. */
+    expect(w.takes[0]!.taking).toMatchObject({ kind: 'takeover', full: true, heard: WALL });
+  });
+
+  it('counts a promise it gave as hearing the leader', async () => {
+    const w = watching({ beats: () => true, idleFrom: 1, route: t => ({ state: t >= 1 ? 'empty' : 'held', generation: 7 }) });
+    await w.until(18);
+    /* The leader asks for the next term a moment before this copy would take over, and gets it: for twenty seconds
+       from then this copy takes nothing, so the lease the leader takes on that promise is never met by a takeover. */
+    expect(w.it.promise(A, { term: { number: 8, machine: A, split: false } })).toMatchObject({ body: { stance: { kind: 'follow', term: { number: 8 } } } });
+    await w.until(37);
+    expect(w.takes).toEqual([]);
+    await w.until(45);
+    expect(w.takes.map(take => take.at)).toEqual([38]);
+  });
+
+  it('tries again when it could not write the takeover down', async () => {
+    let fails = 1;
+    const w = watching({ onTake: () => { if (fails-- > 0) throw new Error('the folder cannot be written'); } });
+    await w.until(60);
+    /* The first try failed: it is not attempting on nothing, and takes over once its checks hold again. */
+    expect(w.takes).toHaveLength(1);
+    expect(w.takes[0]!.at).toBeGreaterThan(37);
+    expect(w.it.attempting()).toBe(true);
+    expect(w.lines.some(line => line.startsWith('The keeper could not watch the machine that leads'))).toBe(true);
+  });
+
+  it('asks hornhoof.org seldom while the leader is heard', async () => {
+    const w = watching({ beats: () => true });
+    await w.until(0);
+    /* Once a minute, to know the relay's start; and nothing through the company's link. */
+    expect(w.polls.length).toBeLessThanOrEqual(6);
+    expect(w.polls.length).toBeGreaterThanOrEqual(4);
+    expect(w.probes).toEqual([]);
+    /* The leader falls silent: within a few seconds it asks each second. */
+    const gone = watching();
+    await gone.until(20);
+    expect(gone.polls.filter(t => t > 4).length).toBe(16);
+    expect(gone.probes.filter(t => t > 4).length).toBeGreaterThanOrEqual(15);
   });
 
   it('watches nothing while a promise holds or its copy is not ready', async () => {

@@ -20,7 +20,7 @@ function keeper() {
   const said = {
     now: 0, needed: true as boolean | null, idle: false, own: TERM as Term | null, b: B as string | null, flag: false, client: CLIENT as string | null, runs: false,
     route: { state: 'held', client: CLIENT, generation: 7 } as { state: 'held' | 'empty'; client: string | null; generation: number } | 'unknown' | 'none',
-    health: { up: true, relayStarted: 100 }, promise: null as Beat['stance'] | 'silent' | null,
+    health: { up: true, relayStarted: 100 }, promise: null as Beat['stance'] | 'silent' | null, followFails: false,
   };
   const answers = new Map<string, Heard>();
   const lasts = new Map<string, Heard>();
@@ -47,7 +47,12 @@ function keeper() {
     client: () => said.client,
     tunnel: { start: () => void ((said.runs = true), did.push('tunnel start')), stop: () => void ((said.runs = false), did.push('tunnel stop')), runs: () => said.runs },
     flag: () => said.flag,
-    follow: async () => void did.push('follow'),
+    follow: async () => {
+      if (said.followFails) throw new Error('the control folder cannot be written');
+      did.push('follow');
+    },
+    /* The link client of a machine, as its id is made: B's is OTHER. */
+    clientOf: networkId => (networkId === B ? OTHER : networkId === A ? CLIENT : null),
     now: () => clocks(said.now),
     log: line => lines.push(line),
   });
@@ -154,7 +159,7 @@ describe('the way back to leading', () => {
 
   it('never comes back in after someone else registered, and follows a newer leader it hears', async () => {
     const taken = keeper();
-    taken.said.route = { state: 'empty', client: OTHER, generation: 8 };
+    taken.said.route = { state: 'held', client: OTHER, generation: 8 };
     taken.said.flag = true;
     await taken.seconds(3);
     expect([taken.did, taken.it.entry()]).toEqual([['tunnel stop', 'follow'], null]);
@@ -186,6 +191,56 @@ describe('the way back to leading', () => {
     await lost.it.promoted();
     await lost.seconds(1);
     expect(lost.did).toEqual(['tunnel start', 'tunnel stop', 'follow']);
+  });
+
+  it('waits on a name another machine took and let go, until that machine says what it does', async () => {
+    const k = keeper();
+    /* B registered the name at 8 and let it go: it may lead with its client down for a moment, or have given up. */
+    k.said.route = { state: 'empty', client: OTHER, generation: 8 };
+    k.said.flag = true;
+    k.said.promise = { kind: 'follow', term: NEXT };
+    k.answered({ kind: 'attempting' });
+    await k.seconds(30);
+    expect([k.did, k.it.entry(), k.asks]).toEqual([[], null, []]);
+    expect(k.lines.at(-1)).toBe('This machine does not lead yet: it waits for the machine that took the name last.');
+    /* B says it follows again: it gave the server up, and this keeper comes back in on B's promise. */
+    k.answered({ kind: 'follow', term: TERM });
+    await k.seconds(1);
+    expect(k.asks).toEqual([NEXT]);
+    await k.seconds(1);
+    expect(k.it.entry()).toMatchObject({ term: NEXT });
+    expect(k.did).toEqual([]);
+  });
+
+  it('decides nothing about the name while it does not know its own link', async () => {
+    const k = keeper();
+    /* A look that saw the name as its own; then the link's settings cannot be read for a while. */
+    k.said.route = { state: 'empty', client: CLIENT, generation: 7 };
+    await k.seconds(2);
+    k.said.client = null;
+    await k.seconds(40);
+    expect([k.did, k.it.entry()]).toEqual([[], null]);
+    /* Its copy's promise needs no link. */
+    k.answered({ kind: 'follow', term: TERM });
+    k.said.promise = { kind: 'follow', term: NEXT };
+    k.said.flag = true;
+    await k.seconds(2);
+    expect(k.it.entry()).toMatchObject({ term: NEXT });
+  });
+
+  it('tries again when it could not write down that it follows', async () => {
+    const k = keeper();
+    k.said.route = { state: 'held', client: OTHER, generation: 8 };
+    k.said.followFails = true;
+    await k.seconds(2);
+    expect(k.did.filter(step => step === 'follow')).toEqual([]);
+    expect(k.lines.some(line => line.startsWith('The keeper could not look for its way back to leading'))).toBe(true);
+    k.said.followFails = false;
+    await k.seconds(1);
+    expect(k.did.filter(step => step === 'follow')).toEqual(['follow']);
+    /* Once it follows, it looks no more. */
+    await k.seconds(3);
+    expect(k.did.filter(step => step === 'follow')).toHaveLength(1);
   });
 
   it('keeps its link client stopped while it waits', async () => {

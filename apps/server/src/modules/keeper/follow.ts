@@ -117,6 +117,8 @@ export class FollowKeeper {
   private wordFails = false;
   private updatingFails = false;
   private lookFails = false;
+  /* It took the go of a switch, or decided to take the server over, as of its last look: what its beats say. */
+  private goingNow = false;
   private stopped = false;
 
   constructor(private readonly opts: FollowKeeperOptions) {
@@ -274,7 +276,7 @@ export class FollowKeeper {
     const own = this.view?.data.find(machine => machine.networkId === machineId);
     const copy = this.maker.report();
     return {
-      machine: machineId, host: own?.hostname ?? '', stance: this.taker.going() ? { kind: 'attempting' } : this.watcher.stance(),
+      machine: machineId, host: own?.hostname ?? '', stance: this.goingNow ? { kind: 'attempting' } : this.watcher.stance(),
       number: own?.number ?? null, reach: copy?.at ?? null, ready: copy?.state === 'ready', full: false,
     };
   }
@@ -366,6 +368,7 @@ export class FollowKeeper {
     const since = taking.heard == null ? 'this keeper started' : new Date(taking.heard).toISOString();
     writeTaking(this.opts.config.dir, { ...taking, from: { ...taking.from, hostname: leader } });
     this.opts.log(taking.kind === 'ceo' ? `Going on from ${taking.reach ?? 'what this copy holds'} as the CEO chose.` : `Taking the server over from ${leader}: it has not answered since ${since}.`);
+    this.goingNow = true;
     await this.taker.takenOver();
   }
 
@@ -408,7 +411,8 @@ export class FollowKeeper {
     await this.taker.tick();
     /* Once it took the go of a switch, its subscription stays stopped and this keeper ends: the copy's maker, which
        starts a stopped subscription again, takes no step. */
-    if (this.taker.going()) return;
+    this.goingNow = this.taker.going();
+    if (this.goingNow) return;
     await this.maker.tick(this.view?.copy ?? null);
     /* While the leader updates, an app that reads says so; one with no copy to read stays off. */
     const mode = this.maker.mode();

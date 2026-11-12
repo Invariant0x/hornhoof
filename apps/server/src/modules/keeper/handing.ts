@@ -1,10 +1,10 @@
-import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Term } from '../../db/net.js';
 import { claimMove } from '../copies/move.js';
 import type { SyncRecord } from '../link/relay.js';
-import { REPLICA_FILE } from './become.js';
+import { writeReplicaMarker } from './become.js';
 import { COPY_STATE } from './copy.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf, writePrivately } from './machine-keys.js';
@@ -368,10 +368,7 @@ export class Hander {
     await dropSlots(opts.sql);
     writePrivately(join(opts.dir, PEERS_FILE), JSON.stringify(await seedView(opts.sql, opts.machine.networkId, opts.secret)));
     writePrivately(join(opts.dir, COPY_STATE), JSON.stringify({ attempt: Number(/_(\d+)$/.exec(handing.slot)?.[1] ?? 1), database: FOLLOW_DB, phase: 'join', slot: handing.slot, leader: handing.to.networkId }));
-    const marker = join(opts.controlDir, REPLICA_FILE);
-    writeFileSync(`${marker}.${process.pid}.tmp`, JSON.stringify({ since: new Date(this.now()).toISOString() }));
-    chmodSync(`${marker}.${process.pid}.tmp`, 0o644);
-    renameSync(`${marker}.${process.pid}.tmp`, marker);
+    writeReplicaMarker(opts.controlDir, this.now());
     this.forget();
     this.done = true;
     opts.log(`${handing.to.hostname || 'The other machine'} leads now; this machine keeps a copy.`);

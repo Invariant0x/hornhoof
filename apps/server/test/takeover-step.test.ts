@@ -107,7 +107,7 @@ describe('the copy that watches the leader', () => {
 const T = clocks(NOW);
 /* A keeper that led under (7, A), holds no lease, and has nothing to go by yet. */
 const entry = (over: Partial<EntrySample> = {}): EntrySample => ({
-  now: T, needed: true, self: A, ownTerm: term(7), latest: term(7), b: null, asked: null, window: NO_WINDOW, route: null, registering: null, client: OWN_CLIENT, tunnel: false, flag: false, ...over,
+  now: T, needed: true, self: A, ownTerm: term(7), latest: term(7), b: null, asked: null, window: NO_WINDOW, route: null, registering: null, client: OWN_CLIENT, tunnel: false, flag: false, gaveUp: false, ...over,
 });
 const answered = (stance: EntrySample['b'] extends infer X ? (X extends { answer: infer Y } ? (Y extends { stance: infer S } ? S : never) : never) : never, sentAgo = 500, heardAgo = 400): NonNullable<EntrySample['b']> => ({
   networkId: B, answered: NOW - heardAgo, answer: { stance, sent: clocks(NOW - sentAgo) },
@@ -127,8 +127,20 @@ describe('the keeper that led and comes back in', () => {
     /* Another machine led since: it follows. */
     expect(nextEntryStep(entry({ latest: term(8, B) }))).toEqual({ do: 'follow' });
     expect(nextEntryStep(entry({ latest: term(7, B) }))).toEqual({ do: 'follow' });
+    /* Another machine's client holds the name now: that machine is taking the server, or has it. */
     expect(nextEntryStep(entry({ route: held(8, 'acme-b0b0b0b0') }))).toEqual({ do: 'follow' });
-    expect(nextEntryStep(entry({ route: empty(8, 'acme-b0b0b0b0') }))).toEqual({ do: 'follow' });
+    /* The name is free and another machine registered it last. That alone says nothing of who leads: that machine may
+       have given the server up. While it does not say what it does, this keeper neither follows nor leads. */
+    const lastTheirs = empty(8, 'acme-b0b0b0b0');
+    const ripeWindow: Window = { since: NOW - EMPTY_MS, generation: 8, lastSent: NOW - 1000, relayStarted: 100, relaySeen: NOW - RELAY_BACK_MS };
+    expect(nextEntryStep(entry({ route: lastTheirs, window: ripeWindow, flag: true, b: answered({ kind: 'follow', term: NEXT }) }))).toEqual({ do: 'wait', why: 'the machine that took the name last' });
+    expect(nextEntryStep(entry({ route: lastTheirs, window: ripeWindow }))).toEqual({ do: 'wait', why: 'the machine that took the name last' });
+    /* Once that machine says it follows, it gave the server up: the name counts as free for this keeper again. */
+    expect(nextEntryStep(entry({ route: lastTheirs, gaveUp: true, flag: true, b: answered({ kind: 'follow', term: NEXT }) }))).toEqual({ do: 'take', sent: clocks(NOW - 500), term: NEXT });
+    expect(nextEntryStep(entry({ route: lastTheirs, gaveUp: true, window: ripeWindow }))).toEqual({ do: 'register', generation: 8 });
+    expect(nextEntryStep(entry({ route: lastTheirs, gaveUp: true, window: { ...ripeWindow, since: NOW - EMPTY_MS + 1 } }))).toEqual({ do: 'wait', why: "the relay's window" });
+    /* A name another machine holds is followed whatever else is said. */
+    expect(nextEntryStep(entry({ route: held(8, 'acme-b0b0b0b0'), gaveUp: true }))).toEqual({ do: 'follow' });
     expect(nextEntryStep(entry({ b: answered({ kind: 'lead', term: term(8, B), lease: 'normal', sync: null, until: 0 }) }))).toEqual({ do: 'follow' });
     /* Also on an answer that is old by now: B led at some time. */
     expect(nextEntryStep(entry({ b: answered({ kind: 'lead', term: term(8, B), lease: 'normal', sync: null, until: 0 }, 60_000, 60_000) }))).toEqual({ do: 'follow' });
