@@ -3,7 +3,7 @@ import { withNamedKeys } from './apply.js';
 import { factsOf, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
-import { backupsOf, horizonOf, journalIds, journalRows, keyText, netTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
+import { backupsOf, parkedOf, horizonOf, journalIds, journalRows, keyText, netTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
 import { ruleOf } from './rules.js';
 import type { MergeSource } from './source.js';
 
@@ -98,6 +98,9 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
   /* Every bundle the source knew of and every conflict it left open is on the leader. */
   const held = new Set((await backupsOf(q)).map(row => String(row.id)));
   for (const backup of await backupsOf(src)) if (!held.has(String(backup.id))) missing.push({ table: 'net.backups', key: { id: backup.id } });
+  /* And everything nodes told the source of jobs it had no row of. */
+  const parked = new Set((await parkedOf(q)).map(row => String(row.id)));
+  for (const row of await parkedOf(src)) if (!parked.has(String(row.id))) missing.push({ table: 'net.parked', key: { id: row.id } });
   for (const conflict of await openConflicts(src)) {
     const first = conflict.carried ?? conflict.id;
     const [there] = await q('SELECT 1 AS found FROM net.merge_conflicts WHERE id = $1::uuid OR carried = $1::uuid LIMIT 1', [first]);

@@ -25,6 +25,7 @@ import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
+import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
@@ -215,8 +216,50 @@ async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Da
   if (msg.type === 'agent.input_left') await keepLeftInput(ctx, id, msg);
 }
 
+/* What a node says of one job that may be kept until the job's row is there, and as which kind it is kept. A word that
+   the agent did not hear names a job too, but needs only the agent and its node, so it is never kept. */
+const PARKED_AS: Partial<Record<NodeMessage['type'], ParkedKind>> = { 'job.started': 'started', 'job.event': 'event', 'job.done': 'done', 'agent.restarted': 'event' };
+
+/* While the database of a machine the server was taken from waits to be merged, what a node says of a job this
+   Hornhoof has no row of is kept, and the node is answered as if it was handled: the job runs on, and its row comes
+   with the merge. True when the message was kept. */
+async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
+  const kind = PARKED_AS[msg.type];
+  const jobId = msg.type === 'job.started' || msg.type === 'job.event' || msg.type === 'job.done' || msg.type === 'agent.restarted' ? msg.jobId : null;
+  if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
+  const [known] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId));
+  if (known) return false;
+  await park(ctx.db, { jobId, node: id, kind, body: msg });
+  if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
+  return true;
+}
+
+/* What was kept of jobs whose rows are there now is applied as if the node said it now. */
+export const applyParkedMessages = (ctx: Ctx): Promise<number> => applyParked(ctx, (scoped, id, msg) => handleNodeMessage(scoped, id, msg));
+
+/* The jobs a node says it runs, once its own open jobs were settled. Hornhoof ended some while the node was away, with
+   a stop or a removed subscription: the node stops those now. While a merge is pending, a job this Hornhoof has no row
+   of is left running and that the node lists it is kept; and one that waits here in the queue runs on that node from
+   now, so it is never sent out again. */
+async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: Date): Promise<void> {
+  if (!running.length) return;
+  const { db } = ctx;
+  const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
+  const keep = new Set(open.map(j => j.id));
+  const pending = await mergePending(db);
+  const ids = pending ? running.filter(jobId => z.uuid().safeParse(jobId).success) : [];
+  const known = new Set(ids.length ? (await db.select({ id: jobs.id }).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
+  for (const jobId of running) {
+    if (keep.has(jobId)) continue;
+    if (pending && ids.includes(jobId) && !known.has(jobId)) await park(db, { jobId, node: id, kind: 'listed', body: {} });
+    else ctx.hub.send(id, { type: 'job.cancel', jobId });
+  }
+  if (pending) for (const job of open) if (job.status === 'queued') await jobStarted(ctx, id, job.id, now);
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
+  if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
   if (await testNodeMessage(ctx, id, msg)) return;
@@ -257,12 +300,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
-      /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
-      if (msg.running.length) {
-        const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
-        const keep = new Set(open.map(j => j.id));
-        for (const jobId of msg.running) if (!keep.has(jobId)) ctx.hub.send(id, { type: 'job.cancel', jobId });
-      }
+      await settleListed(ctx, id, msg.running, now);
       /* The plan's sign-in sealed to this node, or a word to a node that holds it to seal it for this one. */
       if (id.kind === 'node') await pushCredentials(ctx, id.nodeId, msg.loggedIn);
       await pumpWaiting(ctx);

@@ -189,6 +189,7 @@ export type ErrorReason =
   | 'no_authority'
   | 'not_owner_session'
   | 'question_changed'
+  | 'merge_pending'
   | `bundle_${'format' | 'authority' | 'role' | 'time' | 'signature' | 'company' | 'size' | 'hash' | 'content' | 'key' | 'room' | 'idle'}`
   | 'starting'
   | 'telegram_token'
@@ -270,6 +271,9 @@ function fenceAnswer(err: unknown, req: FastifyRequest, reply: FastifyReply): Fa
 
 /* A refusal as the caller reads it, its status and its body, for an ApiError or input that does not parse; null for any
    other error. */
+/* How many seconds a caller is asked to wait before it tries again, for the refusals that say so. */
+export const retryAfterOf = (err: unknown): string | null => (err instanceof ApiError && err.reason === 'merge_pending' ? '60' : null);
+
 export function refusal(err: unknown): { status: number; body: ReturnType<typeof body> } | null {
   if (err instanceof ApiError) return { status: err.status, body: body(err.code, err.message, err.reason, err.details) };
   if (err instanceof ZodError) {
@@ -284,6 +288,8 @@ const statusOf = (err: FastifyError | Error): number => ('statusCode' in err && 
 
 function errorAnswer(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
   const refused = refusal(err);
+  const wait = retryAfterOf(err);
+  if (wait) reply.header('retry-after', wait);
   if (refused) return reply.status(refused.status).send(refused.body);
   const status = statusOf(err);
   if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));

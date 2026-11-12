@@ -5,13 +5,16 @@ import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { companies, departments, machines, people } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, people, subscriptions } from '../src/db/schema.js';
 import { copyOrder } from '../src/modules/copies/slots.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import * as apply from '../src/modules/merge/apply.js';
 import { fastWay } from '../src/modules/merge/check.js';
 import * as facts from '../src/modules/merge/facts.js';
 import { Merger } from '../src/modules/merge/merger.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { applyParkedMessages } from '../src/modules/nodes/messages.js';
+import { park } from '../src/modules/nodes/parked.js';
 import { MACHINE_SOURCE, type MergeSource } from '../src/modules/merge/source.js';
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
@@ -24,6 +27,8 @@ type MergeRow = { id: string; source: string; label: string; status: string; pat
 const rowsOf = async <T>(db: Db, query: ReturnType<typeof sql>): Promise<T[]> => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
 const NETWORK_ID = `99bb2233aabbccdd${'2'.repeat(48)}`;
 const PORT = 45_678;
+/* The machine id the old leader's own node ran under. */
+const OLD_MACHINE = 'c1d2e3f4'.repeat(4);
 
 /* An app that leads on a company, with a machine that keeps a copy and says an old attempt's database waits on it. The
    old database is a fork of the app's own as it is when the test asks for it. */
@@ -154,6 +159,43 @@ describe("the old database of a copy on another machine", () => {
     expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:led-7`)).toBe(true);
     expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:3`)).toBe(true);
     expect(MACHINE_SOURCE.test(`machine:${s.machine.id}:led-0`)).toBe(false);
+  });
+
+  it('keeps a parked job open, and closes it with what its node said', async () => {
+    const s = await stand();
+    await s.db.update(machines).set({ copyOld: 3, copyOldLed: 7 }).where(eq(machines.id, s.machine.id));
+    const [sub] = await s.db.select().from(subscriptions);
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const NODE = builtinOf(OLD_MACHINE);
+    const ids = { told: randomUUID(), waited: randomUUID(), other: randomUUID() };
+    const job = (id: string, status: 'queued' | 'running') =>
+      ({ id, companyId: s.acme.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation' as const, prompt: 'hi', timeoutMs: 900_000, status, startedAt: status === 'running' ? new Date() : null, builtinMachine: OLD_MACHINE });
+    /* While it led alone, the old leader started two turns and queued one; of the queued one a node told it something
+       while its row was away from it. */
+    const old = await s.copied(async side => {
+      await side.db.insert(jobs).values([job(ids.told, 'running'), job(ids.waited, 'queued'), job(ids.other, 'running')]);
+      await side.client.exec(`INSERT INTO net.parked (job_id, node, kind, body) VALUES ('${ids.waited}', '${JSON.stringify(NODE)}', 'listed', '{}')`);
+    });
+    await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster) VALUES (7, 'copy', 'copy', 'cluster-of-the-copy')`);
+    /* The new leader heard of the first from its node: that it runs, and then how it ended. */
+    await park(s.db, { jobId: ids.told, node: NODE, kind: 'listed', body: {} });
+    vi.spyOn(s.app.ctx.hub, 'send').mockReturnValue(true);
+    await park(s.db, { jobId: ids.told, node: NODE, kind: 'done', body: { type: 'job.done', jobId: ids.told, ok: true, result: 'Done over there.', tail: '', error: null, sessionId: null } });
+    s.door(true);
+    await s.look();
+    expect((await s.merges())[0]).toMatchObject({ source: `machine:${s.machine.id}:led-7`, status: 'merged' });
+    const now = async (id: string) => (await s.db.select().from(jobs).where(eq(jobs.id, id)))[0];
+    /* The one its node told the leader of came running on that node, and what the node said since closed it in the
+       same look. */
+    expect(await now(ids.told)).toMatchObject({ status: 'done', result: 'Done over there.', builtinMachine: OLD_MACHINE });
+    expect(await now(ids.waited)).toMatchObject({ status: 'running', builtinMachine: OLD_MACHINE });
+    expect((await now(ids.waited))!.startedAt).not.toBeNull();
+    /* A turn nobody said anything of ended with the machine that ran it. */
+    expect(await now(ids.other)).toMatchObject({ status: 'failed' });
+    /* What the source kept of the queued one is here too. */
+    const parked = await rowsOf<{ job_id: string; kind: string }>(s.db, sql`SELECT job_id::text AS job_id, kind FROM net.parked ORDER BY at, id`);
+    expect(parked.map(row => [row.job_id, row.kind]).sort()).toEqual([[ids.told, 'done'], [ids.told, 'listed'], [ids.waited, 'listed']].sort());
+    expect(await applyParkedMessages(s.app.ctx)).toBe(0);
   });
 
   it('compares across a restore', async () => {

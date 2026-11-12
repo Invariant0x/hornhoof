@@ -10,6 +10,7 @@ import { replicaPassword } from '../keeper/replica.js';
 import { complete, fastWay } from './check.js';
 import { dropChoice, readChoice, type KeptDatabases } from './kept.js';
 import { queryOf } from './leader.js';
+import { pendingChanged } from '../nodes/parked.js';
 import { KEPT_NAME, MACHINE_SOURCE, MACHINE_SOURCE_SQL, peerSource, setAside, UPLOAD_NAME, type MergeSource } from './source.js';
 import { taskFor } from './task.js';
 import { timeWords } from './words.js';
@@ -217,6 +218,18 @@ export class Merger {
       await this.tasks();
     } catch (err) {
       this.ctx.log.warn({ error: loggable(err) }, 'Could not look at the merges. Trying again in a minute.');
+    }
+    await this.parked();
+  }
+
+  /* What nodes said of jobs whose rows a merge has brought since is applied now: at each look, so also right after a
+     merge ended and at the first look of a machine that just took the server. */
+  private async parked(): Promise<void> {
+    try {
+      pendingChanged(this.ctx.db);
+      await this.ctx.applyParked();
+    } catch (err) {
+      this.ctx.log.warn({ error: loggable(err) }, 'Could not apply what nodes said of jobs while their database was away. Trying again in a minute.');
     }
   }
 

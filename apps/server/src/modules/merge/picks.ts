@@ -1,12 +1,12 @@
 import type { Ctx } from '../../app.js';
 import { orchestratorWrites } from '../../db/agent-sql.js';
 import type { Db } from '../../db/client.js';
-import { ApiError } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { UnitWriter, type Unit } from './apply.js';
 import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
-import { rowsByKeys, type Row } from './read.js';
+import { parkedNodes, parkedOf, rowsByKeys, type Row } from './read.js';
 import { ORCHESTRATORS_TABLES, SOFT_REFS, TABLE_RULES, ceos, ruleOf } from './rules.js';
 import { nameOf, valueWords } from './words.js';
 
@@ -190,6 +190,8 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
     const [company] = await q<{ id: string }>('SELECT id FROM public.companies LIMIT 1');
     /* What a pick wrote woke nobody: the screens read again, and so does what counts the CEO's decisions. */
     if (company) for (const type of ['org', 'requests'] as const) ctx.bus.publish(company.id, type === 'org' ? { type } : { type, spot: { departmentId: null } });
+    /* A pick may have brought the row of a job a node said something of meanwhile: that is applied now. */
+    await ctx.applyParked().catch((err: unknown) => ctx.log.warn({ error: loggable(err) }, 'Could not apply what nodes said of jobs while their database was away. It is tried again in a minute.'));
   }
   return result;
 }
@@ -223,7 +225,8 @@ async function write(q: Query, facts: Facts, group: ConflictRow[], take: 'there'
   const order = new Map(facts.order.map((name, index) => [name, index]));
   const units = (await Promise.all(group.map(conflict => unitOf(q, facts, conflict, take, value)))).filter(unit => unit !== null).sort((a, b) => order.get(a.table)! - order.get(b.table)!);
   const writes = units.filter(unit => unit.op !== 'delete');
-  await writer.begin(writes);
+  /* A job a node still runs, as it said while the job's row was away, comes running. */
+  await writer.begin(writes, parkedNodes(await parkedOf(q)));
   for (const unit of [...writes, ...units.filter(unit => unit.op === 'delete')]) {
     await writer.attempt(unit);
     if (unit.refused) throw new NotTaken(unit.refused);

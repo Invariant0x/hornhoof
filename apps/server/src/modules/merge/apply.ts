@@ -6,7 +6,7 @@ import {
   compareOutcome, cutoffOf, differing, divergence, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
 } from './plan.js';
 import {
-  backupsOf, consumedIds, handoversOf, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
+  backupsOf, consumedIds, handoversOf, parkedNodes, parkedOf, type ParkedNode, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
 } from './read.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ruleOf, type TableRule } from './rules.js';
 import type { MergeSource } from './source.js';
@@ -117,6 +117,8 @@ export class UnitWriter {
   /* The turn open here when a pass begins, and the source's turns that are added closed because of it. */
   private openTurn: string | null = null;
   private closing = new Set<string>();
+  /* The jobs a node said something of while their rows were away, each with the node it runs on: these stay running. */
+  private running = new Map<string, ParkedNode>();
 
   constructor(
     readonly q: Query,
@@ -135,8 +137,9 @@ export class UnitWriter {
     return true;
   }
 
-  /* Before a pass over these units: what is open here now. */
-  async begin(writes: Unit[]): Promise<void> {
+  /* Before a pass over these units: what is open here now. running: the jobs that are left running, with their nodes. */
+  async begin(writes: Unit[], running: Map<string, ParkedNode> = new Map()): Promise<void> {
+    this.running = running;
     const [open] = await this.q<{ id: string }>("SELECT id FROM public.turns WHERE status = 'open' LIMIT 1");
     this.openTurn = open?.id ?? null;
     this.closing = new Set(writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && this.openTurn && unit.x!.status === 'open').map(unit => String(unit.x!.id)));
@@ -211,7 +214,16 @@ export class UnitWriter {
       const [live] = await q(`SELECT 1 AS found FROM public.agents WHERE kind = $2 AND removed_at IS NULL AND id <> $3::uuid AND ${where} LIMIT 1`, [row.kind === 'head' ? row.department_id : row.company_id, row.kind, row.id]);
       if (live) put('kind', 'worker');
     }
-    for (const closing of CLOSING[t.name] ?? []) {
+    /* A job a node still runs, as it told this side while the job's row was away, is added running on that node: what
+       the node said of it since is applied once the row is here. */
+    const runs = t.name === 'jobs' && (row.status === 'queued' || row.status === 'running') ? this.running.get(String(row.id)) : undefined;
+    if (runs) {
+      if (row.status !== 'running') put('status', 'running');
+      if (row.started_at === null || row.started_at === undefined) put('started_at', this.opts.now);
+      if (runs.kind === 'node' && row.node_id !== runs.nodeId) put('node_id', runs.nodeId);
+      if (runs.kind === 'builtin' && row.builtin_machine !== runs.machine) put('builtin_machine', runs.machine);
+    }
+    for (const closing of runs ? [] : (CLOSING[t.name] ?? [])) {
       if (!closing.open.includes((row[closing.column] ?? null) as string | null)) continue;
       put(closing.column, closing.to);
       put(closing.at, this.opts.now);
@@ -587,11 +599,13 @@ class Merge {
       now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare',
       whole: async (t, key) => (await rowsByKeys(this.src, t, [key], undefined, true)).values().next().value ?? null,
     });
+    /* What nodes said of jobs whose rows were away, on either side. */
+    const running = parkedNodes([...(await parkedOf(q)), ...(await parkedOf(this.src))]);
     await q(`SAVEPOINT ${UNITS}`);
     for (let pass = 0; ; pass += 1) {
       if (pass > 0) await q(`ROLLBACK TO SAVEPOINT ${UNITS}`);
       for (const unit of this.units) Object.assign(unit, { done: null, written: null, rewritten: null, matched: null });
-      await writer.begin(writes);
+      await writer.begin(writes, running);
       for (const unit of [...writes, ...deletes]) {
         if (pass === 0) await this.onUnit?.((this.asked += 1));
         if (!unit.refused) await writer.attempt(unit);
@@ -615,8 +629,12 @@ class Merge {
   }
 
   /* A restore of an older bundle then lists, and can check, the bundles made after it, and knows of each planned
-     switch written down after it. A switch between machines this database does not hold stays where it was. */
+     switch written down after it. A switch between machines this database does not hold stays where it was. What
+     nodes told the source of jobs it had no row of comes too, applied or not as the source left it. */
   private async backups(): Promise<void> {
+    for (const parked of await parkedOf(this.src)) {
+      await this.q('INSERT INTO net.parked SELECT * FROM jsonb_populate_record(NULL::net.parked, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(parked)]);
+    }
     for (const backup of await backupsOf(this.src)) {
       await this.q('INSERT INTO net.backups SELECT * FROM jsonb_populate_record(NULL::net.backups, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(backup)]);
     }

@@ -152,6 +152,32 @@ export async function handoversOf(q: Query): Promise<Row[]> {
   return (await q<{ row: Row }>('SELECT to_jsonb(h) AS row FROM net.handovers h ORDER BY h.at, h.id')).map(found => found.row);
 }
 
+/* What nodes said of jobs the side had no row of, oldest first; none on a side from before it kept any. */
+export async function parkedOf(q: Query): Promise<Row[]> {
+  if (!(await has(q, 'parked'))) return [];
+  return (await q<{ row: Row }>('SELECT to_jsonb(p) AS row FROM net.parked p ORDER BY p.at, p.id')).map(found => found.row);
+}
+
+/* Where a job runs that a node said something of while its row was away. */
+export type ParkedNode = { kind: 'node'; nodeId: string } | { kind: 'builtin'; machine: string };
+
+/* The jobs these rows are of, each with the node it runs on: the one that listed it or said it started last, else the
+   one that said anything of it last. rows: oldest first. */
+export function parkedNodes(rows: Row[]): Map<string, ParkedNode> {
+  const found = new Map<string, { node: ParkedNode; sure: boolean }>();
+  for (const row of rows) {
+    const said = row.node as { kind?: unknown; nodeId?: unknown; machine?: unknown } | null;
+    const node: ParkedNode | null =
+      said?.kind === 'node' && typeof said.nodeId === 'string' ? { kind: 'node', nodeId: said.nodeId }
+        : said?.kind === 'builtin' && typeof said.machine === 'string' ? { kind: 'builtin', machine: said.machine } : null;
+    if (!node) continue;
+    const sure = row.kind === 'listed' || row.kind === 'started';
+    const before = found.get(String(row.job_id));
+    if (!before || sure || !before.sure) found.set(String(row.job_id), { node, sure });
+  }
+  return new Map([...found].map(([job, { node }]) => [job, node]));
+}
+
 export async function backupsOf(q: Query): Promise<Row[]> {
   if (!(await has(q, 'backups'))) return [];
   return (await q<{ row: Row }>('SELECT to_jsonb(b) AS row FROM net.backups b ORDER BY b.made_at, b.id')).map(found => found.row);

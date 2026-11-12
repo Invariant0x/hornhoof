@@ -12,6 +12,8 @@ export const CALL_BODY_MAX = 1024 * 1024;
 export const CALL_ANSWER_MAX = 4 * 1024 * 1024;
 export const CALL_LOST = 'Hornhoof did not answer this call in time. It may have run; look at its result before you repeat it.';
 export const CALL_NOT_SENT = 'Hornhoof could not be reached in time, so this call did not run. Try it again shortly.';
+export const CALL_WAITING =
+  'Hornhoof is bringing back work from another machine, so this call did not run. Try it again in a few minutes; if it keeps failing, end your turn with what you have done, and it is kept and applied once that machine is back.';
 
 const EVERY_MS = 500;
 const JSON_TYPE = { 'Content-Type': 'application/json' };
@@ -65,8 +67,9 @@ const reasonOf = ({ body }: Whole): string | undefined => {
 };
 
 /* The app says it is starting, or the keeper held the request and the app never came: the call did not reach the app's
-   work. */
-const neverTaken = (answer: Whole): boolean => answer.status === 503 && reasonOf(answer) === 'starting';
+   work. Nor did one the app refused because the job's row is still on its way from another machine. */
+const waitsForMerge = (answer: Whole): boolean => answer.status === 503 && reasonOf(answer) === 'merge_pending';
+const neverTaken = (answer: Whole): boolean => answer.status === 503 && (reasonOf(answer) === 'starting' || reasonOf(answer) === 'merge_pending');
 
 /* Worth another try: that, or a hop before the app had no answer of its own, as when the app dropped the connection. */
 const passes = (answer: Whole): boolean => answer.status === 502 || neverTaken(answer) || (answer.status === 503 && reasonOf(answer) === undefined);
@@ -120,8 +123,8 @@ function passOn(res: http.ServerResponse, { status, raw, body }: Whole): void {
 }
 
 /* What the agent hears of a call front gave up: a tool's own error, which says whether the call may have run. */
-function gaveUp(id: unknown, mayHaveRun: boolean): Refusal {
-  const text = mayHaveRun ? CALL_LOST : CALL_NOT_SENT;
+function gaveUp(id: unknown, mayHaveRun: boolean, last: Whole | null): Refusal {
+  const text = mayHaveRun ? CALL_LOST : last && waitsForMerge(last) ? CALL_WAITING : CALL_NOT_SENT;
   return { status: 200, headers: JSON_TYPE, body: JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: true } }) };
 }
 
@@ -150,7 +153,7 @@ async function carry(opts: Options, req: http.IncomingMessage, res: http.ServerR
     await pause(everyMs);
   }
   if (res.destroyed) return;
-  if (call) return answer(res, gaveUp(call.id, mayHaveRun));
+  if (call) return answer(res, gaveUp(call.id, mayHaveRun, last));
   if (last) return passOn(res, last);
   answer(res, heldAnswer(req));
 }

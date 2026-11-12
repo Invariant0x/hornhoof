@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { CALL_BODY_MAX, CALL_LOST, CALL_NOT_SENT, frontCalls } from '../src/net/front-calls.js';
+import { CALL_BODY_MAX, CALL_LOST, CALL_NOT_SENT, CALL_WAITING, frontCalls } from '../src/net/front-calls.js';
 import type { Target } from '../src/net/proxy.js';
 
 const INVOCATION = 'x-hornhoof-invocation';
@@ -155,6 +155,15 @@ describe("front's door for tool calls", () => {
     expect(JSON.parse((await post(await doorTo(target, 40), call(9))).body)).toEqual(toolError(9, CALL_NOT_SENT));
     const maybe = await keeperAnswering(refused(502, 'starting'));
     expect(JSON.parse((await post(await doorTo(maybe.target, 40), call(9))).body)).toEqual(toolError(9, CALL_LOST));
+  });
+
+  it('waits out a pending merge', async () => {
+    const { target, seen } = await keeperAnswering(refused(503, 'merge_pending'), ok);
+    expect(JSON.parse((await post(await doorTo(target), call(1))).body)).toEqual(result(1, 'Noted.'));
+    expect(seen).toHaveLength(2);
+    /* The app refused before the tool ran: the agent hears that the call did not run, and what to do about it. */
+    const waiting = await keeperAnswering(refused(503, 'merge_pending'));
+    expect(JSON.parse((await post(await doorTo(waiting.target, 40), call(9))).body)).toEqual(toolError(9, CALL_WAITING));
   });
 
   it('passes every other answer as it came, and tries none of them again', async () => {

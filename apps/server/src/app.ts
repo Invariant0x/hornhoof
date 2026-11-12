@@ -24,7 +24,7 @@ import { outboundRoutes } from './modules/outbound/extension.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { nameBuiltinWork } from './modules/nodes/builtin.js';
-import { handleNodeClose } from './modules/nodes/messages.js';
+import { applyParkedMessages, handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
 import { handleNumbered } from './modules/nodes/numbered.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
@@ -128,6 +128,9 @@ export type Ctx = Deps & {
   agentSqlPending?: boolean;
   /* The network ids of the machines whose database a merge is to read: the keeper opens a door to each. */
   doorsWanted: () => Promise<string[]>;
+  /* Applies what nodes said of jobs whose rows were on a machine the server was taken from, once those rows are
+     here; how many messages it applied. */
+  applyParked: () => Promise<number>;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;
@@ -224,6 +227,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.ranking = new Ranking(ctx);
   ctx.replication = replicationOf(deps.db);
   ctx.doorsWanted = () => ctx.merger.doors();
+  ctx.applyParked = () => applyParkedMessages(ctx);
   ctx.computer = new Computers(ctx);
   ctx.computer.moveLegacy(config.controlDir);
   ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
