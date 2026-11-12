@@ -73,7 +73,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   if (verdict.escalate) {
     const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: verdict.comment.trim() }];
     const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
-    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
+    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, { ...n, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
     return { task: row, wakes };
   }
   if (!verdict.pass) {

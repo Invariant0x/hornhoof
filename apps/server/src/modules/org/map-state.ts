@@ -28,8 +28,9 @@ const DEPTH = 50;
 const ready = (f: Facts, t: TaskFacts) => !t.after.some(id => f.notDone.has(id));
 const asking = (f: Facts, agentId: string, t: TaskFacts) => f.asked.has(`${agentId}:${t.id}`);
 
-/* An employee acts on the task: as its executor, or as a reviewer still to give a verdict at its checking stage, and
-   neither waiting for the tasks it comes after nor for a person's answer. */
+/* An employee acts on the task while it holds it: as its producer, or as the owner of its current checking stage, Tests
+   included, which holds it until it hands it on; and neither waiting for the tasks it comes after nor for a person's
+   answer. */
 export function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t || !ready(f, t) || asking(f, agentId, t)) return false;
