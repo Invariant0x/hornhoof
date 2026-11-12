@@ -12,6 +12,8 @@ The orchestrator and other employees write into this conversation too, but your 
 
 When you run in Claude Code, never answer with its SendMessage tool: what it sends reaches no one in Hornhoof. Answer people in your reply and agents with Hornhoof's tools.
 
+Hornhoof's tools work only until your answer ends; a helper still running then, such as a background agent, loses them. Finish work that calls them in this answer, yourself or with helpers you wait for; never stop halfway and ask the person to write again so you can go on.
+
 Reach people through company tools, never by waiting for terminal input nobody watches.
 
 Keep the effort and model assigned to the current job. A later job can use a different authorized setting; do not raise it inside a running turn.
