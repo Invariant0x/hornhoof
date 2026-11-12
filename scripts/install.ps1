@@ -16,11 +16,16 @@
 # cores and memory, which each node shows next to the share Docker gives it. They go through the environment, so no other
 # program sees them on a command line.
 #
+# The person follows four steps: this script shows the first, the one for Docker Desktop, and install.sh the others. The
+# container has no browser, so install.sh writes each sign-in link to a file in it, and this script opens the link in the
+# browser of Windows.
+#
 # The server fills in its own address and the updater image of its build when it serves this file. It runs in Windows
 # PowerShell 5.1, which every Windows 10 and 11 has, and in PowerShell 7. A failure says why and stops; it ends with exit
-# only a PowerShell started for this command, so a window someone pasted irm | iex into stays open.
+# only a PowerShell started for this command, so a window someone pasted irm | iex into stays open. A window that would
+# close as this ends, as one started from Win+R, waits for Enter first, so the person reads how it went.
 
-function Install-Hornhoof([string[]]$Words) {
+function Install-Hornhoof([string[]]$Words, $Console) {
   $ErrorActionPreference = 'Stop'
   $server = '__HORNHOOF_SERVER__'
   $helper = '__HORNHOOF_UPDATER_IMAGE__'
@@ -33,6 +38,18 @@ function Install-Hornhoof([string[]]$Words) {
     'exec bash $f $@'
 
   function Say([string]$Text) { Write-Host $Text }
+
+  # A line a person finds the run by, in color: the start of a step, or what they have to do now.
+  function Show-Line([string]$Text, [string]$Color) {
+    if ($env:NO_COLOR) { Write-Host $Text } else { Write-Host $Text -ForegroundColor $Color }
+  }
+
+  # docker pull, which shows how far the download is when it writes to the console itself, as it does from a statement
+  # whose output nothing takes. Output that is no console gets none of it.
+  function Get-Image([string]$Image) {
+    $ErrorActionPreference = 'Continue'
+    if ([Console]::IsOutputRedirected) { & docker pull $Image *> $null } else { & docker pull $Image }
+  }
 
   # Whether a docker command succeeds, with what it says dropped. Windows PowerShell turns what a program writes to its
   # error output into errors, which would stop this script, so here they do not.
@@ -168,6 +185,33 @@ function Install-Hornhoof([string[]]$Words) {
     }
   }
 
+  # Beside the run of install.sh, which holds this PowerShell, a second one in this process reads the sign-in link install.sh
+  # writes in the container every second, and opens each new one in the browser of Windows once. The link comes from inside
+  # a node, so only a plain https address opens. docker run with a terminal turns QuickEdit of the console on again, which
+  # the second one turns off again meanwhile. Its docker exec gets no console, so it leaves the one of the run alone. It goes
+  # with the run, or nothing when PowerShell cannot start it.
+  function Start-Watcher([string]$Container) {
+    $watch = {
+      param([string]$Container, $Console)
+      $opened = New-Object Collections.Hashtable
+      for (;;) {
+        Start-Sleep -Seconds 1
+        if ($Console) { try { $null = $Console::QuickEditOff() } catch { } }
+        $url = ($null | & docker exec $Container cat /tmp/hornhoof-open-url 2> $null | Out-String).Trim()
+        if ($url -cmatch '^https://[\x21-\x7e]+$' -and -not $opened.ContainsKey($url)) {
+          $opened[$url] = $true
+          try { Start-Process -FilePath $url } catch { }
+        }
+      }
+    }
+    try {
+      $watcher = [PowerShell]::Create()
+      $null = $watcher.AddScript($watch.ToString()).AddArgument($Container).AddArgument($Console)
+      $null = $watcher.BeginInvoke()
+      $watcher
+    } catch { }
+  }
+
   # The key this computer goes by: made once, 32 hex digits as install.sh makes it, and kept.
   function Get-MachineKey {
     $dir = Join-Path $HOME '.hornhoof'
@@ -215,6 +259,12 @@ function Install-Hornhoof([string[]]$Words) {
   }
 
   $runOnce = 'HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+  # A removal says what it does itself, with no steps.
+  if ($Words -notcontains '--uninstall') {
+    Say ''
+    Show-Line 'Step 1 of 4: Checking this computer' Cyan
+    Say 'Hornhoof runs on this computer in Docker Desktop. This checks that Docker Desktop is here and runs, and installs or starts it when it is not.'
+  }
   Say 'Checking Docker Desktop.'
   $found = Find-Docker
   if (-not ($found -and (Test-Docker info))) {
@@ -239,11 +289,16 @@ function Install-Hornhoof([string[]]$Words) {
         if (-not $found) { Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue }
       }
       if ($ended -eq 100 -or (Test-Restart)) {
+        Say ''
+        Show-Line '======================== Restart needed ========================' Yellow
         if (Set-RunOnce $Words) {
           Say 'Windows needs a restart to finish installing. Restart the computer; when you sign in again, Hornhoof goes on by itself in a PowerShell window.'
+          Say 'To restart, save your open work, then choose Start, Power, Restart. After the restart, leave the Hornhoof window open until it says Done.'
         } else {
           Say 'Windows needs a restart to finish installing. Restart the computer, then run this command again.'
+          Say 'To restart, save your open work, then choose Start, Power, Restart.'
         }
+        Show-Line '================================================================' Yellow
         # The programs above ended as they did; this command ends well.
         $global:LASTEXITCODE = 0
         return
@@ -259,7 +314,8 @@ function Install-Hornhoof([string[]]$Words) {
   }
 
   Say "Getting the Hornhoof installer image $helper."
-  if (-not (Test-Docker pull $helper) -and -not (Test-Docker image inspect $helper)) {
+  Get-Image $helper
+  if ($LASTEXITCODE -ne 0 -and -not (Test-Docker image inspect $helper)) {
     throw "Could not download $helper. Check the internet connection, then run this command again."
   }
 
@@ -267,10 +323,14 @@ function Install-Hornhoof([string[]]$Words) {
   $passed['HORNHOOF_SERVER'] = $server
   $passed['HORNHOOF_HOME'] = '/hornhoof'
   $passed['HORNHOOF_MACHINE'] = Get-MachineKey
+  # install.sh leaves the step done here to this script, and writes each sign-in link to /tmp/hornhoof-open-url.
+  $passed['HORNHOOF_FROM_WINDOWS'] = '1'
+  # The container has a name of its own, by which the watcher below reads that file.
+  $container = 'hornhoof-install-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
   # A terminal that is not a console, as the PowerShell ISE, gets no sign-in here: install.sh then says how to sign in.
   $run = @('run', '--rm', '-i')
   if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) { $run += '-t' }
-  $run += @('--hostname', (Get-ComputerName), '-v', '//var/run/docker.sock:/var/run/docker.sock')
+  $run += @('--name', $container, '--hostname', (Get-ComputerName), '-v', '//var/run/docker.sock:/var/run/docker.sock')
   foreach ($name in $passed.Keys) { $run += @('-e', $name) }
   $run += @('--entrypoint', 'sh', $helper, '-c', $inside, 'install')
   if ($Words) { $run += $Words }
@@ -283,21 +343,82 @@ function Install-Hornhoof([string[]]$Words) {
   $null = Invoke-Reg delete $runOnce /v Hornhoof /f
   # install.sh says why it stops on its error output, which is no error of this script.
   $ErrorActionPreference = 'Continue'
+  $watcher = Start-Watcher $container
   try {
     & docker @run
   } finally {
+    if ($watcher) {
+      $watcher.Stop()
+      $watcher.Dispose()
+    }
     foreach ($name in $before.Keys) { [Environment]::SetEnvironmentVariable($name, $before[$name]) }
   }
 }
 
+# The console window of Windows, which PowerShell has no commands for: its type, or nothing where there is no console, as
+# in the PowerShell ISE, with input from a file, or on another system. A click in a console window with QuickEdit on starts
+# a selection, which holds everything in the window until Esc, so to a person the window looks stuck. With QuickEdit off
+# a click does nothing, and a right-click shows the window's menu, with Paste.
+function Get-HornhoofConsole {
+  if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or [Console]::IsInputRedirected) { return }
+  try {
+    if (-not ('HornhoofInstall.ConsoleWindow' -as [type])) {
+      Add-Type -Namespace HornhoofInstall -Name ConsoleWindow -MemberDefinition @'
+[DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int handle);
+[DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+[DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr handle, uint mode);
+[DllImport("kernel32.dll")] static extern uint GetConsoleProcessList(uint[] list, uint count);
+static long before = -1;
+public static bool QuickEditOff() {
+  uint mode;
+  IntPtr input = GetStdHandle(-10);
+  if (!GetConsoleMode(input, out mode)) return false;
+  if (before < 0) before = mode;
+  return (mode & 0x40) == 0 || SetConsoleMode(input, (mode & ~0x40u) | 0x80u);
+}
+public static void Restore() {
+  if (before >= 0) SetConsoleMode(GetStdHandle(-10), (uint)before | 0x80u);
+  before = -1;
+}
+public static uint Programs() { return GetConsoleProcessList(new uint[8], 8); }
+'@
+    }
+    $console = 'HornhoofInstall.ConsoleWindow' -as [type]
+    if ($console::QuickEditOff()) { $console }
+  } catch { }
+}
+
+# Whether the window closes as this PowerShell ends: it was started for this command alone, as from Win+R, and no other
+# program shares its console. One someone pasted the command into, or one started with -NoExit, stays open.
+function Test-HornhoofWindow($Console) {
+  if (-not $Console) { return $false }
+  $launch = [Environment]::GetCommandLineArgs()
+  if ($launch -contains '-NoExit' -or -not ($launch -contains '-c' -or $launch -contains '-Command')) { return $false }
+  try { $Console::Programs() -eq 1 } catch { $false }
+}
+
 $hornhoofFailed = $false
+$hornhoofConsole = Get-HornhoofConsole
 try {
-  Install-Hornhoof $args
-  # install.sh said what went wrong itself.
-  $hornhoofFailed = $LASTEXITCODE -ne 0
-} catch {
-  Write-Host $_.Exception.Message
-  $hornhoofFailed = $true
+  try {
+    Install-Hornhoof $args $hornhoofConsole
+    # install.sh said what went wrong itself.
+    $hornhoofFailed = $LASTEXITCODE -ne 0
+  } catch {
+    Write-Host $_.Exception.Message
+    $hornhoofFailed = $true
+  }
+  if (Test-HornhoofWindow $hornhoofConsole) {
+    Write-Host ''
+    Write-Host 'Press Enter to close this window.'
+    # Keys pressed while it ran, as an Enter to see whether it still works, would close the window at once.
+    try {
+      while ([Console]::KeyAvailable) { $null = [Console]::ReadKey($true) }
+      $null = [Console]::ReadLine()
+    } catch { }
+  }
+} finally {
+  if ($hornhoofConsole) { try { $hornhoofConsole::Restore() } catch { } }
 }
 $hornhoofLaunch = [Environment]::GetCommandLineArgs()
 if ($hornhoofFailed -and ($hornhoofLaunch -contains '-c' -or $hornhoofLaunch -contains '-Command') -and $hornhoofLaunch -notcontains '-NoExit') { exit 1 }
