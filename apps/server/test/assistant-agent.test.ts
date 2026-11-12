@@ -80,9 +80,11 @@ describe("an assistant's own agent", () => {
     const ava = await assistantOf(c, c.ceo, c.owner.id);
     expect((await me(c, ava.key)).assistant).toMatchObject({ agentId: null, agentReady: false });
     expect((await write(c, ava.key, { text: 'Hello' })).statusCode).toBe(409);
-    expect((await pick(c, c.ceo, ava.id, c.plan)).statusCode).toBe(200);
+    const picked = await pick(c, c.ceo, ava.id, c.plan);
+    expect(picked.statusCode).toBe(200);
     const agent = await ownAgent(c, ava.id);
     expect(agent).toMatchObject({ kind: 'assistant', name: 'Ava', departmentId: null, subscriptionId: c.plan, removedAt: null });
+    expect(picked.json().person.assistant).toMatchObject({ agent: { id: agent.id, plan: c.plan }, skillsUrl: null });
     await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
     expect((await me(c, ava.key)).assistant.agentId).toBe(agent.id);
     const sent = await write(c, ava.key, { text: 'Who writes to me today?' });
