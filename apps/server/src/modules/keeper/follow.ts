@@ -23,6 +23,7 @@ import { ensureReplica, replicaPassword, replicaReady } from './replica.js';
 import type { Taking } from './switch-step.js';
 import { pgSubscription, Taker, writeTaking, type TakerOptions } from './taking.js';
 import { makeQuestion, Recovery, type Question, type RecoveryOptions } from './question.js';
+import { waitForNoCopy } from './promote.js';
 import { writeKeeperState } from './state.js';
 import { CopyUpdating, type CopyUpdatingOptions } from './updating.js';
 import { Watcher, type WatcherOptions } from './watch.js';
@@ -142,6 +143,7 @@ export class FollowKeeper {
   /* It took the go of a switch, or decided to take the server over, as of its last look: what its beats say. */
   private goingNow = false;
   private stopped = false;
+  private waitsForNone = false;
 
   constructor(private readonly opts: FollowKeeperOptions) {
     const { config, log } = opts;
@@ -471,6 +473,15 @@ export class FollowKeeper {
       .finally(() => { this.working = null; });
   }
 
+  /* A database that follows waits for no copy. One that led keeps, in its setting, the name of the copy its commits
+     waited for; nothing clears it when the lease just ends, as on a machine that was cut off, and whatever writes
+     there afterwards, this keeper or its updater, would wait for that copy for good. Done once, when it works. */
+  private async waitForNone(): Promise<void> {
+    if (this.waitsForNone) return;
+    await waitForNoCopy(this.copySql);
+    this.waitsForNone = true;
+  }
+
   private async lookOnce(): Promise<void> {
     /* A machine that stops holding the data makes no copy any more, and its app is off: what it holds is the leader's
        to read, and nobody else's. */
@@ -480,6 +491,7 @@ export class FollowKeeper {
       await this.leaving.step(owed);
       return;
     }
+    await this.waitForNone();
     await this.keepPromise();
     await this.keepLink();
     await this.taker.tick();

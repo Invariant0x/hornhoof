@@ -128,6 +128,29 @@ function askingAt(port: number, certDir: string) {
 }
 
 describe('the keeper of a machine that keeps a copy', () => {
+  it('waits for no copy of its own, as a database that led did', async () => {
+    const c = await company();
+    /* This machine led before, and the name of the copy its commits waited for is still in its database's setting:
+       whatever writes there now, its keeper or its updater, would wait for a copy that follows it no more. */
+    const asked: string[] = [];
+    let names = 'FIRST 1 ("copy_b0b0b0b0b0b0b0b0_1")';
+    const sql = (database: string): Sql & { close(): Promise<void> } => ({
+      query: async <R>(text: string) => {
+        if (text.includes('current_setting')) return { rows: [{ names }] as R[] };
+        if (text.startsWith('ALTER SYSTEM') || text.includes('pg_reload_conf')) asked.push(`${database}: ${text}`);
+        if (text.includes('pg_reload_conf')) names = '';
+        return { rows: [] as R[] };
+      },
+      close: async () => undefined,
+    });
+    await follower(c, { sql });
+    await until(() => asked.length === 2);
+    expect(asked).toEqual(['hornhoof: ALTER SYSTEM RESET synchronous_standby_names', 'hornhoof: SELECT pg_reload_conf()']);
+    /* Once, not at each look. */
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(asked).toHaveLength(2);
+  });
+
   it('opens its door to the other machines by what it kept, with no leader in reach', async () => {
     const c = await company();
     /* The machine that led is gone before this keeper starts, as when the server was handed over and never taken, or
