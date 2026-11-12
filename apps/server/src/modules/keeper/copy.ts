@@ -26,6 +26,8 @@ export const MISSING_VIEWS = 2;
 /* After this many views in a row of a new leader that name no slot for it, a copy is made again from that leader. */
 export const MOVED_VIEWS = 2;
 const ENABLE_EVERY_MS = 60_000;
+/* How often the saver of a database that led is asked to go on. */
+const SAVE_EVERY_MS = 10_000;
 const RETRY_MS = 600_000;
 /* How long the app gets to read that it is off before the databases change places. */
 const OFF_FOR_MS = 2_000;
@@ -38,7 +40,8 @@ export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'd
 
 /* What a copy says of itself in its keeper's report. at: the leader's pulse it holds. name: the name of its
    subscription, its slot on the leader and its connection there. old: the attempt whose database waits to be merged. */
-export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number } | null };
+/* old.led: the number of the term the old database led the company under, when it did. */
+export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
@@ -70,7 +73,7 @@ const Kept = z.object({
   notBefore: z.string().nullable().default(null),
   /* The attempt whose database, the one that is read, waits for the leader to merge it while a new copy is made beside
      it, and the count of migrations that one was made with. */
-  old: z.object({ attempt: z.number().int().min(1), migrations: z.number().int().nullable() }).nullable().default(null),
+  old: z.object({ attempt: z.number().int().min(1), migrations: z.number().int().nullable(), led: z.number().int().min(0).optional() }).nullable().default(null),
   /* Whether the leader listed this attempt's slot once, and how many views in a row have not since. */
   seen: z.boolean().default(false),
   missing: z.number().int().min(0).default(0),
@@ -95,6 +98,10 @@ export type CopyMakerOptions = {
   diskFree: () => number | null;
   /* Whether this machine promised the machine that leads to wait for its update, and the promise holds. */
   updating?: () => boolean;
+  /* What saves a database of this machine that led the company, before its copy is made again: asked every ten
+     seconds until it is done. state: the term the database led under, and why its dump failed when it did. Without
+     it such a database stops the copy, and is never touched. */
+  saver?: { tick(): Promise<void>; done(): boolean; state(): { term: number; failed: string | null } | null; forget(): void };
   log: (line: string) => void;
   now?: () => Date;
   /* Where the copy's database finds the leader's: the keeper's door, unless a test names the leader itself. */
@@ -126,6 +133,7 @@ export class CopyMaker {
   private said: CopyReport;
   private busy = false;
   private disabledSince: number | null = null;
+  private savedAt: number | null = null;
   private enabledAt = 0;
   private failing = false;
   private lastOrder: CopyOrder | null = null;
@@ -310,16 +318,38 @@ export class CopyMaker {
     if (this.kept.phase === 'detach') return this.detach();
     if (this.kept.phase === 'drop') return this.drop();
     const sql = this.on(this.kept.database);
-    if (await this.led(sql)) {
-      this.said = this.stopped('led');
-      return;
-    }
+    if (await this.led(sql)) return this.saveLed();
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
     if (this.kept.phase === 'subscribe') return this.subscribe(sql);
     if (this.kept.phase === 'sync') return this.sync(sql, order);
     return this.ready(sql, order);
+  }
+
+  /* The database led the company and no handover ended that: what it holds is saved first, as a backup of the company
+     the keeper that leads records. Then the copy is made again beside it, and it is read until the new one is whole;
+     it goes only once the leader merged it. With nothing to save it by, the copy stops, and the database stays. */
+  private async saveLed(): Promise<void> {
+    const saver = this.opts.saver;
+    if (!saver) {
+      this.said = this.stopped('led');
+      return;
+    }
+    if (!saver.done()) {
+      const now = this.now();
+      if (this.savedAt === null || now - this.savedAt >= SAVE_EVERY_MS) {
+        this.savedAt = now;
+        await saver.tick();
+      }
+      const failed = saver.state()?.failed ?? null;
+      this.said = failed ? this.stopped(/No space left on device/.test(failed) ? 'disk_full' : 'setup') : { state: 'saving', progress: null, error: null, at: null, name: this.name(), old: null };
+      if (!saver.done()) return;
+    }
+    const led = saver.state()?.term;
+    this.opts.log('What this machine did while it led is saved. Its copy is made again; the database that led is read until the new one is whole.');
+    this.keep({ old: { attempt: this.kept.attempt, migrations: this.kept.migrations, ...(led === undefined ? {} : { led }) }, attempt: this.kept.attempt + 1, database: NEXT_DB, phase: 'detach', migrations: null, notBefore: null, seen: false, missing: 0 });
+    this.disabledSince = null;
   }
 
   /* Whether the database once held a term of the company that did not end in a handover: such a one is never dropped,
@@ -523,8 +553,10 @@ export class CopyMaker {
       this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: null };
       return;
     }
-    this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: { attempt: this.kept.old.attempt } };
-    if (order?.old === 'merged' || order?.old === 'done') {
+    const { led } = this.kept.old;
+    this.said = { state: 'ready', progress: null, error: null, at, name: this.name(), old: { attempt: this.kept.old.attempt, ...(led === undefined ? {} : { led }) } };
+    /* A database that led goes only once its bundle is recorded too. */
+    if ((order?.old === 'merged' || order?.old === 'done') && (led === undefined || this.opts.saver?.done() === true)) {
       const now = new Date(this.now());
       this.keep({ swap: 'off', stamp: stampOf(now), swapAt: now.toISOString() });
     }
@@ -619,7 +651,9 @@ export class CopyMaker {
     if (step === 'drop_db') {
       if (await this.exists(old)) {
         /* A database that once led the company stays, and the copy says so. */
-        if (await this.led(this.on(old))) {
+        /* A database that led goes only as the old one of a remake whose bundle is recorded and whose merge the leader made. */
+        const saved = this.kept.old?.led !== undefined && this.opts.saver?.done() === true;
+        if (!saved && (await this.led(this.on(old)))) {
           this.said = this.stopped('led', this.said.at);
           return;
         }
@@ -630,6 +664,7 @@ export class CopyMaker {
     }
     /* The role's rights are per database, so they are made in full on the one that is read now. */
     await ensureReplica(() => this.opts.db(FIRST_DB), this.opts.password);
+    if (this.kept.old?.led !== undefined) this.opts.saver?.forget();
     this.keep({ swap: null, stamp: null, swapAt: null, old: null, database: FIRST_DB, phase: 'ready' });
   }
 }

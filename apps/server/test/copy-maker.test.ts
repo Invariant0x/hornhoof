@@ -101,9 +101,13 @@ function stand(over: { diskFree?: number } = {}) {
   const c = cluster();
   c.add('hornhoof');
   const state = { now: new Date('2026-11-11T12:00:00Z'), lines: [] as string[], diskFree: over.diskFree ?? 50 * 2 ** 30, updating: false };
+  /* What saves a database that led, as a test plays it: how far it is, and what it was asked. */
+  const saving = { on: false, done: false, failed: null as string | null, ticks: 0, forgot: 0 };
+  const saver = { tick: async () => void (saving.ticks += 1), done: () => saving.done, state: () => ({ term: 7, failed: saving.failed }), forget: () => void (saving.forgot += 1) };
   const maker = () =>
     new CopyMaker({
       admin: c.sqlOn('postgres'), db: c.sqlOn, controlDir, dir, networkId: NETWORK_ID, password: PASSWORD, diskFree: () => state.diskFree, updating: () => state.updating, log: line => state.lines.push(line), now: () => state.now,
+      ...(saving.on ? { saver } : {}),
     });
   const later = (ms: number) => void (state.now = new Date(state.now.getTime() + ms));
   const request = () => (existsSync(join(controlDir, SCHEMA_FILE)) ? (JSON.parse(readFileSync(join(controlDir, SCHEMA_FILE), 'utf8')) as Record<string, unknown>) : null);
@@ -115,7 +119,7 @@ function stand(over: { diskFree?: number } = {}) {
     writeFileSync(join(controlDir, 'schema', `${attempt}.done`), '');
     rmSync(join(controlDir, SCHEMA_FILE), { force: true });
   };
-  return { ...c, controlDir, dir, state, maker, later, request, kept, loaded };
+  return { ...c, controlDir, dir, state, maker, later, request, kept, loaded, saving };
 }
 
 /* Ticks until the copy has reached this phase, a few at most. */
@@ -293,6 +297,62 @@ describe('the maker of a copy', () => {
     expect(s.run.every(line => /: SELECT (to_regclass|EXISTS)/.test(line))).toBe(true);
     expect(s.request()).toBeNull();
     expect(maker.mode()).toBe('off');
+  });
+
+  it('saves a led database before remaking it', async () => {
+    const s = stand();
+    s.saving.on = true;
+    Object.assign(s.databases.get('hornhoof')!, { tables: true, led: true });
+    const maker = s.maker();
+    const from = s.run.length;
+    /* What it did while it led is saved first: nothing of a copy starts, and the saver is asked every ten seconds. */
+    for (let seconds = 0; seconds < 25; seconds++) {
+      await maker.tick(ORDER);
+      s.later(1000);
+    }
+    expect(maker.report()).toEqual({ state: 'saving', progress: null, error: null, at: null, name: NAME, old: null });
+    expect([s.saving.ticks, changes(s, from), s.request(), maker.mode()]).toEqual([3, [], null, 'off']);
+    /* The updater could not dump it: the copy says why, as far as it can tell. */
+    s.saving.failed = 'pg_dump: error: could not write: No space left on device';
+    await maker.tick(ORDER);
+    expect(maker.report()).toMatchObject({ state: 'stopped', error: 'disk_full' });
+    s.saving.failed = 'pg_dump: error: connection refused';
+    await maker.tick(ORDER);
+    expect(maker.report()).toMatchObject({ state: 'stopped', error: 'setup' });
+    s.saving.failed = null;
+    /* Saved: the copy is made again beside the database that led, which is read until the new one is whole. */
+    s.saving.done = true;
+    s.later(10_000);
+    await maker.tick(ORDER);
+    expect(s.kept()).toMatchObject({ attempt: 2, database: 'hornhoof_next', phase: 'detach', old: { attempt: 1, led: 7 } });
+    expect(maker.mode()).toBe('read');
+    await remade(s, maker);
+    await maker.tick({ ...ORDER });
+    expect(maker.report()).toEqual({ state: 'ready', progress: null, error: null, at: '2026-11-11T12:00:30.000Z', name: NEXT, old: { attempt: 1, led: 7 } });
+    expect(s.databases.get('hornhoof')!.led).toBe(true);
+  });
+
+  it('swaps a led database only once its bundle is recorded', async () => {
+    const s = stand();
+    s.saving.on = true;
+    s.saving.done = true;
+    Object.assign(s.databases.get('hornhoof')!, { tables: true, led: true });
+    const maker = s.maker();
+    await maker.tick(ORDER);
+    await remade(s, maker);
+    await maker.tick({ ...ORDER });
+    /* The leader merged what it held, but its bundle is not recorded any more as far as this keeper knows: it stays. */
+    s.saving.done = false;
+    for (let ticks = 0; ticks < 3; ticks++) await maker.tick({ ...ORDER, old: 'merged' });
+    expect([s.kept().swap, s.databases.has('hornhoof_next')]).toEqual([null, true]);
+    s.saving.done = true;
+    await maker.tick({ ...ORDER, old: 'merged' });
+    expect(s.kept()).toMatchObject({ swap: 'off' });
+    s.later(2000);
+    for (let ticks = 0; ticks < 8 && s.kept().swap !== null; ticks++) await maker.tick({ ...ORDER, old: 'merged' });
+    /* The database that led went, with its merge and its bundle behind it, and nothing is left to remember of it. */
+    expect(s.kept()).toMatchObject({ attempt: 2, database: 'hornhoof', phase: 'ready', old: null, swap: null });
+    expect([[...s.databases.keys()], s.databases.get('hornhoof')!.led, s.saving.forgot]).toEqual([['hornhoof'], false, 1]);
   });
 
   it('gives a failed attempt up whole', async () => {
