@@ -23,7 +23,7 @@ const orgOf = (departments: { id: string; name: string }[]): Org => ({
 });
 
 const turn = (number: number, status: TurnView['status'], title: string, goal: string, tasks: TurnView['tasks']): TurnView => ({
-  id: `u${number}`, number, title, goal, status, mode: 'echelons', messages: [], taskId: null, tasks,
+  id: `u${number}`, number, title, goal, status, mode: 'echelons', departmentId: DEV.id, canChangeMode: true, messages: [], taskId: null, tasks,
   startedAt: '2026-10-30T07:00:00.000Z', openedAt: status === 'planned' ? null : '2026-10-30T07:00:00.000Z', closedAt: status === 'closed' ? '2026-10-30T08:00:00.000Z' : null,
 });
 export const TURNS: TurnView[] = [
@@ -78,7 +78,7 @@ export async function serveTasksTable(page: Page, me: Me = ME) {
     const body = request.postDataJSON() as unknown;
     if (path === '/api/me') return route.fulfill({ json: me });
     if (path === '/api/org') return route.fulfill({ json: orgOf(places.departments.map(d => ({ id: d.id, name: d.name! }))) });
-    if (path === '/api/turns') return route.fulfill({ json: { turns: TURNS } });
+    if (path === '/api/turns') return route.fulfill({ json: { turns: TURNS.map(turn => ({ ...turn, canChangeMode: whole })) } });
     if (path === '/api/task-departments') return route.fulfill({ json: places });
     if (path === '/api/tasks' && url.searchParams.get('status') === 'all') {
       const id = url.searchParams.get('department')!;
