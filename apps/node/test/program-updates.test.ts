@@ -117,8 +117,8 @@ describe('node-owned program updates', () => {
     ]);
   });
 
-  /* npm's own words go to the node's log, which hides secrets; the machine's screen only says the update failed. */
-  it("says in the node's log why a program could not be updated", async () => {
+  /* npm's own words go to the machine's output; Hornhoof's screen of the machine only says the update failed. */
+  it("says in the machine's output why a program could not be updated", async () => {
     const lines: string[] = [];
     const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: async () => { throw new Error('npm error code ENOTEMPTY'); } }]);
     await updates.update(() => {}, line => lines.push(line));
