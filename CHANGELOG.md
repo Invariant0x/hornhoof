@@ -19,6 +19,8 @@ branch.
 ### Fixed
 
 - A server that stops no longer waits up to a minute for a connection that never asked anything.
+- A head is no longer woken every quarter of an hour about a quiet department when its work is paused with a reason:
+  a pause explains the quiet whatever the task's status.
 
 ## [0.23.3] - 2026-11-13
 
