@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -144,7 +144,10 @@ describe('Company settings', () => {
     });
     const user = userEvent.setup();
     render(<Settings me={ME} onClose={() => {}} />);
-    await user.click(await screen.findByRole('button', { name: 'Open on the internet' }));
+    /* The button is there before the field has its random name: only then may a person go on. */
+    const open = await screen.findByRole('button', { name: 'Open on the internet' });
+    await waitFor(() => expect(open).toBeEnabled());
+    await user.click(open);
     expect(await screen.findByText('This link is taken already. Pick another name.')).toBeInTheDocument();
   });
 });
