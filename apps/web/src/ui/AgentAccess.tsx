@@ -55,8 +55,9 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
   });
 
   if (access.status === 'denied') return <RouteUnavailable dialog onHome={onClose} />;
-  /* An organization refresh can revoke access. Hide unlisted content until this snapshot is checked; a product's
-     employee may be absent from the department roster and still have an authorized card on the server. */
-  if (!listed(org, agentId) && access.org !== org) return null;
+  /* An organization refresh can revoke access. Hide content the new snapshot drops from the roster until it is checked.
+     A product's employee or a person's own assistant is on no department roster and still has an authorized card on the
+     server: a refresh says nothing new of it, and hiding it would close and build its window again on every one. */
+  if (!listed(org, agentId) && access.org !== org && listed(access.org, agentId)) return null;
   return contentOf(access.status, t, access.failure, children);
 }
