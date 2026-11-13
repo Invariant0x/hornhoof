@@ -35,7 +35,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(labs.getByRole('button', { name: /Gleb/ })).toHaveCount(1);
           await expect(graph.getByRole('button', { name: /#90/ })).not.toHaveCount(0);
           await expect(graph.getByRole('button', { name: /#121/ })).not.toHaveCount(0);
-          await expect(graph.locator('.seg.al').first()).toHaveCSS('stroke', theme === 'light' ? 'rgb(211, 47, 47)' : 'rgb(255, 107, 107)');
+          await expect(graph.locator('.seg.al').first()).toHaveCSS('stroke', theme === 'light' ? 'rgb(198, 40, 40)' : 'rgb(255, 107, 107)');
           expect(await graph.evaluate(svg => [...svg.querySelectorAll<SVGGraphicsElement>('.bdg')].every(b => b.getBBox().x + b.getBBox().width <= (svg as SVGSVGElement).viewBox.baseVal.width))).toBe(true);
           /* Since 0.17.0 a check is a task of its own: its card shows the stage, the stage's owner and the findings, not verdict marks. */
           await expect(graph.locator('.ic-ok')).toHaveCount(0);
@@ -150,7 +150,7 @@ for (const lang of ['en', 'ru'] as const) {
       await page.screenshot({ path: info.outputPath('tree-loading.png') });
       mode = 'empty';
       release();
-      await expect(page.locator('.tv-empty')).toHaveText(lang === 'en' ? 'No turn is open now.' : 'Сейчас нет открытого хода.');
+      await expect(page.locator('.tv-empty')).toHaveText(lang === 'en' ? 'This department runs no turn now.' : 'Сейчас у отдела нет открытого хода.');
       await page.screenshot({ path: info.outputPath('tree-empty.png') });
       mode = 'error';
       const failed = page.waitForResponse(r => r.url().endsWith('/api/departments/d2/tree') && r.status() === 503);
