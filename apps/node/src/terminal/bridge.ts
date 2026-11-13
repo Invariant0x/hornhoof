@@ -253,7 +253,7 @@ export class Bridge {
   /* A call the node cannot answer for Hornhoof with no turn open: a tool call gets words the agent reads, and a program
      turned away as it connects keeps no tools until it starts again. Each refusal goes to the node's log. */
   private noTools(res: ServerResponse, key: string, body: Buffer, asked: number): void {
-    if (asks(body, 'initialize') || asks(body, 'tools/list')) this.refusedAt.set(key, asked);
+    if (JOINING.some(method => asks(body, method))) this.refusedAt.set(key, asked);
     if (noTurn(res, body)) this.refusals.reject(key, messages(body).map(m => String(m?.method)).join(', '), 'no Hornhoof turn is running');
   }
 
@@ -318,8 +318,11 @@ function noTurn(res: ServerResponse, body: Buffer): boolean {
   return true;
 }
 
-/* The messages an MCP client sends while it connects and looks at what the server has. */
-const CONNECTING = new Set(['initialize', 'notifications/initialized', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list']);
+/* The messages an MCP client sends while it connects and looks at what the server has. A newer client, agy 1.4.12 among
+   them, first asks with server/discover and falls back to initialize when the server does not know it. */
+const CONNECTING = new Set(['server/discover', 'initialize', 'notifications/initialized', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list']);
+/* The ones a client that is turned away at them keeps no tools after. */
+const JOINING = ['server/discover', 'initialize', 'tools/list'];
 
 function messages(body: Buffer): { method?: unknown }[] {
   try {

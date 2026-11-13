@@ -236,6 +236,29 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(bridge.toolsRefusedSince('agent-1', since)).toBe(false);
   });
 
+  /* Newer MCP clients, agy 1.4.12 among them, first ask the server what it is with server/discover, and fall back to
+     initialize when the server does not know it. agy asks as it takes a person's words, a moment before the turn opens. */
+  it('lets a program that asks what the server is with server/discover wait for the turn as one that initializes does, and remembers it turned one away', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const discover = () => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' });
+    bridge.waitForTurns('agent-1', NEVER);
+    const waiting = discover();
+    await eventually(() => bridge['waiting'].get('agent-1')?.size === 1);
+    bridge.setToken('agent-1', 'tok-typed');
+    expect((await waiting).status).toBe(200);
+    expect(up.seen[0]).toMatchObject({ auth: 'Bearer tok-typed', body: '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' });
+
+    bridge.setToken('agent-1', null);
+    bridge.waitForTurns('agent-1', 0);
+    const since = Date.now();
+    expect(await (await discover()).json()).toMatchObject({ id: 1, error: { code: -32001 } });
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(true);
+  });
+
   it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});
