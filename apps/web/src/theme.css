@@ -5,7 +5,9 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
-html { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+/* A browser never fakes a weight or a slant a font does not ship: Handjet ships one weight, and drawn over itself, its
+   dots run into blots. Every other font Hornhoof carries ships the weights its text uses. */
+html { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); font-synthesis: none; }
 body {
   margin: 0;
   background: var(--bg);
@@ -318,8 +320,8 @@ select:disabled { opacity: .55; }
   border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; font-size: 13px;
 }
 .menu-link .menu-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+/* An angle quote turns by itself right to left: the browser draws its mirror, so it points to the end of the line. */
 .menu-link .menu-arrow { display: inline-block; }
-[dir='rtl'] .menu-link .menu-arrow { transform: scaleX(-1); }
 .menu-link:hover { border-color: var(--cyan-ink); }
 .menu-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* A person's settings: the sections at the start, 180 px, and the open one beside them; above it when narrow. */

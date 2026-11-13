@@ -330,8 +330,8 @@ test('Pixel writes headings and buttons in Handjet, served by Hornhoof itself in
   expect(await family(dialog.getByRole('heading', { name: words.skins.names.pixel, exact: true }))).toMatch(/^"?Handjet"?,/);
   expect(await family(dialog.getByText(words.skins.desc, { exact: true }))).toMatch(/^"?Onest"?,/);
   expect(await page.evaluate(() => ['Pixel', 'Пиксель'].map(text => document.fonts.check('600 16px "Handjet"', text)))).toEqual([true, true]);
-  expect(fonts.filter(path => path.includes('handjet-cyrillic-600'))).not.toEqual([]);
-  expect(fonts.filter(path => path.includes('handjet-latin-600'))).not.toEqual([]);
+  expect(fonts.filter(path => path.includes('handjet-cyrillic-500'))).not.toEqual([]);
+  expect(fonts.filter(path => path.includes('handjet-latin-500'))).not.toEqual([]);
   /* Twelve corners of two steps against the six of a slant; a ghost button is square. */
   const points = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).clipPath.split(',').length);
   expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(12);
