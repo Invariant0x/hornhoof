@@ -6,24 +6,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
-import { APP, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, killProcessGroup, pidAlive, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
 
 const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
-  } catch {
-    return true;
-  }
-}
 
 function treePids(rootPid: number): number[] {
   const out = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
@@ -37,17 +23,6 @@ function treePids(rootPid: number): number[] {
     for (const child of children.get(all[i]!) ?? []) all.push(child);
   }
   return all;
-}
-
-function forceKillPid(pid: number): void {
-  if (!Number.isInteger(pid) || pid <= 1) return;
-  for (const target of [-pid, pid]) {
-    try {
-      process.kill(target, 'SIGKILL');
-    } catch {
-      /* Process or group is already gone. */
-    }
-  }
 }
 
 /* The orchestrator's commands on the server's computer, while the CEO keeps access to it open. */
@@ -155,7 +130,7 @@ describe('updater, the computer', () => {
     const tempDirs: string[] = [];
 
     afterEach(() => {
-      for (const pid of leakedPids) forceKillPid(pid);
+      for (const pid of leakedPids) killProcessGroup(pid);
       leakedPids.clear();
       for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
     });
@@ -242,7 +217,7 @@ describe('updater, the computer', () => {
         const probeConfig = join(work, 'vitest.probe.config.mjs');
         writeFileSync(
           probeConfig,
-          `export default { root: ${JSON.stringify(REPO_ROOT)}, test: { pool: 'forks', reporters: ['default'], include: ['apps/server/test/updater-computer.test.ts'] } };\n`,
+          `export default { root: ${JSON.stringify(REPO_ROOT)}, test: { pool: 'forks', testTimeout: 20000, reporters: ['default'], include: ['apps/server/test/updater-computer.test.ts'] } };\n`,
         );
         const runner = spawn(
           process.execPath,

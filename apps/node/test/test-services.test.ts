@@ -4,11 +4,21 @@ import { PassThrough } from 'node:stream';
 import { runInNewContext } from 'node:vm';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openServices, prepareServiceArtifacts, type ServiceCommand, type ServiceContext, type ServiceDefinitions, type ServicePrepareContext } from '../src/test-services.js';
+import {
+  openServices as openServiceRun,
+  prepareServiceArtifacts,
+  type OpenedServices,
+  type ServiceArtifacts,
+  type ServiceCommand,
+  type ServiceContext,
+  type ServiceDefinitions,
+  type ServicePartContext,
+  type ServicePrepareContext,
+} from '../src/test-services.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
 const procVisibility = vi.hoisted(() => ({ readable: true, ending: '', reads: 0 }));
@@ -33,7 +43,12 @@ vi.mock('node:fs', async importOriginal => {
 const NEVER = 2_147_483_647;
 const LASTING = { stopMs: NEVER, exitMs: NEVER, cleanupMs: NEVER };
 
+const trackerDir = mkdtempSync(join(tmpdir(), 'hh-services-pids-'));
+const pidLog = join(trackerDir, 'pids');
+const socketLog = join(trackerDir, 'sockets');
+const activeOpened: OpenedServices[] = [];
 const roots: string[] = [];
+let contextController: AbortController | undefined;
 let root: string;
 let bin: string;
 let log: string[];
@@ -44,9 +59,87 @@ const definitions: ServiceDefinitions = {
   prepare: [],
 };
 
+function takeTrackedLines(file: string): string[] {
+  if (!existsSync(file)) return [];
+  const lines = readFileSync(file, 'utf8').split('\n').map(line => line.trim()).filter(Boolean);
+  writeFileSync(file, '');
+  return [...new Set(lines)];
+}
+
+function killServiceProcessGroup(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 1) return;
+  for (const target of [-pid, pid]) {
+    try {
+      process.kill(target, 'SIGKILL');
+    } catch {
+      /* Process or group has already exited. */
+    }
+  }
+}
+
+function killTrackedServicePids(): number[] {
+  const pids = takeTrackedLines(pidLog).map(Number).filter(pid => Number.isInteger(pid) && pid > 1);
+  for (const pid of pids) killServiceProcessGroup(pid);
+  return pids;
+}
+
+function removeTrackedSockets(): void {
+  for (const socket of takeTrackedLines(socketLog)) {
+    if (socket.startsWith('/tmp/hhpg-')) rmSync(socket, { recursive: true, force: true });
+  }
+}
+
+function emergencyServiceCleanup(): void {
+  procVisibility.ending = '';
+  contextController?.abort();
+  killTrackedServicePids();
+  removeTrackedSockets();
+  for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+  rmSync(trackerDir, { recursive: true, force: true });
+}
+
+process.once('exit', () => emergencyServiceCleanup());
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+  process.once(signal, () => {
+    const last = process.listenerCount(signal) === 0;
+    emergencyServiceCleanup();
+    if (last) process.kill(process.pid, signal);
+  });
+}
+
+async function openServices(defs: ServiceDefinitions, artifacts: ServiceArtifacts, partContext: ServicePartContext): Promise<OpenedServices> {
+  const opened = await openServiceRun(defs, artifacts, partContext);
+  if (opened.env.PGHOST?.startsWith('/tmp/hhpg-')) {
+    try {
+      appendFileSync(socketLog, `${opened.env.PGHOST}\n`);
+    } catch {
+      /* Tracker directory may already be removed during process shutdown. */
+    }
+  }
+  const entry: OpenedServices = {
+    env: opened.env,
+    async close() {
+      const index = activeOpened.indexOf(entry);
+      if (index >= 0) activeOpened.splice(index, 1);
+      await opened.close();
+    },
+  };
+  activeOpened.push(entry);
+  return entry;
+}
+
 function executable(name: string, body: string): void {
   const file = join(bin, name);
-  writeFileSync(file, `#!/usr/bin/env node\n${body}\n`);
+  const prelude = [
+    '(()=>{',
+    "const fs=require('node:fs'),a=process.argv;",
+    `try{fs.appendFileSync(${JSON.stringify(pidLog)},process.pid+'\\n');`,
+    "const u=a.find(x=>x.startsWith('unix_socket_directories='))?.slice(24),s=u||process.env.PGHOST;",
+    `if(s&&s.startsWith('/tmp/hhpg-'))fs.appendFileSync(${JSON.stringify(socketLog)},s+'\\n')}catch{}`,
+    `const o=${process.pid};setInterval(()=>{try{process.kill(o,0)}catch(e){if(e&&e.code==='ESRCH')process.exit(1)}},50).unref();`,
+    '})();',
+  ].join('');
+  writeFileSync(file, `#!/usr/bin/env node\n${prelude}\n${body}\n`);
   chmodSync(file, 0o755);
 }
 
@@ -92,11 +185,23 @@ beforeEach(() => {
   log = []; secrets = [];
   const uid = process.getuid!(); const gid = process.getgid!();
   vi.spyOn(process, 'getuid').mockReturnValue(0);
-  context = { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid }, signal: new AbortController().signal,
+  contextController = new AbortController();
+  context = { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid }, signal: contextController.signal,
     deadline: Date.now() + NEVER, graces: LASTING, log: line => log.push(line), registerSecrets: values => secrets.push(...values), postgresBin: bin };
   fakePostgres();
 });
-afterEach(() => { vi.restoreAllMocks(); for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  procVisibility.ending = '';
+  contextController?.abort();
+  const killed = killTrackedServicePids();
+  await Promise.allSettled(activeOpened.splice(0).map(item => item.close()));
+  const more = killTrackedServicePids();
+  await eventually(() => [...killed, ...more].every(pid => !servicePidAlive(pid)));
+  removeTrackedSockets();
+  for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 /* Execute the node's inline guardian as its child process would, with recorded process and /proc boundaries. The timers
    belong to the test's virtual clock; no program starts and no signal reaches the machine. */
@@ -252,22 +357,24 @@ describe('prepared native services', () => {
     const artifacts = await prep();
     expect(existsSync(join(artifacts.paths.pg!, 'postmaster.pid'))).toBe(false);
     const one = await openServices(definitions, artifacts, part('one'));
-    const two = await openServices(definitions, artifacts, part('two'));
     try {
-      expect(one.env.PGHOST).not.toBe(two.env.PGHOST);
-      expect(statSync(one.env.PGHOST!).mode & 0o777).toBe(0o700);
-      expect(one.env.DATABASE_URL).not.toBe(two.env.DATABASE_URL);
-      expect(one.env.DATABASE_URL).toContain('hornhoof');
-      expect(secrets.length).toBeGreaterThanOrEqual(4);
-      const state = join(root, 'runs', 'one', 'state', 'pg');
-      expect(readFileSync(join(state, 'pg_hba.conf'), 'utf8')).toContain('scram-sha-256');
-      expect(readFileSync(join(state, 'pg_hba.conf'), 'utf8')).not.toContain('trust');
-      writeFileSync(join(state, 'PG_VERSION'), 'corrupt');
-      expect(readFileSync(join(artifacts.paths.pg!, 'PG_VERSION'), 'utf8')).toBe('17');
-      const ready = readFileSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'), 'utf8');
-      for (const secret of secrets) { expect(ready).not.toContain(secret); expect(log.join('\n')).not.toContain(secret); }
-    } finally { await Promise.all([one.close(), two.close()]); }
-    await one.close();
+      const two = await openServices(definitions, artifacts, part('two'));
+      try {
+        expect(one.env.PGHOST).not.toBe(two.env.PGHOST);
+        expect(statSync(one.env.PGHOST!).mode & 0o777).toBe(0o700);
+        expect(one.env.DATABASE_URL).not.toBe(two.env.DATABASE_URL);
+        expect(one.env.DATABASE_URL).toContain('hornhoof');
+        expect(secrets.length).toBeGreaterThanOrEqual(4);
+        const state = join(root, 'runs', 'one', 'state', 'pg');
+        expect(readFileSync(join(state, 'pg_hba.conf'), 'utf8')).toContain('scram-sha-256');
+        expect(readFileSync(join(state, 'pg_hba.conf'), 'utf8')).not.toContain('trust');
+        writeFileSync(join(state, 'PG_VERSION'), 'corrupt');
+        expect(readFileSync(join(artifacts.paths.pg!, 'PG_VERSION'), 'utf8')).toBe('17');
+        const ready = readFileSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'), 'utf8');
+        for (const secret of secrets) { expect(ready).not.toContain(secret); expect(log.join('\n')).not.toContain(secret); }
+      } finally { await Promise.all([one.close(), two.close()]); }
+      await one.close();
+    } finally { await one.close(); }
     expect(existsSync(one.env.PGHOST!)).toBe(false);
     expect(existsSync(join(root, 'runs', 'one', 'state', 'pg'))).toBe(false);
   });
@@ -365,10 +472,16 @@ describe('prepared native services', () => {
       const artifacts = await prepared.running;
       expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(true);
       const opened = await openServices(definitions, artifacts, { ...part('one'), graces: undefined, env: env('attempt') });
-      const attempt = await stopping(() => opened.close(), env('attempt').STOP_MARKER);
-      vi.advanceTimersByTime(HOUR);
-      writeFileSync(env('attempt').STOP_RELEASE, '');
-      await attempt.running;
+      try {
+        const attempt = await stopping(() => opened.close(), env('attempt').STOP_MARKER);
+        vi.advanceTimersByTime(HOUR);
+        writeFileSync(env('attempt').STOP_RELEASE, '');
+        await attempt.running;
+      } finally {
+        writeFileSync(env('attempt').STOP_RELEASE, '');
+        vi.useRealTimers();
+        await opened.close();
+      }
     } finally { vi.useRealTimers(); }
     const stop = ['-D', expect.any(String), 'stop', '-m', 'fast', '-W'];
     expect(readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[])).toEqual([stop, stop]);
@@ -440,8 +553,9 @@ describe('managed process services', () => {
     expect(readFileSync(join(artifacts.paths.worker!, 'data', 'stopped'), 'utf8')).toBe('yes');
     expect(existsSync(join(artifacts.paths.worker!, 'undeclared'))).toBe(false);
     const opened = await openServices(defs, artifacts, part('process'));
-    expect(opened.env.HH_SERVICE_STATE).toContain(join('runs', 'process', 'state', 'worker'));
-    await opened.close();
+    try {
+      expect(opened.env.HH_SERVICE_STATE).toContain(join('runs', 'process', 'state', 'worker'));
+    } finally { await opened.close(); }
     expect(existsSync(opened.env.HH_SERVICE_STATE!)).toBe(false);
   });
   it('copies overlapping and repeated declared paths only once', async () => {
@@ -475,11 +589,17 @@ describe('managed process services', () => {
     executable('ready', "const fs=require('node:fs'),p=require('node:path');const marker=process.env.RELEASE?process.env.RELEASE+'.ready':p.join(process.env.HH_SERVICE_STATE,'data','value');setInterval(()=>{if(fs.existsSync(marker))process.exit(0)},5);");
     const artifacts = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'e'.repeat(64) });
     const opened = await openServices(defs, artifacts, { ...part('ending'), env: { RELEASE: release } });
-    procVisibility.ending = '/proc/1/stat';
-    const closed = opened.close().then(() => 'closed', (error: Error) => error.message);
-    await eventually(() => procVisibility.reads > 0);
-    writeFileSync(release, 'yes');
-    expect(await closed).toBe('closed');
+    try {
+      procVisibility.ending = '/proc/1/stat';
+      const closed = opened.close().then(() => 'closed', (error: Error) => error.message);
+      await eventually(() => procVisibility.reads > 0);
+      writeFileSync(release, 'yes');
+      expect(await closed).toBe('closed');
+    } finally {
+      procVisibility.ending = '';
+      writeFileSync(release, 'yes');
+      await opened.close();
+    }
   });
 
   it('stops earlier services when a later readiness command fails', async () => {
@@ -573,6 +693,13 @@ describe('service preparation lock ownership', () => {
     const watcher = watch(root);
     const entered = new Promise<void>(resolve => watcher.on('change', () => { if (existsSync(ctx.env.ENTERED)) resolve(); }));
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: fileURLToPath(new URL('../../..', import.meta.url)), stdio: 'ignore' });
+    if (child.pid) {
+      try {
+        appendFileSync(pidLog, `${child.pid}\n`);
+      } catch {
+        /* Tracker directory may already be removed during process shutdown. */
+      }
+    }
     const ended = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
     try {
       await Promise.race([entered, ended.then(([code, signal]) => { throw new Error(`Owner exited before preparation: ${code ?? signal}`); })]);
@@ -728,8 +855,9 @@ describe('service ownership boundaries', () => {
     const noIsolation = { ...context, nodeOwner: context.jobUser };
     const artifacts = await prepareServiceArtifacts(empty, root, { ...noIsolation, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
     const opened = await openServices(empty, artifacts, { ...part('empty'), ...noIsolation });
-    expect(opened.env).toEqual({});
-    await opened.close();
+    try {
+      expect(opened.env).toEqual({});
+    } finally { await opened.close(); }
     expect(existsSync(join(root, 'runs', 'empty'))).toBe(false);
   });
 });
@@ -816,18 +944,26 @@ describe('generated protocol inputs in prepared PGlite templates', () => {
   });
 });
 
+function procTaskState(pid: number): string {
+  if (!existsSync('/proc')) return 'R';
+  try {
+    const text = readFileSync(join('/proc', String(pid), 'stat'), 'utf8');
+    return text.slice(text.lastIndexOf(')') + 2).split(' ', 1)[0] ?? '';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ESRCH' ? 'X' : 'R';
+  }
+}
+
 function servicePidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
   try {
     process.kill(pid, 0);
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
-  } catch {
-    return true;
-  }
+  const state = procTaskState(pid);
+  return state !== 'Z' && state !== 'X';
 }
 
 describe('service test cleanup on failure or abort', () => {
@@ -835,16 +971,7 @@ describe('service test cleanup on failure or abort', () => {
   const leakedPaths = new Set<string>();
 
   afterEach(() => {
-    for (const pid of leakedPids) {
-      if (!Number.isInteger(pid) || pid <= 1) continue;
-      for (const target of [-pid, pid]) {
-        try {
-          process.kill(target, 'SIGKILL');
-        } catch {
-          /* Process or group is already gone. */
-        }
-      }
-    }
+    for (const pid of leakedPids) killServiceProcessGroup(pid);
     leakedPids.clear();
     for (const path of leakedPaths) rmSync(path, { recursive: true, force: true });
     leakedPaths.clear();
@@ -859,7 +986,7 @@ describe('service test cleanup on failure or abort', () => {
       [
         'export default {',
         `  root: ${JSON.stringify(checkout)},`,
-        "  test: { pool: 'forks', maxWorkers: 1, reporters: ['default'], include: ['apps/node/test/test-services.test.ts'] },",
+        "  test: { pool: 'forks', maxWorkers: 1, testTimeout: 20000, reporters: ['default'], include: ['apps/node/test/test-services.test.ts'] },",
         '};',
         '',
       ].join('\n'),
@@ -925,7 +1052,9 @@ if (process.env.HH_SERVICES_ABORT_MODE && process.env.HH_SERVICES_ABORT_FILE) {
       const artifacts = await prepareServiceArtifacts(definitions, root, { ...context, env, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
       rmSync(env.STOP_RELEASE);
       const opened = await openServices(definitions, artifacts, { ...part('one'), env });
-      const pid = Number(readFileSync(join(root, 'runs', 'one', 'state', 'pg', 'postmaster.pid'), 'utf8').trim());
+      const pidFile = join(root, 'runs', 'one', 'state', 'pg', 'postmaster.pid');
+      await eventually(() => existsSync(pidFile) && Number(readFileSync(pidFile, 'utf8').trim()) > 1);
+      const pid = Number(readFileSync(pidFile, 'utf8').trim());
       saved = { pid, root, socket: opened.env.PGHOST! };
       writeFileSync(recordFile, JSON.stringify(saved));
       if (mode === 'exit') process.exit(1);

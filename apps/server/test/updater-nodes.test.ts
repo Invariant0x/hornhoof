@@ -1,20 +1,16 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { eventually } from '../../../test-support/eventually.mjs';
+import { JQ, killProcessGroup, pidAlive, runUpdater, SCRIPT, tempUpdaterDir } from './updater-fixture.js';
 
-const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
 const DOCKERFILE = fileURLToPath(new URL('../../updater/Dockerfile', import.meta.url));
 const INSTALL = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
-const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
-const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
-const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
-if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 const SERVER = 'https://hornhoof.example.test';
 const HOST = 'a'.repeat(64);
@@ -73,23 +69,23 @@ function bundled(dir: string): string {
 
 /* The updater with these arguments, as long as it takes: only the runner's limit for the test ends one that never ends. */
 async function updater(args: string[], env: Record<string, string> = {}, served: Served = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-updater-nodes-'));
+  const dir = tempUpdaterDir('hh-updater-nodes-');
   const log = join(dir, 'stub.log');
   writeFileSync(log, '');
-  const child = spawn('bash', [SCRIPT, ...args], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`, HOME: dir, STUB_LOG: log, STUB_STATE: dir, STUB_SERVED: serve(dir, served), HORNHOOF_INSTALLER: bundled(dir), ...env },
+  const { code, out } = await runUpdater(args, {
+    TMPDIR: dir,
+    HOME: dir,
+    STUB_LOG: log,
+    STUB_STATE: dir,
+    STUB_SERVED: serve(dir, served),
+    HORNHOOF_INSTALLER: bundled(dir),
+    ...env,
   });
-  let stdout = '';
-  let stderr = '';
-  child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
-  child.stderr.setEncoding('utf8').on('data', (text: string) => (stderr += text));
-  const [code] = (await once(child, 'close')) as [number | null];
-  const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+  const calls = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
   /* Whatever happens, nothing of what the server served ran. */
   expect(existsSync(join(dir, 'pwned'))).toBe(false);
   expect(calls).not.toContain('served installer ran');
-  return { code, out: stdout + stderr, calls };
+  return { code, out, calls };
 }
 
 const look = (env: Record<string, string> = {}, served: Served = {}) => updater(['nodes', SERVER, SELF, HOST, '--once'], { STUB_PLAN_NODES: BEHIND, ...env }, served);
@@ -246,35 +242,12 @@ describe('updater start-nodes', () => {
   });
 });
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
-  } catch {
-    return true;
-  }
-}
-
 describe('updater nodes process group cleanup', () => {
   const leakedPids = new Set<number>();
   const tempDirs: string[] = [];
 
   afterEach(() => {
-    for (const pid of leakedPids) {
-      if (!Number.isInteger(pid) || pid <= 1) continue;
-      for (const target of [-pid, pid]) {
-        try {
-          process.kill(target, 'SIGKILL');
-        } catch {
-          /* Process or group is already gone. */
-        }
-      }
-    }
+    for (const pid of leakedPids) killProcessGroup(pid);
     leakedPids.clear();
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
@@ -288,7 +261,7 @@ describe('updater nodes process group cleanup', () => {
     const probeConfig = join(work, 'vitest.probe.config.mjs');
     writeFileSync(
       probeConfig,
-      `export default { root: ${JSON.stringify(repoRoot)}, test: { pool: 'forks', reporters: ['default'], include: ['apps/server/test/updater-nodes.test.ts'] } };\n`,
+      `export default { root: ${JSON.stringify(repoRoot)}, test: { pool: 'forks', testTimeout: 20000, reporters: ['default'], include: ['apps/server/test/updater-nodes.test.ts'] } };\n`,
     );
     const runner = spawn(
       process.execPath,
