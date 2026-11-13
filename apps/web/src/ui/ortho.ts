@@ -186,3 +186,145 @@ export function orthoRoute(a: Rect, b: Rect, others: readonly Rect[] = []): Poin
   if (around) return around;
   return simple?.pts ?? tidy([[midX(a), midY(a)], [midX(a), midY(b)], [midX(b), midY(b)]]);
 }
+
+/* A turn where a line passes one of its bends costs a little less than a turn anywhere else, so the line turns at its bends
+   where it can; going back the way it came costs most. */
+const BEND_TURN = TURN - 1, BACK = 3 * TURN;
+
+const same = (a: Point, b: Point) => a[0] === b[0] && a[1] === b[1];
+const span = (a: Point, b: Point) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+const headingOf = (p: Point, q: Point): Dir | null => (same(p, q) ? null : p[1] === q[1] ? (q[0] > p[0] ? 0 : 2) : q[1] > p[1] ? 1 : 3);
+const firstHeading = (pts: Point[]): Dir | null => pts.slice(1).map((q, i) => headingOf(pts[i]!, q)).find(h => h !== null) ?? null;
+const lastHeading = (pts: Point[]): Dir | null => pts.slice(1).map((q, i) => headingOf(pts[i]!, q)).findLast(h => h !== null) ?? null;
+const across = (d: Dir | null) => d === 0 || d === 2;
+
+function turnAt(from: Dir | null, to: Dir | null): number {
+  if (from === null || to === null || from === to) return 0;
+  return (from + 2) % 4 === to ? BACK : BEND_TURN;
+}
+
+/* Where p stands along a line made of runs across and down, as the length of the line up to it, first at or after from;
+   -1 when the line does not pass through p there. */
+export function along(pts: Point[], p: Point, from = 0): number {
+  let walked = 0;
+  for (const [a, b] of segmentsOf(pts)) {
+    const on = (a[0] === b[0] && p[0] === a[0] && p[1] >= Math.min(a[1], b[1]) && p[1] <= Math.max(a[1], b[1])) ||
+      (a[1] === b[1] && p[1] === a[1] && p[0] >= Math.min(a[0], b[0]) && p[0] <= Math.max(a[0], b[0]));
+    if (on && walked + span(a, p) >= from) return walked + span(a, p);
+    walked += span(a, b);
+  }
+  return -1;
+}
+
+/* The point this far along a line, and the stretch of the line between two such places. */
+function pointAlong(pts: Point[], at: number): Point {
+  let walked = 0;
+  for (const [a, b] of segmentsOf(pts)) {
+    const len = span(a, b);
+    if (walked + len >= at) return [a[0] + Math.sign(b[0] - a[0]) * (at - walked), a[1] + Math.sign(b[1] - a[1]) * (at - walked)];
+    walked += len;
+  }
+  return pts[pts.length - 1]!;
+}
+
+function stretch(pts: Point[], from: number, to: number): Point[] {
+  const out: Point[] = [pointAlong(pts, from)];
+  let walked = 0;
+  for (const [a, b] of segmentsOf(pts)) {
+    walked += span(a, b);
+    if (walked > from && walked < to) out.push(b);
+  }
+  out.push(pointAlong(pts, to));
+  return out;
+}
+
+/* Runs joined into one line: a point repeated or standing in the middle of a straight run drops out, but a line that goes
+   back the way it came keeps the point where it turns. */
+function joined(parts: Point[][]): Point[] {
+  const out: Point[] = [];
+  for (const p of parts.flat()) {
+    const last = out[out.length - 1], before = out[out.length - 2];
+    if (last && same(last, p)) continue;
+    if (before && last && headingOf(before, last) === headingOf(last, p)) out[out.length - 1] = p;
+    else out.push(p);
+  }
+  return out;
+}
+
+type Leg = { pts: Point[]; cost: number };
+
+/* The ways from one stop of a line to the next: the simple ways, the way around the blocks when none of them is clear, and
+   the ways given that keep where the line touches its blocks. */
+function legWays(a: Rect, b: Rect, others: readonly Rect[], given: Point[][]): Leg[] {
+  if (!a.w && !a.h && !b.w && !b.h && a.x === b.x && a.y === b.y) return [{ pts: [[a.x, a.y]], cost: 0 }];
+  const ways = [...given.map(tidy), ...simpleWays(a, b)].filter(pts => pts.length > 1).map(pts => ({ pts, cost: score(pts, a, b, others) })).filter(w => Number.isFinite(w.cost));
+  if (!ways.some(w => w.cost < 1e6)) {
+    const around = aroundWay(a, b, others);
+    if (around && around.length > 1) ways.push({ pts: around, cost: score(around, a, b, others) });
+  }
+  return ways.length ? ways : [{ pts: tidy([[midX(a), midY(a)], [midX(a), midY(b)], [midX(b), midY(b)]]), cost: 1e9 }];
+}
+
+/* What a line with bends knows of its own way: the points it is drawn along without them; home, it is the way the map lays
+   it out, which it keeps between the bends that stand on it in order; across, it leaves its start along the hub's middle
+   line. */
+export type OwnWay = { pts: Point[]; home: boolean; across?: boolean };
+
+/* A way from block a through each bend in turn to block b, made only of runs across and down. Where the line is at home and
+   two stops in a row stand on its own way, it keeps that stretch, so a bend put on a line changes nothing. Elsewhere each
+   stretch from stop to stop is the one that crosses fewest blocks, then costs least: its turns, a turn at a bend a little
+   less, its length, how far it touches a block from where its own way touches it, and a start off the hub's middle line. */
+export function orthoThrough(a: Rect, bends: readonly Point[], b: Rect, others: readonly Rect[], own: OwnWay): Point[] {
+  if (!bends.length || own.pts.length < 2) return own.pts;
+  const stops: Rect[] = [a, ...bends.map(([x, y]) => ({ x, y, w: 0, h: 0 })), b];
+  const end = segmentsOf(own.pts).reduce((sum, [p, q]) => sum + span(p, q), 0);
+  /* Where each stop stands along the line's own way, or -1. */
+  const at: number[] = [0];
+  let reached = 0;
+  for (const [x, y] of bends) {
+    const here = along(own.pts, [x, y], reached);
+    at.push(here);
+    if (here >= 0) reached = here;
+  }
+  at.push(end);
+  const sized = (r: Rect) => r.w > 0 || r.h > 0;
+  const start = own.pts[0]!, finish = own.pts[own.pts.length - 1]!;
+  const out = firstHeading(own.pts), into = lastHeading(own.pts);
+  const last = stops.length - 2;
+  const legs: Leg[][] = stops.slice(1).map((to, i) => {
+    const from = stops[i]!;
+    if (own.home && at[i]! >= 0 && at[i + 1]! >= 0 && at[i]! <= at[i + 1]!) return [{ pts: stretch(own.pts, at[i]!, at[i + 1]!), cost: 0 }];
+    const given: Point[][] = [];
+    const p: Point = [to.x, to.y], q: Point = [from.x, from.y];
+    if (i === 0 && sized(a)) given.push(across(out) ? [start, [p[0], start[1]], p] : [start, [start[0], p[1]], p]);
+    if (i === last && sized(b)) given.push(across(into) ? [q, [q[0], finish[1]], finish] : [q, [finish[0], q[1]], finish]);
+    const around = [...others, ...(i > 0 && sized(a) ? [a] : []), ...(i < last && sized(b) ? [b] : [])];
+    return legWays(from, to, around, given).map(w => {
+      let cost = w.cost;
+      if (i === 0 && sized(a)) cost += span(w.pts[0]!, start);
+      if (i === last && sized(b)) cost += span(w.pts[w.pts.length - 1]!, finish);
+      if (i === 0 && own.across && !across(firstHeading(w.pts)) && firstHeading(w.pts) !== null) cost += TURN;
+      return { pts: w.pts, cost };
+    });
+  });
+  /* The cheapest way through every stop: for each way of each stretch, the best way to come to it. */
+  let best = legs[0]!.map(w => w.cost);
+  const back: number[][] = [];
+  for (let i = 1; i < legs.length; i++) {
+    const prev = legs[i - 1]!, cost: number[] = [], from: number[] = [];
+    for (const w of legs[i]!) {
+      let pick = 0, least = Infinity;
+      prev.forEach((v, j) => {
+        const c = best[j]! + turnAt(lastHeading(v.pts), firstHeading(w.pts));
+        if (c < least) [least, pick] = [c, j];
+      });
+      cost.push(least + w.cost);
+      from.push(pick);
+    }
+    best = cost;
+    back.push(from);
+  }
+  const picks: number[] = [best.indexOf(Math.min(...best))];
+  for (let i = back.length - 1; i >= 0; i--) picks.unshift(back[i]![picks[0]!]!);
+  return joined(picks.map((k, i) => legs[i]![k]!.pts));
+}

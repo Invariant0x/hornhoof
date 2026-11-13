@@ -475,6 +475,13 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
 .grip:active { cursor: grabbing; }
 .grip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
+/* A line takes a click a little wider than it is drawn, to put a bend on it; nothing more is drawn for it. */
+.wires .hit { fill: none; stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; }
+/* A bend's handle over its dot, 28 px at any zoom: nothing drawn, only the pointer shows it, and the ring of the keyboard's
+   focus around the dot. */
+.bend { box-sizing: border-box; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
+.bend:active { cursor: grabbing; }
+.bend:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -6px; }
 /* Put back as it was, and a move that was not saved, above the zoom. */
 .map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
 .map-arrange .alert { margin: 0; }
