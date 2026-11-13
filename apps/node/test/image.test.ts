@@ -78,6 +78,14 @@ describe('the node image', () => {
     expect(layer).toMatch(/&& unzip -v(?:\s|$)/);
   });
 
+  it('installs zip beside unzip, and PyYAML, pip and pytest for Python, and fails the build if any of them does not run', () => {
+    for (const name of ['zip', 'python3-yaml', 'python3-pip', 'python3-pytest']) expect(installed).toContain(name);
+    const layer = runtime.slice(runtime.indexOf('RUN apt-get update'), runtime.indexOf('\nCOPY --from=quality'));
+    for (const command of ['zip -v', "python3 -c 'import yaml'", 'python3 -m pip --version', 'python3 -m pytest --version']) {
+      expect(layer).toContain(`&& ${command} `);
+    }
+  });
+
   it('installs the GitHub CLI in the runtime stage at a pinned version with verified per-arch SHA-256 and checks gh --version', () => {
     const version = runtime.match(/ARG GH_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
     const amd64Sha = runtime.match(/ARG GH_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];
