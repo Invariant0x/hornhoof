@@ -1,5 +1,6 @@
 -- Each turn belongs to one top-level department, which opens and closes its own turns. A turn takes the top department of
--- its first root task, the first unfinished one for a turn that has not closed; a turn with no such task takes Development,
+-- its first root task, the first unfinished one for a turn that has not closed, of a department that runs turns before one
+-- that works all the time; a turn with no such task takes Development,
 -- else the company's first department. The work of other departments leaves the open turn and goes on outside turns, and
 -- the planned work of other departments moves into a planned turn of its own department. Closed turns keep their history.
 ALTER TABLE "turns" ADD COLUMN "department_id" uuid;--> statement-breakpoint
@@ -11,8 +12,9 @@ WITH RECURSIVE "tops"("id", "top") AS (
 ), "chosen" AS (
   SELECT DISTINCT ON ("tasks"."turn_id") "tasks"."turn_id", "tops"."top"
   FROM "tasks" JOIN "tops" ON "tops"."id" = "tasks"."department_id" JOIN "turns" ON "turns"."id" = "tasks"."turn_id"
+    JOIN "departments" "top" ON "top"."id" = "tops"."top"
   WHERE "tasks"."parent_id" IS NULL
-  ORDER BY "tasks"."turn_id", ("turns"."status" <> 'closed' AND "tasks"."status" NOT IN ('done', 'cancelled')) DESC, "tasks"."number"
+  ORDER BY "tasks"."turn_id", ("top"."work_mode" = 'continuous'), ("turns"."status" <> 'closed' AND "tasks"."status" NOT IN ('done', 'cancelled')) DESC, "tasks"."number"
 )
 UPDATE "turns" SET "department_id" = "chosen"."top" FROM "chosen" WHERE "turns"."id" = "chosen"."turn_id";--> statement-breakpoint
 UPDATE "turns" SET "department_id" = (

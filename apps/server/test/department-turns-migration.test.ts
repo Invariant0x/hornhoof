@@ -14,6 +14,9 @@ const DESIGN = '00000000-0000-4000-8000-000000000b04';
 const SALES = '00000000-0000-4000-8000-000000000b05';
 const SUPPORT = '00000000-0000-4000-8000-000000000b06';
 const GONE = '00000000-0000-4000-8000-000000000b07';
+const BUSY = '00000000-0000-4000-8000-000000000a04';
+const OPS = '00000000-0000-4000-8000-000000000b08';
+const BUILD = '00000000-0000-4000-8000-000000000b09';
 const T = (n: number) => `00000000-0000-4000-8000-000000000c${String(n).padStart(2, '0')}`;
 const K = (n: number) => `00000000-0000-4000-8000-000000000d${String(n).padStart(2, '0')}`;
 
@@ -74,6 +77,17 @@ const plain = () => migrated(`
   INSERT INTO turns(id, company_id, number, title, goal, status, mode, messages, opened_at, closed_at) VALUES ('${T(6)}', '${PLAIN}', 1, 'Quiet', 'No tasks.', 'closed', 'echelons', '[]', now(), now());
 `);
 
+/* Busy ran one open turn where Operations, which works all the time, holds the first unfinished task. */
+const busy = () => migrated(`
+  INSERT INTO companies(id, name) VALUES ('${BUSY}', 'Busy');
+  INSERT INTO departments(id, company_id, template_key, role_code, position, work_mode) VALUES
+    ('${OPS}', '${BUSY}', 'operations', 'OPS', 0, 'continuous'), ('${BUILD}', '${BUSY}', 'development', 'DEV', 1, 'turns');
+  INSERT INTO turns(id, company_id, number, title, goal, status, mode, messages, opened_at) VALUES ('${T(7)}', '${BUSY}', 1, 'Release', 'Ship it.', 'open', 'echelons', '[]', now());
+  INSERT INTO tasks(id, company_id, number, title, turn_id, parent_id, department_id, status) VALUES
+    ('${K(17)}', '${BUSY}', 1, 'Restart a machine', '${T(7)}', null, '${OPS}', 'working'),
+    ('${K(18)}', '${BUSY}', 2, 'Build the release', '${T(7)}', null, '${BUILD}', 'working');
+`);
+
 const turnsOf = async (client: PGlite) =>
   (await client.query<{ number: number; department_id: string | null; status: string; title: string; goal: string; mode: string; messages: unknown }>(
     'SELECT number, department_id, status, title, goal, mode, messages FROM turns ORDER BY number',
@@ -95,6 +109,12 @@ describe('the migration that gives each turn its department', () => {
     ]);
     /* With no Development, the first department in the company's order. */
     expect((await turnsOf(await plain())).map(t => [t.number, t.department_id])).toEqual([[1, SUPPORT]]);
+  });
+
+  it('gives a live turn to a department that runs turns rather than to one that works all the time', async () => {
+    const client = await busy();
+    expect((await turnsOf(client)).map(t => [t.number, t.department_id, t.status])).toEqual([[1, BUILD, 'open']]);
+    expect(await turnOfTasks(client)).toEqual({ 1: null, 2: 1 });
   });
 
   it('leaves in the open turn only the work of its department, which the rest goes on with outside turns', async () => {
