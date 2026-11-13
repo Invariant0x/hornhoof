@@ -18,6 +18,7 @@ describe('workspace addresses', () => {
     ['/profile', { kind: 'profile' }],
     ['/settings', { kind: 'settings' }],
     ['/about', { kind: 'about' }],
+    ['/theme', { kind: 'theme' }],
     ['/invite/abc123', { kind: 'invite', token: 'abc123' }],
     ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
   ] as const)('opens and shares %s', (path, route) => {

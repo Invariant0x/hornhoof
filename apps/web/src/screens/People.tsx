@@ -7,25 +7,29 @@ import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/Access
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
-import { AgentIcon, DeputyIcon, PersonIcon } from '../ui/icons';
-import { AgentTick, AssistantCard, looksAfter, NewAssistant } from './PeopleAssistant';
+import { BusyLabel } from '../ui/BusyLabel';
+import { AgentIcon, DeputyIcon, EditIcon, PersonIcon } from '../ui/icons';
+import { AssistantCard, KindSwitch, looksAfter, NewAssistant } from './PeopleAssistant';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
 /* assistant: a person without the whole company adds their own assistant. */
 type Panel = { kind: 'invite' } | { kind: 'assistant' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean } | null;
 
+/* The link, shown once: its note, the link right under it, and Copy and Done under the link. */
 function InviteLink({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
   const t = useT();
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.people.linkFor(name)}</h2>
-      <p className="muted">{t.people.linkNote(name)}</p>
-      <div className="command">
-        <code>{url}</code>
-        <CopyButton text={url} label={t.people.copyLink} />
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title"><PersonIcon />{t.people.linkFor(name)}</h2>
       </div>
-      <div className="actions">
-        <button className="btn" type="button" onClick={onClose}>{t.common.done}</button>
+      <div className="secret">
+        <p className="muted">{t.people.linkNote}</p>
+        <code className="secret-code">{url}</code>
+        <div className="form-foot">
+          <CopyButton text={url} className="btn" />
+          <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
+        </div>
       </div>
     </Edge>
   );
@@ -33,7 +37,7 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
 
 type Invite = { org: Org | null; me: Me; people: PersonView[]; onSent: (name: string, url: string) => void; onAssistant: (person: PersonView) => void; onClose: () => void };
 
-/* Invites a person, or, with the tick, adds an agent that acts for one, keeping the name and title typed. */
+/* Invites a person, or, with the switch on the assistant, adds an agent that acts for one, keeping the name and title typed. */
 function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
   const t = useT();
   const [name, setName] = useState('');
@@ -43,7 +47,7 @@ function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState(false);
-  if (agent) return <NewAssistant me={me} people={people} own={false} tick={<AgentTick on onChange={setAgent} />} initial={{ name, title }} onMade={onAssistant} onClose={onClose} />;
+  if (agent) return <NewAssistant me={me} people={people} own={false} heading={t.people.addTitle} kind={<KindSwitch agent onChange={setAgent} />} initial={{ name, title }} onMade={onAssistant} onClose={onClose} />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -65,18 +69,22 @@ function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
   }
 
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.people.invitePerson}</h2>
-      <form onSubmit={e => void submit(e)} className="panel-form">
-        <AgentTick on={false} onChange={setAgent} />
-        <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
-        <Field label={t.common.email}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title"><PersonIcon />{t.people.addTitle}</h2>
+      </div>
+      <form onSubmit={e => void submit(e)} className="form-grid">
+        <KindSwitch agent={false} onChange={setAgent} />
+        <Field label={t.common.name} hint={t.people.nameHint}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
+        <Field label={t.common.email} hint={t.people.emailHint}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>
         <AccessPicker org={org} value={access} onChange={setAccess} />
         {failure && <p className="alert" role="alert">{failure}</p>}
-        <div className="actions">
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || !name.trim() || !email.trim() || accessEmpty(access)}>
+            <BusyLabel busy={busy} idle={t.people.createInvite} working={t.common.creating} />
+          </button>
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || !name.trim() || !email.trim() || accessEmpty(access)}>{t.people.sendInvite}</button>
         </div>
       </form>
     </Edge>
@@ -99,18 +107,23 @@ const deputyRule = {
 const deputyCall = (wanted: boolean, opened: PersonView, saved: PersonView): boolean =>
   wanted !== Boolean(opened.isCeoDelegate) && wanted !== Boolean(saved.isCeoDelegate);
 
-/* The CEO's switch for the deputy, right after the access, with what it gives under it. */
+/* The CEO's switch for the deputy, right after the access, in the row of the authority, with what it gives under it. */
 function DeputySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   const t = useT();
   const id = useId();
   return (
-    <label className="check">
-      <input type="checkbox" role="switch" checked={on} onChange={e => onChange(e.target.checked)} aria-labelledby={`${id}-name`} aria-describedby={`${id}-about`} />
-      <span>
-        <b id={`${id}-name`}>{t.people.ceoDelegate}</b>
-        <small id={`${id}-about`}>{t.people.deputyAbout}</small>
-      </span>
-    </label>
+    <div className="field">
+      <span className="label">{t.people.authority}</span>
+      <div className="field-control">
+        <label className="check-card">
+          <input type="checkbox" role="switch" checked={on} onChange={e => onChange(e.target.checked)} aria-labelledby={`${id}-name`} aria-describedby={`${id}-about`} />
+          <span>
+            <b id={`${id}-name`}>{t.people.ceoDelegate}</b>
+            <small id={`${id}-about`}>{t.people.deputyAbout}</small>
+          </span>
+        </label>
+      </div>
+    </div>
   );
 }
 
@@ -137,15 +150,12 @@ function changesOf(person: PersonView, { rename, titleOnly, telegram: tg }: Edit
 
 const fillable = ({ rename, titleOnly }: EditRights, draft: EditDraft): boolean => (!rename || draft.name.trim() !== '') && (titleOnly || !accessEmpty(draft.access));
 
-/* The name, when the form shows it, above the title. The form has two columns, so the title keeps to the first one to stand
-   under the name and not beside it. */
+/* The name, when the form shows it, above the title. */
 function NameAndTitle({ rename, name, title, onName, onTitle }: { rename: boolean; name: string; title: string; onName: (name: string) => void; onTitle: (title: string) => void }) {
   const t = useT();
   return <>
     {rename && <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => onName(e.target.value)} maxLength={80} autoFocus required />}</Field>}
-    <div style={{ gridColumn: 1 }}>
-      <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => onTitle(e.target.value)} maxLength={80} autoFocus={!rename} />}</Field>
-    </div>
+    <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => onTitle(e.target.value)} maxLength={80} autoFocus={!rename} />}</Field>
   </>;
 }
 
@@ -182,23 +192,25 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
   }
 
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.people.editHeading(person.name)}</h2>
-      <form onSubmit={e => void submit(e)} className="panel-form">
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title"><EditIcon />{t.people.editHeading(person.name)}</h2>
+      </div>
+      <form onSubmit={e => void submit(e)} className="form-grid">
         <NameAndTitle rename={rename} name={name} title={title} onName={setName} onTitle={setTitle} />
         {telegramShown && (
-          <div style={{ gridColumn: 1 }}>
-            <Field label={t.people.telegram} hint={t.people.telegramHint}>
-              {p => <input {...p} value={telegram} onChange={e => setTelegram(e.target.value)} maxLength={64} placeholder={t.people.telegramPlaceholder} autoComplete="off" spellCheck={false} />}
-            </Field>
-          </div>
+          <Field label={t.people.telegram} hint={t.people.telegramHint}>
+            {p => <input {...p} className="mono" value={telegram} onChange={e => setTelegram(e.target.value)} maxLength={64} placeholder={t.people.telegramPlaceholder} autoComplete="off" spellCheck={false} />}
+          </Field>
         )}
         {!titleOnly && <AccessPicker org={org} value={access} onChange={a => setChoice(c => deputyRule.accessed(c, a))} />}
         {deputy && <DeputySwitch on={isDeputy} onChange={on => setChoice(c => deputyRule.switched(c, on))} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
-        <div className="actions">
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || !fillable(rights, draft)}>
+            <BusyLabel busy={busy} idle={t.common.save} working={t.common.saving} />
+          </button>
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || !fillable(rights, draft)}>{t.common.save}</button>
         </div>
       </form>
     </Edge>
@@ -207,12 +219,16 @@ function EditForm({ person, org, titleOnly, rename, telegram: telegramShown, dep
 
 function PersonDetails({ person, org, onClose }: { person: PersonView; org: Org | null; onClose: () => void }) {
   const t = useT();
-  return <Edge className="panel" cut={12}>
-    <h2>{person.name}</h2>
+  return <Edge className="panel form-card" cut={12}>
+    <div className="form-head">
+      <h2 className="form-title">{person.assistant ? <AgentIcon /> : <PersonIcon />}{person.name}</h2>
+    </div>
     <p>{person.title}</p>
     <p>{person.assistant ? t.people.actsFor(person.assistant.owner.name) : accessText(t, person.access, org)}</p>
     {telegramOf(person) && <p>{t.people.telegram}: {telegramOf(person)}</p>}
-    <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
+    <div className="form-foot">
+      <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
+    </div>
   </Edge>;
 }
 
@@ -261,9 +277,10 @@ function selectionOf(me: Me, selected: CardRoute['selected'], people: PersonView
 }
 
 function InvitationPanel({ panel, ...invite }: { panel: Panel } & Invite) {
+  const t = useT();
   return <>
     {panel?.kind === 'invite' && <InviteForm {...invite} />}
-    {panel?.kind === 'assistant' && <NewAssistant me={invite.me} people={invite.people} own initial={{ name: '', title: '' }} onMade={invite.onAssistant} onClose={invite.onClose} />}
+    {panel?.kind === 'assistant' && <NewAssistant me={invite.me} people={invite.people} own heading={t.people.newAssistant} initial={{ name: '', title: '' }} onMade={invite.onAssistant} onClose={invite.onClose} />}
     {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={invite.onClose} />}
   </>;
 }

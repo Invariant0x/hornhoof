@@ -383,11 +383,11 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
-    expect(screen.getByRole('button', { name: 'Get the command' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Show command' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
     await user.click(screen.getByRole('checkbox', { name: 'Codex' }));
     expect(screen.getByRole('checkbox', { name: 'GLM' })).not.toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['claude', 'codex'] } });
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
@@ -403,7 +403,7 @@ describe('Subscriptions', () => {
     const google = screen.getByRole('checkbox', { name: 'Antigravity' });
     expect(google).toHaveAccessibleDescription('Google AI Pro or Ultra plan');
     await user.click(google);
-    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['antigravity'] } });
   });
 
@@ -830,7 +830,7 @@ describe('signing in to plans', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
     expect(screen.getByRole('link', { name: /Kimi/ })).toHaveAttribute('href', 'https://www.kimi.com/code/console');
     await userEvent.type(screen.getByLabelText('Kimi key'), KEY);
-    await userEvent.click(screen.getByRole('button', { name: 'Save the key' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Connect key' }));
     await vi.waitFor(() => expect(calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')).toBeTruthy());
     const sent = calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')!.body as { kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] };
     expect(sent.kind).toBe('kimi_key');
@@ -1048,5 +1048,54 @@ describe('the card of a plan that does not work', () => {
     expect(within(side).getByText('Remove Anthropic key ending 9f3a? The key is deleted from Hornhoof.')).toBeInTheDocument();
     await userEvent.click(within(side).getByRole('button', { name: 'Yes, remove' }));
     expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-key', body: undefined });
+  });
+});
+
+describe('the forms that connect plans and keys', () => {
+  const groupOf = (button: HTMLElement) => {
+    const foot = button.parentElement!;
+    expect(foot).toHaveClass('form-foot');
+    return within(foot).getAllByRole('button');
+  };
+
+  it('offers each plan as a card with its mark, and says Preparing… on Show command, which comes before Cancel', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    lists({ 'POST /api/subscriptions/connect': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    expect(screen.getByRole('heading', { name: 'Connect subscriptions' })).toBeInTheDocument();
+    const claude = screen.getByRole('checkbox', { name: 'Claude' });
+    expect(claude.closest('label')!.querySelector('svg.pm')).not.toBeNull();
+    await user.click(claude);
+    const show = screen.getByRole('button', { name: 'Show command' });
+    expect(groupOf(show)).toEqual([show, screen.getByRole('button', { name: 'Cancel' })]);
+    await user.click(show);
+    expect(show).toHaveAccessibleName('Preparing…');
+    expect(show).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finish([201, { subscriptions: [SUBS[0]], command: 'curl x' }]); });
+  });
+
+  it('asks for a key in the form grid, says Connecting… on Connect key, which comes before Cancel', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    const kimi = { ...SUBS[2]!, status: 'needs_login' as const, online: true, machines: [{ ...MACHINE, status: 'needs_login' as const }] };
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], 'GET /api/subscriptions': [200, { subscriptions: [kimi] }], 'GET /api/subscriptions/s-kimi/recipients': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await user.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
+    const field = screen.getByLabelText('Kimi key');
+    expect(field.closest('form')).toHaveClass('form-grid');
+    expect(field).toHaveAccessibleDescription(/Stored encrypted and never shown again after saving\./);
+    await user.type(field, 'sk-kimi-1');
+    const connect = screen.getByRole('button', { name: 'Connect key' });
+    expect(groupOf(connect)).toEqual([connect, screen.getByRole('button', { name: 'Cancel' })]);
+    await user.click(connect);
+    expect(connect).toHaveAccessibleName('Connecting…');
+    expect(connect).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finish([200, { version: 1, recipients: [] }]); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('No machine of this plan can take the key yet.');
+    expect(connect).toHaveAccessibleName('Connect key');
   });
 });

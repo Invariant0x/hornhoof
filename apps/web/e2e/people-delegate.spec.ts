@@ -92,12 +92,16 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(deputy).not.toBeChecked();
         const panel = page.locator('.panel', { has: deputy });
         await panel.screenshot({ path: info.outputPath(`edit-${width}-${lang}-${theme}.png`) });
-        const access = await box(panel.getByRole('group', { name: t.people.access, exact: true }));
+        const accessGroup = panel.getByRole('group', { name: t.people.access, exact: true });
+        const access = await box(accessGroup);
+        /* The ticks of the access, in the column of the fields of the form's grid. */
+        const ticks = await box(accessGroup.locator('.field-control'));
         const label = deputy.locator('xpath=ancestor::label[1]');
         await expect(label).toContainText(t.people.deputyAbout);
         const whole = await box(label);
         expect(whole.y, 'the switch right after the access').toBeGreaterThanOrEqual(access.y + access.height - 1);
-        /* The interface's switch: the box on the left, the name with what it gives under it, as wide as the access. */
+        /* The interface's switch: the box on the left, the name with what it gives under it, in the column of the fields on the
+           edge and as wide as the ticks of the access. */
         const parts = await label.evaluate(el => {
           const rect = (e: Element): Rect => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
           const [input, name, about] = ['input', 'b', 'small'].map(s => el.querySelector(s)!);
@@ -107,7 +111,8 @@ for (const lang of ['en', 'ru'] as const) {
         expect(parts.about.y, 'what it gives under the name').toBeGreaterThanOrEqual(parts.name.y + parts.name.height - 1);
         expect(parts.input.width, 'the size of the box').toBe(16);
         expect(parts).toMatchObject({ aboutSize: '12px', nameWeight: '600' });
-        expect(Math.abs(whole.width - access.width), 'as wide as the access').toBeLessThanOrEqual(1);
+        expect(Math.abs(whole.x - ticks.x), 'on the edge of the access ticks').toBeLessThanOrEqual(1);
+        expect(Math.abs(whole.width - ticks.width), 'as wide as the access ticks').toBeLessThanOrEqual(1);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(errors).toEqual([]);
       });

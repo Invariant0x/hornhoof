@@ -1,10 +1,11 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { Roster, StaffLine } from '../src/types';
 import { StaffCard } from '../src/ui/StaffCard';
 import { mockApi, ROSTER } from './api-mock';
+import { decl, RULES } from './css';
 
 const DEPT = { id: 'd2', name: 'Development' };
 
@@ -86,7 +87,7 @@ describe('StaffCard', () => {
     const model = await screen.findByRole('combobox', { name: 'Model for Backend engineer' });
     expect(options(model)).toEqual(['Default', 'Claude Opus 5.5', 'Claude Sonnet 5.5']);
     await user.selectOptions(model, 'claude-opus-5-5');
-    const runs = screen.getByRole('combobox', { name: 'Where Backend engineer runs' });
+    const runs = screen.getByRole('combobox', { name: 'Subscription for Backend engineer' });
     expect(options(runs)).toEqual(['None yet', 'Codex, Oleg', 'Team key (Anthropic)']);
     expect(within(runs).getAllByRole('group').map(g => g.getAttribute('label'))).toEqual(['Codex', 'Anthropic']);
     await user.selectOptions(runs, 's-codex');
@@ -96,7 +97,7 @@ describe('StaffCard', () => {
 
   it('says where to add a subscription when none serves the department', async () => {
     card(undefined, { ...ROSTER, subscriptions: [], roles: ROSTER.roles.map(r => ({ ...r, subscription: null })) });
-    expect(await screen.findByText('No subscription serves this department yet. Add one in Subscriptions; people hired now wait for it.')).toBeInTheDocument();
+    expect(await screen.findByText('No subscription serves this department yet. Connect one in Subscriptions; those hired now will wait.')).toBeInTheDocument();
   });
 
   it("names the people in the person's language", async () => {
@@ -128,8 +129,13 @@ describe('StaffCard', () => {
       expect(box).toBeDisabled();
       await user.click(box);
       expect(box).toBeChecked();
-      expect(within(box.closest('label')!).getByText('Required')).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Where Program operator runs' })).toBeEnabled();
+      const required = within(box.closest('label')!).getByText('Required role');
+      expect(required).toHaveClass('badge');
+      /* It looks like the other badges: no rule of another block reaches its classes, as the request card's .req once did. */
+      const own = [...required.classList].filter(name => name !== 'badge');
+      const foreign = RULES.flatMap(r => r.selectors).filter(sel => own.some(name => new RegExp(`\\.${name}(?![\\w-])`).test(sel)) && !/\.badge\./.test(sel));
+      expect(foreign).toEqual([]);
+      expect(screen.getByRole('combobox', { name: 'Subscription for Program operator' })).toBeEnabled();
       await user.click(screen.getByRole('button', { name: 'Hire (2)' }));
       await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { people: { role: string }[] }).people.map(p => p.role)).toContain('OPS-PROGRAM'));
     });
@@ -139,10 +145,10 @@ describe('StaffCard', () => {
       opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-PROGRAM', checked: true }, { role: 'OPS-FIX', checked: true }] });
       const box = await screen.findByRole('checkbox', { name: /Reliability engineer/ });
       expect(box).toBeEnabled();
-      expect(within(box.closest('label')!).queryByText('Required')).not.toBeInTheDocument();
+      expect(within(box.closest('label')!).queryByText('Required role')).not.toBeInTheDocument();
       await user.click(box);
       expect(box).not.toBeChecked();
-      expect(screen.getByRole('combobox', { name: 'Where Reliability engineer runs' })).toBeDisabled();
+      expect(screen.getByRole('combobox', { name: 'Subscription for Reliability engineer' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Hire (1)' })).toBeEnabled();
     });
 
@@ -163,7 +169,7 @@ describe('StaffCard', () => {
       expect(within(box.closest('label')!).getByText('Already here: Argus')).toBeInTheDocument();
       expect(screen.queryByRole('combobox', { name: 'Where Task watchdog runs' })).not.toBeInTheDocument();
       expect(screen.queryByRole('combobox', { name: 'Model for Task watchdog' })).not.toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Where Program operator runs' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Subscription for Program operator' })).toBeInTheDocument();
     });
 
     it('by hand hires only who is not there', async () => {
@@ -201,7 +207,7 @@ describe('StaffCard', () => {
       card();
       const box = await screen.findByRole('checkbox', { name: /Backend engineer/ });
       expect(box).toBeEnabled();
-      expect(screen.queryByText('Required')).not.toBeInTheDocument();
+      expect(screen.queryByText('Required role')).not.toBeInTheDocument();
     });
 
     it('says it in Russian too', async () => {
@@ -321,5 +327,51 @@ describe('StaffCard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
     expect(container.querySelectorAll('.mat')).toHaveLength(0);
     expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
+  });
+});
+
+describe('the look of the hiring card', () => {
+  it('names each pick on the screen, marks the head as a badge and puts the warning on its own line with an icon', async () => {
+    card(undefined, { ...ROSTER, subscriptions: [], roles: ROSTER.roles.map(r => ({ ...r, subscription: null })) });
+    const heading = await screen.findByRole('heading', { name: 'Hiring for Development' });
+    expect(heading.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const warning = await screen.findByText('No subscription serves this department yet. Connect one in Subscriptions; those hired now will wait.');
+    expect(warning).toHaveClass('warn-line');
+    expect(warning.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const pick = screen.getByRole('combobox', { name: 'Subscription for Backend engineer' });
+    expect(within(pick.closest('label')!).getByText('Subscription')).toBeInTheDocument();
+    const model = screen.getByRole('combobox', { name: 'Model for Backend engineer' });
+    expect(within(model.closest('label')!).getByText('Model')).toBeInTheDocument();
+    const head = within(screen.getByRole('checkbox', { name: /^Head of development/ }).closest('label')!).getByText('Head');
+    expect(head).toHaveClass('badge', 'head');
+  });
+
+  it('puts Hire first, then Correct and Hide, and says Hiring… on Hire while it goes', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    mockApi({ 'GET /api/departments/d2/roster': [200, ROSTER], 'POST /api/departments/d2/staff': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    render(
+      <LanguageProvider>
+        <StaffCard department={DEPT} proposal={{ id: 'pr1', brief: 'Start.', people: [{ role: 'DEV-BE', checked: true }] }} onCorrect={() => {}} onHide={() => {}} />
+      </LanguageProvider>,
+    );
+    const hire = await screen.findByRole('button', { name: 'Hire (1)' });
+    const foot = hire.parentElement!;
+    expect(foot).toHaveClass('form-foot');
+    expect(within(foot).getAllByRole('button')).toEqual([hire, screen.getByRole('button', { name: 'Correct in words' }), screen.getByRole('button', { name: 'Hide' })]);
+    await user.click(hire);
+    expect(hire).toHaveAccessibleName('Hiring…');
+    expect(hire).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finish([201, { hired: ['x1'] }]); });
+    expect(await screen.findByText('Hired')).toBeInTheDocument();
+    expect(hire).toHaveAccessibleName('Hire (1)');
+  });
+
+  it('wraps a long badge by words instead of cutting it, and keeps both picks in one row while the card is wide', () => {
+    expect(decl('.staff-row .badge', 'white-space')).toBe('normal');
+    expect(decl('.staff-row .badge', 'overflow-wrap')).toBe('break-word');
+    expect(decl('.staff-pick', 'grid-template-columns')).toBe('repeat(2, minmax(0, 1fr))');
+    expect(decl('.staff-pick select', 'height')).toBe('40px');
+    expect(decl('.warn-line', 'border-inline-start')).toBe('3px solid var(--amber)');
   });
 });

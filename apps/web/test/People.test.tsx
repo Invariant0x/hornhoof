@@ -1,12 +1,19 @@
 import { act, render, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { AgentWindowContext } from '../src/screens/AgentWindowContext';
 import { People } from '../src/screens/People';
+import { AgentIcon, PersonIcon } from '../src/ui/icons';
 import type { Me, PersonView, SubView } from '../src/types';
 import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
+import { decl } from './css';
+
+/* The icon a heading or a choice card shows, and how an icon is drawn on its own, to tell the person from the agent. */
+const iconOf = (element: HTMLElement) => element.querySelector('svg')!.outerHTML;
+const drawn = (icon: ReactElement) => render(icon).container.innerHTML;
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
 
@@ -76,14 +83,14 @@ describe('People', () => {
     expect(screen.getByRole('checkbox', { name: 'Social' })).toBeDisabled();
     await user.type(screen.getByLabelText('Name'), 'Oleg');
     await user.type(screen.getByLabelText('Email'), 'oleg@acme.com');
-    await user.click(screen.getByRole('button', { name: 'Send invite' }));
+    await user.click(screen.getByRole('button', { name: 'Create invite link' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({
       method: 'POST',
       path: '/api/people/invite',
       body: { name: 'Oleg', email: 'oleg@acme.com', title: '', access: { departments: ['d1', 'd2'], teams: [] } },
     });
     expect(await screen.findByText(link)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
   });
 
   it('will not send an empty list', async () => {
@@ -99,9 +106,9 @@ describe('People', () => {
     await user.type(screen.getByLabelText('Email'), 'sasha@acme.com');
     await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
     expect(screen.getByText('Tick at least one department or team.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send invite' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create invite link' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: 'Social' }));
-    await user.click(screen.getByRole('button', { name: 'Send invite' }));
+    await user.click(screen.getByRole('button', { name: 'Create invite link' }));
     expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({ access: { departments: [], teams: ['t1'] } });
   });
 
@@ -187,7 +194,7 @@ describe('People row actions', () => {
     await user.click(await screen.findByRole('button', { name: 'New invite link for Maria' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/people/p2/invite', body: undefined });
     expect(await screen.findByText(link)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Invite link for Maria' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Invite link for Maria is ready' })).toBeInTheDocument();
     expect(within(rowOf('Maria')).getByText('Invited')).toBeInTheDocument();
   });
 
@@ -444,20 +451,20 @@ describe("a person's assistant", () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Invite person' }));
-    await user.click(screen.getByRole('checkbox', { name: 'This is an agent (assistant)' }));
+    await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Whole company' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('option', { name: /Ivan|Maria|Sasha/ }).map(o => o.textContent)).toEqual(['Ivan', 'Maria']);
-    await user.type(screen.getByLabelText('Name'), 'Ava');
-    await user.selectOptions(screen.getByLabelText('Acts for'), 'Maria');
+    await user.type(screen.getByLabelText('Assistant name'), 'Ava');
+    await user.selectOptions(screen.getByLabelText('Owner'), 'Maria');
     await user.selectOptions(screen.getByLabelText('Program'), 'OpenClaw');
     await user.type(screen.getByLabelText(/Events address/), 'https://ava.example.com/hornhoof');
-    await user.click(screen.getByRole('button', { name: 'Add assistant' }));
+    await user.click(screen.getByRole('button', { name: 'Create assistant' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({
       method: 'POST', path: '/api/people/assistants',
       body: { name: 'Ava', title: '', owner: 'p2', program: 'openclaw', eventsUrl: 'https://ava.example.com/hornhoof' },
     });
-    expect(await screen.findByRole('button', { name: 'Create key' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Issue key' })).toBeInTheDocument();
     expect(within(rowOf('Ava')).getByText('Assistant of Maria')).toBeInTheDocument();
   });
 
@@ -471,13 +478,13 @@ describe("a person's assistant", () => {
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
     expect(screen.getByText('No key yet.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create key' }));
+    await user.click(screen.getByRole('button', { name: 'Issue key' }));
     expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
     expect(screen.getByText('hhs_SECRET')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy key' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy signing secret' })).toBeInTheDocument();
-    expect(screen.getByText(/Shown only now/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Done, saved' }));
+    expect(screen.getByText('Copy the key and the signing secret now: they are shown only once.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide key' }));
     expect(screen.queryByText('hha_KEY')).not.toBeInTheDocument();
     expect(screen.getByText(/^Key made on/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument();
@@ -487,8 +494,8 @@ describe("a person's assistant", () => {
   });
 
   it.each([
-    ['en', 'Edit Ava', 'Create key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY'],
-    ['ru', 'Изменить Ava', 'Создать ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY'],
+    ['en', 'Edit Ava', 'Issue key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY'],
+    ['ru', 'Изменить Ava', 'Выпустить ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY'],
   ])("copies the company's address and the key as one text for the assistant, without the signing secret, in %s", async (language, edit, create, button, text) => {
     localStorage.setItem('hh-lang', language);
     mockApi({ ...lists([...PEOPLE, AVA]), 'POST /api/people/h1/key': [201, { key: 'hha_KEY', signingSecret: 'hhs_SECRET', address: 'https://acme.hornhoof.app', person: KEYED }] });
@@ -504,8 +511,8 @@ describe("a person's assistant", () => {
   });
 
   it.each([
-    ['en', 'Edit Ava', 'Create key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY\nSecret: hhs_SECRET'],
-    ['ru', 'Изменить Ava', 'Создать ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY\nСекрет: hhs_SECRET'],
+    ['en', 'Edit Ava', 'Issue key', 'Copy for the assistant', 'Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY\nSecret: hhs_SECRET'],
+    ['ru', 'Изменить Ava', 'Выпустить ключ', 'Скопировать для ассистента', 'Подключись к моей компании в Hornhoof.\nАдрес: https://acme.hornhoof.app\nКлюч: hha_KEY\nСекрет: hhs_SECRET'],
   ])('adds the signing secret to the text for an AvaClone assistant that has an address to be called at, in %s', async (language, edit, create, button, text) => {
     localStorage.setItem('hh-lang', language);
     const called: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, skillsUrl: 'https://ava.example.com/skills' } };
@@ -529,7 +536,7 @@ describe("a person's assistant", () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
-    await user.click(screen.getByRole('button', { name: 'Create key' }));
+    await user.click(screen.getByRole('button', { name: 'Issue key' }));
     await user.click(await screen.findByRole('button', { name: 'Copy for the assistant' }));
     expect(copied).toEqual(['Connect to my company in Hornhoof.\nAddress: https://acme.hornhoof.app\nKey: hha_KEY']);
   });
@@ -600,8 +607,8 @@ describe("a person's assistant", () => {
   });
 
   it.each([
-    ['en', 'Edit Ava', 'Create key', 'Settings for OpenClaw', 'Add these lines to ~/.openclaw/openclaw.json', 'Copy settings'],
-    ['ru', 'Изменить Ava', 'Создать ключ', 'Настройки для OpenClaw', 'Добавьте эти строки в ~/.openclaw/openclaw.json', 'Скопировать настройки'],
+    ['en', 'Edit Ava', 'Issue key', 'Settings for OpenClaw', 'Add these lines to ~/.openclaw/openclaw.json', 'Copy settings'],
+    ['ru', 'Изменить Ava', 'Выпустить ключ', 'Настройки для OpenClaw', 'Добавьте эти строки в ~/.openclaw/openclaw.json', 'Скопировать настройки'],
   ])('shows the settings that connect OpenClaw with a new key, and copies them whole, in %s', async (language, edit, create, heading, where, button) => {
     localStorage.setItem('hh-lang', language);
     const claw: PersonView = { ...KEYED, assistant: { ...KEYED.assistant!, program: 'openclaw' } };
@@ -626,7 +633,7 @@ describe("a person's assistant", () => {
     const user = userEvent.setup();
     render(<People me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Edit Ava' }));
-    await user.click(screen.getByRole('button', { name: 'Create key' }));
+    await user.click(screen.getByRole('button', { name: 'Issue key' }));
     expect(await screen.findByText('hha_KEY')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy settings' })).not.toBeInTheDocument();
   });
@@ -678,12 +685,13 @@ describe("a person's assistant", () => {
     expect(screen.queryByRole('button', { name: 'Invite person' })).not.toBeInTheDocument();
     expect(within(rowOf('Ava')).queryByRole('button', { name: 'Edit Ava' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Add my assistant' }));
-    expect(screen.queryByRole('checkbox', { name: 'This is an agent (assistant)' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Acts for')).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText('Name'), 'Max');
-    await user.click(screen.getByRole('button', { name: 'Add assistant' }));
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(iconOf(screen.getByRole('heading', { name: 'New personal AI assistant' }))).toBe(drawn(<AgentIcon />));
+    expect(screen.queryByLabelText('Owner')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Assistant name'), 'Max');
+    await user.click(screen.getByRole('button', { name: 'Create assistant' }));
     expect(calls.find(c => c.method === 'POST')!.body).toEqual({ name: 'Max', title: '', owner: 'p3', program: 'avaclone', eventsUrl: null });
-    expect(await screen.findByRole('button', { name: 'Create key' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Issue key' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(calls.filter(c => c.method === 'PATCH').map(c => c.path)).toEqual(['/api/people/h2/assistant']);
@@ -707,9 +715,192 @@ describe("a person's assistant", () => {
     render(<LanguageProvider><People me={ME} /></LanguageProvider>);
     expect(await screen.findByText(ru.people.assistantOf('Maria'))).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: ru.people.invitePerson }));
-    await user.click(screen.getByRole('checkbox', { name: 'Это агент (ассистент)' }));
-    expect(screen.getByLabelText('Работает за')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Добавить ассистента' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Личный ИИ-ассистент' }));
+    expect(screen.getByLabelText('Владелец')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Создать ассистента' })).toBeInTheDocument();
+    localStorage.clear();
+  });
+});
+
+describe('the forms to add and edit people', () => {
+  const lists = { 'GET /api/people': [200, { people: PEOPLE }] as [number, unknown], 'GET /api/org': [200, ORG_WITH_TEAMS] as [number, unknown] };
+  async function openInvite(user: ReturnType<typeof userEvent.setup>) {
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Invite person' }));
+  }
+  /* The buttons of a group, in the order a person meets them. */
+  const groupOf = (button: HTMLElement) => {
+    const foot = button.parentElement!;
+    expect(foot).toHaveClass('form-foot');
+    return within(foot).getAllByRole('button');
+  };
+
+  it('asks first whether a person or a personal AI assistant joins, each a card with its icon, a person by default', async () => {
+    mockApi(lists);
+    const user = userEvent.setup();
+    await openInvite(user);
+    expect(screen.getByRole('heading', { name: 'Add a member to the company' })).toBeInTheDocument();
+    const [person, assistant] = within(screen.getByRole('radiogroup', { name: 'Person or assistant' })).getAllByRole('radio');
+    expect(person).toHaveAccessibleName('Person');
+    expect(person).toHaveAccessibleDescription('Signs in with a one-time invite link in the browser');
+    expect(assistant).toHaveAccessibleName('Personal AI assistant');
+    expect(assistant).toHaveAccessibleDescription('Connects your own program with a key');
+    expect(person).toBeChecked();
+    expect(assistant).not.toBeChecked();
+    for (const card of [person!, assistant!]) expect(card.closest('label')!.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(iconOf(person!.closest('label')!)).toBe(drawn(<PersonIcon />));
+    expect(iconOf(assistant!.closest('label')!)).toBe(drawn(<AgentIcon />));
+    expect(person!.closest('label')).toHaveClass('kind-card', 'on');
+    expect(assistant!.closest('label')).not.toHaveClass('on');
+    expect(iconOf(screen.getByRole('heading', { name: 'Add a member to the company' }))).toBe(drawn(<PersonIcon />));
+    expect(screen.queryByRole('checkbox', { name: /agent/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+  });
+
+  it('turns into the assistant form and back under the same heading, keeping the name typed', async () => {
+    mockApi(lists);
+    const user = userEvent.setup();
+    await openInvite(user);
+    await user.type(screen.getByLabelText('Name'), 'Oleg');
+    await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Person' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' }).closest('label')).toHaveClass('on');
+    expect(screen.getByRole('radio', { name: 'Person' }).closest('label')).not.toHaveClass('on');
+    expect(iconOf(screen.getByRole('heading', { name: 'Add a member to the company' }))).toBe(drawn(<PersonIcon />));
+    expect(screen.getByLabelText('Assistant name')).toHaveValue('Oleg');
+    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Program')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Person' }));
+    expect(screen.getByRole('radio', { name: 'Person' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Person' }).closest('label')).toHaveClass('on');
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' }).closest('label')).not.toHaveClass('on');
+    expect(screen.getByLabelText('Name')).toHaveValue('Oleg');
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Program')).not.toBeInTheDocument();
+  });
+
+  it('says Creating… on the main button while the invite goes, keeping its place before Cancel', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    mockApi({ ...lists, 'POST /api/people/invite': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    await openInvite(user);
+    await user.type(screen.getByLabelText('Name'), 'Oleg');
+    await user.type(screen.getByLabelText('Email'), 'oleg@acme.com');
+    const create = screen.getByRole('button', { name: 'Create invite link' });
+    expect(groupOf(create)).toEqual([create, screen.getByRole('button', { name: 'Cancel' })]);
+    expect(create).not.toHaveAttribute('aria-busy', 'true');
+    await user.click(create);
+    expect(create).toHaveAccessibleName('Creating…');
+    expect(create).toHaveAttribute('aria-busy', 'true');
+    expect(create).toBeDisabled();
+    /* The idle words stay in the button, unseen, so it keeps its width. */
+    expect(create.querySelector('[aria-hidden="true"]')).toHaveTextContent('Create invite link');
+    await act(async () => { finish([201, { person: PEOPLE[2], inviteUrl: 'https://hq.acme.com/invite/T' }]); });
+    expect(await screen.findByText('https://hq.acme.com/invite/T')).toBeInTheDocument();
+  });
+
+  it('shows the one-time link right under its note, with Copy and Done in one group under it', async () => {
+    const link = 'https://hq.acme.com/invite/TOKEN123';
+    mockApi({ ...lists, 'POST /api/people/invite': [201, { person: PEOPLE[2], inviteUrl: link }] });
+    const user = userEvent.setup();
+    await openInvite(user);
+    await user.type(screen.getByLabelText('Name'), 'Sasha');
+    await user.type(screen.getByLabelText('Email'), 'sasha@acme.com');
+    await user.click(screen.getByRole('button', { name: 'Create invite link' }));
+    expect(await screen.findByRole('heading', { name: 'Invite link for Sasha is ready' })).toBeInTheDocument();
+    const note = screen.getByText('Send it to the person yourself. It works once, for 7 days, and is shown only now.');
+    const code = screen.getByText(link);
+    expect(code.tagName).toBe('CODE');
+    expect(note.nextElementSibling).toBe(code);
+    const copy = screen.getByRole('button', { name: 'Copy' });
+    expect(code.nextElementSibling).toBe(copy.parentElement);
+    expect(groupOf(copy)).toEqual([copy, screen.getByRole('button', { name: 'Done' })]);
+  });
+
+  it('edits in the same grid, with the deputy under Authority, Save before Cancel, and Saving… while it goes', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    mockApi({ ...lists, 'PATCH /api/people/p2': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    const heading = screen.getByRole('heading', { name: 'Edit Maria' });
+    expect(heading.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
+    expect(deputy.closest('.field')!.querySelector(':scope > .label')).toHaveTextContent('Authority');
+    expect(screen.getByRole('group', { name: 'Company access' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Telegram')).toHaveAccessibleDescription('@name or the account number, so the bots know the person.');
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(groupOf(save)).toEqual([save, screen.getByRole('button', { name: 'Cancel' })]);
+    await user.type(screen.getByLabelText('Title'), ' and COO');
+    await user.click(save);
+    expect(save).toHaveAccessibleName('Saving…');
+    expect(save).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finish([200, { person: { ...PEOPLE[1]!, title: 'Deputy CEO and COO' } }]); });
+    expect(await within(rowOf('Maria')).findByText('Deputy CEO and COO')).toBeInTheDocument();
+  });
+
+  it('says Creating… on the assistant form too, and gives its fields the short names', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    mockApi({ ...lists, 'POST /api/people/assistants': () => new Promise(resolve => { finish = resolve; }) });
+    const user = userEvent.setup();
+    await openInvite(user);
+    await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
+    expect(screen.getByLabelText('Owner')).toHaveAccessibleDescription('Person on whose behalf this assistant operates.');
+    expect(screen.getByLabelText('Events address')).toHaveAccessibleDescription('Optional. Here Hornhoof tells the program that something is new.');
+    await user.type(screen.getByLabelText('Assistant name'), 'Ava');
+    const create = screen.getByRole('button', { name: 'Create assistant' });
+    expect(groupOf(create)).toEqual([create, screen.getByRole('button', { name: 'Cancel' })]);
+    await user.click(create);
+    expect(create).toHaveAccessibleName('Creating…');
+    expect(create).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finish([500, { error: { code: 'internal', message: 'x' } }]); });
+    expect(create).toHaveAccessibleName('Create assistant');
+    expect(create).toBeEnabled();
+  });
+
+  it('lays the forms out with classes alone, with no inline style', async () => {
+    mockApi(lists);
+    const user = userEvent.setup();
+    const { container } = render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Invite person' }));
+    expect(container.querySelector('form [style]')).toBeNull();
+    await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
+    expect(container.querySelector('form [style]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Edit Maria' }));
+    expect(container.querySelector('form [style]')).toBeNull();
+  });
+
+  it('puts each label in a 180 px column beside its field, with 12 px between them and between rows, and above it in a narrow place', () => {
+    const narrow = 'form (max-width: 479px)';
+    expect(decl('.form-grid', 'container')).toBe('form / inline-size');
+    expect(decl('.form-grid', 'gap')).toBe('12px');
+    expect(decl('.form-grid .field', 'grid-template-columns')).toBe('180px minmax(0, 1fr)');
+    expect(decl('.form-grid .field', 'gap')).toBe('12px');
+    expect(decl('.form-grid .field > :is(label, .label)', 'padding-block-start')).toBe('10px');
+    expect(decl('.form-grid .field-control', 'gap')).toBe('4px');
+    expect(decl('.form-grid .field', 'grid-template-columns', narrow)).toBe('minmax(0, 1fr)');
+    expect(decl('.form-grid .field', 'gap', narrow)).toBe('6px');
+    expect(decl('.form-grid .field > :is(label, .label)', 'padding-block-start', narrow)).toBe('0');
+    expect(decl('.kind-switch', 'grid-template-columns')).toBe('repeat(2, minmax(0, 1fr))');
+    expect(decl('.kind-switch', 'grid-template-columns', narrow)).toBe('minmax(0, 1fr)');
+    expect(decl('.kind-card', 'min-height')).toBe('44px');
+    expect(decl('.kind-card > .ic', 'width')).toBe('20px');
+    expect(decl('.busy-swap > [aria-hidden="true"]', 'visibility')).toBe('hidden');
+  });
+
+  it('names the choice and the new buttons in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi(lists);
+    const user = userEvent.setup();
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: ru.people.invitePerson }));
+    expect(screen.getByRole('heading', { name: 'Добавить участника в компанию' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Человек' })).toHaveAccessibleDescription('Вход по одноразовой ссылке и работа в браузере');
+    expect(screen.getByRole('radio', { name: 'Личный ИИ-ассистент' })).toHaveAccessibleDescription('Подключение своей программы по ключу');
+    expect(screen.getByRole('button', { name: 'Создать ссылку' })).toBeInTheDocument();
     localStorage.clear();
   });
 });

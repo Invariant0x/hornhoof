@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { decl, parse, px, rulesFor } from './css';
+import { decl, parse, px, RULES, rulesFor } from './css';
 
 function paddingRightPx(selector: string): number | undefined {
   const right = decl(selector, 'padding-right');
@@ -87,4 +87,10 @@ it('wraps question materials and keeps their viewer and actions inside the avail
   expect(decl('.mv-doc', 'max-inline-size')).toBe('760px');
   expect(decl('.mv-plain', 'overflow-wrap')).toBe('anywhere');
   expect(decl('.mv-acts > .act', 'min-height')).toBe('44px');
+});
+
+it('draws every focus ring in the accent ink, which keeps 3:1 on every surface of every theme', () => {
+  const rings = RULES.filter(r => r.selectors.some(s => s.includes(':focus-visible')) && r.decls.outline && r.decls.outline !== 'none');
+  expect(rings.map(r => r.selectors.join(', '))).toEqual(expect.arrayContaining([':focus-visible', '.segments label:has(input:focus-visible)', '.seg button:focus-visible', 'button.hub:focus-visible', '.t-mh:focus-visible']));
+  for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
 });

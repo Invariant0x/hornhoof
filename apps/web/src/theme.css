@@ -1,20 +1,23 @@
-/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. */
+/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. A theme sets
+   only these tokens: colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay
+   the same in every theme. src/theme-template.ts holds the same values for the samples it gives out. */
 :root {
-  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #A9B7C5;
+  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #768695;
   --ink: #0F1B27; --muted: #4C5A68;
-  --p-claude: #C2593A; --p-kimi: #1667E0; --p-glm: #3D47D6; --p-antigravity: #1E8E3E;
-  --cyan: #00A3BD; --cyan-ink: #00768A; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #1E8E4E;
-  --red: #D32F2F; --on-red: #FFFFFF;
+  --p-claude: #A84628; --p-kimi: #125BC7; --p-glm: #3D47D6; --p-antigravity: #157331;
+  --cyan: #00A3BD; --cyan-ink: #006E80; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #13753D;
+  --red: #C62828; --on-red: #FFFFFF;
   --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
   --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
   --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
   --f-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --f-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --cut-k: 1;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
     --ink: #E3EAF1; --muted: #93A0AE;
     --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
     --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
@@ -25,13 +28,36 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
   --ink: #E3EAF1; --muted: #93A0AE;
   --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
   --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
   --red: #FF6B6B; --on-red: #2A0606;
   --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
   --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+/* Matrix: phosphor green on near black, square frames. Roles leave green so they stay apart. */
+:root[data-theme="matrix"] {
+  --bg: #050A06; --surface: #0A130D; --surface2: #101D14; --line: #1E3525; --line2: #4A7856;
+  --ink: #D4F7DC; --muted: #84B390;
+  --p-claude: #F08A66; --p-kimi: #639EFF; --p-glm: #8F97FF; --p-antigravity: #6EE08E;
+  --cyan: #00E05A; --cyan-ink: #66FF99; --amber: #E5B82E; --amber-ink: #F5CD56; --pink: #F25C9A; --pink-ink: #FF8AB8; --ok: #42DEC2;
+  --red: #FF5247; --on-red: #260402;
+  --idle: #1B3021; --dot: rgba(82, 224, 128, .16); --glow: rgba(0, 224, 90, .14);
+  --btn: #00E05A; --on-btn: #021C0B; --hud: rgba(8, 16, 11, .88); --shadow: rgba(0, 0, 0, .62);
+  --cut-k: 0;
+  color-scheme: dark;
+}
+/* Cyberpunk: deep violet night with neon cyan lines and links, a yellow main button and magenta attention. */
+:root[data-theme="cyberpunk"] {
+  --bg: #0B0720; --surface: #140D33; --surface2: #1C1342; --line: #33275E; --line2: #7E6BC4;
+  --ink: #F5F0FF; --muted: #B9AEE0;
+  --p-claude: #FF9A73; --p-kimi: #73A9FF; --p-glm: #A3A9FF; --p-antigravity: #6FE592;
+  --cyan: #00E5FF; --cyan-ink: #5CF0FF; --amber: #FF9E2C; --amber-ink: #FFB866; --pink: #FF2BD6; --pink-ink: #FF7AE5; --ok: #3DFFA8;
+  --red: #FF4766; --on-red: #1A0008;
+  --idle: #2A1F55; --dot: rgba(0, 229, 255, .14); --glow: rgba(255, 43, 214, .16);
+  --btn: #FCEE0A; --on-btn: #1A1400; --hud: rgba(17, 11, 43, .86); --shadow: rgba(0, 0, 0, .6);
   color-scheme: dark;
 }
 
@@ -52,7 +78,7 @@ h2 { font-size: 18px; }
 p { margin: 0; }
 a { color: var(--cyan-ink); }
 button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 
@@ -62,7 +88,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
   position: relative;
   padding: 1px;
   background: var(--line);
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k)));
 }
 .edge > .edge-in { height: 100%; background: var(--surface); clip-path: inherit; }
 .edge.accent { background: var(--cyan); }
@@ -75,7 +101,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
   border: 0; cursor: pointer;
   background: var(--btn); color: var(--on-btn);
   font-family: var(--f-display); font-size: 14px; font-weight: 600;
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+  clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k)));
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
@@ -106,6 +132,7 @@ select {
 select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 select:disabled { opacity: .55; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
+.field-control { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
 .field > label, .field > .label { font-size: 13px; font-weight: 500; color: var(--muted); }
 .field input {
   height: 40px; padding: 0 12px;
@@ -116,7 +143,7 @@ select:disabled { opacity: .55; }
 .field input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .field .hint { font-size: 12px; color: var(--muted); }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
-.alert { padding: 10px 12px; border-left: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
+.alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
 .agent-window-error { margin-top: 68px; }
 
 /* Centered card screens: setup, log in, invite */
@@ -182,13 +209,12 @@ select:disabled { opacity: .55; }
 .segments label:first-of-type { margin-left: 0; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
-/* A switch with its line and a hint under it, like opening Hornhoof on the internet, or the deputy in a person's window. */
-.card label.check, .panel-form label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
-.card label.check input, .panel-form label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
-.card label.check span, .panel-form label.check span, .dv-list label.check span { display: grid; gap: 2px; }
-.card label.check b, .panel-form label.check b, .dv-list label.check b { font-weight: 600; }
-.card label.check small, .panel-form label.check small, .dv-list label.check small { font-size: 12px; color: var(--muted); }
-.panel-form label.check { grid-column: 1 / -1; }
+/* A switch with its line and a hint under it, like opening Hornhoof on the internet. */
+.card label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
+.card label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.card label.check span, .dv-list label.check span { display: grid; gap: 2px; }
+.card label.check b, .dv-list label.check b { font-weight: 600; }
+.card label.check small, .dv-list label.check small { font-size: 12px; color: var(--muted); }
 /* The narrow column for the name, link and sign-in code, so they stay readable inside the wide template step. */
 .setup-lead { display: grid; gap: 14px; max-width: 440px; }
 /* The company templates on the first screen: a grid of cards, each with a mini department scheme drawn as an SVG. */
@@ -222,7 +248,7 @@ select:disabled { opacity: .55; }
 .link-input { display: flex; align-items: stretch; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
-.segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.segments label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
 .command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
@@ -340,7 +366,18 @@ select:disabled { opacity: .55; }
 }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
-.seg button:focus-visible { position: relative; outline: 2px solid var(--cyan); outline-offset: 2px; }
+.seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* The themes two by two, each a 44 px target 8 px from the next; a name too long for its button wraps by words. The custom
+   template, a fifth choice, takes the whole row. */
+.seg.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.seg.themes button { min-height: 44px; margin: 0; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.seg.themes button:nth-child(5) { grid-column: 1 / -1; }
+/* The custom theme template: what it is, whether one is on, and its three actions. The load button is a label around a
+   hidden file field, so the field's focus shows on the label. */
+.theme-template { display: grid; gap: 10px; }
+.theme-template > p { margin: 0; font-size: 13px; }
+.theme-template a.btn { text-decoration: none; }
+.theme-load:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .body { position: absolute; inset: 0; overflow: auto; }
 /* A page scrolls under the floating header, so a band in the page's own color stays at the top of what scrolls, as tall
    as the header and the gap above it: text never shows around the glass blocks. It takes no room from the page. */
@@ -400,7 +437,7 @@ select:disabled { opacity: .55; }
 .hub-focus-tag { position: absolute; left: 50%; top: 162px; transform: translateX(-50%); padding: 1.5px 6px; background: var(--glow); border: 1px solid color-mix(in srgb, var(--cyan) 45%, var(--line)); font-family: var(--f-display); font-size: 9.5px; font-weight: 600; line-height: 1.2; color: var(--cyan-ink); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.hub { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
-button.hub:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+button.hub:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 4px; }
 button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .hub.on .hub-ring { stroke: var(--cyan); }
 .start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
@@ -466,20 +503,71 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
-.panel-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.panel-form .alert, .panel-form .actions { grid-column: 1 / -1; }
-.panel-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .panel .actions { display: flex; justify-content: flex-end; }
-/* An assistant's key on its card: a line on it, the key and secret once made, and its buttons on one row that wraps whole. */
-.assistant-key { display: grid; gap: 10px; padding-block-start: 14px; border-block-start: 1px solid var(--line); }
+/* A card with a form, as Design drew it for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
+   and 14 where the card itself is narrow. Its head is the heading with its icon and a line under it. Only sizes and gaps are
+   set here, so every theme lays it out the same. */
+.panel.form-card { container: form-card / inline-size; }
+.panel.form-card > .edge-in { padding: 24px; gap: 16px; }
+@container form-card (max-width: 479px) { .panel.form-card > .edge-in { padding: 16px; gap: 14px; } }
+.form-head { display: grid; gap: 4px; padding-block-end: 12px; border-block-end: 1px solid var(--line); }
+.form-title { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: break-word; }
+.form-title > .ic, .t-card.staff h4 > .ic { width: 20px; height: 20px; }
+/* The grid of a form: each label in a 180 px column beside its field, 12 px apart and 12 px between rows, the field's hint
+   4 px under it. Where the form itself is narrow, the label stands over its field, 6 px above it. */
+.form-grid { container: form / inline-size; display: grid; gap: 12px; min-width: 0; }
+.form-grid .field { grid-template-columns: 180px minmax(0, 1fr); gap: 12px; align-items: start; }
+.form-grid .field > :is(label, .label) { padding-block-start: 10px; font-weight: 600; color: var(--ink); overflow-wrap: break-word; }
+.form-grid .field-control { gap: 4px; }
+.form-grid > .alert { margin: 0; }
+.form-grid > .form-foot { margin-block-start: 4px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
+/* Keys, addresses, mail and Telegram names read left to right in every language, in the code font. */
+.form-grid input:is([type="email"], [type="url"], .mono) { direction: ltr; font-family: var(--f-mono); font-size: 13px; }
+/* Who joins: a person or a personal AI assistant, two cards side by side, one over the other where the form is narrow. */
+.kind-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.kind-card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
+.kind-card > .ic { width: 20px; height: 20px; color: var(--muted); }
+.kind-card > span { display: grid; gap: 4px; min-width: 0; }
+.kind-card b { font-weight: 600; overflow-wrap: break-word; }
+.kind-card small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.kind-card.on { border-color: var(--cyan); background: var(--glow); }
+.kind-card.on > .ic, .kind-card.on b { color: var(--cyan-ink); }
+.kind-card:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+@container form (max-width: 479px) {
+  .form-grid .field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .form-grid .field > :is(label, .label) { padding-block-start: 0; }
+  .kind-switch { grid-template-columns: minmax(0, 1fr); }
+}
+/* A switch on a frame of its own beside its label, like the deputy in a person's window. */
+.check-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
+.check-card input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+/* A tick in a form's row is no text field: it keeps its own size and shows its focus ring. */
+.access .field-control input, .check-card input { padding: 0; border: 0; background: none; }
+.access .field-control input:focus, .check-card input:focus { box-shadow: none; }
+.access .field-control input:focus-visible, .check-card input:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.check-card > span { display: grid; gap: 4px; min-width: 0; }
+.check-card b { font-weight: 600; overflow-wrap: break-word; }
+.check-card small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.access .field-control { padding-block-start: 8px; }
+/* What a main button says while its action runs: both words stay in it, the hidden one keeping its width. */
+.busy-swap { display: inline-grid; justify-items: center; }
+.busy-swap > * { grid-area: 1 / 1; }
+.busy-swap > [aria-hidden="true"] { visibility: hidden; }
+/* Something shown once, such as an invite link or a new key: its note, the code right under it, its buttons under that. */
+.secret { display: grid; gap: 8px; min-width: 0; }
+.secret-title { font-weight: 600; }
+.secret-code { display: block; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); font-family: var(--f-mono); font-size: 12px; line-height: 1.55; direction: ltr; text-align: left; overflow-wrap: anywhere; }
+/* A program's settings keep their lines and indents, and a long line wraps inside the box. */
+pre.secret-code { margin: 0; white-space: pre-wrap; }
+.secret-code code { font: inherit; }
+/* An assistant's key on its card: a line on it, the key and secret once made, and its buttons under the line. */
+.assistant-key { display: grid; gap: 8px; padding-block-start: 16px; border-block-start: 1px solid var(--line); }
 .assistant-key h3, .assistant-key p { margin: 0; }
-.assistant-key .actions { flex-wrap: wrap; gap: 10px; }
-/* A key keeps a readable width: where the row is too narrow for it and its Copy, Copy goes under it. */
-.assistant-key .command { display: flex; flex-wrap: wrap; }
-.assistant-key .command code { flex: 1 1 24ch; min-width: 0; }
-/* The program's settings keep their lines and indents, and a long line wraps inside the card. */
-.assistant-key .command pre { flex: 1 1 24ch; min-width: 0; margin: 0; }
-.assistant-key .command pre code { white-space: pre-wrap; }
+.key-line { display: flex; align-items: center; gap: 8px; }
+.key-line > .ic { color: var(--cyan-ink); }
+/* A warning on its own line, with its sign at the start. */
+.warn-line { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); color: var(--amber-ink); overflow-wrap: break-word; }
+.warn-line > .ic { margin-block-start: 3px; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
 .ptable th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -524,7 +612,6 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .tabs button { padding: 0 10px; }
-  .panel-form { grid-template-columns: 1fr; }
   .ptable thead { display: none; }
   .ptable, .ptable tbody, .ptable tr, .ptable td { display: block; width: 100%; }
   .ptable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -570,11 +657,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .plan-steps li.now::before { border-color: var(--btn); background: var(--btn); color: var(--on-btn); box-shadow: 0 0 0 3px var(--glow); }
 .plan-steps li.now > span:first-child { font-weight: 600; }
 .plan-steps li p { margin: 0; }
-.key-form { display: grid; gap: 8px; max-width: 520px; }
-.key-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.key-form input { font: inherit; font-family: var(--f-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 6px 8px; }
-.key-form p { margin: 0; font-size: 12.5px; }
-.key-form a { color: var(--cyan-ink); }
+.key-form { max-width: 640px; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
 .test { display: grid; gap: 6px; }
@@ -583,13 +666,14 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
 .command-box { display: grid; gap: 8px; }
 .trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
-.connect-form { display: grid; gap: 14px; }
-.connect-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; border: 0; padding: 0; margin: 0; }
-.plan { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: center; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
+/* The plans to connect: a card each, with its tick, its mark, its name and what it takes. */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.plan { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 44px; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
 .plan.on { border-color: var(--cyan); }
-.plan input { grid-row: span 2; }
-.plan span { font-size: 12px; }
+.plan input { grid-row: span 2; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
+.plan .pm { grid-row: span 2; width: 20px; height: 20px; }
+.plan b { overflow-wrap: break-word; }
+.plan span { font-size: 12px; overflow-wrap: break-word; }
 
 /* Machines: the pool in figures, then the table. The figures go in columns, each label over its value. */
 .pool > .edge-in { padding: 16px 20px; }
@@ -675,7 +759,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-m.out .t-mh > i { color: var(--cyan-ink); }
 .t-mh > span { min-width: 0; overflow-wrap: anywhere; }
 .t-mh:hover > span { color: var(--cyan-ink); }
-.t-mh:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.t-mh:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .t-mf { grid-column: 2; font-size: 12px; }
 .t-mb { grid-column: 2; min-width: 0; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line2); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .t-l { display: grid; grid-template-columns: 18px 1fr; }
@@ -825,6 +909,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: normal; overflow-wrap: break-word;
   font-family: var(--f-display); font-size: 14px; font-weight: 600; font-style: normal; line-height: 1.4; letter-spacing: normal; text-transform: none; text-indent: 0;
 }
+/* WebKit lets a button that grows from its narrowest width stop at that width again, so its words wrap with room to spare.
+   A width of fit-content gives it back its whole words; Chromium and Firefox ignore the width under this flex-basis. */
+.form-foot > :is(.act, .btn) { width: fit-content; }
 .notebook li form { display: grid; gap: 8px; min-width: 0; }
 .notebook textarea { width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); font: inherit; resize: vertical; }
 .notebook-add { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
@@ -1104,12 +1191,20 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 
 /* The staff card: a line per person with where it runs and its model. */
 .t-card-brief { margin: 0 0 4px; color: var(--muted); }
-.staff-row { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
-.staff-row:first-of-type { border-top: 0; }
+.staff-row { display: grid; gap: 8px; padding: 10px 0; border-block-start: 1px solid var(--line); }
+.staff-row:first-of-type { border-block-start: 0; }
 .t-card .staff-row label { padding: 0; }
-.t-card.staff .t-card-tag { color: var(--cyan-ink); }
-.staff-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-left: 30px; min-width: 0; }
-.staff-pick select { width: 100%; min-width: 0; height: 32px; padding: 0 28px 0 8px; background-color: var(--surface); font-size: 13px; }
+.t-card.staff h4 { display: flex; align-items: center; gap: 8px; }
+/* The head and a required role are marked with a badge that wraps by words, never cut. */
+.staff-row .badge { margin-inline-start: 8px; white-space: normal; overflow-wrap: break-word; vertical-align: 1px; }
+.badge.head { color: var(--amber-ink); }
+.badge.required { color: var(--cyan-ink); }
+.staff-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-inline-start: 30px; min-width: 0; }
+.t-card .staff-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 0; min-width: 0; cursor: default; }
+.staff-field > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.staff-pick select { width: 100%; min-width: 0; height: 40px; padding: 0 28px 0 12px; background-color: var(--surface); font-size: 13px; }
+.t-card.staff > .warn-line { margin-block-end: 4px; }
+.t-card.staff > .form-foot { margin-block-start: 10px; }
 
 @media (max-width: 760px) {
   .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
@@ -1117,20 +1212,18 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .dv-acts { left: 16px; right: 16px; bottom: 124px; flex-wrap: wrap; }
   .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
-  .staff-pick { margin-left: 0; }
+  .staff-pick { margin-inline-start: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }
 
 /* Access: whole company, or departments with their teams below them. */
-.access { grid-column: 1 / -1; display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
-.access legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.access .hint { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.access .hint { margin: 0; font-size: 12px; color: var(--muted); }
 .access .bad { margin: 0; font-size: 12px; color: var(--pink-ink); }
-.access label { display: inline-flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.access .field-control label { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; overflow-wrap: break-word; }
 .access label:has(input:disabled) { cursor: default; color: var(--muted); }
 .access input { width: 16px; height: 16px; margin: 0; accent-color: var(--cyan); }
 .access-list, .access-list ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.access-list ul { padding-left: 24px; }
+.access-list ul { padding-inline-start: 24px; }
 
 /* The tracker: what waits for people, then the turns with their tasks. */
 .tasks { max-width: 1040px; margin: 0 auto; padding: 84px 16px 48px; display: grid; gap: 22px; }
@@ -1326,7 +1419,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .task-search .zbtn { position: absolute; right: 0; top: 0; height: 40px; }
 .trow { display: grid; gap: 4px; width: 100%; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .trow:hover, .trow.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
-.trow:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.trow:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .trow-title { font-weight: 600; overflow-wrap: anywhere; }
 .trow-title b { font-family: var(--f-display); color: var(--cyan-ink); }
 .trow-brief { min-width: 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; white-space: normal; }
@@ -1385,7 +1478,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tview .tv-in > svg { display: block; flex: none; }
 /* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
 .tview .tv-labs .dept-chip { position: absolute; }
-.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
@@ -1466,7 +1559,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .tview .lgd-l li { display: flex; align-items: center; gap: 8px; }
 .tview .lgd-l svg { flex: none; width: 34px; height: 16px; overflow: visible; }
 .tview .tv-card { position: absolute; z-index: 12; width: 340px; filter: drop-shadow(0 14px 28px var(--shadow)); }
-.tview .tv-card-edge { --cut: 12px; padding: 1px; background: var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tview .tv-card-edge { --cut: 12px; padding: 1px; background: var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
 .tview .tv-card-in { position: relative; display: grid; gap: 10px; max-height: 470px; overflow: auto; padding: 14px 16px 16px; background: var(--surface); border-top: 2px solid var(--cyan); clip-path: inherit; }
 .tview .tv-card h4 { padding-right: 34px; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
 .tview .tv-card h4 b { color: var(--cyan-ink); }
