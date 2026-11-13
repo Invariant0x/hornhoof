@@ -73,6 +73,7 @@ describe('the inbox of Hornhoof developers', () => {
       { ...report(), kind: 'complaint' },
       { ...report(), installation: 'not-an-id' },
       { ...report(), title: '' },
+      { ...report(), title: '\u200f\u2066 \u0000' },
       { ...report(), title: 'x'.repeat(201) },
       { ...report(), text: 'x'.repeat(5001) },
       { ...report(), facts: { version: '0.18.11', platform: ['linux x64'], errorCode: 'Not A Code' } },

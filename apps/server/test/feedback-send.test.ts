@@ -109,6 +109,8 @@ describe('sending feedback to Hornhoof developers', () => {
     const { preview } = await installation();
     expect((await preview({ ...BUG, kind: 'complaint' })).statusCode).toBe(400);
     expect((await preview({ ...BUG, title: '   ' })).statusCode).toBe(400);
+    /* Marks a screen drops leave nothing to show, so a title of them alone is as empty as one of spaces. */
+    expect((await preview({ ...BUG, title: '\u200e \u202e\u0007' })).statusCode).toBe(400);
     expect((await preview({ ...BUG, title: 'x'.repeat(201) })).statusCode).toBe(400);
     expect((await preview({ ...BUG, text: 'x'.repeat(5001) })).statusCode).toBe(400);
     expect((await preview({ ...BUG, title: 'x'.repeat(200), text: 'x'.repeat(5000) })).statusCode).toBe(200);
