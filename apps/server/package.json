@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:real": "sh test/real/run.sh",
     "test:lab": "vitest run --config vitest.lab.config.ts",
-    "lint:part": "eslint"
+    "lint:part": "eslint . --ignore-pattern \"test/**\" --ignore-pattern \"src/modules/[t-z]*/**\" && eslint \"src/modules/[t-z]*/**\" && eslint test --ignore-pattern \"test/[m-z]*.ts\" && eslint \"test/[m-s]*.ts\" && eslint \"test/[t-z]*.ts\""
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
