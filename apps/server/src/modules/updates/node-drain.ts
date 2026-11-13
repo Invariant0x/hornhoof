@@ -9,6 +9,7 @@ import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { keyOf, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
+import { hasLiveDrainWork } from './drain-live.js';
 import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
 /* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
@@ -126,8 +127,10 @@ class NodeDrains {
     const node = nodeOf(record.key);
     const work = await drainWork(this.ctx, node);
     if (this.records.get(record.key) !== record) return;
+    const live = Boolean(work.turns.length || work.parts.length) && (await hasLiveDrainWork(this.ctx, node, now));
+    if (this.records.get(record.key) !== record) return;
     const counts = { turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
-    if (!work.turns.length && !work.parts.length) {
+    if (!live) {
       record.view = { state: 'restarting', since: new Date(now).toISOString() };
       this.save();
       return;

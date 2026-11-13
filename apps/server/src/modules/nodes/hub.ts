@@ -92,6 +92,8 @@ export class NodeHub {
   private readonly sockets = new Map<string, Entry>();
   /* When each node that is away lost its socket, while it stays away. */
   private readonly away = new Map<string, number>();
+  /* When this server process last received a connection or a valid frame from each node. */
+  private readonly seen = new Map<string, number>();
   private readonly timer: NodeJS.Timeout;
   private leaving = false;
 
@@ -116,6 +118,7 @@ export class NodeHub {
     const entry: Entry = { link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
+    this.seen.set(key, at.getTime());
     socket.on('pong', () => {
       entry.missed = 0;
     });
@@ -161,6 +164,7 @@ export class NodeHub {
     if (this.sockets.get(key) !== entry) return chain;
     const msg = parseOperatorNodeMessage(raw);
     if (!msg) return chain;
+    this.seen.set(key, Date.now());
     this.capturePrograms(entry, msg);
     if (isTerminalFrame(msg)) {
       this.forwardTerminal(id, msg);
@@ -190,6 +194,10 @@ export class NodeHub {
     const key = keyOf(id);
     if (!this.away.has(key)) this.away.set(key, Date.now());
     return this.away.get(key)!;
+  }
+
+  lastSeenAt(id: NodeIdentity): number | null {
+    return this.seen.get(keyOf(id)) ?? null;
   }
 
   greet(

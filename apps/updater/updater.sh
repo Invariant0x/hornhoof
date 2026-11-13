@@ -516,21 +516,23 @@ interrupted() {
   NODES_FREE=''
 }
 
-# The nodes on this computer that run another image than the one .env names, by the images of this server's own
-# repositories, as words: builtin for the built-in node, the plan on its label for each other. One of another server on
-# this computer counts too: the server names only its own.
+# The nodes on this computer that run another image than the one .env names, or have stopped, by the images of this
+# server's own repositories, as words: builtin for the built-in node, the plan on its label for each other. One of
+# another server on this computer counts too: the server names only its own.
 nodes_behind() {
-  local running target name plan
+  local cid running target name plan
   [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
   own "$IMAGE" "$(env_value HORNHOOF_APP_REF)" && own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" && own "$UPDATER_IMAGE" "$(env_value HORNHOOF_UPDATER_REF)" || return 0
   plain_tag "$(env_value HORNHOOF_VERSION)" || return 0
   target=$(docker image inspect --format '{{.Id}}' "$(env_value HORNHOOF_NODE_REF)" 2> /dev/null || true)
-  running=$(docker inspect --format '{{.Image}}' "$(compose ps -q node 2> /dev/null || true)" 2> /dev/null || true)
-  if [ -n "$running" ] && [ "$running" != "$target" ]; then printf 'builtin '; fi
+  cid=$(compose ps -aq node 2> /dev/null || true)
+  running=''
+  if [ -n "$cid" ]; then running=$(docker inspect --format '{{.Image}}' "$cid" 2> /dev/null || true); fi
+  if [ -n "$running" ] && { [ "$running" != "$target" ] || [ "$(docker inspect --format '{{.State.Running}}' "$cid" 2> /dev/null || true)" = false ]; }; then printf 'builtin '; fi
   { docker ps -a --filter label=hornhoof.subscription --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
     case "$plan" in '' | *[!A-Za-z0-9-]*) continue ;; esac
     running=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
-    if [ -n "$running" ] && [ "$running" != "$target" ]; then printf '%s ' "$plan"; fi
+    if [ -n "$running" ] && { [ "$running" != "$target" ] || [ "$(docker inspect --format '{{.State.Running}}' "$name" 2> /dev/null || true)" = false ]; }; then printf '%s ' "$plan"; fi
   done
 }
 
@@ -755,15 +757,17 @@ updater_name() {
   fi
 }
 
-# behind_of <server> <image>: the plans of that server's running nodes on this computer, by their labels, whose image Docker
-# does not keep as <image>. A node someone stopped stays as it is.
+# behind_of <server> <image>: the plans of that server's nodes on this computer, by their labels, that have stopped or
+# whose image Docker does not keep as <image>.
 behind_of() {
   local name plan id
-  { docker ps --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
+  { docker ps -a --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
     case "$plan" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
     id=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
     [ -n "$id" ] || continue
-    case " $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true) " in *" $2 "*) continue ;; esac
+    if [ "$(docker inspect --format '{{.State.Running}}' "$name" 2> /dev/null || true)" != false ]; then
+      case " $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true) " in *" $2 "*) continue ;; esac
+    fi
     printf '%s ' "$plan"
   done
 }
