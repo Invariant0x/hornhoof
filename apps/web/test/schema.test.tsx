@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BUS, CY, FHEAD, FT, FW, G, GS, HH, HW, PY, REP, schemaLayout, stepPaths } from '../src/screens/schema';
+import { BUS, CY, FHEAD, FT, FW, G, GS, HH, HW, PH, PW, PY, REP, schemaLayout, stepPaths } from '../src/screens/schema';
 import { taskRoute } from './task-route';
 import type { Department, DeptRole, Employee } from '../src/types';
+import type { Point } from '../src/ui/wires';
 
 const role = (id: string, gate: number | null = null, schema?: 'before_work' | 'final_check' | 'observer'): DeptRole => ({ id, title: { en: id, ru: id }, description: { en: '', ru: '' }, kind: id.endsWith('HEAD') ? 'head' : 'member', gate, ...(schema ? { schema } : {}) });
 const emp = (id: string, roleId: string | null, kind: Employee['kind'] = 'worker'): Employee => ({
@@ -38,6 +39,18 @@ const dept = (employees: Employee[], roles: DeptRole[]): Department => ({
 
 const ROLES = [role('DEV-HEAD'), role('DEV-BE'), role('DEV-FE'), role('DEV-REV', 1), role('DEV-QA', 5)];
 const TEAM = [emp('hana', 'DEV-HEAD', 'head'), emp('bruno', 'DEV-BE'), emp('felix', 'DEV-FE'), emp('fiona', 'DEV-FE'), emp('rita', 'DEV-REV'), emp('quinn', 'DEV-QA')];
+
+/* Nine sub-units, an observer and a short pipeline, as a grown department has them. */
+function grown(): Department {
+  const teams = Array.from({ length: 9 }, (_, i) => ({ id: `u${i}`, name: `Unit ${i}`, about: '', stage: 0, gate: false, turnkey: false }));
+  const employees = [...TEAM, emp('pat', 'DEV-PERF'), ...teams.map((t, i) => ({ ...emp(`m${i}`, 'DEV-BE'), teamId: t.id }))];
+  return { ...dept(employees, [...ROLES, role('DEV-PERF', null, 'observer')]), teams };
+}
+
+/* Whether a level or upright piece of a line touches a box [x, y, width, height]. */
+const touches = (a: Point, b: Point, [x, y, w, h]: number[]) =>
+  Math.max(a[0], b[0]) >= x! && Math.min(a[0], b[0]) <= x! + w! && Math.max(a[1], b[1]) >= y! && Math.min(a[1], b[1]) <= y! + h!;
+const pieces = (pts: Point[]) => pts.slice(1).map((b, i) => [pts[i]!, b] as const);
 
 describe('the department schema', () => {
   it('lays out design, work, each check in its order and the final check, with an observer outside the pipeline', () => {
@@ -181,31 +194,82 @@ describe('the department schema', () => {
     expect(s.right).toBe(s.hx + HW / 2 + 40 + 220);
   });
 
-  it('places a sub-unit in its own frame with a direct line from the head, outside any stage or gate', () => {
+  it('hangs a sub-unit frame on the head\'s bus like a stage frame, outside any stage or gate', () => {
     const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
     const simon = { ...emp('simon', 'DEV-BE'), teamId: 'u1' };
     const d: Department = { ...dept([...TEAM, simon], ROLES), teams: [urgent] };
     const s = schemaLayout(d, 0);
-    expect(s.frames[0]!.team?.name).toBe('Urgent fixes');
-    expect(s.frames[0]!.stage).toBe(-1);
-    expect(s.frames[0]!.members.map(m => m.e.id)).toEqual(['simon']);
+    const unit = s.frames[0]!;
+    expect(unit.team?.name).toBe('Urgent fixes');
+    expect(unit.stage).toBe(-1);
+    expect(unit.members.map(m => m.e.id)).toEqual(['simon']);
     expect(s.stages.flat().some(f => f.members.some(m => m.e.id === 'simon'))).toBe(false);
-    /* Direct line from the head's left edge into the sub-unit frame, with no pipeline or rework line touching it. */
-    expect(s.lines).toContainEqual({
-      cls: 'tr',
-      pts: [[s.hx - HW / 2, HH / 2], [s.frames[0]!.x + 10, HH / 2], [s.frames[0]!.x + 10, FT]],
-      arrow: true,
-    });
+    /* The head stands over the middle of all the frames, and the sub-unit's spine drops from the one bus. */
+    expect(s.hx).toBe(s.w / 2);
+    const placed = unit.members[0]!;
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[unit.x + 10, BUS], [s.frames[s.frames.length - 1]!.x + 10, BUS]] });
+    expect(s.lines).toContainEqual({ cls: 'tr', pts: [[unit.x + 10, BUS], [unit.x + 10, placed.cy]] });
+    expect(s.vias).toContainEqual([unit.x + 10, BUS]);
     expect(s.lines.some(l => (l.cls === 'pl' || l.cls === 'gate') && l.pts.some(p => p[0] < s.stages[0]![0]!.x))).toBe(false);
     const p = stepPaths(s);
-    const placed = s.frames[0]!.members[0]!;
     expect(p.toMember('simon')).toEqual([
-      [s.hx - HW / 2 + 14, HH / 2],
-      [s.frames[0]!.x + 10, HH / 2],
-      [s.frames[0]!.x + 10, placed.cy],
+      [s.hx, HH - 30],
+      [s.hx, BUS],
+      [unit.x + 10, BUS],
+      [unit.x + 10, placed.cy],
       [placed.x + 14, placed.cy],
     ]);
     expect(p.onward('simon')).toEqual([...p.toMember('simon')!].reverse());
     expect(p.way('simon', 'hana')).toEqual(p.onward('simon'));
+  });
+
+  it('with many sub-units leads them all from the head\'s bottom: one drop to the bus, a spine down each frame, nothing from its left edge', () => {
+    const s = schemaLayout(grown(), 1);
+    const left = s.hx - HW / 2, right = s.hx + HW / 2;
+    const units = s.frames.filter(f => f.team);
+    expect(units).toHaveLength(9);
+    /* Over the middle of the frames, not to the right of every sub-unit. */
+    expect(s.hx).toBe(s.w / 2);
+    expect(right).toBeLessThan(units[units.length - 1]!.x + FW);
+    expect(s.lines.some(l => l.pts.some(([x, y]) => x === left && y <= HH))).toBe(false);
+    expect(s.lines.filter(l => l.pts.some(([x, y]) => x > left && x < right && y === HH))).toEqual([{ cls: 'tr', pts: [[s.hx, HH], [s.hx, BUS]] }]);
+    /* One bus along the sub-units, the observer and the stages alike. */
+    expect(s.lines.filter(l => l.pts.every(([, y]) => y === BUS))).toEqual([
+      { cls: 'tr', pts: [[s.frames[0]!.x + 10, BUS], [s.frames[s.frames.length - 1]!.x + 10, BUS]] },
+    ]);
+    for (const f of s.frames) {
+      expect(s.lines).toContainEqual({ cls: 'tr', pts: [[f.x + 10, BUS], [f.x + 10, f.members[f.members.length - 1]!.cy]] });
+      expect(s.vias).toContainEqual([f.x + 10, BUS]);
+    }
+    const observer = s.frames.find(f => f.key === 'DEV-PERF')!;
+    const pat = observer.members[0]!;
+    expect(stepPaths(s).toMember('pat')).toEqual([[s.hx, HH - 30], [s.hx, BUS], [observer.x + 10, BUS], [observer.x + 10, pat.cy], [pat.x + 14, pat.cy]]);
+    /* The report still comes into the head's right edge, clear of the person's chip there, its label too. */
+    expect(s.report!.pts[s.report!.pts.length - 1]).toEqual([right, REP]);
+    const [px, py] = s.people[0]!;
+    const [lx, ly] = s.report!.label;
+    expect(REP).toBeGreaterThan(py + PH);
+    expect(lx >= px && lx <= px + PW && ly >= py && ly <= py + PH).toBe(false);
+  });
+
+  it.each([
+    ['no sub-units', () => dept(TEAM, ROLES)],
+    ['nine sub-units', grown],
+  ])('brings the report into the head clear of the people\'s chips and their line, with %s', (_, make) => {
+    for (const people of [0, 1, 2, 3]) {
+      const s = schemaLayout(make(), people);
+      const pts = s.report!.pts;
+      const [ex, ey] = pts[pts.length - 1]!;
+      /* It ends on the head: on its right edge or its bottom. */
+      expect((ex === s.hx + HW / 2 && ey > 0 && ey < HH) || (ey === HH && ex > s.hx - HW / 2 && ex < s.hx + HW / 2)).toBe(true);
+      const chips = s.people.map(([x, y]) => [x, y, PW, PH]);
+      const peopleLine = s.lines.filter(l => l.pts.some(([x]) => x >= s.hx + HW / 2) && l.pts.every(([, y]) => y < BUS));
+      const [lx, ly] = s.report!.label;
+      for (const [a, b] of pieces(pts)) {
+        for (const chip of chips) expect(touches(a, b, chip)).toBe(false);
+        for (const l of peopleLine) for (const [c, d] of pieces(l.pts)) expect(touches(a, b, [Math.min(c[0], d[0]), Math.min(c[1], d[1]), Math.abs(c[0] - d[0]), Math.abs(c[1] - d[1])])).toBe(false);
+      }
+      for (const chip of chips) expect(touches([lx - 80, ly - 9], [lx + 80, ly + 9], chip)).toBe(false);
+    }
   });
 });
