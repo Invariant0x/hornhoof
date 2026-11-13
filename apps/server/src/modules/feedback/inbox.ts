@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { limiter, type Attempts } from '../../auth/limit.js';
 import { companies, feedbackInbox, feedbackSignals, FEEDBACK_KINDS } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { cleaned, TEXT_MAX, TITLE_MAX, type Report } from './report.js';
+import { cleaned, TEXT_MAX, TITLE_MAX, type IssueLink, type Report, type Shown } from './report.js';
 
 /* On Hornhoof's own installation: the one list every installation's reports come to. A report like one already there
    counts as one more signal on its card, from its installation; the priority follows from the kind and how many
@@ -53,26 +53,32 @@ function within(attempts: Attempts, key: string, now: number): void {
 
 const merged = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort().slice(0, KEPT);
 
+/* A report's title as the inbox keeps it, and what tells its repeats: the same on every installation that sent it. */
+const titleOf = (report: Pick<Shown, 'title'>) => cleaned(report.title).text.slice(0, TITLE_MAX) || '-';
+export const fingerprintOfReport = (report: Pick<Shown, 'kind' | 'title'> & { facts: Pick<Shown['facts'], 'errorCode'> }) => fingerprintOf(report.kind, report.facts.errorCode, titleOf(report));
+const issueOf = (card: { issueNumber: number | null; issueUrl: string | null }): IssueLink | null => (card.issueNumber !== null && card.issueUrl ? { number: card.issueNumber, url: card.issueUrl } : null);
+
 async function companyOf(ctx: Pick<Ctx, 'db'>): Promise<string> {
   const [company] = await ctx.db.select({ id: companies.id }).from(companies).where(eq(companies.singleton, true));
   if (!company) throw new ApiError(503, 'unavailable', 'This Hornhoof is not set up yet.');
   return company.id;
 }
 
-/* Takes one report into the list: a new card, or one more signal on the card it repeats. Its words are cleaned once more,
-   whoever sent it. */
-export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Report): Promise<void> {
+/* Takes one report into the list: a new card, or more signals on the card it repeats, one or as many repeats as it tells
+   of. Its words are cleaned once more, whoever sent it. It answers with the card's number and its issue, if any. */
+export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Report): Promise<{ number: number; issue: IssueLink | null }> {
   const now = ctx.clock();
   const limits = limitsOf(ctx);
   within(limits.perInstallation, report.installation, now);
   const companyId = await companyOf(ctx);
-  const title = cleaned(report.title).text.slice(0, TITLE_MAX) || '-';
+  const title = titleOf(report);
   const text = cleaned(report.text).text.slice(0, TEXT_MAX);
-  const fingerprint = fingerprintOf(report.kind, report.facts.errorCode, title);
+  const fingerprint = fingerprintOfReport(report);
   const at = new Date(now);
   const versions = [report.facts.version];
   const platforms = report.facts.platform;
-  await ctx.db.transaction(async tx => {
+  const signals = report.repeats ?? 1;
+  const taken = await ctx.db.transaction(async tx => {
     const place = and(eq(feedbackInbox.companyId, companyId), eq(feedbackInbox.fingerprint, fingerprint));
     let [card] = await tx.select().from(feedbackInbox).where(place).for('update');
     if (!card) {
@@ -89,10 +95,12 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
     }
     await tx
       .insert(feedbackSignals)
-      .values({ cardId: card!.id, installation: report.installation, createdAt: at, updatedAt: at })
-      .onConflictDoUpdate({ target: [feedbackSignals.cardId, feedbackSignals.installation], set: { signals: sql`${feedbackSignals.signals} + 1`, updatedAt: at } });
+      .values({ cardId: card!.id, installation: report.installation, signals, createdAt: at, updatedAt: at })
+      .onConflictDoUpdate({ target: [feedbackSignals.cardId, feedbackSignals.installation], set: { signals: sql`${feedbackSignals.signals} + ${signals}`, updatedAt: at } });
+    return card!;
   });
   inboxChanged(ctx, companyId);
+  return { number: taken.number, issue: issueOf(taken) };
 }
 
 /* People who see the whole company hear that the list changed. */
@@ -114,6 +122,7 @@ export async function listInbox(ctx: Pick<Ctx, 'db'>, companyId: string) {
       const { signals = 0, installations = 0 } = of.get(c.id) ?? {};
       return {
         id: c.id,
+        number: c.number,
         kind: c.kind,
         title: c.title,
         text: c.text,
@@ -125,7 +134,7 @@ export async function listInbox(ctx: Pick<Ctx, 'db'>, companyId: string) {
         priority: priorityOf(c.kind, installations),
         firstAt: c.createdAt.toISOString(),
         lastAt: c.updatedAt.toISOString(),
-        issue: c.issueNumber !== null && c.issueUrl ? { number: c.issueNumber, url: c.issueUrl } : null,
+        issue: issueOf(c),
       };
     })
     .sort((a, b) => RANK[a.priority] - RANK[b.priority] || b.installations - a.installations || b.lastAt.localeCompare(a.lastAt));

@@ -120,6 +120,8 @@ export type ErrorReason =
   | 'feedback_issued'
   | 'feedback_no_github_key'
   | 'feedback_issue_refused'
+  | 'feedback_not_sent'
+  | 'feedback_no_repeats'
   | 'no_head'
   | 'switched_off'
   | 'turn_open'

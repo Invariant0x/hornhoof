@@ -2,9 +2,11 @@ import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
+import { agents, departments, FEEDBACK_KINDS, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
+import { fingerprintOfReport } from '../feedback/inbox.js';
+import { fateOf } from '../feedback/released.js';
 import type { Tx } from '../tasks/engine.js';
 
 export type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
@@ -29,8 +31,21 @@ export function caseText(p: ImprovementParts): string {
     .join('\n\n');
 }
 
+type Row = typeof improvements.$inferSelect;
+type Fate = Pick<Ctx, 'config' | 'released'>;
+
+/* What became of one sent to Hornhoof's developers: when it went, its number in their inbox, its issue as their inbox or a
+   release named it, the version that fixed it once this one is it or newer, and how many more rounds found it since they
+   last heard of it. */
+function sentOf(ctx: Fate, i: Row) {
+  if (i.status !== 'sent' || !i.sentAt) return null;
+  const fate = fateOf(ctx.released, ctx.config.version, i.reportNumber);
+  const issue = i.issueNumber !== null && i.issueUrl ? { number: i.issueNumber, url: i.issueUrl } : fate.issue;
+  return { at: i.sentAt.toISOString(), number: i.reportNumber, issue, fixedIn: fate.fixedIn, repeats: Math.max(0, i.seen - (i.reportedSeen ?? i.seen)) };
+}
+
 /* Improvements as people and the orchestrator read them, the latest changed first, each with who found it and where. */
-export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, statuses: readonly ImprovementStatus[] = IMPROVEMENT_STATUSES) {
+export async function listImprovements(ctx: Pick<Ctx, 'db'> & Fate, companyId: string, statuses: readonly ImprovementStatus[] = IMPROVEMENT_STATUSES) {
   const active = statuses.filter(s => ACTIVE.includes(s));
   const closed = statuses.filter(s => !ACTIVE.includes(s));
   const ofCompany = eq(improvements.companyId, companyId);
@@ -74,7 +89,25 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, 
     department: department ? { id: department.id, name: deptName(department) } : null,
     decidedBy,
     tasks: [...(byImprovement.get(i.id)?.values() ?? [])],
+    sent: sentOf(ctx, i),
   }));
+}
+
+/* A finding about Hornhoof itself that its developers have already: one sent to them and not fixed yet, told by the same
+   fingerprint their inbox tells repeats by, under whichever kind it went as. One more round found it, so it counts on that
+   card instead of a new one, and its developers hear of it once a person reports the repeats. */
+export async function countOnSent(ctx: Pick<Ctx, 'db' | 'bus'> & Fate, companyId: string, finding: { title: string; code: string | null }): Promise<{ id: string; number: number | null } | null> {
+  const prints = FEEDBACK_KINDS.map(kind => fingerprintOfReport({ kind, title: finding.title, facts: { errorCode: finding.code } }));
+  const sent = await ctx.db
+    .select()
+    .from(improvements)
+    .where(and(eq(improvements.companyId, companyId), eq(improvements.scope, 'platform'), eq(improvements.status, 'sent'), inArray(improvements.sentFingerprint, prints)))
+    .orderBy(desc(improvements.sentAt));
+  const open = sent.find(i => !fateOf(ctx.released, ctx.config.version, i.reportNumber).fixedIn);
+  if (!open) return null;
+  await ctx.db.update(improvements).set({ seen: sql`${improvements.seen} + 1`, updatedAt: new Date() }).where(eq(improvements.id, open.id));
+  improvementsChanged(ctx, companyId);
+  return { id: open.id, number: open.reportNumber };
 }
 
 /* People who see the whole company hear that the list changed. */

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -8,10 +8,10 @@ import { requireCompanyPerson, requireCompanyScope, requirePerson, type Person }
 import { decryptSecret } from '../../crypto/secrets.js';
 import { feedbackInbox, improvements, repoHosts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { moveImprovement } from '../improvements/store.js';
+import { improvementsChanged, moveImprovement } from '../improvements/store.js';
 import { ISSUE_REPOSITORY, issueOf } from './github-issue.js';
-import { inboxChanged, listInbox, receive } from './inbox.js';
-import { factsOf, installationOf, Report, shownOf, Written } from './report.js';
+import { fingerprintOfReport, inboxChanged, listInbox, receive } from './inbox.js';
+import { answerOf, factsOf, installationOf, REPEATS_MAX, Report, shownOf, Written, type IssueLink } from './report.js';
 
 /* A body the inbox takes from the relay at most. */
 const INBOUND_BYTES = 16 * 1024;
@@ -22,6 +22,7 @@ const ISSUE_OWNER = ISSUE_REPOSITORY.split('/')[0]!;
 
 const Send = Written.extend({ digest: z.string().regex(/^[0-9a-f]{64}$/) });
 const Params = z.object({ id: z.uuid() });
+const Repeats = z.strictObject({ improvement: z.uuid() });
 
 const notHere = () => new ApiError(404, 'not_found', 'Not found.');
 const humanOnly = (me: Person): void => {
@@ -45,6 +46,25 @@ async function findingFor(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, id: strin
   if (found.scope !== 'platform' || ctx.config.feedbackInbox) throw new ApiError(409, 'conflict', 'This finding is about the work of this company, so it stays here.', 'improvement_not_platform');
   if (found.status !== 'open') throw new ApiError(409, 'conflict', `This improvement is ${found.status} already.`, 'improvement_decided');
   return found;
+}
+
+/* The issue an answer of the inbox names, as a finding keeps it. */
+const issueColumns = (issue: IssueLink | null) => (issue ? { issueNumber: issue.number, issueUrl: issue.url } : {});
+
+/* Tells Hornhoof's developers how many more rounds found a finding sent to them: the same report, word for word, with that
+   count. Their inbox counts them as signals of it and answers with its issue, if there is one now. Nothing else goes. */
+export async function reportRepeats(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'links'>, companyId: string, id: string): Promise<void> {
+  const [found] = await ctx.db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
+  if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
+  if (found.status !== 'sent' || !found.sentReport || found.reportedSeen === null || ctx.config.feedbackInbox) throw new ApiError(409, 'conflict', "This finding was not sent to Hornhoof's developers.", 'feedback_not_sent');
+  const repeats = Math.min(found.seen - found.reportedSeen, REPEATS_MAX);
+  if (repeats < 1) throw new ApiError(409, 'conflict', 'No round found it again since its developers last heard of it.', 'feedback_no_repeats');
+  const answer = answerOf(await ctx.links.relay.feedback({ v: 1, installation: installationOf(ctx.config.secret), ...found.sentReport, repeats }));
+  await ctx.db
+    .update(improvements)
+    .set({ reportedSeen: sql`${improvements.reportedSeen} + ${repeats}`, reportNumber: found.reportNumber ?? answer.number, ...issueColumns(answer.issue) })
+    .where(eq(improvements.id, found.id));
+  improvementsChanged(ctx, companyId);
 }
 
 /* What would go for what a person wrote, from a finding's card or not: a finding asks for the whole company first. */
@@ -82,13 +102,46 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());
     if (!allowed) passWait(reply, new ApiError(429, 'too_many', 'You sent many reports this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS }));
     const signed = { v: 1 as const, installation: installationOf(config.secret), ...report };
+    let answer: ReturnType<typeof answerOf> = { number: null, issue: null };
     try {
-      if (config.feedbackInbox) await receive(ctx, signed);
-      else await ctx.links.relay.feedback(signed);
+      answer = config.feedbackInbox ? await receive(ctx, signed) : answerOf(await ctx.links.relay.feedback(signed));
     } catch (err) {
       passWait(reply, err);
     }
-    if (finding) await moveImprovement(ctx, me.companyId, finding.id, 'open', { status: 'sent', decidedBy: me.id });
+    if (finding)
+      await moveImprovement(ctx, me.companyId, finding.id, 'open', {
+        status: 'sent',
+        decidedBy: me.id,
+        sentAt: new Date(ctx.clock()),
+        sentReport: report,
+        sentFingerprint: fingerprintOfReport(report),
+        reportNumber: answer.number,
+        ...issueColumns(answer.issue),
+        reportedSeen: sql`${improvements.seen}`,
+      });
+    return { sent: true };
+  });
+
+  /* Findings whose repeats are being told now, so two presses at once tell them once. */
+  const telling = new Set<string>();
+
+  app.post('/api/feedback/repeats', async (req, reply) => {
+    const me = await requireCompanyPerson(req, db);
+    humanOnly(me);
+    const { improvement } = Repeats.parse(req.body);
+    const [found] = await db.select({ agentId: improvements.agentId }).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, me.companyId)));
+    if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
+    if (telling.has(improvement)) throw new ApiError(409, 'conflict', 'Its repeats are being told already.', 'feedback_no_repeats');
+    const { allowed, retryAfterS } = sentBy(me.id, ctx.clock());
+    if (!allowed) passWait(reply, new ApiError(429, 'too_many', 'You sent many reports this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS }));
+    telling.add(improvement);
+    try {
+      await reportRepeats(ctx, me.companyId, improvement);
+    } catch (err) {
+      passWait(reply, err);
+    } finally {
+      telling.delete(improvement);
+    }
     return { sent: true };
   });
 
@@ -98,12 +151,13 @@ export function feedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!config.feedbackInbox) throw notHere();
     const report = Report.safeParse(req.body);
     if (!report.success) throw new ApiError(400, 'validation', 'This is not a feedback report Hornhoof takes.', 'feedback_refused');
+    let answer: Awaited<ReturnType<typeof receive>> | undefined;
     try {
-      await receive(ctx, report.data);
+      answer = await receive(ctx, report.data);
     } catch (err) {
       passWait(reply, err);
     }
-    return reply.code(202).send({ received: true });
+    return reply.code(202).send({ received: true, ...answer });
   });
 
   app.get('/api/feedback/inbox', async req => {

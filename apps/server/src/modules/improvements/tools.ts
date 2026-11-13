@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { improvements, IMPROVEMENT_SCOPES, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { caseText, improvementsChanged, listImprovements, moveImprovement } from './store.js';
+import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement } from './store.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
@@ -110,6 +110,8 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
           await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });
         }
+        const known = kind.scope === 'platform' ? await countOnSent(ctx, job.companyId, { title, code: kind.code }) : null;
+        if (known) return json({ improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." });
         const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text, parts, ...kind }).returning({ id: improvements.id });
         improvementsChanged(ctx, job.companyId);
         return json({ improvement: row!.id });

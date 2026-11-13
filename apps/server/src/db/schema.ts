@@ -8,7 +8,7 @@ import type { BindingPart } from '../modules/model-checks/lifecycle.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
 import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -1434,14 +1434,31 @@ export const improvements = pgTable(
     decidedBy: uuid('decided_by').references(() => people.id),
     /* The orchestrator's word on what came of it, or why it could not be done. */
     result: text('result'),
+    /* For one sent to Hornhoof's developers: when it went, the report exactly as it went, what tells its repeats, its number
+       in their inbox and the issue it became there, as their inbox answered, and how many rounds had found it when they
+       last heard of it. */
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    sentReport: jsonb('sent_report').$type<SentReport>(),
+    sentFingerprint: text('sent_fingerprint'),
+    reportNumber: integer('report_number'),
+    issueNumber: integer('issue_number'),
+    issueUrl: text('issue_url'),
+    reportedSeen: integer('reported_seen'),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  t => [index('improvements_company_id_status').on(t.companyId, t.status)],
+  t => [index('improvements_company_id_status').on(t.companyId, t.status), index('improvements_sent_fingerprint').on(t.companyId, t.sentFingerprint)],
 );
 
 /* What a report to Hornhoof's developers is. */
 export const FEEDBACK_KINDS = ['bug', 'improvement', 'idea'] as const;
+/* A report as an installation sent it: its kind, cleaned words and technical data. */
+export type SentReport = {
+  kind: (typeof FEEDBACK_KINDS)[number];
+  title: string;
+  text: string;
+  facts: { version: string; platform: string[]; errorCode: string | null };
+};
 
 /* On Hornhoof's own installation, one card of the inbox: a report every installation may send, its repeats counted on it.
    fingerprint: what tells repeats apart, its kind, error code and title written plainly. The text is the first report's,
@@ -1451,6 +1468,8 @@ export const feedbackInbox = pgTable(
   {
     id: id(),
     companyId: companyId(),
+    /* What an installation calls the report by: its place in the order cards were opened. */
+    number: serial('number').notNull(),
     fingerprint: text('fingerprint').notNull(),
     kind: text('kind', { enum: FEEDBACK_KINDS }).notNull(),
     title: text('title').notNull(),
@@ -1465,7 +1484,7 @@ export const feedbackInbox = pgTable(
     /* When its last signal came. */
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  t => [unique('feedback_inbox_fingerprint').on(t.companyId, t.fingerprint)],
+  t => [unique('feedback_inbox_fingerprint').on(t.companyId, t.fingerprint), unique('feedback_inbox_number').on(t.number)],
 );
 
 /* How many times one installation sent a card's report, by the id it signs its reports with. */

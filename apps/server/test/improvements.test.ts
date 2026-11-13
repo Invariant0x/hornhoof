@@ -487,12 +487,14 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     const { app, db, relay, id, propose, card, send } = await installation();
     relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue: null } };
     expect((await send()).statusCode).toBe(200);
-    /* A newer release names report 7, which this version does not know of yet. */
-    app.ctx.released = [{ report: 7, issue: ISSUE, fixedIn: '99.0.0' }, { report: 8, issue: null, fixedIn: '0.1.0' }];
     expect(await card()).toMatchObject({ sent: { number: 7, issue: null, fixedIn: null } });
-    /* The installation updates: the same database, the new version and the data it brings. */
+    /* The installation updates: the same database, the new version and the release data it brings, which names the issue
+       of report 7 and its fix, still to come in a later version. */
     app.ctx.config.version = '99.0.0';
-    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: '99.0.0', repeats: 0 } });
+    app.ctx.released = [{ report: 7, issue: ISSUE, fixedIn: '99.0.1' }, { report: 8, issue: null, fixedIn: '0.1.0' }];
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: null } });
+    app.ctx.config.version = '99.0.1';
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: '99.0.1', repeats: 0 } });
     const after = JSON.parse((await propose()).content[0]!.text).improvement;
     expect(after).not.toBe(id);
     expect((await db.select().from(improvements).where(eq(improvements.id, after)))[0]).toMatchObject({ status: 'open', seen: 1 });

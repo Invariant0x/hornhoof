@@ -49,6 +49,11 @@ const aFinding = (url: string, extra: object = {}) => async (c: AclCompany, agen
   const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
   return { method: 'POST', url, payload: { kind: 'bug', title: 'Finding', text: 'x', improvement: finding!.id, ...extra } };
 };
+/* Its repeats, told from its card: a finding not sent yet has none to tell, so nothing reaches the relay from here. */
+const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
+  return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
+};
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
   const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
@@ -79,6 +84,7 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/feedback/preview', of: aFinding('/api/feedback/preview'), companyOnly: true },
   /* A digest of nothing: what reaches the relay is never sent from here. */
   { route: 'POST /api/feedback', of: aFinding('/api/feedback', { digest: '0'.repeat(64) }), companyOnly: true },
+  { route: 'POST /api/feedback/repeats', of: aRepeated, companyOnly: true },
   /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
   { route: 'GET /api/attachments/:id', of: aPicture, closedStatus: 404 },
 ];

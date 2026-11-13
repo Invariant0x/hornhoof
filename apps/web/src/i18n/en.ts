@@ -1634,6 +1634,8 @@ export const en = {
     feedback_refused: 'hornhoof.org did not take this report. Update Hornhoof and send it again.',
     feedback_unknown: 'This card is no longer in the inbox.',
     feedback_issued: 'This card has an issue already.',
+    feedback_not_sent: 'This finding was not sent to Hornhoof developers.',
+    feedback_no_repeats: 'No round found it again since Hornhoof developers last heard of it.',
     feedback_no_github_key: 'No GitHub key for invariant0x is saved. Save one in Company settings, with the right to create issues.',
     backlog_changed: 'The list changed meanwhile. It is shown again as it is now.',
     backlog_unknown: 'This task is no longer in the list.',

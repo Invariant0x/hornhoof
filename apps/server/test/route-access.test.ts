@@ -42,7 +42,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'openInvite', path: /^\/api\/invites\/:token(?:\/accept)?$/, rule: 'valid invitation token' },
   { name: 'ownPlan', path: /^\/api\/subscriptions\/:id\/signin(?:\/(?:stop|terminal))?$/, rule: 'human subscription owner' },
   { name: 'ownScreen', path: /^\/api\/nodes\/commands(?:\/:id\/hide)?$/, rule: 'human owner of install commands' },
-  { name: 'requireCompanyPerson', path: /^\/api\/(?:updates|link|feedback\/inbox)(?:\/.*)?$/, rule: 'human company scope' },
+  { name: 'requireCompanyPerson', path: /^\/api\/(?:updates|link|feedback\/inbox|feedback\/repeats)(?:\/.*)?$/, rule: 'human company scope' },
   { name: 'person', path: /^\/api\/improvements(?:\/:id\/(?:take|dismiss))?$/, rule: 'human company scope' },
   { name: 'bookFor', path: /^\/api\/(?:departments\/:id\/)?notebook(?:\/:number)?$/, rule: 'human reachable notebook' },
   { name: 'viewer', path: /^\/api\/computer$/, rule: 'human company scope' },

@@ -76,12 +76,12 @@ export class Relay {
     return bound.data;
   }
 
-  /* Passes a report on to Hornhoof's developers, whose inbox answers through the relay. One it does not take is a fault
-     of this build, and one it cannot pass on now is like the relay not answering. */
-  async feedback(report: object): Promise<void> {
+  /* Passes a report on to Hornhoof's developers and gives back what their inbox answered, as the relay passes it back. One
+     it does not take is a fault of this build, and one it cannot pass on now is like the relay not answering. */
+  async feedback(report: object): Promise<unknown> {
     const res = await this.call('POST', '/feedback', { body: report });
+    if (res.status === 202) return res.json().catch(() => null);
     await res.body?.cancel();
-    if (res.status === 202) return;
     if (res.status === 429) throw busyFor(res.headers.get('retry-after'));
     if (res.status === 400 || res.status === 413) throw new ApiError(400, 'validation', 'hornhoof.org did not take this report. Update Hornhoof and send it again.', 'feedback_refused');
     throw unreachable();

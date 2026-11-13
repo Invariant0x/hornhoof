@@ -1661,6 +1661,8 @@ export const ru: Messages = {
     feedback_refused: 'hornhoof.org не принял это обращение. Обновите Hornhoof и отправьте снова.',
     feedback_unknown: 'Этой карточки во входящих больше нет.',
     feedback_issued: 'У этой карточки уже есть Issue.',
+    feedback_not_sent: 'Эта находка не отправлялась разработчикам Hornhoof.',
+    feedback_no_repeats: 'С тех пор как разработчики Hornhoof узнали о ней, ее больше не находили.',
     feedback_no_github_key: 'Нет сохраненного ключа GitHub для invariant0x. Сохраните его в настройках компании, с правом создавать Issue.',
     backlog_changed: 'Список тем временем изменился. Он показан заново, как есть сейчас.',
     backlog_unknown: 'Этой задачи уже нет в списке.',

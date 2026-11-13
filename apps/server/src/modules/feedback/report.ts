@@ -4,12 +4,15 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { FEEDBACK_KINDS, machines } from '../../db/schema.js';
 import { cleanText, type Hidden } from './clean.js';
+import { ISSUE_REPOSITORY } from './github-issue.js';
 
 /* A report to Hornhoof's developers as it travels from an installation through hornhoof.org to the inbox, version 1. The
    installation signs it with an id of its own that tells nothing about it. Nothing else of the company goes with it. */
 
 export const TITLE_MAX = 200;
 export const TEXT_MAX = 5000;
+/* How many more rounds found a report already sent, told at once. */
+export const REPEATS_MAX = 100;
 const PLATFORMS_MAX = 10;
 const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 /* What a platform is written with: an operating system and an architecture, as a machine says them. */
@@ -37,15 +40,37 @@ export const Report = z.strictObject({
   title: Title,
   text: Text,
   facts: Facts,
+  /* A report sent again, word for word, to say how many more rounds found it since. */
+  repeats: z.int().min(1).max(REPEATS_MAX).optional(),
 });
 export type Report = z.infer<typeof Report>;
-export type Shown = Omit<Report, 'v' | 'installation'>;
+export type Shown = Omit<Report, 'v' | 'installation' | 'repeats'>;
 
 /* What a person writes in the feedback window, and the finding it was opened from, if any. */
 export const Written = z.strictObject({ kind: Kind, title: Title, text: Text, improvement: z.uuid().optional() });
 export type Written = z.infer<typeof Written>;
 
 export const isErrorCode = (code: string) => CODE.test(code);
+
+/* An issue of Hornhoof's repository on GitHub. Its page is only ever the exact one of its number there, so an answer that
+   passed hornhoof.org cannot put any other link on a card. */
+export type IssueLink = { number: number; url: string };
+const ISSUE_PAGE = new RegExp(`^https://github\\.com/${ISSUE_REPOSITORY}/issues/([1-9][0-9]{0,9})$`, 'i');
+const Issue = z.object({ number: z.int().positive(), url: z.string() });
+export const issuePage = (number: number) => `https://github.com/${ISSUE_REPOSITORY}/issues/${number}`;
+export function issueLinkOf(value: unknown): IssueLink | null {
+  const found = Issue.safeParse(value);
+  const page = found.success ? ISSUE_PAGE.exec(found.data.url) : null;
+  return found.success && page && Number(page[1]) === found.data.number ? { number: found.data.number, url: issuePage(found.data.number) } : null;
+}
+
+/* What the inbox answered a report with, through hornhoof.org: the number of its card there and its issue, if any. An
+   answer of another shape tells neither. */
+const Answer = z.object({ number: z.int().positive(), issue: z.unknown().optional() });
+export function answerOf(body: unknown): { number: number | null; issue: IssueLink | null } {
+  const found = Answer.safeParse(body);
+  return found.success ? { number: found.data.number, issue: issueLinkOf(found.data.issue) } : { number: null, issue: null };
+}
 
 /* The same id for every report of this installation, made from its secret by a one-way hash, so it reveals neither. */
 export const installationOf = (secret: Buffer): string => createHmac('sha256', secret).update('hornhoof feedback installation').digest('hex').slice(0, 32);
