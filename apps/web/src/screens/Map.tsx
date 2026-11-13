@@ -267,7 +267,10 @@ function deptClass(d: Department, flashing: boolean): string {
    with-turn: this department works in it. */
 const turnClass = (tall: boolean, works: boolean) => (works ? ' tall with-turn' : tall ? ' tall' : '');
 
-const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
+/* Whether the orchestrator works now, alike for everyone: from whether he has a plan and what his program does, which
+   everyone is shown, and not from his plan itself, which only those who open him see. */
+const orchestratorWorks = (o: NonNullable<Org['orchestrator']>, limitAt: string | null) =>
+  !!o.planned && !limitAt && !o.alarm && !!o.program && o.program.state !== 'gone';
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string; speed: number };
 
@@ -819,7 +822,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
       {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
       {!windowOpen && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
-          <span className={`live${orchestratorReady(sub) && !limitAt ? '' : ' off'}`} />
+          <span className={`live${org.orchestrator && orchestratorWorks(org.orchestrator, limitAt) ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
           <AgentState agent={org.orchestrator} serverNow={org.serverNow} />
           <span className="tx" title={status}>{status}</span>
