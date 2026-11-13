@@ -475,13 +475,21 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
 .grip:active { cursor: grabbing; }
 .grip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-/* A line takes a click a little wider than it is drawn, to put a bend on it; nothing more is drawn for it. */
-.wires .hit { fill: none; stroke: transparent; stroke-width: 12; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; }
-/* A bend's handle over its dot, 28 px at any zoom: nothing drawn, only the pointer shows it, and the ring of the keyboard's
-   focus around the dot. */
-.bend { box-sizing: border-box; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
+/* A line takes a click 12 px wide on the screen, to put a bend on it; nothing more is drawn for it, nor flashed under a finger.
+   The width is in the map's units against its zoom (--k), since a browser finds what the pointer is on by the width before
+   vector-effect. */
+.wires .hit { fill: none; stroke: transparent; stroke-width: calc(12px / var(--k, 1)); pointer-events: stroke; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* A bend's handle over its dot, 28 px at any zoom, its middle where the map puts it: nothing drawn, only the pointer shows it,
+   and the ring of the keyboard's focus around the dot. */
+.bend { box-sizing: border-box; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; -webkit-tap-highlight-color: transparent; }
 .bend:active { cursor: grabbing; }
 .bend:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -6px; }
+/* A finger takes a line twice as wide, and a bend by a handle as big as a block's grip, with the same ring around the dot. */
+@media (pointer: coarse) {
+  .wires .hit { stroke-width: calc(24px / var(--k, 1)); }
+  .bend { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  .bend:focus-visible { outline-offset: -14px; }
+}
 /* Put back as it was, and a move that was not saved, above the zoom. */
 .map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
 .map-arrange .alert { margin: 0; }

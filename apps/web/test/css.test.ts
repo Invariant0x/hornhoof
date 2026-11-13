@@ -94,3 +94,15 @@ it('draws every focus ring in the accent ink, which keeps 3:1 on every surface o
   expect(rings.map(r => r.selectors.join(', '))).toEqual(expect.arrayContaining([':focus-visible', '.segments label:has(input:focus-visible)', '.seg button:focus-visible', 'button.hub:focus-visible', '.t-mh:focus-visible']));
   for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
 });
+
+it('lets a finger take a line of the company map and a bend on it as easily as a block\'s grip', () => {
+  /* In the map's own units, against its zoom: a browser finds what a pointer is on without vector-effect, by the drawn width. */
+  expect(decl('.wires .hit', 'stroke-width')).toBe('calc(12px / var(--k, 1))');
+  expect(decl('.wires .hit', 'stroke-width', '(pointer: coarse)')).toBe('calc(24px / var(--k, 1))');
+  expect(decl('.wires .hit', 'vector-effect')).toBeUndefined();
+  /* A phone flashes nothing over the map where a finger touches a line or a bend: neither is drawn. */
+  expect(decl('.wires .hit', '-webkit-tap-highlight-color')).toBe('transparent');
+  expect(decl('.bend', '-webkit-tap-highlight-color')).toBe('transparent');
+  expect(['width', 'height', 'margin'].map(p => decl('.bend', p))).toEqual(['28px', '28px', '-14px 0 0 -14px']);
+  expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
+});
