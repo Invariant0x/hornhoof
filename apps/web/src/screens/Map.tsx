@@ -69,8 +69,10 @@ function planWaits(t: Messages, sub: SubView): string {
   return sub.status === 'needs_setup' ? t.map.waitingSetup(PROVIDER_NAMES[sub.provider]) : t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
 }
 
-/* limitAt: the time his plan's limit resets, while it is at it. */
-export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null): string {
+/* limitAt: the time his plan's limit resets, while it is at it. planned: whether he has a plan, for a person who is not
+   shown which one. */
+export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null, planned = false): string {
+  if (!sub && planned) return limitAt ? t.map.waitingLimit(limitAt) : t.map.hasSubscription;
   if (!sub) return t.map.needsSubscription;
   if (sub.kind !== 'api_key') {
     if (sub.status !== 'ready') return planWaits(t, sub);
@@ -621,7 +623,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const sub = org.orchestrator?.subscription ?? null;
   const limitUntil = org.orchestrator?.limitUntil ?? null;
   const limitAt = limitUntil && Date.parse(limitUntil) > Date.now() ? clock(language, limitUntil) : null;
-  const status = orchestratorStatus(t, sub, limitAt);
+  const status = orchestratorStatus(t, sub, limitAt, org.orchestrator?.planned);
   const spots = arr.depts, placed = arr.people, { hub } = arr;
   const mx = hub.x + HUB, my = hub.y + HUB;
   const allPeople = mapPeople(org);

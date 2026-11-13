@@ -218,6 +218,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         held: holds.get(orchestrator.id)!,
+        /* Whether he has a plan to work on, which everyone may know; which plan it is goes only to those who open him. */
+        planned: Boolean(orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId)),
         subscription: orchestrator.subscriptionId && seesAgentId(viewer, orchestrator.id) ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
         machine: seesAgentId(viewer, orchestrator.id) ? await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null) : null,
       },

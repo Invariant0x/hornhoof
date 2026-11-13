@@ -216,6 +216,8 @@ export const en = {
     putBack: 'Put back as it was',
     layoutNotSaved: 'Could not save where you moved it. Move it again to try once more.',
     needsSubscription: 'Needs a subscription to start',
+    /* For a person who is not shown which subscription the orchestrator works on. */
+    hasSubscription: 'Has a subscription to work on',
     runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,

@@ -54,6 +54,13 @@ describe('orchestratorStatus', () => {
     expect(orchestratorStatus(en, SUBS[3]!, '14:30')).toBe('Waiting for the limit to reset at 14:30');
     expect(orchestratorStatus(en, { ...claude, online: false }, '14:30')).toBe("Ivan's machine is offline");
   });
+
+  it('says he has a plan to a person who is not shown which one, and still when its limit resets', () => {
+    expect(orchestratorStatus(en, null, null, true)).toBe('Has a subscription to work on');
+    expect(orchestratorStatus(ru, null, null, true)).toBe('Подписка для работы есть');
+    expect(orchestratorStatus(en, null, '14:30', true)).toBe('Waiting for the limit to reset at 14:30');
+    expect(orchestratorStatus(en, null, null, false)).toBe('Needs a subscription to start');
+  });
 });
 
 describe('Map', () => {
@@ -68,6 +75,15 @@ describe('Map', () => {
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
+  });
+
+  it('does not tell a person of part of the company that the orchestrator needs a plan when his plan is only hidden from them', async () => {
+    const listed = { ...ME, person: { ...ME.person, id: 'p3', scopeKind: 'listed' as const, isOwner: false } };
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null, machine: null, opens: false, planned: true } }] });
+    const { container } = render(<MapScreen {...PROPS} me={listed} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorHas a subscription to work on');
+    expect(container.querySelector('.ticker')).not.toHaveTextContent('Needs a subscription to start');
   });
 
   it("shows how full the orchestrator's context is in the line at the bottom, and follows it live", async () => {

@@ -248,6 +248,7 @@ export const ru: Messages = {
     putBack: 'Вернуть как было',
     layoutNotSaved: 'Не удалось сохранить, куда вы это передвинули. Передвиньте еще раз, чтобы попробовать снова.',
     needsSubscription: 'Чтобы начать, нужна подписка',
+    hasSubscription: 'Подписка для работы есть',
     runsOnKey: (provider, last4) => `На связи, ключ ${provider}, последние символы ${last4}`,
     waitingMachine: owner => `Ждет машину, владелец ${owner}`,
     waitingLogin: provider => `Ждет входа в ${provider}`,
