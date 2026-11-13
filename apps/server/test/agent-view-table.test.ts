@@ -28,8 +28,8 @@ type Viewer = keyof AclCompany['tokens'];
 type Call = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; payload?: object };
 
 /* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything;
-   ownerToo: or for the owner of the agent's department. */
-type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; closedStatus?: 403 | 404 };
+   ownerToo: or for the owner of the agent's department; company: it is the company's work, which everyone of it reads. */
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; company?: boolean; closedStatus?: 403 | 404 };
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -63,8 +63,8 @@ const POINTED: Pointed[] = [
   /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
   { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true, ownerToo: true },
   { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
-  { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
-  { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits') },
+  { route: 'GET /api/tasks/:id', of: aTask('GET', ''), company: true },
+  { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits'), company: true },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
@@ -90,15 +90,16 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
   { name: 'CEO', viewer: 'ceo', agent: 'deputy', closed: false },
 ];
 
-/* Lists, with what each person gets. */
-type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>> };
+/* Lists, with what each person gets. company: it names every employee and the work of the company, which everyone of it
+   sees, and keeps only the words of the agents a person does not open. */
+type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean };
 const ALL_OK = { ann: 200, olga: 200, wes: 200, lisa: 200, ceo: 200 };
 const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, lisa: 200, ceo: 200 };
 /* Ann has App, a product of Development, and not the department itself: for her it does not exist, and its notebook is closed. */
 const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, lisa: 200, ceo: 200 };
 const LISTS: Listed[] = [
-  { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK },
-  { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK },
+  { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
+  { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
   { route: 'GET /api/turns', url: () => '/api/turns', statuses: ALL_OK },
@@ -113,7 +114,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/computer', url: () => '/api/computer', statuses: WHOLE_ONLY },
   { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: { ...DEPARTMENT_ITSELF, ann: 403 } },
-  { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 200, wes: 403, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: DEPARTMENT_ITSELF },
@@ -130,7 +131,7 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
-  'GET /api/task-departments': 'backlog.test.ts: only the departments the person has',
+  'GET /api/task-departments': "backlog.test.ts: every department of the company, which everyone sees",
   'GET /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'PUT /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'GET /api/departments/:id/backlog': 'backlog.test.ts: a person with the department, 403 for another one',
@@ -199,7 +200,7 @@ async function busy() {
     const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
     work[key] = task;
     await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
-    await ask(c.app.ctx, agent.id, task.id, { text: 'Please decide', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+    await ask(c.app.ctx, agent.id, task.id, { text: wordsOf(key), kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
     await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
     await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
     await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
@@ -210,8 +211,11 @@ async function busy() {
   return { ...c, tasksOf: work as Record<Crew, typeof tasks.$inferSelect> };
 }
 
-/* What each person may read of the crew. */
+/* What each person may open of the crew. */
 const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['mine', 'other', 'head', 'owned'], wes: ['wide'] };
+
+/* What an agent asks in the busy company: its own words. */
+const wordsOf = (key: Crew) => `Please decide what ${String(key)} asks`;
 
 describe('every real route', () => {
   it('has its place in the table', async () => {
@@ -226,7 +230,7 @@ describe('every real route', () => {
 });
 
 describe('one thing of one agent', () => {
-  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, closedStatus = 403 }) => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, company, closedStatus = 403 }) => {
     const c = await aclCompany();
     const got: string[] = [];
     /* Those that are closed first: what opens may change or remove what it is given. */
@@ -234,16 +238,17 @@ describe('one thing of one agent', () => {
       const res = await call(c, await of(c, agent), viewer);
       got.push(`${name}: ${res.statusCode}`);
       const scoped = companyOnly && (viewer === 'ann' || (viewer === 'olga' && !ownerToo));
-      if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
+      if (company) expect(res.statusCode, `${route}, ${name}`).toBe(200);
+      else if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
       else expect([403, closedStatus], `${route}, ${name}`).not.toContain(res.statusCode);
-      if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);
+      if (closed && !company) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);
     }
     lines.push(`| ${route} | ${got.join('; ')} |`);
   });
 });
 
 describe('every list', () => {
-  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses }) => {
+  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses, company }) => {
     const c = await busy();
     const got: string[] = [];
     for (const [viewer, status] of Object.entries(statuses) as [Viewer, number][]) {
@@ -255,10 +260,12 @@ describe('every list', () => {
       const hidden = (Object.keys(c.crew) as Crew[]).filter(k => !seen.includes(k));
       for (const key of hidden) {
         const hiddenWork = [c.crew[key], { id: c.tasksOf[key].id, name: c.tasksOf[key].title }];
-        expect(leaks(res, hiddenWork), `${route} for ${viewer}: ${key}`).toEqual([]);
+        if (!company) expect(leaks(res, hiddenWork), `${route} for ${viewer}: ${key}`).toEqual([]);
+        expect(res.body, `${route} for ${viewer}: ${key}`).not.toContain(wordsOf(key));
       }
       expect(res.body, `${route} for ${viewer}`).not.toContain('Secret words');
-      expect(res.body, `${route} for ${viewer}`).not.toContain(c.orchestrator.id);
+      /* The orchestrator's circle shows on the map to everyone, without opening him. */
+      if (route !== 'GET /api/org') expect(res.body, `${route} for ${viewer}`).not.toContain(c.orchestrator.id);
     }
     lines.push(`| ${route} | ${got.join('; ')} |`);
   });

@@ -11,7 +11,7 @@ import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { candidateChecks } from './development-echelons-verification.js';
-import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
 function withDefault<T extends { after?: string[]; independentPart?: unknown; independentNone?: string }>(input: T): T {
@@ -366,20 +366,20 @@ describe('a task that comes after others', () => {
 });
 
 describe('what a task comes after, as each one sees it', () => {
-  it('is refused to a person for a task the person cannot reach, and left out of a task the person reads', async () => {
-    const { app, ctx, owner, ceo, dev, head, outside } = await company();
+  it("is any task of the company to a person, as everyone sees the company's work, and shows in a task the person reads", async () => {
+    const { app, owner, dev, outside } = await company();
     const deal = await outside();
     const dana = await invitePerson(app, owner, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev.id] } });
-    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number], independentNone: NONE }, ...as(dana) });
-    expect(refused.statusCode).toBe(400);
-    expect(refused.json().error.message).toBe(`There is no task #${deal.number} to come after.`);
-    await ownPlan(ctx.db, 'dana@acme.com', head.id);
-    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [deal.id] })).task;
+    const made = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number], independentNone: NONE }, ...as(dana) });
+    expect(made.statusCode).toBe(201);
+    const launch = made.json().task as { id: string };
+    const unknown = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [999], independentNone: NONE }, ...as(dana) });
+    expect(unknown.json().error.message).toBe('There is no task #999 to come after.');
     const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
-    expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });
+    expect(await read(dana)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
     expect(await read(owner)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
     const listed = (session: typeof owner) => app.inject({ url: `/api/tasks?department=${dev.id}`, ...as(session) }).then(r => r.json().tasks.find((t: { id: string }) => t.id === launch.id));
-    expect(await listed(dana)).toMatchObject({ waitsFor: [] });
+    expect(await listed(dana)).toMatchObject({ waitsFor: [deal.number] });
     expect(await listed(owner)).toMatchObject({ waitsFor: [deal.number] });
   });
 

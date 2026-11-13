@@ -8,15 +8,20 @@ import { accessOf, agentSpot, canReach, type Access, type Spot } from './access.
 import { actsAsCeo } from './decisions.js';
 import type { Person } from './session.js';
 
-/* Which agents a person sees. The CEO and the CEO's delegate see all of them, and so does a call from inside, whose rights
+/* The company is one, and everyone of it sees the whole of it: every department, every employee by name, role and state,
+   and their work, on the map, on each department's screen and in its tasks (knowsAgentId). An assistant's own agent is
+   apart from that: its owner alone knows of it. What follows is the other level, the agent's own: its window, card,
+   conversation and terminal, and acting on it.
+
+   Which agents a person opens. The CEO and the CEO's delegate open all of them, and so does a call from inside, whose rights
    its own tools set. The owner of a department sees every agent of it, its products and its sub-units, on whoever's plan:
    the owner of the company gave them that department to run as their own, and nobody runs people they cannot see. Two
    things stay with each plan's owner even there: typing into an agent's terminal, which works with that owner's sign-in on
    their machine, and the plan's secrets (keys, sign-ins, codes), which no view of an agent carries. Anyone else, and the
    owner outside their department, sees an agent only on a plan of their own in a place they reach: neither alone is
    enough. An assistant's own agent is apart from all of that: its owner alone sees it, as nobody else talks to their
-   assistant, not the CEO and not the orchestrator. This is the one rule; every route that shows an agent or its work asks
-   it here.
+   assistant, not the CEO and not the orchestrator. This is the one rule; every route that opens an agent, or shows its own
+   words, asks it here.
    plans: the person's own live plans. agents: the employees that passes for now, empty for a full view. own: the agents of
    the person's own assistants. apart: every other assistant's agent of the company, which even a full view leaves out. */
 export type AgentViewer = {
@@ -43,6 +48,12 @@ export function seesAgent(viewer: AgentViewer, agent: AgentPlace): boolean {
   if (agent.assistant) return viewer.own.has(agent.assistant);
   if (viewer.full || ownsPlace(viewer, agent.spot)) return true;
   return agent.subscriptionId !== null && viewer.plans.has(agent.subscriptionId) && canReach(viewer.access, agent.spot);
+}
+
+/* Whether a person knows of an agent named in the company's structure or work: its name, role, state and what it works
+   on. Everyone does, but of another person's assistant's own agent. Its own conversation is seesAgentId's. */
+export function knowsAgentId(viewer: Pick<AgentViewer, 'apart'>, id: string | null | undefined): boolean {
+  return Boolean(id) && !viewer.apart.has(id!);
 }
 
 /* The same answer for an agent already named in a task, a message or a line; nobody sees one that is not named. */

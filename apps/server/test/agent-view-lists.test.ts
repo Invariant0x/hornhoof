@@ -69,16 +69,17 @@ describe('what waits for people', () => {
     expect(res.json().counts.byAgent).toEqual({});
   });
 
-  it('lets that person answer and read only its own picture, and nothing around it', async () => {
+  it("lets that person answer and read only its own picture, and nothing of the agent's own around it", async () => {
     const c = await aclCompany();
     const { task, request, picture, neighbour } = await approval(c, 'question');
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.ann)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.ann)).statusCode).toBe(404);
-    expect((await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).statusCode).toBe(403);
+    /* The task is the company's, which everyone sees; the agent's window is not hers. */
+    expect((await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).statusCode).toBe(200);
     expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.ann)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.ann)).statusCode).toBe(403);
     const list = (await c.get(`/api/tasks?status=all&department=${c.dev.id}`, c.tokens.ann)).body;
-    expect(list).not.toContain(task.title);
+    expect(list).toContain(task.title);
     /* The stream listens from the moment it answers: the server takes the bus in the same step it sends the headers. */
     const stream = await openStream(c.app, c.tokens.ann);
     const answered = await answer(c, request.id, c.tokens.ann, { answer: 'This way' });
@@ -88,9 +89,8 @@ describe('what waits for people', () => {
     expect(leaks(answered, [c.crew.other, c.crew.head])).toEqual([]);
     c.app.ctx.bus.publish(c.companyId, { type: 'org' });
     await until(() => stream.messages.some(m => m.type === 'org'));
-    const heard = JSON.stringify(stream.messages);
-    for (const word of taskWords(task)) expect(heard).not.toContain(word);
-    expect(heard).not.toMatch(new RegExp(`Otto|${c.crew.other.id}`));
+    expect(stream.messages.filter(m => m.type === 'agent_event')).toEqual([]);
+    expect(JSON.stringify(stream.messages)).not.toContain('This way');
     stream.close();
     /* Answered, it is nobody's to take: gone from the list, no second answer, its picture closed to someone who only answered. */
     expect((await c.get('/api/requests', c.tokens.ann)).json().addressed).toEqual([]);
@@ -231,7 +231,6 @@ describe('a long text kept as a file of its task', () => {
     expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).body).toBe(WORDS);
     const res = await c.get(`/api/tasks/${task.id}`, c.tokens.ann);
     expect(res.json<Detail>().task.files.map(f => [f.id, f.by?.id])).toEqual([[file, c.ids.bob]]);
-    expect(res.body).not.toContain(c.crew.other.id);
   });
 
   it('answers to the request, not the task, for a picture sent to a task and shown with a request', async () => {
@@ -252,7 +251,7 @@ describe('a wait on a task', () => {
   type Line = { id: string; externalWait: { reason: string; on?: unknown } | null };
   const readLines = async (c: AclCompany) => (await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann)).json<{ tasks: Line[] }>().tasks;
 
-  it('says whom it is on only when the person sees them, and an event always', async () => {
+  it('says whom it is on, any employee of the company, and an event', async () => {
     const c = await aclCompany();
     const onHidden = await c.work('On hidden', c.crew.mine);
     const onSeen = await c.work('On seen', c.crew.mine);
@@ -263,16 +262,13 @@ describe('a wait on a task', () => {
     await c.db.update(tasks).set({ externalWait: wait({ kind: 'external', event: 'time' }) }).where(eq(tasks.id, onEvent.id));
     await c.db.update(tasks).set({ externalWait: wait() }).where(eq(tasks.id, onNobody.id));
     const list = await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann);
-    expect(list.body).not.toContain(c.crew.other.id);
-    expect(list.body).not.toContain(c.crew.other.name);
     const line = (id: string) => list.json<{ tasks: Line[] }>().tasks.find(t => t.id === id)!;
-    expect(line(onHidden.id).externalWait).toEqual({ reason, since: expect.any(String), until: expect.any(String) });
+    expect(line(onHidden.id).externalWait?.on).toEqual({ kind: 'employee', employee: c.crew.other.id, name: c.crew.other.name });
     expect(line(onSeen.id).externalWait?.on).toEqual({ kind: 'employee', employee: c.crew.mine.id, name: c.crew.mine.name });
     expect(line(onEvent.id).externalWait?.on).toEqual({ kind: 'external', event: 'time' });
     expect(line(onNobody.id).externalWait).not.toHaveProperty('on');
     const detail = await c.get(`/api/tasks/${onHidden.id}`, c.tokens.ann);
-    expect(detail.json<{ task: Line }>().task.externalWait).not.toHaveProperty('on');
-    expect(detail.body).not.toContain(c.crew.other.name);
+    expect(detail.json<{ task: Line }>().task.externalWait?.on).toEqual({ kind: 'employee', employee: c.crew.other.id, name: c.crew.other.name });
   });
 
   it('goes with the agent who holds the task: their words are not for someone who sees only another agent on it', async () => {
@@ -288,7 +284,7 @@ describe('a wait on a task', () => {
 });
 
 describe('turns', () => {
-  it('counts what the person sees and keeps the words the turn was laid out from for the full view', async () => {
+  it('counts every task of the company for everyone and keeps the words the turn was laid out from for the full view', async () => {
     const c = await aclCompany();
     const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret plan', at: new Date().toISOString() }], openedAt: new Date() }).returning();
     const own = await c.work('Own work', c.crew.mine);
@@ -300,8 +296,7 @@ describe('turns', () => {
     for (const viewer of ['ann', 'wes'] as const) {
       const res = await c.get('/api/turns/current', c.tokens[viewer]);
       expect(res.body).not.toContain('Secret plan');
-      expect(res.body).not.toContain(other.id);
-      expect(res.json().turn).toMatchObject({ messages: [], taskId: null, tasks: { total: viewer === 'ann' ? 1 : 0, done: 0 } });
+      expect(res.json().turn).toMatchObject({ messages: [], taskId: other.id, tasks: { total: 2, done: 0 } });
       expect((await c.get('/api/turns', c.tokens[viewer])).body).not.toContain('Secret plan');
     }
     expect((await c.get('/api/turns/current', c.tokens.lisa)).json().turn).toMatchObject({ taskId: other.id, tasks: { total: 2, done: 0 } });
@@ -392,7 +387,7 @@ describe('improvements', () => {
     expect((await c.get('/api/improvements', c.tokens.ann)).statusCode).toBe(403);
   });
 
-  it('names only linked tasks the person sees', async () => {
+  it('names every linked task, as everyone sees the tasks of the company', async () => {
     const c = await aclCompany();
     const [own] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew.wide.id, title: 'Wanda idea', text: 'x' }).returning();
     const { taskEvents, tasks } = await import('../src/db/schema.js');
@@ -402,8 +397,7 @@ describe('improvements', () => {
     await c.db.update(taskEvents).set({ data: { improvement: own!.id } }).where(eq(taskEvents.taskId, seen.id));
     expect((await c.db.select().from(tasks)).length).toBeGreaterThan(1);
     const res = await c.get('/api/improvements', c.tokens.wes);
-    expect(res.json().improvements[0].tasks.map((t: { id: string }) => t.id)).toEqual([seen.id]);
-    expect(res.body).not.toContain('Hidden from Wes');
+    expect(res.json().improvements[0].tasks.map((t: { id: string }) => t.id).sort()).toEqual([hidden.id, seen.id].sort());
   });
 });
 

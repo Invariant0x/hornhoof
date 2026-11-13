@@ -152,7 +152,7 @@ describe('GET /api/org', () => {
     expect(org.departments[1]).toMatchObject({ name: 'Sales Europe', templateKey: 'sales', products: [] });
   });
 
-  it('tells what each employee does now, and only to people who see that employee', async () => {
+  it('tells what each employee does now, to everyone of the company', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const [company] = await db.select().from(companies);
@@ -210,7 +210,7 @@ describe('GET /api/org', () => {
 
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const hers = (await app.inject({ url: '/api/org', ...as(maria) })).json();
-    expect(doing(hers)).toEqual({});
+    expect(doing(hers)).toEqual(doing(org));
   });
 
   it('shows independent Review owners while one waits for a person', async () => {
@@ -351,7 +351,7 @@ describe('GET /api/org', () => {
     expect(org.departments.find((d: { id: string }) => d.id === dev!.id).people.map((p: { name: string }) => p.name)).toEqual(['Kate']);
   });
 
-  it('shows program, tool, and alarm details only for agents in departments the person reaches, hiding other departments and the orchestrator', async () => {
+  it("shows every agent's program, tool, and alarm to everyone, and opens the card only of agents the person opens", async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const [company] = await db.select().from(companies);
@@ -422,8 +422,13 @@ describe('GET /api/org', () => {
       reportedAt: reportedAt.getTime(),
     });
     expect(devEmployee.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });
-    expect(devOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees).toEqual([]);
-    expect(devOrg.orchestrator).toBeUndefined();
+    expect(devOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees).toMatchObject([{
+      id: sally!.id,
+      opens: false,
+      program: { state: 'tool', tool: 'payroll.ExportSalaries' },
+      alarm: { reason: 'node_silent', since: reportedAt.getTime() },
+    }]);
+    expect(devOrg.orchestrator).toMatchObject({ opens: false, program: { state: 'tool', tool: 'company.Reorg' }, alarm: { reason: 'node_silent', since: reportedAt.getTime() } });
 
     const ownCard = await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(devPerson) });
     expect(ownCard.statusCode).toBe(200);
