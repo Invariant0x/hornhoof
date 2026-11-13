@@ -5,6 +5,26 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.3] - 2026-11-13
+
+A person's assistant can write to its owner in their chat when asked in its window, and an assistant's program can hand
+its whole conversation to a new session.
+
+### Added
+
+- When the owner asks their assistant in its window in Hornhoof to write to them in their chat, the assistant sends
+  those words there in its own voice. The assistant's program gets them as a reply that answers no message of its own.
+- An assistant's program can send, beside the new words, its whole conversation with the owner (`freshText`, up to
+  200000 characters). The assistant's agent reads it in place of the new words when its session starts anew: a first
+  session, a change of plan, machine or instructions, or a conversation the owner cleared in the terminal. A session
+  that goes on reads only the new words. The assistant's `/me` now says `contract: 2`, so a program sends `freshText`
+  only to a server that takes it.
+
+### Changed
+
+- The words an assistant's program sends may now be up to 50000 characters, up from 20000. Longer words are refused,
+  not cut.
+
 ## [0.23.2] - 2026-11-13
 
 Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, heads'

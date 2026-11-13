@@ -7,6 +7,7 @@ import { assistantOfAgent, requireAssistant } from '../../auth/assistant.js';
 import type { Person } from '../../auth/session.js';
 import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
+import { tellOwner } from './replies.js';
 import { callSkill } from './skills.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
@@ -50,7 +51,10 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
         'The answer comes later: read it with read_events, after the number `next` this gives.',
       inputSchema: {
         agentId: MessageBody.shape.agentId.describe("The agent's id, from list_agents."),
-        text: MessageBody.shape.text.describe("What you write, as your owner's words: 1 to 20000 characters."),
+        text: MessageBody.shape.text.describe("What you write, as your owner's words: 1 to 50000 characters."),
+        freshText: MessageBody.shape.freshText.describe(
+          "Optional, for the assistant's own agent: your whole conversation with your owner, up to 200000 characters, which it reads in place of text when its turn starts a new session.",
+        ),
       },
     },
     args =>
@@ -99,11 +103,28 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
   return server;
 }
 
-/* What an assistant's own agent works with: its owner's assistant tools, and the program's skills. */
+/* What an assistant's own agent works with: its owner's assistant tools, the program's skills, and words for its owner's
+   chat with the program. */
 export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string }): McpServer {
   let actor: Promise<Person> | undefined;
+  const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
-  registerTools(server, ctx, () => (actor ??= assistantOfAgent(ctx.db, job.agentId)), new AbortController().signal, job.agentId);
+  registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
+  server.registerTool(
+    'tell_owner',
+    {
+      description:
+        "Sends your owner words in their chat with the assistant program now. Only for when your owner asks in your window to be written to there: " +
+        "your answer to words from your window stays in the window, and your answer to the program's message reaches the chat by itself.",
+      inputSchema: { text: MessageBody.shape.text.describe('The words for your owner, as they will read them: 1 to 50000 characters.') },
+    },
+    args =>
+      answer(async () => {
+        const me = await owner();
+        await tellOwner(ctx, { companyId: me.companyId, assistantId: me.assistant!.id }, job.agentId, args.text, ctx.assistants.told);
+        return { passedOn: true };
+      }),
+  );
   server.registerTool(
     'persona_call',
     {

@@ -249,6 +249,14 @@ describe('job.run', () => {
     expect(parseServerMessage(JSON.stringify({ ...run, effort: '--dangerously' }))).toBeNull();
   });
 
+  it("may carry an assistant's whole conversation, as words of any length", () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const freshPrompt = 'Max: hi\n\nMiu: hello\n'.repeat(20_000);
+    expect(parseServerMessage(JSON.stringify({ ...run, freshPrompt }))).toEqual({ ...run, freshPrompt });
+    expect(parseServerMessage(JSON.stringify(run))).toEqual(run);
+    expect(parseServerMessage(JSON.stringify({ ...run, freshPrompt: 7 }))).toBeNull();
+  });
+
   it('needs instructions and a tool token, even when they are null', () => {
     const noInstructions = { ...SERVER[0], instructions: undefined };
     const noToken = { ...SERVER[0], toolToken: undefined };
