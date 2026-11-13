@@ -22,7 +22,11 @@ export const Facts = z.strictObject({
 });
 export type Facts = z.infer<typeof Facts>;
 
-const Title = z.string().trim().min(1).max(TITLE_MAX);
+/* What a screen should not take: control characters other than line breaks and tabs, and the marks that turn the
+   direction of text. */
+const UNSEEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+/* A title keeps a word once those are dropped, or it would show as empty. */
+const Title = z.string().trim().min(1).max(TITLE_MAX).refine(title => title.replace(UNSEEN, '').trim() !== '');
 const Text = z.string().trim().max(TEXT_MAX);
 export const Kind = z.enum(FEEDBACK_KINDS);
 
@@ -54,9 +58,7 @@ export async function factsOf(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string
   return { version: ctx.config.version, platform, errorCode };
 }
 
-/* Cleans a title or a text and drops what a screen should not take: control characters other than line breaks and tabs,
-   and the marks that turn the direction of text. */
-const UNSEEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+/* Cleans a title or a text and drops what a screen should not take. */
 export function cleaned(text: string): { text: string; hidden: Hidden } {
   const once = cleanText(text.replace(UNSEEN, ''));
   return { text: once.text.trim(), hidden: once.hidden };
