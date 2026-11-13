@@ -17,6 +17,12 @@ const HOOK_WAIT_MS = 10_000;
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
 
+/* A short outage of Hornhoof, as its proxy says it: a call that only reads is asked again after these growing pauses. */
+const OUTAGE = new Set([502, 503, 504]);
+const OUTAGE_PAUSES_MS = [1_000, 2_000, 4_000];
+/* Tools that change nothing, so asking one again cannot do anything twice. */
+const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'company']);
+
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
@@ -53,7 +59,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void> } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -231,7 +237,8 @@ export class Bridge {
       if (typeof v === 'string') headers[h] = v;
     }
     const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
-    const up = await fetch(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) });
+    const reads = kind === 'attach' ? req.method === 'GET' : onlyReads(body);
+    const up = await this.forward(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) }, reads);
     const out: Record<string, string> = {};
     for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
       const v = up.headers.get(h);
@@ -242,6 +249,19 @@ export class Bridge {
     res.end(answer);
     if (kind === 'mcp' && up.ok) this.memory.keep(key, body, answer);
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  /* A call that only reads goes again after a short outage, a few times with growing pauses; a write is never sent twice,
+     as it may have gone through. An outage that lasts reaches the program as it came. */
+  private async forward(target: string, init: RequestInit, reads: boolean): Promise<Response> {
+    let up = await fetch(target, init);
+    for (const ms of reads ? OUTAGE_PAUSES_MS : []) {
+      if (!OUTAGE.has(up.status)) break;
+      await up.body?.cancel();
+      await (this.options.pause ?? pause)(ms);
+      up = await fetch(target, init);
+    }
+    return up;
   }
 
   /* With no turn open, a program that connects or lists its tools hears what Hornhoof said to the same before. */
@@ -343,6 +363,14 @@ function only(body: Buffer, methods: Set<string>): boolean {
   const all = messages(body);
   return all.length > 0 && all.every(m => typeof m?.method === 'string' && methods.has(m.method));
 }
+
+/* Whether a JSON-RPC message, or every message of a batch, calls a tool that only reads. */
+function onlyReads(body: Buffer): boolean {
+  const all = messages(body) as { method?: unknown; params?: { name?: unknown } }[];
+  return all.length > 0 && all.every(m => m?.method === 'tools/call' && typeof m.params?.name === 'string' && READS.has(m.params.name));
+}
+
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
