@@ -5,6 +5,18 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.17] - 2026-11-12
+
+An agent on Antigravity no longer loses Hornhoof's tools when a person's words reach it a moment before their turn
+opens.
+
+### Fixed
+
+- Antigravity asks for Hornhoof's tools as it takes a person's words, a moment before Hornhoof opens their turn. The
+  node now waits for that turn, as it does for other programs, instead of turning the program away and leaving it
+  without tools until it starts again.
+- A program turned away that way ends its turn saying it has no tools, and the next turn starts it again with them.
+
 ## [0.18.16] - 2026-11-12
 
 An assistant's own agent now stays out of everyone else's sight, and lets go of its owner's plan when the assistant is
