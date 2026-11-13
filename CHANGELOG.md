@@ -7,14 +7,20 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.23.2] - 2026-11-13
 
-Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, and a
-machine whose sign-in was refused stops starting turns that cannot work.
+Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, heads'
+Telegram bots take files, and a machine whose sign-in was refused stops starting turns that cannot work.
 
 ### Added
 
 - A click on a line of the company map puts a bend on it, drawn as a small circle. The line runs through its bends in
   straight pieces, a bend can be dragged or moved with the arrow keys, and a click on it takes it away. Each person's
   bends are kept with their own arrangement of the map, and "Put back as it was" clears them too.
+- A head's Telegram bot, which answered anything but text with "I take only text messages for now", now passes on
+  documents, archives, photos (an album as one message), voice, audio and video messages and still stickers as files
+  the agent downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its
+  transcript when `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY`
+  and `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears
+  why. The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
 
 ### Changed
 
@@ -45,12 +51,6 @@ or a sign-in failed.
   program aside, and every later update of that program failed at once with "Could not update". The node now clears
   that copy before it installs.
 - The machine's log now says why a program update failed and how a sign-in's program ended, without any part of a token.
-- A head's Telegram bot answered anything but text with "I take only text messages for now". It now passes on documents,
-  archives, photos (an album as one message), voice, audio and video messages and still stickers as files the agent
-  downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its transcript when
-  `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY` and
-  `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears why.
-  The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
 
 ## [0.23.0] - 2026-11-12
 
