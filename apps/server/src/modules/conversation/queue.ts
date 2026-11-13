@@ -2,7 +2,7 @@ import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
 import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
@@ -14,6 +14,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { cameBack } from '../nodes/connections.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -747,16 +748,26 @@ async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
+const BACKLOG = 'These wake-ups on your task waited in line until your machine was connected again. Go through them together in this turn:';
 /* What a task's turn that went out inside another one ended with: its own result is the other turn's. */
 export const GONE_ALONG = 'Went out with the turn before it.';
 
-/* The other task turns waiting for the agent, oldest first. */
-function alongWith(ctx: Ctx, agentId: string, jobId: string) {
+/* The other task turns waiting for the agent that are due, oldest first; only narrows them down further. */
+function alongWith(ctx: Ctx, agentId: string, jobId: string, only?: SQL) {
   return ctx.db
     .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId, continueOf: jobs.continueOf })
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), isNotNull(jobs.taskId), ne(jobs.id, jobId), only))
     .orderBy(asc(jobs.createdAt));
+}
+
+/* What goes out inside a task's turn. A head reads everything that moved on its tasks while it was busy in one turn, instead
+   of one turn per task. Anyone else takes in one turn what waits on the same task when this turn waited until the node it
+   goes to came back: what a machine that was away kept would otherwise go out turn after turn, each out of date. */
+async function goingAlong(ctx: Ctx, agent: { id: string; kind: string }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId' | 'createdAt'>, nodeId: string | null): Promise<Along[]> {
+  if (!job.taskId) return [];
+  if (agent.kind === 'head') return alongWith(ctx, agent.id, job.id);
+  return (await cameBack(ctx.db, nodeId, job.createdAt)) ? alongWith(ctx, agent.id, job.id, eq(jobs.taskId, job.taskId)) : [];
 }
 
 /* A waiting turn that went out inside another: over, with its task taken up as its own turn would have. */
@@ -951,9 +962,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
-  /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
   const along: Along[] = [];
-  for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
+  for (const j of await goingAlong(ctx, agent, job, place.nodeId)) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
 
   /* A node from before skill files gets every skill in the instructions. */
   const files = ctx.hub.takesSkillFiles(place.node);
@@ -969,7 +979,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const on = { subscriptionId: sub.id, nodeId: place.nodeId };
   const { sessionId, catchUp, originalPrompt, prompts } = await queuedSession(ctx, agent, on, runHash, job, along);
-  const asked = along.length ? [ALONG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
+  const asked = along.length ? [agent.kind === 'head' ? ALONG : BACKLOG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
   const said = withOriginal(asked, originalPrompt);
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
      instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */

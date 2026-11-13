@@ -47,7 +47,12 @@ function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState(false);
-  if (agent) return <NewAssistant me={me} people={people} own={false} heading={t.people.addTitle} kind={<KindSwitch agent onChange={setAgent} />} initial={{ name, title }} onMade={onAssistant} onClose={onClose} />;
+  const [switched, setSwitched] = useState(false);
+  const switchTo = (next: boolean) => {
+    setSwitched(true);
+    setAgent(next);
+  };
+  if (agent) return <NewAssistant me={me} people={people} own={false} heading={t.people.addTitle} kind={<KindSwitch agent switched={switched} onChange={switchTo} />} initial={{ name, title }} onMade={onAssistant} onClose={onClose} />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -74,7 +79,7 @@ function InviteForm({ org, me, people, onSent, onAssistant, onClose }: Invite) {
         <h2 className="form-title"><PersonIcon />{t.people.addTitle}</h2>
       </div>
       <form onSubmit={e => void submit(e)} className="form-grid">
-        <KindSwitch agent={false} onChange={setAgent} />
+        <KindSwitch agent={false} switched={switched} onChange={switchTo} />
         <Field label={t.common.name} hint={t.people.nameHint}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label={t.common.email} hint={t.people.emailHint}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>

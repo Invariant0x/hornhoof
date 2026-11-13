@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
@@ -25,10 +25,15 @@ export function looksAfter(me: Me, assistant: PersonView, people: PersonView[]):
 }
 
 /* Who joins: a person or a personal AI assistant, two cards with their icons, one of them chosen. Choosing turns the invite
-   form into the form of an assistant, and back. The radios are native, so the arrow keys move between them. */
-export function KindSwitch({ agent, onChange }: { agent: boolean; onChange: (agent: boolean) => void }) {
+   form into the form of an assistant, and back. The radios are native, so the arrow keys move between them. The other form
+   comes in its place, so after a switch the choice takes the focus back from the name field there. */
+export function KindSwitch({ agent, switched = false, onChange }: { agent: boolean; switched?: boolean; onChange: (agent: boolean) => void }) {
   const t = useT();
   const id = useId();
+  const chosen = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (switched) chosen.current?.focus();
+  }, [switched]);
   const kinds = [
     { agent: false, key: 'person', icon: <PersonIcon />, name: t.people.kindPerson, about: t.people.kindPersonHint },
     { agent: true, key: 'agent', icon: <AgentIcon />, name: t.people.kindAssistant, about: t.people.kindAssistantHint },
@@ -39,7 +44,7 @@ export function KindSwitch({ agent, onChange }: { agent: boolean; onChange: (age
         const on = kind.agent === agent;
         return (
           <label key={kind.key} className={on ? 'kind-card on' : 'kind-card'}>
-            <input className="sr" type="radio" name={id} checked={on} onChange={() => onChange(kind.agent)} aria-labelledby={`${id}-${kind.key}`} aria-describedby={`${id}-${kind.key}-about`} />
+            <input ref={on ? chosen : undefined} className="sr" type="radio" name={id} checked={on} onChange={() => onChange(kind.agent)} aria-labelledby={`${id}-${kind.key}`} aria-describedby={`${id}-${kind.key}-about`} />
             {kind.icon}
             <span>
               <b id={`${id}-${kind.key}`}>{kind.name}</b>

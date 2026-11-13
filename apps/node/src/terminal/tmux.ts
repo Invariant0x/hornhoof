@@ -139,19 +139,32 @@ export class Tmux {
     /* A command that fails ends the line, so the keys come after the program has started. */
     const keys = KEYS.flatMap(c => [';', ...c]);
     await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start, ...keys]);
-    if (this.recordings.get(name)) await this.run(['pipe-pane', '-t', name]).catch(() => {});
-    this.recordings.remove(name);
+    await this.clearRecording(name);
     if (outputDir) {
       await this.capture(name, outputDir);
       await this.keys(name, 'Enter');
     }
   }
 
+  /* Restarts a silent recorder once while the pane still waits on read before running the program. */
   private async capture(name: string, dir: string): Promise<void> {
+    if (await this.startRecorder(name, dir)) return;
+    await this.clearRecording(name);
+    if (await this.startRecorder(name, dir)) return;
+    await this.clearRecording(name);
+    throw new Error('The terminal output recorder did not start.');
+  }
+
+  private async startRecorder(name: string, dir: string): Promise<boolean> {
     const recording = this.recordings.create(name, dir);
     const command = [process.execPath, CAPTURE, recording.file, recording.ready, recording.flush, String(KEEP_BYTES), this.socket, name, recording.position].map(quote).join(' ');
     await this.run(['pipe-pane', '-t', name, `exec ${command}`]);
-    if (!(await this.recordings.wait(recording, 'ready', 5000))) throw new Error('The terminal output recorder did not start.');
+    return this.recordings.wait(recording, 'ready', 5000);
+  }
+
+  private async clearRecording(name: string): Promise<void> {
+    await this.stopRecording(name);
+    this.recordings.remove(name);
   }
 
   /* Read before a pane can be respawned or removed. Keep the first observation time on tmux versions without one. */
