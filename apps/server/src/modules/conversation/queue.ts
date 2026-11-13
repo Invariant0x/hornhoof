@@ -41,8 +41,10 @@ import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operato
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
-   keep the whole window, since they hold the department's and the company's picture. */
+   keep the whole window, since they hold the department's and the company's picture. Their window is named outright too:
+   left to its own choice, Claude Code stops a session with a question whether to compact earlier, which nobody answers. */
 export const WORKER_COMPACT_WINDOW = 500_000;
+export const FULL_COMPACT_WINDOW = 1_000_000;
 
 /* Any turn may run as long as its work takes. This only ends one that hangs, a program frozen or waiting for input
    nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
@@ -1014,7 +1016,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       sessionId,
       model,
       effort,
-      compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
+      compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : FULL_COMPACT_WINDOW,
       timeoutMs: job.timeoutMs,
       instructions: instructions.text,
       toolToken: token,
