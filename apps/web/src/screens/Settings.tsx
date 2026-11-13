@@ -7,7 +7,6 @@ import { CopyButton } from '../ui/CopyButton';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { CompanyRepoHost } from '../ui/RepoHost';
-import { ThemeChoice, ThemeTemplate } from '../ui/ThemePicker';
 import { useDialogClose } from '../ui/use-dialog-close';
 import { Backups } from './Backups';
 
@@ -27,9 +26,9 @@ function Encryption({ tls }: { tls: TlsView | null }) {
 }
 
 /* The company's settings, for people who see the whole company: its public link at hornhoof.org, which they copy, move
-   to another name or remove, the GitHub key Hornhoof creates repositories with, the theme of this browser with the
-   same custom template block everyone has in the account menu, and for the CEO alone its backups. A company with no
-   link starts on a long random name, as link names are public. */
+   to another name or remove, the GitHub key Hornhoof creates repositories with, and for the CEO alone its backups. A
+   company with no link starts on a long random name, as link names are public. The themes are each person's own, in
+   their settings. */
 export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -130,11 +129,6 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
         <CompanyRepoHost />
-        <section className="settings-part">
-          <h3>{t.themeTemplate.look}</h3>
-          <ThemeChoice />
-          <ThemeTemplate />
-        </section>
         {me.person.isOwner && <Backups />}
       </div>
     </div>

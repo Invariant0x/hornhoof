@@ -152,14 +152,14 @@ describe('Shell', () => {
     expect(await screen.findByText('Version 0.4.0 (abc1234)')).toBeInTheDocument();
   });
 
-  it('keeps the theme in the account menu, not in the top bar', async () => {
+  it('keeps the themes in the account menu, not in the top bar', async () => {
     const user = userEvent.setup();
     renderShell();
     expect(screen.queryByRole('button', { name: /theme/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Dark' }));
-    expect(document.documentElement.dataset.theme).toBe('dark');
-    expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Go to themes. Current: Cyberpunk' }));
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    expect(location.pathname).toBe('/themes');
   });
 
   /* The window checks its agent's card as it opens; one the server refuses would close it again. */
