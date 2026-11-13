@@ -2,7 +2,7 @@ import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { accessesOf } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, companies, departments, nodes, people, subscriptions, teams } from '../../db/schema.js';
+import { agents, companies, departments, nodes, people, subscriptions, teams, type AgentOverrides } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
 import { agreed } from '../subscriptions/views.js';
 import { employeeOrder } from '../agents/order.js';
@@ -10,6 +10,7 @@ import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 import type { Templates } from '../templates/load.js';
 import { servesWholeCompany } from './staff.js';
 
+const ownText = (overrides: AgentOverrides): boolean => Boolean(overrides.base?.trim() || Object.values(overrides.skills ?? {}).some(text => text.trim()));
 const repositoryOf = (d: { repoUrl: string | null; repoBranch: string | null }) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main' } : null);
 
 /* The people an agent may take orders from: those who see the whole company, and those who run departments, each with the
@@ -63,6 +64,8 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         model: a.model || null,
         /* Off for now: it takes no work until a person switches it on. */
         on: !a.switchedOffAt,
+        /* A person gave it text of its own over its role's, which may narrow the work it takes; the text stays on its card. */
+        ownText: ownText(a.overrides),
       }));
   return {
     name: company?.name ?? '',

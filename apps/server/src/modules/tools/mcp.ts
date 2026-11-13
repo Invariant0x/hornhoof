@@ -51,7 +51,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
     'company',
-    { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
+    { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
