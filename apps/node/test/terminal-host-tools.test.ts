@@ -122,14 +122,14 @@ describe("a program's connection to Hornhoof's tools", () => {
   /* A new Kimi session connects to its tools only with its first message, and Antigravity once it takes one, so the node
      cannot tell before a turn that such a program lost them. Its turn ends as one without tools, which the server repeats
      later and does not remind, and the next turn starts it anew. */
-  it('ends the turn of a program with no session yet that was turned away as it connected as one without tools, and starts it anew once', async () => {
+  it.each(['initialize', 'server/discover'])('ends the turn of a program with no session yet that was turned away as it connected (%s) as one without tools, and starts it anew once', async method => {
     const up = await hornhoof();
     /* A turn with nothing to type started the program for someone who opened its terminal, and it waits for its first
        message to begin a session. */
     const c = await liveTerminal('kimi', 'queued', { host: { hornhoof: up.url }, connects: true, sessionId: null, prompt: '', watched: true });
     expect(await c.on(c.running)).toMatchObject({ ok: true, sessionId: null });
     /* It connects with no turn open, no turn opens while it waits, and the node knows no answer. */
-    expect(await call(c, 1, 'initialize')).toMatchObject({ id: 1, error: { code: -32001 } });
+    expect(await call(c, 1, method)).toMatchObject({ id: 1, error: { code: -32001 } });
     const turn = async (prompt: string, jobId: string) => {
       const running = c.run(prompt, jobId);
       await c.until(() => c.sent.some(m => m.type === 'job.program' && m.jobId === jobId && m.state === 'thinking'));
