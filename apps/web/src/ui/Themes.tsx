@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 import { COLLECTION_LIMIT, type CustomSkin } from '../skins/collection';
 import { BUILTIN_SKINS, type BuiltinSkin, type BuiltinSkinId } from '../skins/registry';
-import { declarations, type Skin, type SkinLook } from '../skins/roles';
+import { declarations, lookOnly, type Skin, type SkinLook } from '../skins/roles';
 import { chooseSkin, forgetSkin, keepSkins, skinsState, subscribeSkins } from '../skins/store';
 import { parseSkin, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
 
@@ -21,8 +21,6 @@ function skinName(t: Messages, id: string, custom: readonly CustomSkin[]): strin
   return custom.find(entry => entry.id === id)?.skin.name ?? t.skins.names[id as BuiltinSkinId];
 }
 
-/* Only the look of a skin, without the id a built-in one carries, for its file. */
-const lookPart = ({ scheme, colors, fonts, cut }: SkinLook): SkinLook => ({ scheme, colors, fonts, cut });
 
 /* The tokens of a skin on its own preview only, so each card shows its theme in the same drawing. */
 const previewStyle = (look: SkinLook) => Object.fromEntries(declarations(look).filter(([property]) => property.startsWith('--'))) as CSSProperties;
@@ -107,7 +105,7 @@ function SkinCard({ id, look, name, own, on }: CardProps) {
         </div>
       ) : (
         <div className="entry-actions">
-          <a className="btn small ghost" href={fileLink({ ...lookPart(look), name })} download={`hornhoof-skin-${id}.json`} aria-label={t.skins.downloadLabel(name)}>
+          <a className="btn small ghost" href={fileLink({ ...lookOnly(look), name })} download={`hornhoof-skin-${id}.json`} aria-label={t.skins.downloadLabel(name)}>
             {t.skins.download}
           </a>
           {own && (

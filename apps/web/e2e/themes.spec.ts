@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
-import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
+import { COLOR_TOKENS, lookOnly, type Skin } from '../src/skins/roles';
 import { parseSkin, skinText } from '../src/skins/validate';
 import { serveApi } from './api';
 
@@ -11,7 +11,7 @@ import { serveApi } from './api';
    person's own: what each looks like, that switching moves nothing among themes written in the same fonts, that text
    stays readable, that nothing runs off the screen, also mirrored right to left, and that the chosen theme is on the
    page before the app starts. Its files load, are refused in plain words, download as samples and are deleted. */
-const { id: _cyberpunk, ...CYBERPUNK } = builtinSkin('cyberpunk')!;
+const CYBERPUNK = lookOnly(builtinSkin('cyberpunk')!);
 const OWN: Skin = { ...CYBERPUNK, name: 'Dusk', colors: { ...CYBERPUNK.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' }, cut: 1.5 };
 const CHOICES = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'];
 const RTL = /^(?:ar|he|fa|ur|ps|sd|ug|yi)(?:-|$)/;
@@ -276,8 +276,7 @@ test('theme files load beside each other, a bad one is refused in plain words, a
   expect(file.suggestedFilename()).toBe('hornhoof-skin-matrix.json');
   const chunks: Buffer[] = [];
   for await (const chunk of (await file.createReadStream())!) chunks.push(chunk as Buffer);
-  const { id: _matrix, ...matrix } = builtinSkin('matrix')!;
-  expect(parseSkin(Buffer.concat(chunks).toString('utf8'))).toEqual({ ok: true, skin: { ...matrix, name: 'Matrix' } });
+  expect(parseSkin(Buffer.concat(chunks).toString('utf8'))).toEqual({ ok: true, skin: { ...lookOnly(builtinSkin('matrix')!), name: 'Matrix' } });
   const load = dialog.getByLabel('Load themes', { exact: true });
   const bad = { ...JSON.parse(skinText(OWN)), colors: { ...OWN.colors, bg: 'url(https://example.com/x.png)' } };
   await load.setInputFiles([

@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
-import type { Skin } from '../src/skins/roles';
+import { lookOnly, type Skin } from '../src/skins/roles';
 import type { Decisions, PersonView, ProposalDecision, Roster, SubView } from '../src/types';
 import { serveApi } from './api';
 
@@ -17,7 +17,7 @@ import { serveApi } from './api';
 test.describe.configure({ timeout: 0 });
 
 /* A theme of a person's own that changes only colours of Cyberpunk, so its layout must match Cyberpunk's exactly. */
-const { id: _cyberpunk, ...CYBERPUNK } = builtinSkin('cyberpunk')!;
+const CYBERPUNK = lookOnly(builtinSkin('cyberpunk')!);
 const CUSTOM: Skin = { ...CYBERPUNK, name: 'Dusk', colors: { ...CYBERPUNK.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
 const CHOICES = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'] as const;
 type Choice = (typeof CHOICES)[number];

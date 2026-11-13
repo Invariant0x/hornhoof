@@ -50,6 +50,8 @@ export type Scheme = (typeof SCHEMES)[number];
 export type SkinLook = { scheme: Scheme; colors: Readonly<Record<ColorRole, string>>; fonts: Readonly<Record<FontRole, readonly string[]>>; cut: number };
 /* A skin of a person's own: a look with the name they gave it. */
 export type Skin = SkinLook & { name: string };
+/* Only the look of a skin, without the id of a built-in one or the name of one's own. */
+export const lookOnly = ({ scheme, colors, fonts, cut }: SkinLook): SkinLook => ({ scheme, colors, fonts, cut });
 
 /* Families a browser knows by a keyword: they go out without quotes, and a font list always ends with one. */
 export const GENERIC_FONTS = ['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'math', 'emoji', 'fangsong'];

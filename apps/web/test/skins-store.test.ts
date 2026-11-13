@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLLECTION_LIMIT, collectionText, readCollection, withAdded, without } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
-import { COLOR_TOKENS, CUT_TOKEN, FONT_TOKENS, SKIN_PROPERTIES, type Skin } from '../src/skins/roles';
+import { COLOR_TOKENS, CUT_TOKEN, FONT_TOKENS, lookOnly, SKIN_PROPERTIES, type Skin } from '../src/skins/roles';
 import { chooseSkin, forgetSkin, initSkins, keepSkins, lookOf, skinsState, subscribeSkins } from '../src/skins/store';
 import { skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
-const { id: _matrix, ...MATRIX } = builtinSkin('matrix')!;
+const MATRIX = lookOnly(builtinSkin('matrix')!);
 const skin = (name: string, bg = '#010203'): Skin => ({ ...MATRIX, name, colors: { ...MATRIX.colors, bg } });
 const inline = () => Object.fromEntries(SKIN_PROPERTIES.map(property => [property, root.style.getPropertyValue(property)]).filter(([, value]) => value));
 
