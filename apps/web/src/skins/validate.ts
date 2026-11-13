@@ -72,16 +72,22 @@ function forbiddenKey(root: unknown): string | null {
 /* A key no skin knows: one that reaches for the layout is named as such. */
 const stranger = (key: string, where: string) => problem(LAYOUT.test(key) ? 'layout_locked' : 'unknown_key', where);
 
+type EntryCheck<K extends string> = (where: string, key: K, value: unknown) => SkinError | null;
+
+/* One value of a group: a key the group knows, nothing in it that reads as code, then the check of its own kind. */
+function checkEntry<K extends string>(name: string, keys: readonly K[], key: string, value: unknown, check: EntryCheck<K>): SkinError | null {
+  const where = `${name}.${key}`;
+  if (!(keys as readonly string[]).includes(key)) return stranger(key, where);
+  if (unsafe(value) || (Array.isArray(value) && value.some(unsafe))) return problem('unsafe', where);
+  return check(where, key as K, value);
+}
+
 /* A group of named values, such as colors: an object with every key, each value passing its own check. */
-function checkGroup<K extends string>(raw: unknown, name: string, keys: readonly K[], check: (where: string, key: K, value: unknown) => SkinError | null): SkinError | null {
+function checkGroup<K extends string>(raw: unknown, name: string, keys: readonly K[], check: EntryCheck<K>): SkinError | null {
   if (raw === undefined) return problem('missing', name);
   if (!isObject(raw)) return problem('not_object', name);
   for (const key of Object.keys(raw)) {
-    const where = `${name}.${key}`;
-    if (!(keys as readonly string[]).includes(key)) return stranger(key, where);
-    const value = raw[key];
-    if (unsafe(value) || (Array.isArray(value) && value.some(unsafe))) return problem('unsafe', where);
-    const found = check(where, key as K, value);
+    const found = checkEntry(name, keys, key, raw[key], check);
     if (found) return found;
   }
   const missing = keys.find(key => !(key in raw));

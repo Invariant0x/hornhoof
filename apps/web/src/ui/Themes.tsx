@@ -179,6 +179,35 @@ function Guide() {
   );
 }
 
+/* The built-in skins in the order of the registry, then a person's own in the order they were added. */
+function catalogCards(t: Messages, language: Language, custom: readonly CustomSkin[]): Card[] {
+  return [
+    ...BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: () => builtinFile(skin, builtinNames(skin.id)) })),
+    ...custom.map(({ id, skin }) => ({ id, look: ownLook(skin), name: nameIn(skin.name, language), desc: t.skins.ownDesc, own: true, file: () => skin })),
+  ];
+}
+
+const failure = (t: Messages, text: string): Notice => ({ tone: 'alert', title: t.skins.addFailed, text });
+
+/* Keeps a skin read from a file under a name no other card has, and says how it went: added, or why not. */
+function keepRead(t: Messages, language: Language, read: Skin | Problem): Notice {
+  if ('code' in read) return failure(t, problemText(t, read));
+  const taken = [...BUILTIN_SKINS.map(builtin => builtinNames(builtin.id)), ...skinsState().custom.map(entry => entry.skin.name)];
+  const named = { ...read, name: uniqueName(read.name, taken) };
+  const added = addSkin(named);
+  if (added.ok) return { tone: 'status', text: t.skins.added(nameIn(named.name, language)) };
+  return failure(t, added.reason === 'full' ? t.skins.full(COLLECTION_LIMIT) : t.skins.notKept);
+}
+
+/* Removes one's own skin and says so with Undo; focus goes to the next card, else the one before, else Add from file. */
+function removeCard(t: Messages, cards: readonly Card[], card: Card): { notice: Notice; focus: string } | null {
+  const removal = removeSkin(card.id);
+  if (!removal) return null;
+  const fellBack = removal.wasOn ? ` ${t.skins.nowOn(t.skins.names[DEFAULT_SKIN])}` : '';
+  const at = cards.indexOf(card);
+  return { notice: { tone: 'status', text: `${t.skins.removed(card.name)}${fellBack}`, removal }, focus: (cards[at + 1] ?? cards[at - 1])?.id ?? '' };
+}
+
 /* Gives a skin as a file of the format a person can change and add back. */
 function saveFile(card: Card): void {
   const link = document.createElement('a');
@@ -189,41 +218,28 @@ function saveFile(card: Card): void {
   link.remove();
 }
 
-export function Themes() {
+function download(t: Messages, card: Card, say: (notice: Notice) => void): void {
+  try {
+    saveFile(card);
+  } catch {
+    say({ tone: 'alert', text: t.skins.downloadFailed(card.name) });
+  }
+}
+
+/* Focus after the catalog has drawn again: the Apply of the card named, else Add from file. */
+function moveFocus(root: HTMLElement | null, to: string): void {
+  const target = root?.querySelector<HTMLElement>(`[data-apply="${to}"]`) ?? root?.querySelector<HTMLElement>('[data-add]');
+  target?.focus();
+}
+
+type Talk = { say: (notice: Notice) => void; focusOn: (id: string) => void };
+
+/* Add from file: one file at a time, the button kept in place and its label saying so while the file is read. */
+function AddFromFile({ say, focusOn }: Talk) {
   const t = useT();
   const { language } = useLanguage();
-  const { active, custom } = useSkins();
-  const [notice, setNotice] = useState<Notice | null>(null);
   const [reading, setReading] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const addButton = useRef<HTMLButtonElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
-  const focusTo = useRef<string | null>(null);
-  const headingId = useId();
-  const catalogId = useId();
-
-  useEffect(() => {
-    if (focusTo.current === null) return;
-    const target = root.current?.querySelector<HTMLElement>(`[data-apply="${focusTo.current}"]`) ?? addButton.current;
-    focusTo.current = null;
-    target?.focus();
-  });
-
-  const cards: Card[] = [
-    ...BUILTIN_SKINS.map(skin => ({ id: skin.id, look: skin, name: t.skins.names[skin.id], desc: t.skins.descs[skin.id], own: false, file: () => builtinFile(skin, builtinNames(skin.id)) })),
-    ...custom.map(({ id, skin }) => ({ id, look: ownLook(skin), name: nameIn(skin.name, language), desc: t.skins.ownDesc, own: true, file: () => skin })),
-  ];
-
-  const fail = (text: string) => setNotice({ tone: 'alert', title: t.skins.addFailed, text });
-
-  function keepRead(skin: Skin) {
-    const taken = [...BUILTIN_SKINS.map(builtin => builtinNames(builtin.id)), ...skinsState().custom.map(entry => entry.skin.name)];
-    const named = { ...skin, name: uniqueName(skin.name, taken) };
-    const added = addSkin(named);
-    if (added.ok) setNotice({ tone: 'status', text: t.skins.added(nameIn(named.name, language)) });
-    else fail(added.reason === 'full' ? t.skins.full(COLLECTION_LIMIT) : t.skins.notKept);
-  }
+  const picker = useRef<HTMLInputElement>(null);
 
   async function load(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget;
@@ -232,41 +248,86 @@ export function Themes() {
     input.value = '';
     if (!file) return;
     setReading(true);
-    setNotice({ tone: 'busy', text: t.skins.busy });
+    say({ tone: 'busy', text: t.skins.busy });
     const read = await readSkin(file);
     setReading(false);
-    if ('code' in read) fail(problemText(t, read));
-    else keepRead(read);
-    focusTo.current = '';
+    say(keepRead(t, language, read));
+    focusOn('');
   }
+
+  return (
+    <div className="skins-add">
+      <button className="btn small" type="button" data-add disabled={reading} aria-busy={reading || undefined} onClick={() => picker.current?.click()}>
+        <SwapLabel first={t.skins.add} second={t.skins.loading} showSecond={reading} />
+      </button>
+      <input ref={picker} type="file" accept=".json,application/json" hidden onChange={event => void load(event)} />
+    </div>
+  );
+}
+
+type CatalogProps = { cards: readonly Card[]; active: string; onApply: (card: Card) => void; onDownload: (card: Card) => void; onRemove: (card: Card) => void };
+
+function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps) {
+  const t = useT();
+  const id = useId();
+  return (
+    <section className="skins-catalog" aria-labelledby={id}>
+      <div className="skins-catalog-head">
+        <h4 id={id}>{t.skins.catalog}</h4>
+        <p className="muted">{t.skins.catalogHint}</p>
+      </div>
+      <ul className="skin-cards">
+        {cards.map(card => (
+          <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
+        ))}
+      </ul>
+      {!cards.some(card => card.own) && (
+        <div className="skins-empty">
+          <p className="skins-empty-title">{t.skins.empty}</p>
+          <p className="muted">{t.skins.emptyHint}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function Themes() {
+  const t = useT();
+  const { language } = useLanguage();
+  const { active, custom } = useSkins();
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  /* Where focus goes once the catalog has drawn again: the Apply of a card, or Add from file. */
+  const focusTo = useRef<string | null>(null);
+  const headingId = useId();
+
+  useEffect(() => {
+    if (focusTo.current === null) return;
+    moveFocus(root.current, focusTo.current);
+    focusTo.current = null;
+  });
+
+  const cards = catalogCards(t, language, custom);
+  const focusOn = (id: string) => {
+    focusTo.current = id;
+  };
 
   function apply(card: Card) {
-    if (card.id === active || !chooseSkin(card.id)) return;
-    setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
-  }
-
-  function download(card: Card) {
-    try {
-      saveFile(card);
-    } catch {
-      setNotice({ tone: 'alert', text: t.skins.downloadFailed(card.name) });
-    }
+    if (card.id !== active && chooseSkin(card.id)) setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
   }
 
   function remove(card: Card) {
-    const at = cards.indexOf(card);
-    const removal = removeSkin(card.id);
-    if (!removal) return;
-    const fellBack = removal.wasOn ? ` ${t.skins.nowOn(t.skins.names[DEFAULT_SKIN])}` : '';
-    setNotice({ tone: 'status', text: `${t.skins.removed(card.name)}${fellBack}`, removal });
-    focusTo.current = (cards[at + 1] ?? cards[at - 1])?.id ?? '';
+    const removed = removeCard(t, cards, card);
+    if (!removed) return;
+    setNotice(removed.notice);
+    focusOn(removed.focus);
   }
 
   function undo(removal: Removal) {
     const back = restoreSkin(removal);
-    if (!back) return fail(t.skins.notKept);
+    if (!back) return setNotice(failure(t, t.skins.notKept));
     setNotice({ tone: 'status', text: t.skins.restored(nameIn(back.skin.name, language)) });
-    focusTo.current = back.id;
+    focusOn(back.id);
   }
 
   return (
@@ -279,31 +340,10 @@ export function Themes() {
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>
-        <div className="skins-add">
-          <button ref={addButton} className="btn small" type="button" disabled={reading} aria-busy={reading || undefined} onClick={() => fileInput.current?.click()}>
-            <SwapLabel first={t.skins.add} second={t.skins.loading} showSecond={reading} />
-          </button>
-          <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={event => void load(event)} />
-        </div>
+        <AddFromFile say={setNotice} focusOn={focusOn} />
       </div>
       {notice && <NoticeBar notice={notice} onUndo={undo} />}
-      <section className="skins-catalog" aria-labelledby={catalogId}>
-        <div className="skins-catalog-head">
-          <h4 id={catalogId}>{t.skins.catalog}</h4>
-          <p className="muted">{t.skins.catalogHint}</p>
-        </div>
-        <ul className="skin-cards">
-          {cards.map(card => (
-            <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => apply(card)} onDownload={() => download(card)} onRemove={() => remove(card)} />
-          ))}
-        </ul>
-        {custom.length === 0 && (
-          <div className="skins-empty">
-            <p className="skins-empty-title">{t.skins.empty}</p>
-            <p className="muted">{t.skins.emptyHint}</p>
-          </div>
-        )}
-      </section>
+      <Catalog cards={cards} active={active} onApply={apply} onDownload={card => download(t, card, setNotice)} onRemove={remove} />
       <Guide />
     </div>
   );
