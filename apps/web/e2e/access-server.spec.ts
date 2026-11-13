@@ -148,6 +148,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(page.locator('.dcanvas')).toContainText('Awa');
           await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
           await page.goto(`/agents/${server.crew.other.id}`);
+          await expect(page.locator('body')).not.toContainText('Otto');
           await expect(page.getByRole('complementary')).toHaveCount(0);
           expect(errorsOf(page)).toEqual([]);
         } finally {
@@ -162,9 +163,13 @@ test('real server shows everyone the whole department and its work, and opens on
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     await ann.goto('/');
+    /* Each department's card says what it works on now, its newest open task: Own work in Development, Away work in Sales. */
+    await expect(ann.locator('.map')).toContainText('Own work');
+    await expect(ann.locator('.map')).toContainText('Away work');
     await ann.getByRole('button', { name: /^Development/ }).click();
     for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).toContainText(name);
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
+    for (const name of ['Mina', 'Otto']) await expect(ann.locator('.tv-labs')).toContainText(name);
     await expect(ann.locator('.tv-in')).toContainText('Hidden work');
     await ann.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
     await expect(ann.locator('.tasks')).toContainText('Own work');
