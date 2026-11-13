@@ -14,7 +14,7 @@ For the review period named in the assignment, turn failures and recurring weak 
    - something an agent did not know and asked people for: an address, a convention, a decision already made;
    - a provider that refused a role's work, so its turns end with nothing done;
    - timeouts, sign-ins, crashes, the same test failing, an instruction the agents misread.
-3. Find each group's root cause from the tails, the last turns and the agents' state in agents first. Something that happened once is noted, not passed on, unless it stopped work for people.
+3. Find each group's root cause from the tails, the reasons Hornhoof recorded, the end of each blocked reason, the last turns and the agents' state in agents first. Something that happened once is noted, not passed on, unless it stopped work for people.
 4. For each cause, find the smallest change that stops it:
    - install the program or package on the nodes ahead, with its exact package name;
    - change a role's or an employee's instructions, with the exact words to add, for example to let it take a harmless action without asking;

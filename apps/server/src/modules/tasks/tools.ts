@@ -372,7 +372,7 @@ class TaskTools {
         description:
           "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
           'which opens it again and wakes its executor with your words, once in a piece of work: blocked again after that, it opens with the answer written into it by update_task. ' +
-          'A comment from a person or another agent also ends an external wait and wakes its holder. ' +
+          'A comment from a person or another agent also ends an external wait and wakes its holder. A note that should leave the wait standing goes to its holder with message_employee naming no task. ' +
           'The current head or orchestrator resolves its internal stuck request with a comment. To hand work on, use the task\'s own moves.',
         inputSchema: { task: Ref, text: Text.trim().min(1) },
       },
@@ -410,6 +410,7 @@ class TaskTools {
       {
         description:
           'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
