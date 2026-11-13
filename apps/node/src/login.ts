@@ -71,7 +71,7 @@ export class CutAtToken {
   }
 }
 
-/* How a sign-in's program ended, with its last lines, for the node's log. Once a token's start is among them, none go. */
+/* How a sign-in's program ended, with its last lines, for the machine's output. Once a token's start is among them, none go. */
 function endedEarly(code: number | null, text: string): string {
   const plain = plainOutput(text);
   const last = plain.includes(TOKEN_START) ? [] : plain.split('\n').map(l => l.trim()).filter(Boolean).slice(-6);
@@ -93,7 +93,7 @@ type Options = {
   signedIn(): Promise<void>;
   /* Installs the program when it is missing, before its sign-in starts. */
   install?: () => Promise<void>;
-  /* The node's own log, for how a sign-in's program ended when it ended with an error. */
+  /* The machine's own output, for how a sign-in's program ended when it ended with an error. */
   log?: (line: string) => void;
   pollMs?: number;
 };

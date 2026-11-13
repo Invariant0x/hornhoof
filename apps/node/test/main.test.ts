@@ -239,11 +239,14 @@ describe('reporting managed programs', () => {
       if (++attempts === 1) throw new Error('private npm credential');
       version = '2.0.0';
     } }]);
-    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    const logs: string[] = [];
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: line => logs.push(line) });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ programs: [{ version: '1.0.0', updating: false, failed: true }] });
     expect(JSON.stringify(server.received)).not.toContain('private npm credential');
+    /* npm's words stay on the machine, in its own output, and never in the log the node gives Hornhoof. */
+    await eventually(() => logs.includes('Could not update claude: private npm credential'));
     server.send({ type: 'programs.update' });
     await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
     expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: false, failed: false }] });

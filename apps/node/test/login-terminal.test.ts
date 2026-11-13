@@ -111,8 +111,8 @@ describe("a plan's sign-in in a terminal on the node", () => {
     expect(s.signedIn).not.toHaveBeenCalled();
   });
 
-  /* The owner sees only that the sign-in ended early; the machine's log keeps why, for whoever helps them. */
-  it("whose program ends at once says in the node's log how it ended and what it printed last", async () => {
+  /* The owner sees only that the sign-in ended early; the machine's output keeps why, for whoever helps them. */
+  it("whose program ends at once says in the machine's output how it ended and what it printed last", async () => {
     const s = signIn();
     await s.login.start(false);
     s.ends("node:internal/modules/cjs/loader:1228\n  throw err;\n\nError: Cannot find module '/data/tools/lib/node_modules/@anthropic-ai/claude-code/cli.js'\n", 1);
@@ -121,7 +121,7 @@ describe("a plan's sign-in in a terminal on the node", () => {
     expect(s.logged).toEqual([expect.stringMatching(/^The sign-in program ended with code 1: .*Cannot find module '\/data\/tools\/lib\/node_modules\/@anthropic-ai\/claude-code\/cli\.js'/)]);
   });
 
-  it("keeps every piece of a printed token out of the node's log", async () => {
+  it("keeps every piece of a printed token out of the machine's output", async () => {
     const s = signIn();
     await s.login.start(false);
     s.ends(printed(30), 1);

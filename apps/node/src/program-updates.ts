@@ -50,7 +50,7 @@ export class ProgramUpdates {
     return signal ? untilReady(pending, signal) : pending;
   }
 
-  /* Why an installation failed goes only to log, the node's own log that hides secrets, never into what Hornhoof is told. */
+  /* Why an installation failed goes only to log, the machine's own output, never into what Hornhoof is told. */
   update(changed: () => void = () => {}, log: (line: string) => void = () => {}): Promise<void> {
     if (this.pending) return this.pending;
     if (!this.entries.length) return Promise.resolve();
