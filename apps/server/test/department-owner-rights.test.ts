@@ -159,11 +159,11 @@ describe('what a department owner sees', () => {
   it('reads nothing of the key of a plan that is not theirs', async () => {
     const c = await owned();
     await c.db.insert(teams).values({ id: '00000000-0000-4000-8000-000000007a2f', companyId: c.companyId, departmentId: c.dev.id, name: 'Web' });
-    await c.db.update(subscriptions).set({ last4: '7a2f' }).where(eq(subscriptions.id, c.worker.subscriptionId!));
-    expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().subscription.last4).toBe('7a2f');
+    await c.db.update(subscriptions).set({ last4: '7zQw' }).where(eq(subscriptions.id, c.worker.subscriptionId!));
+    expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().subscription.last4).toBe('7zQw');
     const card = (await send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}`)).json();
     expect(card.subscription).toMatchObject({ id: c.worker.subscriptionId, last4: null });
-    expect(JSON.stringify(card)).not.toContain('7a2f');
+    expect(JSON.stringify(card)).not.toContain('7zQw');
   });
 
   it('watches the terminal of an employee on another\'s plan without typing into it', async () => {
