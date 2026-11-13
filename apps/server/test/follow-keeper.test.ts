@@ -184,7 +184,9 @@ describe('the keeper of a machine that keeps a copy', () => {
     const f = await follower(c);
     await until(() => f.keeper.status().leader !== null);
     await until(async () => (await through(f.ports.door, 'ping')) === 'leader: ping');
-    /* Nobody else's connection is carried there. */
+  });
+
+  it("carries nobody else's connection through that door", async () => {
     const closed = await follower(await company({ dbTarget: await tcpEcho('leader: ') }), { allowed: async () => ['192.0.2.1'] });
     await until(() => closed.keeper.status().leader !== null);
     expect(await through(closed.ports.door, 'ping')).toBe('closed');

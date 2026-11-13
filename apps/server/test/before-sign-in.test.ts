@@ -134,7 +134,8 @@ describe('before sign-in', () => {
       }
     }
     expect([...new Set(unlisted)]).toEqual([]);
-  });
+    /* Every route is asked from both sides: the test grows with the routes. */
+  }, 120_000);
 });
 
 /* What the upgrade request of a socket carries as the address it came from, the way a real connection does. */

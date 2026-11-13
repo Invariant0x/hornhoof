@@ -219,7 +219,7 @@ describe("the old database of a copy on another machine", () => {
     expect(await rowsOf<{ n: number }>(s.db, sql`SELECT count(*)::int AS n FROM net.merge_conflicts`)).toEqual([{ n: 0 }]);
   });
 
-  it('compares across a restore', async () => {
+  describe('across a restore', () => {
     /* The leader went through a restore the copy knows nothing of, and the copy holds a department only it has. */
     const across = async (kept: (s: Awaited<ReturnType<typeof stand>>, attempt: string) => Promise<void>) => {
       const s = await stand();
@@ -239,23 +239,31 @@ describe("the old database of a copy on another machine", () => {
       s.db.execute(sql`INSERT INTO net.merges (source, label, status, fork, merged_at, done_at) VALUES ('kept:hornhoof_before_t1', 'the database from before the restore', ${status}, ${fork}::uuid, ${merged ? sql`now()` : sql`NULL`}, ${status === 'done' ? sql`now()` : sql`NULL`})`).then(() => undefined);
 
     /* The kept database was brought back: the copy is compared row by row, and what only it held comes too. */
-    const merged = await across(keptMerge('done', randomUUID(), true));
-    expect(merged.merge.status).toBe('merged');
-    expect(merged.merge.path).not.toBeNull();
-    expect(merged.brought).toBe(true);
+    it('compares a copy when the kept database was brought back', async () => {
+      const merged = await across(keptMerge('done', randomUUID(), true));
+      expect(merged.merge.status).toBe('merged');
+      expect(merged.merge.path).not.toBeNull();
+      expect(merged.brought).toBe(true);
+    });
+
     /* The CEO left the kept database out: the copy, which holds no more than that one did, is left out with it. */
-    for (const status of ['removing', 'done']) {
+    it.each(['removing', 'done'])('leaves a copy out with a kept database the CEO left out, its merge %s', async status => {
       const left = await across(keptMerge(status, randomUUID(), false));
       expect(left.merge).toMatchObject({ status: 'done', error: 'Left out with the database from before the restore of 10 Nov 08:00 UTC.', path: null });
       expect(left.merge.done_at).not.toBeNull();
       expect(left.brought).toBe(false);
-    }
+    });
+
     /* A kept database that held no company, as after a total loss, was not the CEO's to leave out: the copy is compared. */
-    const lost = await across(keptMerge('done', null, false));
-    expect([lost.merge.status, lost.brought]).toEqual(['merged', true]);
-    /* A kept database whose merge still waits: the copy is compared too. */
-    const waiting = await across(keptMerge('removing', null, false));
-    expect(waiting.brought).toBe(true);
+    it('compares a copy when the kept database held no company', async () => {
+      const lost = await across(keptMerge('done', null, false));
+      expect([lost.merge.status, lost.brought]).toEqual(['merged', true]);
+    });
+
+    it('compares a copy while the merge of the kept database still waits', async () => {
+      const waiting = await across(keptMerge('removing', null, false));
+      expect(waiting.brought).toBe(true);
+    });
   });
 
   it('waits for its door', async () => {
@@ -276,7 +284,7 @@ describe("the old database of a copy on another machine", () => {
     expect(await s.merger.doors()).toEqual([]);
   });
 
-  it('is done once the machine dropped the old database, and ends unread when the machine left', async () => {
+  it('is done once the machine dropped the old database', async () => {
     const s = await stand();
     await s.copied();
     s.door(true);
@@ -289,7 +297,9 @@ describe("the old database of a copy on another machine", () => {
     expect(done).toMatchObject({ status: 'done', error: null });
     expect(done!.done_at).not.toBeNull();
     expect(await copyOrder(s.app.ctx, { ...s.machine, copyOld: null })).toMatchObject({ old: null });
+  });
 
+  it('ends unread when the machine left before its old copy was read', async () => {
     /* A machine that was disconnected before its old copy was read. */
     const left = await stand();
     await left.copied();
@@ -300,9 +310,11 @@ describe("the old database of a copy on another machine", () => {
     await left.look();
     expect((await left.merges())[0]).toMatchObject({ status: 'done', error: 'ivan-mac left before its old copy was read.' });
     expect(left.state.queries).toEqual([]);
+  });
 
-    /* A machine whose owner lost the scope holds the data no more: no door leads to it, so its old copy is asked for
-       no longer, and none is asked of a machine that left the data before the leader heard of an old copy. */
+  /* A machine whose owner lost the scope holds the data no more: no door leads to it, so its old copy is asked for
+     no longer, and none is asked of a machine that left the data before the leader heard of an old copy. */
+  it('asks no old copy of a machine that left the data', async () => {
     const gone = await stand();
     await gone.copied();
     gone.door(false);
