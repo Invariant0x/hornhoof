@@ -743,7 +743,7 @@ export const proposals = pgTable('proposals', {
   check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
 ]);
 
-/* A company-wide cycle the CEO starts with a goal; one is open at a time. */
+/* A cycle of one top-level department with a goal; each department has one open at a time, numbered across the company. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
 /* How a turn's work runs, chosen as it starts: through the echelons, or by one member of a turnkey team alone. */
 export const TURN_MODES = ['echelons', 'turnkey'] as const;
@@ -756,11 +756,14 @@ export const turns = pgTable(
   {
     id: id(),
     companyId: companyId(),
+    /* The top-level department whose work the turn holds, with its products' and sub-departments'. Only a closed turn of a
+       department that was removed has none. */
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
     number: integer('number').notNull(),
     /* A short name and the main point in a line or two. */
     title: text('title').notNull().default(''),
     goal: text('goal').notNull(),
-    /* Planned turns wait in number order; the lowest opens when the open one closes. */
+    /* A department's planned turns wait in number order; the lowest opens when its open one closes. */
     status: text('status', { enum: TURN_STATUSES }).notNull().default('open'),
     /* Fixed once the turn opens, so no turn runs half in each mode. */
     mode: text('mode', { enum: TURN_MODES }).notNull().default('echelons'),
@@ -774,7 +777,12 @@ export const turns = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
-  t => [unique('turns_company_number').on(t.companyId, t.number), unique('turns_company_id').on(t.companyId, t.id), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
+  t => [
+    unique('turns_company_number').on(t.companyId, t.number),
+    unique('turns_company_id').on(t.companyId, t.id),
+    uniqueIndex('turns_one_open').on(t.companyId, t.departmentId).where(sql`status = 'open'`),
+    check('turns_department', sql`${t.status} = 'closed' OR ${t.departmentId} IS NOT NULL`),
+  ],
 );
 
 /* A turn's pipeline facts: kept as it closed, or rebuilt from its events for a turn that closed before this was kept. */
@@ -816,7 +824,8 @@ export const tasks = pgTable(
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
     /* The employee originally assigned the executable result; candidate events retain later producers. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
-    /* Tasks of the same turn that must be done first: until they are, the task waits and its holder is not woken. */
+    /* Tasks of the company that must be done first, of any turn or none: until they are, the task waits and its holder is
+       not woken. */
     after: jsonb('after').$type<string[]>().notNull().default([]),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),
@@ -845,6 +854,8 @@ export const tasks = pgTable(
     index('tasks_assignee').on(t.assigneeAgentId),
     index('tasks_parent_id').on(t.parentId),
     index('tasks_turn_id').on(t.turnId),
+    /* What waits for a task is found by what it comes after, whatever turn it is in. */
+    index('tasks_after').using('gin', t.after),
     index('tasks_product_id').on(t.productId),
     index('tasks_external_wait_until').on(sql`(${t.externalWait}->>'until')`).where(sql`${t.externalWait} IS NOT NULL`),
     check('tasks_counts', sql`${t.silent} >= 0`),

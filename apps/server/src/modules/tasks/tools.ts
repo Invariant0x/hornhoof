@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, TURN_MODES, type AgentKind, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, TURN_MODES, turns as turnsTable, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, turnForNewTask, updateTask, verdict, type Moved, type Task } from './engine.js';
@@ -14,7 +14,8 @@ import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
-import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
+import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
 import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
@@ -101,7 +102,7 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const TurnItem = z.object({ department: z.uuid().optional().describe("The turn's department; it may be left out."), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 const Mode = z.enum(TURN_MODES).describe('How the turn runs: echelons, where code work goes through Architecture, Development, Review, Security and Tests, or turnkey, where one member of a turnkey team does the whole turn alone.');
 const TurnWords = z
@@ -134,21 +135,30 @@ class TaskTools {
     this.registerReplanWait();
     this.registerAskPerson();
     this.registerReport();
-    if (this.job.agentKind === 'orchestrator') this.registerTurnTools();
+    if (this.job.agentKind !== 'worker') this.registerTurnTools();
     if (this.job.agentKind === 'head') this.registerCreateTask();
     if (this.job.agentKind !== 'worker') this.registerManagementTools();
     if (this.job.agentKind !== 'orchestrator') this.registerExecutionTools();
   }
 
+  /* The orchestrator lays out the turns of every department; a head those of its own, which runs them itself. */
   private registerTurnTools(): void {
     this.registerTurns();
     this.registerBacklog();
-    this.registerPipelineReport();
+    if (this.boss) this.registerPipelineReport();
     this.registerPlanTurn();
     this.registerAddTasks();
-    this.registerSetUrgent();
+    if (this.boss) this.registerSetUrgent();
     this.registerMergeTurn();
     this.registerEditTurn();
+  }
+
+  /* The department whose turns this agent lays out and changes: any for the orchestrator, its own top-level one for a head. */
+  private async turnScope(): Promise<Scope> {
+    if (this.boss) return null;
+    const top = await topDepartment(this.db, (await this.me()).departmentId);
+    if (!top) throw refuse(403, 'task_not_yours', 'You head no department, so you lay out no turn.');
+    return top.id;
   }
 
   private registerManagementTools(): void {
@@ -268,7 +278,7 @@ class TaskTools {
   }
 
   private settledReply(text: string, settled: Awaited<ReturnType<typeof settle>>, orchestratorId: string | undefined): string {
-    return settled && orchestratorId === this.job.agentId ? `${text} ${settled.note}` : text;
+    return settled && [orchestratorId, settled.headId].includes(this.job.agentId) ? `${text} ${settled.note}` : text;
   }
 
   /* Only the CEO or delegate answered in this turn can make work urgent, or the owner of the department it is in. */
@@ -448,13 +458,26 @@ class TaskTools {
   private registerTurns(): void {
     this.server.registerTool(
       'turns',
-      { description: 'The last closed turn, the running turn and the planned ones in order, each with its title, main point and tasks, and where each task stands.', inputSchema: {} },
+      {
+        description: this.boss
+          ? "Each department's turns: its last closed turn, its running turn and its planned ones in order, each with its department, title, main point and tasks, and where each task stands."
+          : "Your department's turns: the last closed one, the running one and the planned ones in order, each with its title, main point and tasks, and where each task stands.",
+        inputSchema: {},
+      },
       async () => {
-        const rows = (await turnRows(this.ctx, this.job.companyId)).filter((t, i, all) => t.status !== 'closed' || all[i + 1]?.status !== 'closed');
+        const scope = await this.turnScope();
+        const all = await turnRows(this.ctx, this.job.companyId, scope ?? undefined);
+        const rows = all.filter((t, i) => t.status !== 'closed' || !all.slice(i + 1).some(later => later.status === 'closed' && later.departmentId === t.departmentId));
         const top = rows.length ? await this.db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
         const agent = await this.me();
         const lines = await taskLines(this.ctx, top, t => sees(agent, t));
-        return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, mode: t.mode, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
+        const ids = [...new Set(rows.flatMap(t => t.departmentId ?? []))];
+        const places = ids.length ? await this.db.select().from(departments).where(inArray(departments.id, ids)) : [];
+        const department = (id: string | null) => {
+          const place = places.find(d => d.id === id);
+          return place ? { id: place.id, name: deptName(place) } : null;
+        };
+        return json(rows.map(t => ({ number: t.number, department: department(t.departmentId), title: t.title || t.goal, goal: t.goal, status: t.status, mode: t.mode, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );
   }
@@ -463,12 +486,13 @@ class TaskTools {
     this.server.registerTool(
       'backlog',
       {
-        description:
-          "What people of each department keep in its list for later turns, the first to go first: proposals nobody holds and no turn has. Read it when you lay out the next turn, and take items into it with backlog in plan_turn or add_tasks.",
+        description: this.boss
+          ? "What people of each department keep in its list for later turns, the first to go first: proposals nobody holds and no turn has. Read it when you lay out the next turn, and take items into it with backlog in plan_turn or add_tasks."
+          : "What people of your department keep in its list for later turns, the first to go first: proposals nobody holds and no turn has. Read it when you lay out your next turn, and take items into it with backlog in plan_turn or add_tasks.",
         inputSchema: {},
       },
       async () => {
-        const all = await listBacklog(this.db, this.job.companyId);
+        const all = await listBacklog(this.db, this.job.companyId, (await this.turnScope()) ?? undefined);
         const places = all.length ? await this.db.select().from(departments).where(inArray(departments.id, [...new Set(all.map(i => i.departmentId))])) : [];
         return json(places.sort((a, b) => a.position - b.position).map(d => ({
           department: { id: d.id, name: deptName(d) },
@@ -500,17 +524,21 @@ class TaskTools {
       'plan_turn',
       {
         description:
-          "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks: one for each of the CEO's goals, for the one department that owns it end to end, " +
-          "going to that department's head; no separate tasks for plans, contracts or proofs. " +
-          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. department and product ids from company. ' +
-          'mode is required and fixed once the turn starts: echelons, or turnkey when one member of a turnkey team does the whole turn alone; a turnkey turn needs a turnkey team.',
-        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), mode: Mode, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
+          (this.boss
+            ? "Lays out a new turn of one department, the one that owns the goal end to end: department names it. A short title, the main point in one or two sentences, and its tasks, going to that department's head; "
+            : "Lays out a new turn of your own department: a short title, the main point in one or two sentences, and its tasks, which come to you; ") +
+          'a new goal of people gets a new turn, and no separate tasks for plans, contracts or proofs. ' +
+          "When the department runs no turn it starts at once; otherwise it waits after the department's planned turns and starts by itself when the one before it is done. Other departments' turns run on their own. department and product ids from company. " +
+          'mode is required and fixed once the turn starts: echelons, or turnkey when one member of a turnkey team of the department does the whole turn alone; a turnkey turn needs such a team.',
+        inputSchema: { department: z.uuid().optional().describe(this.boss ? 'The department whose turn it is.' : 'Your own department; it may be left out.'), title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), mode: Mode, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
         this.run(async () => {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
-          await this.urgentFromCeo(input.tasks);
-          const moved = await planTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input);
+          const scope = await this.turnScope();
+          const department = scope ?? input.department;
+          await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? department ?? '' })));
+          const moved = await planTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input, scope);
           return { text: moved.text, moved };
         }),
     );
@@ -521,15 +549,18 @@ class TaskTools {
       'add_tasks',
       {
         description:
-          'Adds tasks to a turn that is not over. Follow the shared admission rule in hh-lead-tasks. ' +
-          'In the running turn they go to the heads at once, in a planned turn they wait for it to start. Work that does not belong to any planned turn goes into a new one with plan_turn.',
+          (this.boss ? 'Adds tasks of its own department to a turn that is not over. ' : 'Adds tasks to a turn of your own department that is not over. ') +
+          "Only work for that turn's own goal: a new goal goes into a new turn with plan_turn, so a turn closes once its goal is done instead of growing. Follow the shared admission rule in hh-lead-tasks. " +
+          "In the running turn they go to the department's head at once, in a planned turn they wait for it to start.",
         inputSchema: { turn: Turn, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
         this.run(async () => {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
-          await this.urgentFromCeo(input.tasks);
-          const moved = await addTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.turn, input.tasks, input.words, input.improvement, input.backlog);
+          const scope = await this.turnScope();
+          const [turn] = await this.db.select({ departmentId: turnsTable.departmentId }).from(turnsTable).where(and(eq(turnsTable.companyId, this.job.companyId), eq(turnsTable.number, input.turn)));
+          await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? turn?.departmentId ?? '' })));
+          const moved = await addTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.turn, input.tasks, input.words, input.improvement, input.backlog, scope);
           return { text: moved.text, moved };
         }),
     );
@@ -558,13 +589,13 @@ class TaskTools {
       'merge_turn',
       {
         description:
-          'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, stages, results and history; they start once when the target is open. ' +
-          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe. Only turns of the same mode merge.',
+          'Merges a planned source turn into an existing open or planned target turn of the same department. Unfinished tasks keep their ids, trees, assignees, stages, results and history; they start once when the target is open. ' +
+          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe. Only turns of the same department and mode merge.',
         inputSchema: { source: Turn, target: Turn },
       },
       async input =>
         this.run(async () => {
-          const moved = await mergeTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId }, input.source, input.target);
+          const moved = await mergeTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId }, input.source, input.target, await this.turnScope());
           return { text: moved.text, moved };
         }),
     );
@@ -573,10 +604,10 @@ class TaskTools {
   private registerEditTurn(): void {
     this.server.registerTool(
       'edit_turn',
-      { description: 'Gives a turn that is not over a new title or main point, or a planned turn another mode; a turn that has started keeps its mode.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional(), mode: Mode.optional() } },
+      { description: (this.boss ? 'Gives a turn' : 'Gives a turn of your own department') + ' that is not over a new title or main point, or a planned turn another mode; a turn that has started keeps its mode.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional(), mode: Mode.optional() } },
       async input =>
         this.run(async () => {
-          const turn = await editTurn(this.ctx, this.job.companyId, input.turn, input);
+          const turn = await editTurn(this.ctx, this.job.companyId, input.turn, input, await this.turnScope());
           return { text: `${turnName(turn)} now reads: ${turn.goal}` };
         }),
     );
@@ -598,7 +629,7 @@ class TaskTools {
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
-          if (input.resultKind !== 'coordination' && await echelonsFor(this.db, { companyId: agent.companyId, turnId: await turnForNewTask(this.db, agent.companyId, parent), holderId: executor.id })) await this.checkCodeScope(agent, input);
+          if (input.resultKind !== 'coordination' && await echelonsFor(this.db, { companyId: agent.companyId, turnId: await turnForNewTask(this.db, agent.companyId, parent, agent.departmentId), holderId: executor.id })) await this.checkCodeScope(agent, input);
           const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
           return { text: await this.createdTaskText(moved.task, executor), moved };
         }),
