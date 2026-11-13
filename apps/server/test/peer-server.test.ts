@@ -28,6 +28,7 @@ import { VIA } from '../src/modules/network/via.js';
 import { PeerDoor, peerHeaders } from '../src/net/peer-door.js';
 import {
   APP_AUTHORITY,
+  cutOnceAnswered,
   DB_AUTHORITY,
   OncePerMinute,
   PEER_PATHS,
@@ -308,6 +309,42 @@ function connectFails(port: number): Promise<boolean> {
     });
   });
 }
+
+describe('cutOnceAnswered', () => {
+  /* A stream as far as the cut looks at it. left: whether its answer has left. */
+  const streamOf = (left: () => boolean) => {
+    const closed: number[] = [];
+    const stream = { readableEnded: false, destroyed: false, closed: false, get state() { return { localClose: left() ? 1 : 0 }; }, close: (code: number) => void closed.push(code) };
+    return { stream: stream as unknown as http2.ServerHttp2Stream, closed };
+  };
+
+  it('cuts the stream once its answer has left, and not before', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    let left = false;
+    const s = streamOf(() => left);
+    cutOnceAnswered(s.stream);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.closed).toEqual([]);
+    left = true;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(s.closed).toEqual([http2.constants.NGHTTP2_NO_ERROR]);
+  });
+
+  it('cuts a stream whose answer never leaves after a while, so a peer that reads nothing holds no stream open', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const s = streamOf(() => false);
+    cutOnceAnswered(s.stream);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(s.closed).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.closed).toEqual([http2.constants.NGHTTP2_NO_ERROR]);
+    /* And it is looked at no more. */
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s.closed).toHaveLength(1);
+  });
+});
 
 describe('routeOf', () => {
   const db = { host: 'db', port: 5432 };

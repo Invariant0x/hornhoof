@@ -57,8 +57,9 @@ type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number)
 
 const SWEEP_MS = 5000;
 const SWITCH_BODY_BYTES = 64 * 1024;
-/* How often an answer the socket has not taken yet is looked at again. */
+/* How often an answer the socket has not taken yet is looked at again, and how many times: about five seconds. */
 const ANSWER_LEAVES_MS = 10;
+const ANSWER_LEAVES_LOOKS = 500;
 const MINUTE_MS = 60_000;
 const ANY_ADDRESS = '0.0.0.0';
 const CERT_REVOKED = 'CERT_REVOKED';
@@ -155,12 +156,13 @@ function answerEmpty(stream: ServerHttp2Stream, status: number): void {
 }
 
 /* A stream that was answered is closed with whatever the peer still sends, once the answer has left: a reset sent ahead
-   of an answer still waiting to be written takes the answer with it, and the peer would see its stream end unanswered. */
-function cutOnceAnswered(stream: ServerHttp2Stream, first = true): void {
+   of an answer still waiting to be written takes the answer with it, and the peer would see its stream end unanswered.
+   An answer that has not left after a while is one its peer does not read, and the stream is closed without it. */
+export function cutOnceAnswered(stream: ServerHttp2Stream, looks = 0): void {
   if (stream.readableEnded || isGone(stream)) return;
-  if (stream.state.localClose) return void stream.close(http2.constants.NGHTTP2_NO_ERROR);
-  if (first) setImmediate(() => cutOnceAnswered(stream, false));
-  else setTimeout(() => cutOnceAnswered(stream, false), ANSWER_LEAVES_MS).unref();
+  if (stream.state.localClose || looks > ANSWER_LEAVES_LOOKS) return void stream.close(http2.constants.NGHTTP2_NO_ERROR);
+  if (looks === 0) setImmediate(() => cutOnceAnswered(stream, 1));
+  else setTimeout(() => cutOnceAnswered(stream, looks + 1), ANSWER_LEAVES_MS).unref();
 }
 
 /* Plain pipes and not pipeline, which breaks the stream as soon as the far socket has left, while the peer's flow control
@@ -421,7 +423,7 @@ export class PeerServer {
 
   /* A bundle comes back from a machine that holds it. What takes it reads a copy of the stream and may cut that at any
      moment, while the stream itself stays for the answer; then it is closed with whatever the peer still sends, so one
-     that is refused is cut at once. */
+     that is refused is cut as soon as it has its answer. */
   private async takeBundle(stream: ServerHttp2Stream, peer: Peer, id: string): Promise<void> {
     const body = new PassThrough();
     body.on('error', ignore);
@@ -448,8 +450,8 @@ export class PeerServer {
   }
 
   /* What a machine held when it stopped holding the company's data comes here. It is taken as the bundle above is: what
-     takes it reads a copy of the stream, and a machine that is refused, or sends too much, is cut at once. The machine
-     says first how long it is: a stream that a peer cut ends here as one that was sent whole does. */
+     takes it reads a copy of the stream, and a machine that is refused, or sends too much, is cut as soon as it has its
+     answer. The machine says first how long it is: a stream that a peer cut ends here as one that was sent whole does. */
   private async takeUpload(stream: ServerHttp2Stream, peer: Peer, id: string, length: number | null): Promise<void> {
     const body = new PassThrough();
     body.on('error', ignore);
