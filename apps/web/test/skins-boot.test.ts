@@ -4,7 +4,7 @@ import type { Plugin } from 'vite';
 import { bundleSkinsBoot, skinsBoot } from '../skins-boot.config';
 import { builtinSkin } from '../src/skins/registry';
 import { COLOR_TOKENS } from '../src/skins/roles';
-import { skinText } from '../src/skins/validate';
+import { builtinFile, skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
 const SKINS = resolve(process.cwd(), 'src/skins');
@@ -90,11 +90,12 @@ describe('the skin before the page draws', () => {
   it('builds the script as one file with no imports, which puts the chosen skin of the collection on the page', async () => {
     const code = await bundleSkinsBoot();
     expect(code).not.toMatch(/^\s*(import|export)\b/m);
-    const own = { ...builtinSkin('matrix')!, name: 'Deep', colors: { ...builtinSkin('matrix')!.colors, bg: '#010203' } };
+    const sample = builtinFile(builtinSkin('pixel')!, { ru: 'Глубина', en: 'Deep' });
+    const own = { ...sample, colors: { ...sample.colors, bg: '#010203' } };
     localStorage.setItem('hh-skins', JSON.stringify([{ id: 'custom-1', skin: JSON.parse(skinText(own)) }]));
     localStorage.setItem('hh-theme', 'custom-1');
     new Function(code)();
-    expect(root.dataset.theme).toBe('custom-1');
+    expect([root.dataset.theme, root.dataset.cut]).toEqual(['custom-1', 'steps']);
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#010203');
   });
 });
