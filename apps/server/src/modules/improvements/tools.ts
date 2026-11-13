@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, count, eq, gte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { improvements, IMPROVEMENT_SCOPES, jobs } from '../../db/schema.js';
+import { improvements, IMPROVEMENT_SCOPES, jobs, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement } from './store.js';
 
@@ -57,6 +57,15 @@ const refused = async (fn: () => Promise<ReturnType<typeof say>>) => {
 function kindOf(scope: (typeof IMPROVEMENT_SCOPES)[number] = 'company', code?: string) {
   return { scope, code: scope === 'platform' ? (code ?? null) : null };
 }
+/* Files a new finding, or counts one about Hornhoof itself on the sent card its developers have it as already. */
+async function fileFinding(ctx: Ctx, job: ToolJob, values: { title: string; text: string; parts: ImprovementParts } & ReturnType<typeof kindOf>) {
+  const known = values.scope === 'platform' ? await countOnSent(ctx, job.companyId, { title: values.title, code: values.code }) : null;
+  if (known) return json({ improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." });
+  const [row] = await ctx.db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, ...values }).returning({ id: improvements.id });
+  improvementsChanged(ctx, job.companyId);
+  return json({ improvement: row!.id });
+}
+
 const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
   list.map(({ id, title, seen, status, scope, result, agent, department }) => ({ id, title, seen, status, scope, result, foundBy: agent.name, department: department?.name ?? null }));
 
@@ -111,11 +120,7 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
           await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });
         }
-        const known = kind.scope === 'platform' ? await countOnSent(ctx, job.companyId, { title, code: kind.code }) : null;
-        if (known) return json({ improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." });
-        const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text, parts, ...kind }).returning({ id: improvements.id });
-        improvementsChanged(ctx, job.companyId);
-        return json({ improvement: row!.id });
+        return fileFinding(ctx, job, { title, text, parts, ...kind });
       }),
   );
 }
