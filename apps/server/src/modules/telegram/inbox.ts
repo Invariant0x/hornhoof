@@ -5,8 +5,9 @@ import { personColumns, type Person } from '../../auth/session.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentEvents, agents, people, telegramBots, telegramReplies } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
+import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { writeToAgent } from '../conversation/routes.js';
-import type { TelegramUpdate, TelegramUser } from './api.js';
+import { TELEGRAM_FILE_BYTES, TelegramError, type TelegramFile, type TelegramMessage, type TelegramUpdate, type TelegramUser } from './api.js';
 import { agentName, langOf, WORDS, type BotLang } from './words.js';
 
 type Bot = Pick<typeof telegramBots.$inferSelect, 'id' | 'companyId' | 'agentId'>;
@@ -49,11 +50,93 @@ async function awaitAnswer(ctx: Pick<Ctx, 'db'>, bot: Bot, jobId: string, chatId
   await ctx.db.insert(telegramReplies).values({ botId: bot.id, jobId, chatId, afterSeq: said?.seq ?? before, lang }).onConflictDoNothing();
 }
 
-/* One update of a bot: a person's text in a private chat goes to the bot's agent as if they wrote it in its window, with
-   their rights; anyone else hears plainly why not. Returns whether the message went to the agent. */
-export async function receive(ctx: Ctx, bot: Bot, update: TelegramUpdate, say: Say): Promise<boolean> {
-  const message = update.message;
-  if (!message?.from || message.from.is_bot || message.chat.type !== 'private') return false;
+/* What a person sends besides words, read for the agent: its notes in place of what cannot go as a file, and the files. */
+type Incoming = { file: TelegramFile; name: string; voice?: true };
+type Came = { notes: string[]; files: Incoming[] };
+
+const seconds = (f: TelegramFile) => (f.duration ? `, ${f.duration} s` : '');
+
+/* What one message of the person carries: a document or an archive, a photo, a voice, audio or video message, a sticker,
+   a contact, a place or a poll. A sticker that is a still picture goes as one; any other goes as what it shows. */
+export function whatCame(m: TelegramMessage): Came {
+  const notes: string[] = [];
+  const files: Incoming[] = [];
+  if (m.forward_origin) notes.push('[This message is forwarded from someone else.]');
+  if (m.document) files.push({ file: m.document, name: m.document.file_name ?? 'file' });
+  const photo = m.photo?.at(-1);
+  if (photo) files.push({ file: photo, name: 'photo.jpg' });
+  if (m.voice) files.push({ file: m.voice, name: 'voice.ogg', voice: true });
+  if (m.audio) files.push({ file: m.audio, name: m.audio.file_name ?? 'audio.mp3' });
+  if (m.video) files.push({ file: m.video, name: m.video.file_name ?? 'video.mp4' });
+  if (m.video_note) {
+    notes.push(`[A round video message${seconds(m.video_note)}.]`);
+    files.push({ file: m.video_note, name: 'video-note.mp4' });
+  }
+  if (m.animation && !m.document) files.push({ file: m.animation, name: m.animation.file_name ?? 'animation.mp4' });
+  if (m.sticker) {
+    const s = m.sticker;
+    notes.push(`[A sticker${s.emoji ? ` ${s.emoji}` : ''}${s.set_name ? ` from the set ${s.set_name}` : ''}.]`);
+    if (!s.is_animated && !s.is_video) files.push({ file: s, name: 'sticker.webp' });
+  }
+  if (m.contact) notes.push(`[A contact: ${[m.contact.first_name, m.contact.last_name].filter(Boolean).join(' ')}, ${m.contact.phone_number}.]`);
+  if (m.venue) notes.push(`[A place: ${m.venue.title}, ${m.venue.address} (${m.venue.location.latitude}, ${m.venue.location.longitude}).]`);
+  else if (m.location) notes.push(`[A location: ${m.location.latitude}, ${m.location.longitude}.]`);
+  if (m.poll) notes.push(`[A poll: ${m.poll.question} Options: ${m.poll.options.map(o => o.text).join('; ')}.]`);
+  return { notes, files };
+}
+
+/* Gets a file of a message from Telegram. */
+export type FetchFile = (fileId: string) => Promise<Buffer>;
+/* The words of a voice message, or null when there are none to give. */
+export type Transcribe = (bytes: Buffer, name: string) => Promise<string | null>;
+
+const megabytes = (bytes: number) => Math.round(bytes / 1024 / 1024);
+
+/* Brings the files over from Telegram and keeps them for the agent, each in turn. One that does not come is named in the
+   words the agent reads, and the person hears why. */
+async function bringFiles(ctx: Ctx, me: Person, agentId: string, came: Came, fetchFile: FetchFile, transcribe: Transcribe, chatId: number, say: Say, words: (typeof WORDS)[BotLang]) {
+  const ids: string[] = [];
+  const notes: string[] = [];
+  for (const { file, name, voice } of came.files) {
+    if ((file.file_size ?? 0) > TELEGRAM_FILE_BYTES) {
+      notes.push(`[${name} (${megabytes(file.file_size!)} MB) did not come: Telegram gives a bot files of up to ${megabytes(TELEGRAM_FILE_BYTES)} MB.]`);
+      await say(chatId, words.fileTooBig(name, megabytes(TELEGRAM_FILE_BYTES)));
+      continue;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await fetchFile(file.file_id);
+      if (!bytes.length) throw new Error('The file came empty.');
+    } catch (err) {
+      const tooBig = err instanceof TelegramError && /too big/i.test(err.message);
+      ctx.log.warn({ error: err instanceof TelegramError ? { code: err.code, message: err.message } : loggable(err), agentId }, 'A file sent to a Telegram bot could not be fetched.');
+      notes.push(`[${name} did not come${tooBig ? `: Telegram gives a bot files of up to ${megabytes(TELEGRAM_FILE_BYTES)} MB` : ''}.]`);
+      await say(chatId, tooBig ? words.fileTooBig(name, megabytes(TELEGRAM_FILE_BYTES)) : words.fileLost(name));
+      continue;
+    }
+    if (voice) {
+      const said = await transcribe(bytes, name);
+      notes.push(said ? `[A voice message${seconds(file)}. Its words, as speech recognition heard them: ${said}]` : `[A voice message${seconds(file)}, with no transcript: its recording is the file voice.ogg below.]`);
+    }
+    try {
+      ids.push((await keepMessageFile(ctx, me, agentId, bytes, name)).id);
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      notes.push(`[${name} did not come: Hornhoof has no room left for the company's files.]`);
+      await say(chatId, words.noRoom(name));
+    }
+  }
+  return { ids, notes };
+}
+
+/* One message of a bot, or the updates of one album together: a person's words and files in a private chat go to the bot's
+   agent as if they wrote and sent them in its window, with their rights; anyone else hears plainly why not. Returns whether
+   the message went to the agent. */
+export async function receive(ctx: Ctx, bot: Bot, updates: TelegramUpdate | TelegramUpdate[], say: Say, fetchFile: FetchFile, transcribe: Transcribe = async () => null): Promise<boolean> {
+  const all = (Array.isArray(updates) ? updates : [updates]).filter(u => u.message);
+  const update = all[0];
+  const message = update?.message;
+  if (!update || !message?.from || message.from.is_bot || message.chat.type !== 'private') return false;
   const chatId = message.chat.id;
   const lang = langOf(message.from.language_code);
   const words = WORDS[lang];
@@ -73,15 +156,28 @@ export async function receive(ctx: Ctx, bot: Bot, update: TelegramUpdate, say: S
     await say(chatId, words.notYours(name));
     return false;
   }
-  const text = message.text?.trim();
-  if (!text) {
-    await say(chatId, words.textOnly);
+  const messages = all.map(u => u.message!);
+  const came: Came = { notes: [], files: [] };
+  for (const m of messages) {
+    const one = whatCame(m);
+    came.notes.push(...one.notes);
+    came.files.push(...one.files);
+  }
+  const said = messages.map(m => (m.text ?? m.caption ?? '').trim()).filter(Boolean);
+  if (!said.length && !came.notes.length && !came.files.length) {
+    await say(chatId, words.unreadable);
     return false;
   }
+  const files = came.files.slice(0, PICTURES_PER_MESSAGE);
+  const brought = await bringFiles(ctx, me, agent.id, { ...came, files }, fetchFile, transcribe, chatId, say, words);
+  if (came.files.length > files.length) brought.notes.push(`[${came.files.length - files.length} more files of this album did not come: a message carries at most ${PICTURES_PER_MESSAGE}.]`);
+  const text = [...said, ...came.notes, ...brought.notes].join('\n\n');
+  /* Nothing came but what the person already heard did not. */
+  if (!said.length && !came.notes.length && !brought.ids.length) return false;
   const before = await lastSeq(ctx, agent.id);
   let jobId: string;
   try {
-    jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], telegram: { bot: bot.id, chat: chatId, update: update.update_id } });
+    jobId = await writeToAgent(ctx, me, agent, { text, pictures: brought.ids, telegram: { bot: bot.id, chat: chatId, update: update.update_id } });
   } catch (err) {
     const notReady = err instanceof ApiError && (err.reason === 'agent_not_ready' || err.reason === 'orchestrator_not_ready');
     if (!notReady) ctx.log.warn({ error: loggable(err), agentId: agent.id }, 'A message from Telegram did not reach its agent.');
