@@ -100,6 +100,7 @@ for (const lang of ['en', 'ru'] as const) {
     const web = baseURL!;
     const server = await startServer(web);
     const errors: string[] = [];
+    let stopping = false;
     /* The People screen, signed in as one of them, every call going to the real server. */
     const signedIn = async (browser: Browser, who: keyof Boot['sessions']): Promise<Page> => {
       const context = await browser.newContext({ baseURL: web, viewport: { width: 1440, height: 960 } });
@@ -110,9 +111,14 @@ for (const lang of ['en', 'ru'] as const) {
       await page.route('**/api/**', async route => {
         const url = new URL(route.request().url());
         if (url.pathname === '/api/stream') return;
-        /* The page goes on asking where the company runs after the test's server has stopped: such a call ends unanswered. */
-        const response = await route.fetch({ url: `${server.origin}${url.pathname}${url.search}` }).catch(() => null);
-        await (response ? route.fulfill({ response }) : route.abort()).catch(() => undefined);
+        /* The page goes on asking where the company runs after the test's server has stopped: only such a call ends
+           unanswered, and a call that fails while the server runs still fails the scenario. */
+        const response = await route.fetch({ url: `${server.origin}${url.pathname}${url.search}` }).catch(err => {
+          if (stopping) return null;
+          throw err;
+        });
+        if (response) await route.fulfill({ response });
+        else await route.abort().catch(() => undefined);
       });
       await page.goto('/people');
       return page;
@@ -175,6 +181,7 @@ for (const lang of ['en', 'ru'] as const) {
 
       expect(errors).toEqual([]);
     } finally {
+      stopping = true;
       await server.stop();
     }
   });

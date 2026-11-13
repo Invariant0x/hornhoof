@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SubView } from '../src/types';
-import { box, serveApi, withKey } from './api';
+import { box, serveApi, serveOwnerKey, withKey } from './api';
 
 /* The card of a plan that does not work is one block across it. The plan the CEO saw, ready on the Mac but with nodes too
    old for the sign-in from Hornhoof, turns into that block once Sign in finds them, and a plan waiting for its sign-in, for
@@ -42,6 +42,7 @@ async function servePlans(page: Page) {
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [READY, LOGIN, SETUP, WAITING, EXPIRED] } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [installCommand()] } }));
   await page.route('**/api/subscriptions/s-codex/signin', route => route.fulfill({ status: 409, json: OLD }));
+  await serveOwnerKey(page);
 }
 
 /* The block fills the card's blocks, whatever their columns and rows, with no empty rows under it, and nothing in it sticks

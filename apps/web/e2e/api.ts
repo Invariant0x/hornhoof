@@ -14,6 +14,9 @@ export const ME: Me = {
 /* The key of the person at the browser as the server keeps it: a command that joins a machine is shown with its public part. */
 export const OWNER_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padEnd(122, 'k'), wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
 export const withKey = (command: string): string => `${command} --owner-key ${OWNER_KEY.publicKey}`;
+/* For a scenario that shows such a command: the server holds the person's key. The others have none, as before the
+   person made one, so nothing in them waits for a password. */
+export const serveOwnerKey = (page: Page) => page.route('**/api/me/key', route => route.fulfill({ json: { key: OWNER_KEY } }));
 
 /* A person who last chose the terminal in this browser: an agent's window opens with it rather than with the chat. */
 export const chooseTerminal = (page: Page) => page.addInitScript(() => localStorage.setItem('hh-agent-view', 'terminal'));
@@ -76,7 +79,6 @@ const ROUTES: Record<string, unknown> = {
   /* What the CEO's reminder of the recovery file asks at the start: nothing to remind of. */
   '/api/backups/recovery': { recoveryNeeded: false, linkChanged: false },
   '/api/machines/here': { machine: null, view: null },
-  '/api/me/key': { key: OWNER_KEY },
   /* What every page asks about where the company runs: it stays on its machine, and nothing waits for the CEO. */
   '/api/network/switch': { self: null, moving: false, from: null, to: null, since: null, cut: false, question: false } satisfies SwitchWord,
   '/api/network/switched': { switched: null },
