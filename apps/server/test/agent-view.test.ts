@@ -289,12 +289,12 @@ describe('the department tree', () => {
     expect(whole.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
   });
 
-  it('keeps the numbers of a whole department from anyone but the CEO, the delegate and its owner', async () => {
+  it('gives the numbers of a whole department to everyone of the company, as its screen', async () => {
     const c = await aclCompany();
     await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date() });
-    for (const viewer of ['ann', 'wes'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(403);
-    for (const viewer of ['ceo', 'lisa', 'olga'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(200);
-    expect((await c.get(`/api/departments/${c.sales.id}/pipeline`, c.tokens.olga)).statusCode).toBe(403);
+    for (const viewer of VIEWERS) {
+      for (const department of [c.dev, c.sales]) expect((await c.get(`/api/departments/${department.id}/pipeline`, c.tokens[viewer])).statusCode, viewer).toBe(200);
+    }
   });
 });
 
