@@ -5,6 +5,34 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.0] - 2026-11-12
+
+The work of turns 19 to 23: themes, the forms of people, assistants, employees and plans on one layout, a chat that
+opens on its newest message, and a fair count of turns after a machine comes back.
+
+### Added
+
+- Four themes in the account menu and in the settings: Light, Dark, Matrix and Cyberpunk. A person can also load a
+  theme template of their own, a JSON file with colors, fonts and the cut of corners, and save or reset it.
+
+### Changed
+
+- The forms that add a person, an assistant, an employee, a plan or a key share one layout: the name of each field
+  beside it, and above it on a narrow screen. Two cards with icons choose between a person and a personal AI assistant.
+- A button that creates or saves says so while it works, without changing its width. A key is issued with
+  "Issue key" and hidden with "Hide key" once it is copied. After switching between a person and an assistant, the
+  arrow keys go on moving between the two.
+
+### Fixed
+
+- A chat opens on its newest message at once, without running through its history, and keeps the place of someone
+  who scrolled up to read.
+- Wake-ups a task collected while its machine was away go out in one turn when the machine is back. That turn counts
+  neither toward the 8 turns without a hand-in nor toward quiet turns; the turns after it count as before, so a machine
+  that drops around every turn cannot keep an agent from looking stuck.
+- The agent's terminal no longer cuts off the last character on the right: every character fits its own cell.
+- When the recorder of a terminal's output does not start, the node starts it once more before it reports a failure.
+
 ## [0.18.17] - 2026-11-12
 
 An agent on Antigravity no longer loses Hornhoof's tools when a person's words reach it a moment before their turn
