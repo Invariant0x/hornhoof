@@ -56,7 +56,7 @@ const ownAgent = async (c: Company, assistantId: string) => {
   return row!;
 };
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; instructions: string | null; toolToken: string | null };
+type Run = { type: 'job.run'; jobId: string; prompt: string; freshPrompt?: string; sessionId: string | null; instructions: string | null; toolToken: string | null };
 
 /* The turn the node gets with these words in it, past any other. */
 async function runWith(node: FakeNode, words: string): Promise<Run> {
@@ -453,6 +453,7 @@ describe('freshText', () => {
     const run = await runWith(c.node, 'The frame and the whole conversation');
     expect(run.sessionId).toBeNull();
     expect(run.prompt).toBe('The frame and the whole conversation');
+    expect(run.freshPrompt).toBeUndefined();
     expect(run.prompt).not.toContain('Earlier words in the window');
     const shown = (await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.ceo) })).json().events as { kind: string; data: { text?: string } }[];
     expect(shown.filter(e => e.kind === 'message').map(e => e.data.text)).toContain('New words');
@@ -461,7 +462,7 @@ describe('freshText', () => {
     expect(JSON.stringify(kept)).not.toContain('The frame and the whole conversation');
   });
 
-  it('is left aside when the own agent goes on in its session', async () => {
+  it('goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew', async () => {
     const c = await company();
     const { ava, agent } = await ready(c);
     expect((await write(c, ava.key, { text: 'First words', freshText: 'First frame' })).statusCode).toBe(202);
@@ -471,6 +472,13 @@ describe('freshText', () => {
     const run = await runWith(c.node, 'Second words');
     expect(run.sessionId).toBe('s1');
     expect(run.prompt).toBe('Second words');
+    expect(run.freshPrompt).toBe('Second frame');
+    finish(c, run, 's1');
+    await idle(c, agent.id);
+    expect((await write(c, ava.key, { text: 'Third words' })).statusCode).toBe(202);
+    const plain = await runWith(c.node, 'Third words');
+    expect(plain).toMatchObject({ sessionId: 's1', prompt: 'Third words' });
+    expect(plain.freshPrompt).toBeUndefined();
   });
 
   it("is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session", async () => {
@@ -485,6 +493,7 @@ describe('freshText', () => {
       const run = await runWith(c.node, words);
       expect(run.sessionId).toBeNull();
       expect(run.prompt).not.toContain('A frame for my own agent');
+      expect(run.freshPrompt).toBeUndefined();
     }
     expect(JSON.stringify(await c.db.select({ data: agentEvents.data }).from(agentEvents))).not.toContain('A frame for my own agent');
   });

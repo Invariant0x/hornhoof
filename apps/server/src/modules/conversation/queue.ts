@@ -1001,9 +1001,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
      instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
   /* An assistant's own agent reads its program's message as the program built it: its rules say who it is from. A new
-     session reads the program's whole conversation, when the program sent it, in place of the new words and the catch-up. */
-  const fresh = agent.kind === 'assistant' && sessionId === null && job.prompt ? await freshConversation(ctx, job.id) : null;
-  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? fresh ?? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
+     session reads the program's whole conversation, when the program sent it, in place of the new words and the catch-up.
+     A session that goes on may have begun anew on its machine, which only the node sees: the conversation goes beside the
+     words, for the node to type in their place then. */
+  const fresh = agent.kind === 'assistant' && job.prompt ? await freshConversation(ctx, job.id) : null;
+  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? (sessionId === null ? fresh : null) ?? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
@@ -1023,6 +1025,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       role: agent.roleKey,
       leader: isLeader(agent),
       prompt,
+      freshPrompt: sessionId === null ? null : fresh,
       sessionId,
       model,
       effort,

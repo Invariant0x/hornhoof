@@ -40,8 +40,10 @@ import type { ProgramFacts } from './program-access.js';
 import type { OperatorProgram } from './operator-control.js';
 import { operatorQuestion } from './operator-question.js';
 
-/* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
-export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery };
+/* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program.
+   freshPrompt: an assistant's whole conversation, which the turn types in place of its prompt into a session that starts
+   anew; sent: the prompt Hornhoof sent when the turn types other words, which its delivery stays of. */
+export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery; freshPrompt?: string; sent?: string };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
 type Deferred<T> = { promise: Promise<T>; resolve(v: T): void; settled: boolean };
@@ -109,6 +111,8 @@ type Agent = {
   sessionId: string | null;
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
+  /* The session a person's clear began, until a turn types an assistant's whole conversation into it. */
+  blank: string | null;
   tail: LineTail | null;
   draining: boolean;
   /* The Codex session logs there were when the program started a new session: its own log is none of them. */
@@ -561,7 +565,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -597,8 +601,21 @@ export class TerminalHost {
     this.toolsLost(a, job);
     const goesOn = await this.goesOn(a, job, launch.hash);
     if (!goesOn && (await this.asksPerson(a))) return this.leftAsking(a, job);
-    a.launch = { job, spec: launch.spec };
-    return this.turnOn(a, job, launch, goesOn);
+    const typed = this.wordsOf(a, job, goesOn);
+    a.launch = { job: typed, spec: launch.spec };
+    return this.turnOn(a, typed, launch, goesOn);
+  }
+
+  /* An assistant's program sends its whole conversation along with its words. The turn types the conversation in their
+     place into a session that starts anew: a new one the program starts, or the one a person's clear began, which keeps
+     waiting for it through turns that bring none. */
+  private wordsOf(a: Agent, job: TermJob, goesOn: boolean): TermJob {
+    const { input, freshPrompt } = job;
+    if (!freshPrompt || !input.prompt) return job;
+    const session = goesOn ? a.sessionId : input.sessionId;
+    if (input.sessionId !== null && (session === null || session !== a.blank)) return job;
+    a.blank = null;
+    return { ...job, input: { ...input, prompt: freshPrompt }, sent: input.prompt };
   }
 
   /* A program turned away as it connected to its tools has none for the rest of its session, so it starts again in that
@@ -668,8 +685,8 @@ export class TerminalHost {
     return { turn, starting };
   }
 
-  private operatorBegins(a: Agent, { input, operatorDelivery, operatorSourceDelivery }: TermJob, goesOn: boolean): void {
-    this.operator?.begin(a.key, input.jobId ?? null, operatorDelivery, input.prompt, goesOn, operatorSourceDelivery);
+  private operatorBegins(a: Agent, { input, operatorDelivery, operatorSourceDelivery, sent }: TermJob, goesOn: boolean): void {
+    this.operator?.begin(a.key, input.jobId ?? null, operatorDelivery, sent ?? input.prompt, goesOn, operatorSourceDelivery);
     input.signal?.addEventListener('abort', () => this.operator?.intentional(a.key, 'cancelled'), { once: true });
   }
 
@@ -1578,6 +1595,7 @@ export class TerminalHost {
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
     if (!sessionId || sessionId === a.sessionId) return;
+    if (a.sessionId) a.blank = sessionId;
     this.leaveSession(a);
     a.sessionId = sessionId;
     a.enqueuedWords = [];
