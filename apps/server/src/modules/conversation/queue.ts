@@ -748,7 +748,7 @@ async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
-const BACKLOG = 'These wake-ups on your task waited while your machine was away. Go through them together in this turn:';
+const BACKLOG = 'These wake-ups on your task waited in line until your machine was connected again. Go through them together in this turn:';
 /* What a task's turn that went out inside another one ended with: its own result is the other turn's. */
 export const GONE_ALONG = 'Went out with the turn before it.';
 

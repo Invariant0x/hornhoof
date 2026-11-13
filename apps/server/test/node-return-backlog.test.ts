@@ -143,7 +143,7 @@ describe('wake-ups that waited while the machine was away', () => {
     expect(along).toHaveLength(GOING_ON_TURNS);
     expect(along.every(j => j.taskId === task.id)).toBe(true);
     const prompt = c.sentPrompt(one!.id)!;
-    expect(prompt).toContain('These wake-ups on your task waited while your machine was away.');
+    expect(prompt).toContain('These wake-ups on your task waited in line until your machine was connected again.');
     for (const said of [...told, 'Any news on the checkout?']) expect(prompt).toContain(said);
 
     await c.run('Back. Read all of it, going on with the totals.');
@@ -237,5 +237,39 @@ describe('a node that stays connected', () => {
     await c.run('Part 7 pushed.');
 
     expect(await c.stuck()).toEqual([{ taskId: task.id, text: expect.stringContaining(`Went on for ${GOING_ON_TURNS} turns in a row`) }]);
+  });
+});
+
+/* The node goes away while each turn runs and is back before the next goes out: every turn waited in line for its return. */
+async function awayAroundEveryTurn(c: Company, said: (i: number) => string | undefined) {
+  const task = await c.memberTask('Checkout API');
+  await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+  let turns = 0;
+  while (!(await c.stuck()).length && turns < 3 * GOING_ON_TURNS) {
+    c.later();
+    await c.drop();
+    await c.run(said(turns));
+    turns++;
+    await c.back();
+  }
+  return { task, turns };
+}
+
+describe('a node that goes away around every turn', () => {
+  it('lets one turn after its return go uncounted, and still asks the head about an agent that keeps going on', async () => {
+    const c = await company();
+    const { task, turns } = await awayAroundEveryTurn(c, i => `Part ${i} pushed.`);
+
+    expect(await c.stuck()).toEqual([{ taskId: task.id, text: expect.stringContaining(`Went on for ${GOING_ON_TURNS} turns in a row`) }]);
+    expect(turns).toBe(GOING_ON_TURNS + 1);
+    expect((await c.continued(task.id)).filter(e => (e.data as { afterReturn?: boolean } | null)?.afterReturn)).toHaveLength(1);
+  });
+
+  it('lets one quiet turn after its return go uncounted, and still asks the head about an agent that stays quiet', async () => {
+    const c = await company();
+    const { task, turns } = await awayAroundEveryTurn(c, () => undefined);
+
+    expect(await c.stuck()).toEqual([{ taskId: task.id, text: expect.stringContaining(`Ended ${SILENT_TURNS} turns in a row`) }]);
+    expect(turns).toBe(SILENT_TURNS + 1);
   });
 });

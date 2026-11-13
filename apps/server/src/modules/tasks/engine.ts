@@ -1250,6 +1250,18 @@ export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Mo
   return goOn(ctx, agentId, task, { silent: 0 }, { turns });
 }
 
+/* Whether a turn of the agent on the task already went uncounted since the task last moved, because it waited in line until
+   its node came back. Only one does: a node that goes away around every turn must not keep an agent from looking stuck. */
+export async function uncountedSinceMove(db: Db, agentId: string, task: Task): Promise<boolean> {
+  const last = await lastMove(db, task.id);
+  const [one] = await db
+    .select({ id: taskEvents.id })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), sql`${taskEvents.data}->>'afterReturn' = 'true'`, last ? gt(taskEvents.createdAt, last.createdAt) : undefined))
+    .limit(1);
+  return one !== undefined;
+}
+
 /* A turn that waited in line until the agent's node came back worked and goes on too, but a machine coming back says nothing
    of the agent standing still: it counts for neither stuck counter. */
 export async function wentOnAfterReturn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
