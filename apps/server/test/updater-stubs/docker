@@ -18,9 +18,11 @@ image_by_id() {
   for w in ${STUB_PLAN_NODES:-}; do [ "$(ref_id "${w##*=}")" = "$1" ] && { printf '%s' "${w##*=}"; return; }; done
 }
 case "$1 $2" in
-  # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server.
+  # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server,
+  # and STUB_STOPPED_NODES are containers that are not running now.
   'ps --filter')
     for w in ${STUB_PLAN_NODES:-}; do
+      case " ${STUB_STOPPED_NODES:-} " in *" ${w%%=*} "*) continue ;; esac
       case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
       rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
     done ;;
@@ -28,9 +30,23 @@ case "$1 $2" in
   # image the one of its name runs.
   'ps -aq') for w in ${STUB_NODES_UPDATERS:-}; do echo "$w"; done ;;
   'ps -a')
-    for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
+    for w in ${STUB_PLAN_NODES:-}; do
+      case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
+      rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
+    done ;;
   'compose ps')
-    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+    case " $* " in
+      *' db '*) echo dbcid ;;
+      *' app '*) echo appcid ;;
+      *' node '*)
+        if [ -z "${STUB_NO_NODE:-}" ]; then
+          case " $* " in
+            *' -aq '* | *' -a '*) echo nodecid ;;
+            *) case " ${STUB_STOPPED_NODES:-} " in *' nodecid '*) ;; *) echo nodecid ;; esac ;;
+          esac
+        fi ;;
+      *' updater '*) echo updatercid ;;
+    esac ;;
   'exec dbcid')
     case "$*" in
       *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
@@ -56,6 +72,8 @@ case "$1 $2" in
           *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;;
           *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
         esac ;;
+      '{{.State.Running}}')
+        case " ${STUB_STOPPED_NODES:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac ;;
       *.Config.Image*) printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}" ;;
       *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
     esac ;;
