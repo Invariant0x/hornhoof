@@ -16,9 +16,12 @@ export type FakeRelay = {
   down: boolean;
   /* The address it gives a new link. */
   urlFor: (name: string) => string;
-  /* The reports it took to pass on to Hornhoof's developers, as they came, and how it answers the next one. */
+  /* The reports it took to pass on to Hornhoof's developers, as they came, and how it answers the next one, with the
+     body of the inbox's answer, which it passes back unchanged. */
   feedback: unknown[];
-  feedbackAnswer: { status: number; headers?: Record<string, string> };
+  feedbackAnswer: { status: number; headers?: Record<string, string>; body?: unknown };
+  /* While set, it passes each report on to this inbox and gives back what the inbox answered, as relay.py does. */
+  forward: ((report: unknown) => Promise<{ status: number; body: unknown }>) | null;
 };
 
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -40,7 +43,7 @@ const tunnelFor = (name: string, key: string) => ({
 /* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
 export async function fakeRelay(): Promise<FakeRelay> {
   const app = Fastify();
-  const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false, urlFor: name => `https://${name}.hornhoof.test`, feedback: [], feedbackAnswer: { status: 202 } };
+  const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false, urlFor: name => `https://${name}.hornhoof.test`, feedback: [], feedbackAnswer: { status: 202 }, forward: null };
   const check = (name: string) =>
     !NAME.test(name) || name.slice(2, 4) === '--' ? { name, free: false, reason: 'invalid' } : relay.reserved.has(name) ? { name, free: false, reason: 'reserved' } : relay.bindings.has(name) ? { name, free: false, reason: 'taken' } : { name, free: true };
 
@@ -65,9 +68,14 @@ export async function fakeRelay(): Promise<FakeRelay> {
     return reply.code(204).send();
   });
   app.post('/api/v1/feedback', async (req, reply) => {
-    const { status, headers = {} } = relay.feedbackAnswer;
+    if (relay.forward) {
+      relay.feedback.push(req.body);
+      const answer = await relay.forward(req.body);
+      return reply.code(answer.status).send(answer.body);
+    }
+    const { status, headers = {}, body = { received: true, number: 1, issue: null } } = relay.feedbackAnswer;
     if (status === 202) relay.feedback.push(req.body);
-    return reply.code(status).headers(headers).send(status === 202 ? { received: true } : { error: 'refused' });
+    return reply.code(status).headers(headers).send(status === 202 ? body : { error: 'refused' });
   });
   await listenAt(port => app.listen({ host: '127.0.0.1', port }));
   relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;

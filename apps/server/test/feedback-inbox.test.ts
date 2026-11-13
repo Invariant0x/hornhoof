@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { companies, departments, feedbackInbox } from '../src/db/schema.js';
 import { fakeRelay } from './fake-relay.js';
@@ -43,10 +44,11 @@ describe('the inbox of Hornhoof developers', () => {
     const { app, db, ceo, receive, cards } = await inbox();
     expect((await app.inject({ url: '/api/feedback', ...as(ceo) })).json()).toEqual({ inbox: true });
     const taken = await receive(report());
-    expect([taken.statusCode, taken.json()]).toEqual([202, { received: true }]);
+    expect([taken.statusCode, taken.json()]).toEqual([202, { received: true, number: 1, issue: null }]);
     expect(await cards()).toEqual([
       {
         id: expect.any(String),
+        number: 1,
         kind: 'bug',
         title: 'Terminal froze after an update',
         text: 'The agent terminal stayed black.',
@@ -79,6 +81,9 @@ describe('the inbox of Hornhoof developers', () => {
       { ...report(), facts: { version: '0.18.11', platform: ['linux x64'], errorCode: 'Not A Code' } },
       { ...report(), facts: { version: '0.18.11', platform: Array.from({ length: 11 }, (_, i) => `linux ${i}`), errorCode: null } },
       { ...report(), extra: 'field' },
+      { ...report(), repeats: 0 },
+      { ...report(), repeats: 101 },
+      { ...report(), repeats: 1.5 },
       'just text',
     ];
     for (const payload of wrong) expect((await receive(payload)).statusCode).toBe(400);
@@ -114,6 +119,25 @@ describe('the inbox of Hornhoof developers', () => {
     const [bug, idea] = (await cards()).sort((a: { kind: string }, b: { kind: string }) => a.kind.localeCompare(b.kind));
     expect(bug).toMatchObject({ kind: 'bug', title: 'Terminal froze after update 18', signals: 3, installations: 2, versions: ['0.18.11', '0.18.9'], platforms: ['darwin arm64', 'linux x64'], firstAt: '2026-11-12T12:00:00.000Z', lastAt: '2026-11-12T12:00:02.000Z' });
     expect(idea).toMatchObject({ kind: 'idea', signals: 1, installations: 1 });
+  });
+
+  it('answers with the number of the card, the same for a repeat, and its issue once there is one', async () => {
+    const { db, receive } = await inbox();
+    const first = (await receive(report())).json();
+    expect(first).toEqual({ received: true, number: 1, issue: null });
+    expect((await receive(report({ installation: installationId(2), title: 'terminal froze, after an update' }))).json()).toEqual(first);
+    expect((await receive(report({ title: 'The queue stopped' }))).json()).toEqual({ received: true, number: 2, issue: null });
+    await db.update(feedbackInbox).set({ issueNumber: 1347, issueUrl: 'https://github.com/invariant0x/hornhoof/issues/1347' }).where(eq(feedbackInbox.number, 1));
+    const issued = await receive(report({ installation: installationId(3) }));
+    expect([issued.statusCode, issued.json()]).toEqual([202, { received: true, number: 1, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' } }]);
+  });
+
+  it('counts the repeats an installation reports on its card as that many signals of it', async () => {
+    const { receive, cards } = await inbox();
+    await receive(report());
+    const repeated = await receive(report({ repeats: 3 }));
+    expect([repeated.statusCode, repeated.json().number]).toEqual([202, 1]);
+    expect(await cards()).toMatchObject([{ number: 1, signals: 4, installations: 1 }]);
   });
 
   it('tells repeats apart by their error code', async () => {
