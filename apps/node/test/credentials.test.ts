@@ -196,7 +196,7 @@ describe('a sign-in its program refused', () => {
   /* A provider that refuses every sign-in for a while, as on 2026-11-13, must not get a new turn in a terminal every look. */
   it.each([
     ['ended on the sign-in', { error: 'not_logged_in' as const }],
-    ['failed on the sign-in', { error: 'agent_failed' as const, failure: { kind: 'auth' as const, text: 'authentication_failed: Please run /login' } }],
+    ['failed on the sign-in', { error: 'agent_failed' as const, failure: { kind: 'auth' as const, text: 'authentication_failed: Please run /login', retryable: false } }],
   ])('keeps the node signed out after a turn that %s, with no sign-in from Hornhoof to compare, until one comes', async (_, ended) => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
     const refusing: ProviderAdapter = { ...adapter, run: async () => ({ ok: false, sessionId: null, result: '', output: '', limits: null, ...ended }) };
