@@ -66,7 +66,7 @@ export const BUILTIN_SKINS = [
     },
   },
   /* A warm retro console: cream text on night violet, a yellow accent, dotted letters in headings and buttons, and
-     corners cut in two square steps. Status draft in the sheet of Design until it is shown to people. */
+     corners cut in two square steps. Approved for release by the CEO. */
   {
     id: 'pixel',
     scheme: 'dark',
