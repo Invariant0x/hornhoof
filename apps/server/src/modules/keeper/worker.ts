@@ -248,7 +248,7 @@ export class WorkerKeeper {
 
   constructor(private readonly opts: WorkerKeeperOptions) {
     this.measures = new Measures({ dir: opts.config.dir, internet: opts.internet });
-    this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, now: opts.now, log: opts.log });
+    this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     /* A machine that joined opens only on what its owner signed with the key this keeper holds: it takes no app's word. */
     this.carrier = new ComputerCarrier({
       controlDir: opts.config.controlDir,

@@ -26,7 +26,8 @@ export class Following {
   private readonly control: UpdaterControl;
   private readonly hourly = new Hourly();
 
-  constructor(private readonly opts: { dir: string; controlDir: string; now?: () => Date; log: (line: string) => void }) {
+  /* commit: the build this machine runs, when it knows. */
+  constructor(private readonly opts: { dir: string; controlDir: string; commit?: string | null; now?: () => Date; log: (line: string) => void }) {
     this.control = new UpdaterControl(opts.controlDir);
   }
 
@@ -61,8 +62,11 @@ export class Following {
   }
 
   /* One request per build. A newer build replaces a request that still downloads or waits, and never one that is being
-     installed. A build whose install failed here is asked for again only hours later. */
+     installed. A build whose install failed here is asked for again only hours later. The build this machine runs is
+     never asked for: a server that has not heard from the machine yet names its build to it, and the updater would wait
+     a day for a turn the server never gives, with everything else it does for the machine waiting behind that. */
   private ask(build: LeaderBuild): void {
+    if (this.opts.commit && build.commit === this.opts.commit) return;
     const mine = this.asked();
     const status = this.control.status();
     if (status?.state === 'running' && CHANGING.has(status.step)) return;

@@ -14,11 +14,11 @@ function folder(): string {
   return dir;
 }
 
-function standUp() {
+function standUp(commit?: string) {
   const [dir, controlDir] = [folder(), folder()];
   const clock = { now: new Date('2031-03-10T12:00:00Z') };
   const lines: string[] = [];
-  const following = new Following({ dir, controlDir, now: () => clock.now, log: line => lines.push(line) });
+  const following = new Following({ dir, controlDir, commit, now: () => clock.now, log: line => lines.push(line) });
   const read = (file: string) => (existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : null);
   const request = () => read(join(controlDir, 'request.json'));
   const go = () => read(join(controlDir, GO_FILE));
@@ -40,6 +40,15 @@ describe("a worker following the server's build", () => {
     /* The same build again is the same request. */
     s.following.heard(B1, null);
     expect(s.request()).toEqual(first);
+  });
+
+  it('asks for no build it runs itself, which a server that has not heard from it yet names', () => {
+    const s = standUp(B1.commit);
+    s.following.heard(B1, null);
+    expect([s.request(), s.asked()]).toEqual([null, null]);
+    /* Another build is asked for as ever. */
+    s.following.heard(B2, null);
+    expect(s.request()).toMatchObject({ tag: B2.tag });
   });
 
   it('says how far its updater is with that request, and nothing of any other', () => {
