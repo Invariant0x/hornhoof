@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,10 +17,12 @@ vi.mock('node:child_process', async original => ({
 }));
 
 type Call = { args: string[]; input?: string };
+const homes: string[] = [];
 
 /* A Tmux whose every command is written down and answered as the recorded tmux answered it. */
 function recorded(answer: (args: string[]) => string | Error = () => '', env: NodeJS.ProcessEnv = {}) {
   const home = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
+  homes.push(home);
   const tmux = new Tmux({ socket: 'hh-test', env: { PATH: '/usr/bin', HOME: home, NODE_KEY: 'node-own-key', HORNHOOF_URL: 'http://hh', ...env }, recordingsDir: join(home, 'recordings') });
   const calls: Call[] = [];
   vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {
@@ -32,10 +34,13 @@ function recorded(answer: (args: string[]) => string | Error = () => '', env: No
   return { tmux, calls, home };
 }
 const named = (calls: Call[], command: string) => calls.filter(c => c.args.includes(command));
+const recorderFile = (command: string) => command.match(/([^\s']+\.hh-output-[a-f0-9]{16}\.log)/)![1]!;
 
 afterEach(() => {
   spawned.length = 0;
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('starting a program in tmux', () => {
@@ -89,6 +94,84 @@ describe('starting a program in tmux', () => {
     expect(spawned[0]!.env).not.toHaveProperty('NODE_KEY');
     expect(spawned[0]!.env).not.toHaveProperty('HORNHOOF_URL');
     expect(spawned[0]!.env).toMatchObject({ PATH: '/usr/bin', LANG: 'C.UTF-8', TERM: 'xterm-256color' });
+  });
+
+  it('starts the gated program right away when the first output recorder becomes ready', async () => {
+    vi.useFakeTimers();
+    const { tmux, calls } = recorded(args => {
+      if (args[0] === 'has-session') return new Error('no session');
+      if (args[0] === 'pipe-pane' && args[3]) {
+        const file = recorderFile(args[3]);
+        writeFileSync(`${file}.ready`, 'ready');
+        writeFileSync(file, 'recorded output\n');
+      }
+      return '';
+    });
+    await tmux.launch('a-1', { cwd: '/work', command: ['claude'], cols: 80, rows: 24, outputDir: tmux.scratch() });
+    expect(calls.filter(c => c.args[0] === 'pipe-pane')).toHaveLength(1);
+    expect(named(calls, 'send-keys')).toEqual([{ args: ['send-keys', '-t', 'a-1', 'Enter'] }]);
+    expect(tmux.programOutput('a-1')).toBe('recorded output\n');
+  });
+
+  it('restarts a silent output recorder once and continues launching the waiting program', async () => {
+    vi.useFakeTimers();
+    const files: string[] = [];
+    let stoppedFirst = false;
+    const { tmux, calls } = recorded(args => {
+      if (args[0] === 'has-session') return new Error('no session');
+      if (args[0] === 'pipe-pane' && !args[3]) stoppedFirst = true;
+      if (args[0] === 'pipe-pane' && args[3]) {
+        const file = recorderFile(args[3]);
+        files.push(file);
+        if (files.length === 2) {
+          expect(stoppedFirst).toBe(true);
+          expect(existsSync(files[0]!)).toBe(false);
+          expect(existsSync(`${files[0]!}.ready`)).toBe(false);
+          writeFileSync(`${file}.ready`, 'ready');
+          writeFileSync(file, 'from restarted recorder\n');
+        }
+      }
+      return '';
+    });
+    const outcome = tmux.launch('a-1', { cwd: '/work', command: ['claude'], cols: 80, rows: 24, outputDir: tmux.scratch() }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await outcome).toBeNull();
+    expect(files).toHaveLength(2);
+    expect(files[1]).not.toBe(files[0]);
+    expect(calls.filter(c => c.args[0] === 'pipe-pane' && Boolean(c.args[3]))).toHaveLength(2);
+    expect(calls.filter(c => c.args[0] === 'pipe-pane' && !c.args[3])).toEqual([{ args: ['pipe-pane', '-t', 'a-1'] }]);
+    expect(named(calls, 'send-keys')).toEqual([{ args: ['send-keys', '-t', 'a-1', 'Enter'] }]);
+    expect(tmux.programOutput('a-1')).toBe('from restarted recorder\n');
+  });
+
+  it('fails and clears the restarted recorder when neither recorder attempt starts', async () => {
+    vi.useFakeTimers();
+    const files: string[] = [];
+    const { tmux, calls } = recorded(args => {
+      if (args[0] === 'has-session') return new Error('no session');
+      if (args[0] === 'pipe-pane' && args[3]) files.push(recorderFile(args[3]));
+      return '';
+    });
+    const outcome = tmux.launch('a-1', { cwd: '/work', command: ['claude'], cols: 80, rows: 24, outputDir: tmux.scratch() }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    const error = await outcome;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('The terminal output recorder did not start.');
+    expect(files).toHaveLength(2);
+    for (const file of files) {
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.ready`)).toBe(false);
+    }
+    expect(calls.filter(c => c.args[0] === 'pipe-pane' && Boolean(c.args[3]))).toHaveLength(2);
+    expect(calls.filter(c => c.args[0] === 'pipe-pane' && !c.args[3])).toHaveLength(2);
+    expect(named(calls, 'send-keys')).toEqual([]);
+    expect(tmux.programOutput('a-1')).toBeNull();
   });
 });
 
