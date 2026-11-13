@@ -67,6 +67,22 @@ describe('local terminal scrollback', () => {
     expect(core(term).buffers.active.hasScrollback).toBe(true);
   });
 
+  it('shows output that came while someone read history once the reader is back, after the screen shrank before its first alternate use', async () => {
+    const term = new Terminal({ cols: 20, rows: 7, scrollback: 100 });
+    terms.push(term);
+    term.open(document.createElement('div'));
+    term.resize(20, 5);
+    await write(term, `${Array.from({ length: 40 }, (_, i) => `LINE-${i}`).join('\r\n')}\r\n\x1b[?1049hALT-OLD`);
+    scrollTerminal(term, -10);
+    writeTerminalData(term, '\r\nALT-NEW');
+    await write(term, '');
+    scrollTerminal(term, 1000);
+    const live = term.buffer.active;
+    const shown = Array.from({ length: term.rows }, (_, i) => live.getLine(live.viewportY + i)?.translateToString(true)).join('\n');
+    expect(live.type).toBe('alternate');
+    expect(shown).toContain('ALT-OLD\nALT-NEW');
+  });
+
   it('returns to the live alternate screen when the wheel reaches the bottom', async () => {
     const term = await fixture(true);
     scrollTerminal(term, -10);
