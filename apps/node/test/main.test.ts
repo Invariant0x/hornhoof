@@ -16,7 +16,7 @@ import { prepareNodeStop } from '../src/lifecycle.js';
 import { Outbox } from '../src/outbox.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
-import { TerminalHost } from '../src/terminal/host.js';
+import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { StreamMask } from '../src/terminal/mask.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -376,6 +376,33 @@ describe('a node that runs agents in terminals', () => {
       node?.stop();
       vi.useRealTimers();
       stopAll.mockRestore(); start.mockRestore(); stop.mockRestore();
+    }
+  });
+
+  it("hands the terminal an assistant's whole conversation along with the turn's words", async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const tmux = new Tmux({ env: { HOME: dir } });
+    const stopAll = vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+    const start = vi.spyOn(TerminalHost.prototype, 'start').mockResolvedValue();
+    const stop = vi.spyOn(TerminalHost.prototype, 'stop').mockResolvedValue();
+    const jobs: TermJob[] = [];
+    const run = vi.spyOn(TerminalHost.prototype, 'run').mockImplementation(async job => {
+      jobs.push(job);
+      return { ok: true, sessionId: 's1', result: 'Done.', output: '', error: null, limits: null };
+    });
+    let node: Awaited<ReturnType<typeof runNode>> | undefined;
+    try {
+      node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i } });
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      const turn = { type: 'job.run', subscriptionId: 's1', provider: 'claude', prompt: 'Max: and?', sessionId: 's1', model: null, timeoutMs: 10_000, secret: null, instructions: null, toolToken: null, workspace: { key: 'assistant', repo: null } };
+      server.send({ ...turn, jobId: 'with', freshPrompt: 'Max: hi\n\nMax: and?' });
+      server.send({ ...turn, jobId: 'without' });
+      await server.wait(() => ['with', 'without'].every(id => server.received.some(m => m.type === 'job.done' && m.jobId === id)));
+      expect(jobs.find(job => job.input.jobId === 'with')).toMatchObject({ freshPrompt: 'Max: hi\n\nMax: and?', input: { prompt: 'Max: and?' } });
+      expect(jobs.find(job => job.input.jobId === 'without')?.freshPrompt).toBeUndefined();
+    } finally {
+      node?.stop();
+      stopAll.mockRestore(); start.mockRestore(); stop.mockRestore(); run.mockRestore();
     }
   });
 

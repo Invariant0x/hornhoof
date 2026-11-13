@@ -664,6 +664,9 @@ const ServerMessage = z.discriminatedUnion('type', [
     subscriptionId: Id,
     provider: z.enum(PROVIDER_IDS),
     prompt: z.string(),
+    /* An assistant's whole conversation with its owner, which the node types in place of the prompt when the session the
+       turn goes on in starts anew. A node from before drops it and types the prompt. */
+    freshPrompt: z.string().optional(),
     sessionId: z.string().nullable(),
     model: z.string().nullable(),
     /* How hard the program thinks; null leaves it at its own default. */

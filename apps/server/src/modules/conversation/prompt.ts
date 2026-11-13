@@ -91,7 +91,10 @@ export function whoIs(author: { name: string }, standing: Standing): string {
 
 /* Below a person's message that came through the agent's Telegram bot: who they are, and where the answer goes. */
 export function answerInTelegram(author: { name: string }, standing: Standing): string {
-  return `${author.name} wrote this in Telegram. ${whoIs(author, standing)} Your answer in this window goes back to them there as plain text, so write it without formatting.`;
+  return [
+    `${author.name} wrote this in Telegram. ${whoIs(author, standing)} Your answer in this window goes back to them there as plain text, so write it without formatting.`,
+    `It goes to ${author.name} alone: answer ${author.name}'s own words here. Other people write to you in Telegram too, each in a turn of their own, and what you owe one of them you answer in their turn, not in this one.`,
+  ].join(' ');
 }
 
 /* Below a message that a person's assistant wrote for them: whose words they are, what the person is, and where the answer

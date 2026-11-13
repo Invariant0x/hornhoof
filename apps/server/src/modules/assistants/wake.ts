@@ -42,10 +42,10 @@ export class Wakes {
     if (this.run.abort.signal.aborted) this.run = new Run();
   }
 
-  /* A new event of this kind waits after the number. */
-  wake(assistantId: string, after: number, kind: AssistantEventKind): void {
+  /* A new event of this kind waits after the number; worth: it is worth a turn of the program's model whatever its kind. */
+  wake(assistantId: string, after: number, kind: AssistantEventKind, worth = WORTH_A_TURN.has(kind)): void {
     if (this.run.abort.signal.aborted) return;
-    this.join(assistantId, { after, worth: WORTH_A_TURN.has(kind) });
+    this.join(assistantId, { after, worth });
     if (!this.running.has(assistantId)) this.running.set(assistantId, this.send(assistantId, this.run).finally(() => this.running.delete(assistantId)));
   }
 

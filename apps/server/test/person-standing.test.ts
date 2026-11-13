@@ -89,7 +89,7 @@ describe('the rules', () => {
   const skill = (id: string) => loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))).skills.get(id)!.body;
 
   it("have a head do what someone responsible for its department asks in it, and say what its tools cannot do", () => {
-    expect(skill('hh-lead-tasks')).toMatch(/below a person's message Hornhoof says what they are in the company\. The CEO may give you any task\. Everyone responsible for your department, and there may be several, runs it in full as the CEO would: do what they ask inside it without asking the CEO for leave\./);
+    expect(skill('hh-lead-tasks')).toMatch(/below a person's message Hornhoof says what they are in the company\. The CEO may give you any task\. Everyone responsible for your department, and there may be several, runs it in full as the CEO would: do what they ask inside it without the CEO's leave\./);
     expect(skill('hh-lead-tasks')).toMatch(/Anyone else, only what their place allows\. What your tools cannot do they can do on the department's screen\./);
     expect(skill('hh-lead-tasks')).not.toMatch(/pass it to the orchestrator/);
   });

@@ -110,6 +110,12 @@ describe('templates', () => {
     expect(paragraph).not.toMatch(/exception|never change|never hire/);
   });
 
+  it("has a person's assistant answer words from its window there, and write to its owner's chat from there only when asked", () => {
+    const line = body('hh-assistant').split('\n').find(l => l.includes('tell_owner'));
+    expect(line).toMatch(/your answer stays in the window/);
+    expect(line).toMatch(/asks there to be written to in their chat/);
+  });
+
   it("keeps every department's work as files in a repository of its own, which the orchestrator creates itself with a saved key, or offers", () => {
     const resources = body('orch-resources');
     expect(resources).toMatch(/Every department keeps at least one repository of its own/);

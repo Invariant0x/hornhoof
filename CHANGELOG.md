@@ -5,16 +5,42 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.3] - 2026-11-13
+
+A person's assistant can write to its owner in their chat when asked in its window, and an assistant's program can hand
+its whole conversation to a new session.
+
+### Added
+
+- When the owner asks their assistant in its window in Hornhoof to write to them in their chat, the assistant sends
+  those words there in its own voice. The assistant's program gets them as a reply that answers no message of its own.
+- An assistant's program can send, beside the new words, its whole conversation with the owner (`freshText`, up to
+  200000 characters). The assistant's agent reads it in place of the new words when its session starts anew: a first
+  session, a change of plan, machine or instructions, or a conversation the owner cleared in the terminal. A session
+  that goes on reads only the new words. The assistant's `/me` now says `contract: 2`, so a program sends `freshText`
+  only to a server that takes it.
+
+### Changed
+
+- The words an assistant's program sends may now be up to 50000 characters, up from 20000. Longer words are refused,
+  not cut.
+
 ## [0.23.2] - 2026-11-13
 
-Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, and a
-machine whose sign-in was refused stops starting turns that cannot work.
+Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, heads'
+Telegram bots take files, and a machine whose sign-in was refused stops starting turns that cannot work.
 
 ### Added
 
 - A click on a line of the company map puts a bend on it, drawn as a small circle. The line runs through its bends in
   straight pieces, a bend can be dragged or moved with the arrow keys, and a click on it takes it away. Each person's
   bends are kept with their own arrangement of the map, and "Put back as it was" clears them too.
+- A head's Telegram bot, which answered anything but text with "I take only text messages for now", now passes on
+  documents, archives, photos (an album as one message), voice, audio and video messages and still stickers as files
+  the agent downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its
+  transcript when `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY`
+  and `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears
+  why. The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
 
 ### Changed
 
@@ -33,6 +59,11 @@ machine whose sign-in was refused stops starting turns that cannot work.
   terminal. It now stays signed out until the sign-in changes, also when the program reported the refusal as a failure
   or the sign-in was made in the program itself.
 - The window of a person's own assistant no longer closes and opens again every time the company's picture refreshes.
+- When two people wrote to one head's Telegram bot, the second person's words went into the turn that answered the
+  first, and from then on every word of that turn went to both chats: one person got the answer to the other's
+  question. A person's words now wait for a turn of their own when the running turn answers someone else in Telegram,
+  or when they come from Telegram and the running turn is another person's. The head is also told that its answer goes
+  to the writer alone.
 
 ## [0.23.1] - 2026-11-13
 
@@ -45,12 +76,6 @@ or a sign-in failed.
   program aside, and every later update of that program failed at once with "Could not update". The node now clears
   that copy before it installs.
 - The machine's log now says why a program update failed and how a sign-in's program ended, without any part of a token.
-- A head's Telegram bot answered anything but text with "I take only text messages for now". It now passes on documents,
-  archives, photos (an album as one message), voice, audio and video messages and still stickers as files the agent
-  downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its transcript when
-  `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY` and
-  `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears why.
-  The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
 
 ## [0.23.0] - 2026-11-12
 

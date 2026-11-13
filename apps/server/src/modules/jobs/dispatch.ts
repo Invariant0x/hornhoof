@@ -25,6 +25,8 @@ type JobToSend = {
   /* It is for the orchestrator or a head, whom a node that waits for an update holds up to a limit. */
   leader?: boolean;
   prompt: string;
+  /* An assistant's whole conversation, which the node types in place of the prompt when the session begins anew there. */
+  freshPrompt?: string | null;
   sessionId: string | null;
   model?: string | null;
   effort?: string | null;
@@ -45,6 +47,7 @@ type JobToSend = {
 /* What goes along only when the job has it. */
 const jobExtras = (job: JobToSend) => ({
   ...(job.compactWindow ? { compactWindow: job.compactWindow } : {}),
+  ...(job.freshPrompt ? { freshPrompt: job.freshPrompt } : {}),
   ...(job.operatorDelivery ? { operatorDelivery: job.operatorDelivery } : {}),
   ...(job.operatorSourceDelivery ? { operatorSourceDelivery: job.operatorSourceDelivery } : {}),
   ...(job.workspace ? { workspace: job.workspace } : {}),
