@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agents, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agents, assistantEvents, jobs, people, subscriptions } from '../src/db/schema.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
@@ -143,7 +143,7 @@ describe("an assistant's own agent", () => {
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
   });
 });
 
@@ -321,5 +321,79 @@ describe('persona_call', () => {
     const broken = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
     expect(broken.isError).toBe(true);
     expect(broken.content[0]!.text).toContain("The assistant's program stopped in the middle of its answer.");
+  });
+});
+
+describe('tell_owner', () => {
+  type Event = { seq: number; kind: string; data: Record<string, unknown> };
+  const said = (result: unknown) => result as { content: { text: string }[]; isError?: boolean };
+  const eventsOf = async (c: Company, key: string, after = 0): Promise<Event[]> => (await c.app.inject({ url: `/api/assistant/events?after=${after}`, ...bearer(key) })).json().events;
+
+  /* The CEO's assistant on his plan, and the turn of its own agent the CEO started in its window with these words. */
+  async function fromWindow(c: Company, words: string) {
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    expect((await pick(c, c.ceo, ava.id, c.plan)).statusCode).toBe(200);
+    await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
+    const agent = await ownAgent(c, ava.id);
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${agent.id}/messages`, payload: { text: words }, ...as(c.ceo) })).statusCode).toBe(202);
+    return { ava, agent, run: await runWith(c.node, words) };
+  }
+
+  /* The assistant's events address, which keeps every wake. */
+  async function eventsAddress() {
+    const wakes: string[] = [];
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => (body += chunk));
+      req.on('end', () => {
+        wakes.push(body);
+        res.writeHead(200).end();
+      });
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    onTestFinished(() => new Promise<void>(done => server.close(() => done())));
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hornhoof`, wakes };
+  }
+
+  it("passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program", async () => {
+    const c = await company();
+    const { ava, agent, run } = await fromWindow(c, 'Write to me in my chat: 7');
+    const address = await eventsAddress();
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { eventsUrl: address.url }, ...as(c.ceo) })).statusCode).toBe(200);
+    expect(await eventsOf(c, ava.key)).toEqual([]);
+    const waiting = c.app.inject({ url: '/api/assistant/events?after=0&wait=50', ...bearer(ava.key) });
+    const client = await mcp(c.app, run.toolToken!);
+    const result = said(await client.callTool({ name: 'tell_owner', arguments: { text: '  7  ' } }));
+    expect(result.isError).toBeFalsy();
+    const from = { id: agent.id, name: 'Ava', kind: 'assistant' };
+    const [heard] = (await waiting).json().events as Event[];
+    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, text: '7' } });
+    expect(heard!.data.agent).toMatchObject({ id: (await me(c, ava.key)).assistant.agentId });
+    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, text: '7' }]]);
+    await until(() => address.wakes.length > 0);
+    expect(JSON.parse(address.wakes[0]!)).toEqual({ type: 'wake', after: heard!.seq - 1 });
+  });
+
+  it("wakes OpenClaw's model for them at once, as words its owner waits for", async () => {
+    const c = await company();
+    const { ava, run } = await fromWindow(c, 'Write to me in my chat: done');
+    const address = await eventsAddress();
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { program: 'openclaw', eventsUrl: address.url }, ...as(c.ceo) })).statusCode).toBe(200);
+    const client = await mcp(c.app, run.toolToken!);
+    expect(said(await client.callTool({ name: 'tell_owner', arguments: { text: 'Done.' } })).isError).toBeFalsy();
+    await until(() => address.wakes.length > 0);
+    expect(JSON.parse(address.wakes[0]!)).toMatchObject({ mode: 'now' });
+  });
+
+  it('passes on no empty words, and nothing of an assistant that is switched off', async () => {
+    const c = await company();
+    const { ava, run } = await fromWindow(c, 'Write to me in my chat later');
+    const client = await mcp(c.app, run.toolToken!);
+    expect(said(await client.callTool({ name: 'tell_owner', arguments: { text: '   ' } })).isError).toBe(true);
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, ava.id));
+    const off = said(await client.callTool({ name: 'tell_owner', arguments: { text: 'Hello' } }));
+    expect(off.isError).toBe(true);
+    expect(off.content[0]!.text).toContain('assistant_not_allowed');
+    expect(await c.db.select().from(assistantEvents).where(eq(assistantEvents.assistantId, ava.id))).toEqual([]);
   });
 });

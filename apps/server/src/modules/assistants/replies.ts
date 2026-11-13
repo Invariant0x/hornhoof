@@ -5,8 +5,9 @@ import { turnGoingOn } from '../conversation/queue.js';
 import { storeEvent } from './events.js';
 
 type ReplyRow = typeof assistantReplies.$inferSelect;
-/* Tells of a new event of an assistant once it is kept. */
-export type Told = (assistantId: string, seq: number, kind: AssistantEventKind) => void;
+/* Tells of a new event of an assistant once it is kept. worth: the event is worth a turn of a program's model whatever its
+   kind. */
+export type Told = (assistantId: string, seq: number, kind: AssistantEventKind, worth?: boolean) => void;
 
 const OPEN = ['queued', 'running'];
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
@@ -61,6 +62,14 @@ async function collectOne(ctx: Ctx, row: ReplyRow, told: Told, graceMs: number, 
   });
   told(row.assistantId, seq, 'reply_end');
   return null;
+}
+
+/* Words an assistant's own agent sends its owner on its own, for the program to pass on in the owner's chat: one reply with
+   no message of the program that it answers, and no end. The program passes on every such reply, so nothing else keeps one:
+   a reply to a message always names it. */
+export async function tellOwner(ctx: Ctx, to: { companyId: string; assistantId: string }, agentId: string, text: string, told: Told): Promise<void> {
+  const data = { messageId: null, agent: await agentOf(ctx, agentId), text };
+  told(to.assistantId, await storeEvent(ctx.db, { ...to, kind: 'reply', data }), 'reply', true);
 }
 
 /* Every answer the company's assistants wait for. Returns when to look again, or null when nothing waits for a time. */

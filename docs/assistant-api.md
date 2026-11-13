@@ -35,6 +35,7 @@ An assistant may have an agent of its own in Hornhoof that thinks for it. A prog
 * Its card in Hornhoof cannot be edited, reset or removed (`409 assistant_agent_card`). Its plan changes on the assistant's card.
 * It reads a message exactly as the program sends it, with nothing added. So each message carries all the agent needs: the persona, the facts about the owner and the words to answer. It keeps its conversation from one message to the next.
 * Its answer is the text for the owner, in the `reply` and `reply_end` events of the message, as for any agent.
+* Its owner may also write to it in its window, and its answer to that stays in the window. When the owner asks there to be written to in their chat, the agent sends those words with the tool `tell_owner` (`text`, 1 to 20000 characters): Hornhoof keeps each call's words as one `reply` with `messageId` `null` and no `reply_end`, and wakes the program as for any event. The program shows these words to the owner, and never sends them back as a turn.
 * In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. It asks the program for the program's own skills with `persona_call`: see "Skills".
 
 ## Calls
@@ -164,6 +165,8 @@ The kinds of event and their `data`:
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
 
+`messageId` is `null` in a `reply` only when it holds words the assistant's own agent (`data.agent.id` is the `agentId` of `GET /api/assistant/me`) sends its owner on its own, with `tell_owner`, and answers no message of the program. No `reply_end` follows it. Show every such reply to the owner as it is, and never send it back to the agent as a message.
+
 #### When the answer to a message is over
 
 An agent answers a message in a turn, and its words come as `reply` events while it works. A turn may go on in another turn, for example after the agent waited for a machine, so the end of the turn is not yet the end of the answer. Hornhoof sends `reply_end` once for each message, after its turn and every turn that goes on from it are over and 30 seconds passed with no new turn. After `reply_end` no more `reply` comes for that `messageId`.
@@ -249,7 +252,7 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 * `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
 * A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
 * `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
-* The assistant's own agent has these tools inside Hornhoof, with one more, `persona_call` (`name`, `arguments`): see "Skills". The address `/api/assistant/mcp` does not offer it.
+* The assistant's own agent has these tools inside Hornhoof, with two more: `persona_call` (`name`, `arguments`), see "Skills", and `tell_owner` (`text`), see "The assistant's own agent". The address `/api/assistant/mcp` offers neither.
 
 ## Skills
 
