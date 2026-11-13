@@ -1095,6 +1095,20 @@ describe('Map', () => {
     expect(hubTag(container)).toHaveTextContent(/^Turn 3$/);
   });
 
+  it("shows each department's own turn on its card, and on the hub the turn of the department pointed at", async () => {
+    const org = turnOrg({ Development: [3, 17], Sales: [1, 4] });
+    org.departments[1] = { ...org.departments[1]!, turnProgress: { turnNumber: 5, done: 1, total: 4 } };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    expect(strip('Development')!.querySelector('.dt-turn')).toHaveTextContent('Turn 3');
+    expect(strip('Sales')!.querySelector('.dt-turn')).toHaveTextContent('Turn 5');
+    /* The hub holds every running turn together, a sector for each. */
+    expect(container.querySelectorAll('.hub .turn-sec')).toHaveLength(2);
+    fireEvent.mouseEnter(card('Sales'));
+    expect(hubTag(container)).toHaveTextContent(/^SAL · Turn 5$/);
+  });
+
   it('gives each working department a sector of its own, lit when its card is pointed at or focused', async () => {
     mockApi({ 'GET /api/org': [200, turnOrg({ Development: [3, 17], Operations: null, Sales: [4, 4], Marketing: [1, 2] })] });
     const { container } = render(<MapScreen {...PROPS} />);

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, jobs, people, subscriptions, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
 import { cancel, lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, recordStale, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
 import { agentFailureStates } from '../src/modules/tasks/failures.js';
@@ -20,6 +20,7 @@ async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
     { companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' },
     { companyId: company!.id, kind: 'worker', name: 'Rita', model: '' },
   ]).returning();
+  await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' });
   const turn = await echelonsTurn(db, company!.id);
   let number = 0;
   const setRoute = async (t: Task, state: Partial<Route['state']>) => {

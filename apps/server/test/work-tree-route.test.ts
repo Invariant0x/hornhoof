@@ -44,7 +44,7 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const [turn] = openTurn
     ? await db
         .insert(turns)
-        .values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', createdAt: turnOpenedAt, openedAt: turnOpenedAt })
+        .values({ companyId, departmentId: dev!.id, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', createdAt: turnOpenedAt, openedAt: turnOpenedAt })
         .returning()
     : [];
 

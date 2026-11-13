@@ -120,6 +120,7 @@ export type ErrorReason =
   | 'turn_open'
   | 'turn_unknown'
   | 'turn_mode_fixed'
+  | 'turn_department'
   | 'no_turnkey_team'
   | 'repo_invalid'
   | 'repo_command_invalid'

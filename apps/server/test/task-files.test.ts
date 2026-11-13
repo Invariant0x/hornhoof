@@ -135,7 +135,7 @@ describe('the room for task files', () => {
     const day = 24 * 60 * 60 * 1000;
     const now = new Date();
     const turn = async (number: number, status: 'open' | 'closed', closedAt: Date | null) =>
-      (await db.insert(turns).values({ companyId, number, goal: 'g', status, closedAt, createdByAgentId: head.id }).returning())[0]!;
+      (await db.insert(turns).values({ companyId, departmentId: task.departmentId, number, goal: 'g', status, closedAt, createdByAgentId: head.id }).returning())[0]!;
     const [old, recent, open] = [await turn(101, 'closed', new Date(now.getTime() - 31 * day)), await turn(102, 'closed', new Date(now.getTime() - 29 * day)), await turn(103, 'open', null)];
     const files = [];
     for (const t of [old, recent, open]) {

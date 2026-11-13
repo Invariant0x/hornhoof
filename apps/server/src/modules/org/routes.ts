@@ -97,9 +97,11 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* And the key of the git host Hornhoof creates its repositories with, never the key itself. */
     const hosts = await hostsOf(db, me.companyId);
     const repoHostOf = (d: (typeof depts)[number]) => (reach.whole || reach.owns?.has(d.id) ? hosts(d.id) : null);
-    const [open] = await db.select({ id: turns.id, companyId: turns.companyId, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
-    /* The map shows the turn's short name. */
-    const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };
+    /* Each top-level department runs its own turn; a department's card shows its own. */
+    const open = await db.select({ id: turns.id, companyId: turns.companyId, departmentId: turns.departmentId, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open'))).orderBy(asc(turns.number));
+    const openOf = (deptId: string) => open.find(o => o.departmentId === deptId);
+    /* The earliest open turn by its short name, for readers older than the departments' own turns. */
+    const turn = open[0] && { id: open[0].id, number: open[0].number, goal: open[0].title || open[0].goal };
     const allTeams = await db.select().from(teams).where(eq(teams.companyId, me.companyId)).orderBy(asc(teams.stage), asc(teams.createdAt));
     const topDepts = depts.filter(d => !d.parentId);
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
@@ -236,7 +238,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           name: d.name,
           templateKey: d.templateKey,
           workMode: d.workMode,
-          turnProgress: await departmentProgress(db, open, viewer, d),
+          turnProgress: await departmentProgress(db, openOf(d.id), viewer, d),
           roleCode: d.roleCode,
           about: d.about,
           ownerPersonId: ownerOf(owners, d.id),

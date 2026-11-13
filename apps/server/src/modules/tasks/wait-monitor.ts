@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, turns } from '../../db/schema.js';
 import { notificationMessage } from '../events/notifications.js';
@@ -6,7 +6,7 @@ import { quietRecipient, waitOrchestrator } from './wait-recipients.js';
 import { checkWaitDependencies } from './wait-dependencies.js';
 import { sweepWaits } from './wait-escalation.js';
 import { deliverWaitNotices, recordWaitNotice } from './wait-notices.js';
-import { quietDepartment, taskVersions, waitCycles, waitKey } from './wait-observations.js';
+import { departmentScope, quietDepartment, taskVersions, waitCycles, waitKey } from './wait-observations.js';
 
 async function recordCycles(ctx: Ctx, now: Date): Promise<void> {
   for (const group of await waitCycles(ctx, now)) {
@@ -25,9 +25,12 @@ async function recordCycles(ctx: Ctx, now: Date): Promise<void> {
 
 async function recordQuietDepartments(ctx: Ctx, now: Date): Promise<void> {
   for (const turn of await ctx.db.select().from(turns).where(eq(turns.status, 'open'))) {
-    /* A department's silence is its products' too: whoever hears of it once does not hear it again for each. */
+    if (!turn.departmentId) continue;
+    /* A turn is its department's: only its department, products and sub-departments are asked about. A department's silence
+       is its products' too: whoever hears of it once does not hear it again for each. */
+    const scope = await departmentScope(ctx, turn.companyId, turn.departmentId);
     const told = new Set<string>();
-    for (const department of await ctx.db.select().from(departments).where(eq(departments.companyId, turn.companyId)).orderBy(asc(departments.createdAt), asc(departments.id))) {
+    for (const department of await ctx.db.select().from(departments).where(and(eq(departments.companyId, turn.companyId), inArray(departments.id, scope))).orderBy(asc(departments.createdAt), asc(departments.id))) {
       const observation = await quietDepartment(ctx, turn.id, department.id, now);
       if (!observation) continue;
       const recipient = await quietRecipient(ctx, turn.companyId, department.id);

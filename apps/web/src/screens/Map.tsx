@@ -119,7 +119,7 @@ function DeptTurn({ turn }: { turn: WorkingTurn }) {
   );
 }
 
-/* The lower half of the hub, one sector per department working in the turn, in the order of their cards. With several, the one
+/* The lower half of the hub, one sector per department working in its turn, in the order of their cards. With several, the one
    whose card is pointed at or focused stands out and the others fade. */
 function TurnArcs({ turns, pointed }: { turns: WorkingTurn[]; pointed: string | null }) {
   if (!turns.length) return null;
@@ -142,8 +142,8 @@ function TurnArcs({ turns, pointed }: { turns: WorkingTurn[]; pointed: string | 
   );
 }
 
-/* What the hub names under its count: the turn while one department works in it, and with several, the department whose card
-   is pointed at. */
+/* What the hub names under its count: the turn while one department works, and with several, the department whose card is
+   pointed at with its own turn. */
 function hubTag(t: Messages, turns: WorkingTurn[], pointed: string | null): string | null {
   if (turns.length === 1) return t.tasks.turn(turns[0]!.turnNumber);
   const w = turns.find(x => x.id === pointed);

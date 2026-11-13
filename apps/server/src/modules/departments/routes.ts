@@ -1,6 +1,6 @@
 import { notificationMessage } from '../events/notifications.js';
 import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, max, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, max, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -11,7 +11,7 @@ import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
@@ -323,6 +323,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
+          /* Its turns end with it and stay in the history without it: one that ran as it ran, a planned one never started. */
+          await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.departmentId, dept.id), ne(turns.status, 'closed')));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));
           removed.push({ id: dept.id, template: dept.templateKey, name: dept.name });

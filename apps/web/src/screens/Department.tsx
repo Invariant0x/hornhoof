@@ -151,7 +151,7 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
   );
 }
 
-/* Whether the department works in the company's turns or all the time, for people with access to the department itself. */
+/* Whether the department works in turns of its own or all the time, for people with access to the department itself. */
 function DeptWorkMode({ department, shown }: { department: Department; shown: boolean }) {
   const t = useT();
   const id = useId();

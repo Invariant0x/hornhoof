@@ -14,10 +14,10 @@ const MIN_SEGMENT = 5;
 /* Segments of a sector while one, two or three departments work; more share the half in up to four each. */
 const FEW: readonly number[] = [0, TURN_CELLS, 8, 6];
 
-/* A department working in the open turn: the tasks of it the person sees, done out of all. */
+/* A department working in its open turn: the tasks of it the person sees, done out of all. */
 export type WorkingTurn = { id: string; roleCode: string; turnNumber: number; done: number; total: number };
 
-/* The departments that work in the open turn, in the order of their cards: those it gave tasks to. */
+/* The departments that work in an open turn of their own, in the order of their cards: those with tasks in it. */
 export function workingTurns(departments: Department[]): WorkingTurn[] {
   return departments.flatMap(d => (d.turnProgress && d.turnProgress.total > 0 ? [{ id: d.id, roleCode: d.roleCode, ...d.turnProgress }] : []));
 }

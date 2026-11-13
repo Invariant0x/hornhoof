@@ -86,7 +86,10 @@ describe('what people read of the waits on a task', () => {
 
   it('draws the same waits on the department\'s tree, with the same things left out', async () => {
     const c = await aclCompany();
-    await c.db.insert(turns).values({ companyId: c.companyId, number: 90, title: 'Now', goal: 'Now.', status: 'open', openedAt: new Date() });
+    await c.db.insert(turns).values([
+      { companyId: c.companyId, departmentId: c.dev.id, number: 90, title: 'Now', goal: 'Now.', status: 'open', openedAt: new Date() },
+      { companyId: c.companyId, departmentId: c.sales.id, number: 91, title: 'Now', goal: 'Now.', status: 'open', openedAt: new Date() },
+    ]);
     const [{ task: hidden }, far, seen] = [await apartWork(c, 'Own secret'), await c.work('Far first', c.crew.far, c.sales.id), await c.work('Seen first', c.crew.mine)];
     const made = await comesAfter(c, 'Follow', c.crew.mine, [hidden, far, seen]);
     const lineOf = async (token: string) => {

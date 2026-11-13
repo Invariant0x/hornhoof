@@ -198,7 +198,7 @@ const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => 
 /* A company with work in every corner: tasks, a turn, requests, notes, ideas and running parts of every agent. */
 async function busy() {
   const c = await aclCompany();
-  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
+  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
   const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
   const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
   let number = 0;

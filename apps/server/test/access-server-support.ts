@@ -26,7 +26,7 @@ const app = await buildApp({ db, config: loadConfig({ HORNHOOF_SECRET: TEST_SECR
 const origin = await listenAt(port => app.listen({ host: '127.0.0.1', port }));
 const c = await aclCompanyOn(app, db, origin.replace('http://', 'ws://') + '/api/nodes/socket');
 await c.db.update(subscriptions).set({ kind: 'api_key', targetKind: 'any' });
-await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'ACL integration', openedAt: new Date() });
+await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'ACL integration', openedAt: new Date() });
 const node = new WebSocket(c.url, { headers: { authorization: `Bearer ${key}` } });
 node.on('message', data => {
   const message = JSON.parse(String(data)) as ServerMessage;

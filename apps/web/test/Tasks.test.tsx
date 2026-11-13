@@ -60,7 +60,7 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
     await openTasks(user);
-    expect(await screen.findByText(/No turns yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No turns in this department yet/)).toBeInTheDocument();
   });
 
   it('answers a question and takes it off the list', async () => {
@@ -458,7 +458,18 @@ describe('decisions read failure', () => {
 });
 
 describe('how a turn runs', () => {
-  it('shows how each turn runs, and lets a person who sees the whole company change it only while the turn is planned', async () => {
+  it("lists in a department's table its own turns and those its tasks are in, not another department's", async () => {
+    const user = userEvent.setup();
+    const launch = { ...TURN, id: 'u5', number: 5, title: 'Spring launch', goal: 'Tell people.', departmentId: 'd3', messages: [] };
+    const offers = { ...PLANNED_TURN, id: 'u6', number: 6, title: 'Spring offers', goal: 'Special prices.', departmentId: 'd3' };
+    shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN, launch, offers] }] });
+    await openTasks(user);
+    expect(await screen.findByText('Refunds')).toBeInTheDocument();
+    expect(screen.queryByText('Spring launch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Spring offers')).not.toBeInTheDocument();
+  });
+
+  it('shows how each turn runs, and lets a person the server lets change it only while the turn is planned', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'PATCH /api/turns/4': [200, { turn: { ...PLANNED_TURN, mode: 'turnkey' } }] });
     await openTasks(user);
@@ -470,12 +481,22 @@ describe('how a turn runs', () => {
     await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/turns/4', body: { mode: 'turnkey' } }));
   });
 
-  it('shows a person who sees part of the company how each turn runs, without a way to change it', async () => {
+  it('shows a person who may not change it how each turn runs, without a way to change it', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }] });
+    shell({
+      'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }],
+      'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN].map(turn => ({ ...turn, canChangeMode: false })) }],
+    });
     await openTasks(user);
     expect(await screen.findAllByText('How the turn runs: in stages')).not.toHaveLength(0);
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
+  });
+
+  it('lets the owner of the department, who sees only part of the company, change how its planned turn runs', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }] });
+    await openTasks(user);
+    expect(await screen.findAllByRole('combobox', { name: 'How the turn runs' })).toHaveLength(1);
   });
 
   it.each([

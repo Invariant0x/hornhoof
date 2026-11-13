@@ -104,7 +104,7 @@ describe('the report of a turn', () => {
   it('names the turn, where its numbers come from and what it is compared with', async () => {
     show();
     await screen.findByText(/still running, counted just now/);
-    expect(screen.getByText(/Changes are to the previous turn 8 and to the starting turn 7/)).toBeInTheDocument();
+    expect(screen.getByText(/Changes are to this department's previous turn 8 and to its starting turn 7/)).toBeInTheDocument();
   });
 
   it('says when a closed turn was rebuilt from its events', async () => {
@@ -124,7 +124,7 @@ describe('the report of a turn', () => {
 
   it('says there is nothing to compare the first turn with', async () => {
     show(ok({ ...REPORT, turn: turn(1), previous: null, baseline: null, turns: [1], department: { ...DEV, rows: [row('time', 'wholeTurn', 'seconds', 60, null, null, null, null)] } }));
-    await screen.findByText(/There is no earlier turn to compare with\./);
+    await screen.findByText(/This department has no earlier turn to compare with\./);
     expect(rowOf('Whole turn')).not.toHaveTextContent('to turn');
   });
 
@@ -228,7 +228,7 @@ describe('the report of a turn', () => {
 
   it('says no turn has run yet, with nothing to try again', async () => {
     show([404, { error: { code: 'not_found', message: 'No turn has run yet.', reason: 'turn_unknown' } }]);
-    expect(await screen.findByText('No turn has run yet, so there is nothing to report.')).toBeInTheDocument();
+    expect(await screen.findByText('This department has not run a turn yet, so there is nothing to report.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -315,10 +315,10 @@ describe('the third tab of the speed panel', () => {
     const user = userEvent.setup();
     mockApi({ [PATH]: ok({ ...REPORT, turn: turn(8) }) });
     panel({ ...DEV_TREE, turn: null });
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('No turn is open now.');
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('This department runs no turn now.');
     await user.click(screen.getByRole('tab', { name: 'Report' }));
     await within(screen.getByRole('tabpanel')).findByText('From issue to acceptance, median');
-    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('No turn is open now.');
+    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('This department runs no turn now.');
   });
 
   it('keeps the line of the running turn off the report', async () => {

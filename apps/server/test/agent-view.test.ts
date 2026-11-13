@@ -275,7 +275,7 @@ describe('tasks', () => {
 describe('the department tree', () => {
   it('draws every line of any department for everyone', async () => {
     const c = await aclCompany();
-    await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date(Date.now() - 3_600_000) });
+    await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', openedAt: new Date(Date.now() - 3_600_000) });
     const [turn] = await c.db.select().from(turns);
     const own = await c.work('Own work', c.crew.mine);
     const hidden = await c.work('Hidden work', c.crew.other);
@@ -294,7 +294,10 @@ describe('the department tree', () => {
 
   it('gives the numbers of a whole department to everyone of the company, as its screen', async () => {
     const c = await aclCompany();
-    await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date() });
+    await c.db.insert(turns).values([
+      { companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', openedAt: new Date() },
+      { companyId: c.companyId, departmentId: c.sales.id, number: 2, goal: 'Turn', status: 'open', openedAt: new Date() },
+    ]);
     for (const viewer of VIEWERS) {
       for (const department of [c.dev, c.sales]) expect((await c.get(`/api/departments/${department.id}/pipeline`, c.tokens[viewer])).statusCode, viewer).toBe(200);
     }

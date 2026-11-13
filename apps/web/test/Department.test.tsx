@@ -1297,7 +1297,7 @@ describe('Department work tree', () => {
     shell(treeRoute({ ...DEV_TREE, turn: null }));
     await user.click(await screen.findByRole('button', { name: /^Разработка/ }));
     await user.click(screen.getByRole('button', { name: 'Дерево' }));
-    expect(await screen.findByText('Сейчас нет открытого хода.')).toBeInTheDocument();
+    expect(await screen.findByText('Сейчас у отдела нет открытого хода.')).toBeInTheDocument();
     expect(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Карта' })).toHaveAttribute('title', 'Карта');
     expect(screen.getByRole('button', { name: 'Скорость' })).toHaveAttribute('title', 'Скорость');
   });

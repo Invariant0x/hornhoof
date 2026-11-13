@@ -17,7 +17,7 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -30,6 +30,7 @@ import { acknowledgeCard, waitCards } from './wait-cards.js';
 import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
 import { editTurn, settle, tell, turnRows, type Turn } from './turns.js';
+import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 
@@ -62,6 +63,7 @@ const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
 const TurnParams = z.object({ number: z.coerce.number().int().positive() });
 const TurnPatch = z.strictObject({ mode: z.enum(TURN_MODES) });
+const CurrentTurnQuery = z.object({ department: z.uuid().optional() });
 export const AnswerBody = z.union([
   z.object({ answer: Text.trim().min(1) }).strict(),
   z.object({ approve: z.boolean(), answer: Text.optional() }).strict(),
@@ -196,8 +198,19 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
   return task && seesTask(viewer, task) ? task.id : null;
 }
 
-/* Turns belong to the whole company. The words they were laid out from only reach people with the full view. */
-async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
+type ModeChanger = (departmentId: string | null) => boolean;
+
+/* Who picks how a planned turn runs: a person with the whole company, the CEO or the CEO delegate, or the owner of the
+   turn's department. */
+async function modeChanger(db: Db, me: Person): Promise<ModeChanger> {
+  if (me.scopeKind === 'company' || actsAsCeo(me)) return () => true;
+  const { owns } = await accessOf(db, me);
+  return id => id !== null && owns?.has(id) === true;
+}
+
+/* Turns show to the whole company, each with the department it belongs to. The words they were laid out from only reach
+   people with the full view. */
+async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer, changesMode: ModeChanger) {
   if (!turn) return null;
   return {
     id: turn.id,
@@ -206,6 +219,8 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
     goal: turn.goal,
     status: turn.status,
     mode: turn.mode,
+    departmentId: turn.departmentId,
+    canChangeMode: changesMode(turn.departmentId),
     messages: viewer.full ? turn.messages.map(({ by, text, at }) => ({ by, text, at })) : [],
     taskId: await turnTask(db, turn, viewer),
     startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
@@ -448,23 +463,32 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/turns', async req => {
     const me = await requirePerson(req, db);
     const viewer = await viewerOf(db, me);
-    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer))) };
+    const changesMode = await modeChanger(db, me);
+    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer, changesMode))) };
   });
 
-  /* A person who sees the whole company picks how a planned turn runs; a turn that has started keeps its mode. */
+  /* A person who sees the whole company or owns the turn's department picks how a planned turn runs; a turn that has
+     started keeps its mode. */
   app.patch('/api/turns/:number', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { number } = TurnParams.parse(req.params);
     const { mode } = TurnPatch.parse(req.body);
+    const changesMode = await modeChanger(db, me);
+    const [named] = await db.select({ departmentId: turns.departmentId }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.number, number)));
+    if (named && !changesMode(named.departmentId)) throw new ApiError(403, 'forbidden', "Only people with the whole company and the owner of the turn's department pick how it runs.", 'not_owner');
     const turn = await editTurn(ctx, me.companyId, number, { mode });
-    return { turn: await turnView(db, turn, await viewerOf(db, me)) };
+    return { turn: await turnView(db, turn, await viewerOf(db, me), changesMode) };
   });
 
+  /* The running turn of a department, a product or a sub-department naming the department it is in; with none named, the
+     earliest of the departments' running turns. */
   app.get('/api/turns/current', async req => {
     const me = await requirePerson(req, db);
-    const [turn] = await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
-    return { turn: await turnView(db, turn, await viewerOf(db, me)) };
+    const { department } = CurrentTurnQuery.parse(req.query);
+    const turn = department
+      ? await openTurnOf(db, me.companyId, department)
+      : (await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open'))).orderBy(asc(turns.number)).limit(1))[0];
+    return { turn: await turnView(db, turn ?? undefined, await viewerOf(db, me), await modeChanger(db, me)) };
   });
 
   app.get('/api/departments/:id/tree', async req => {
