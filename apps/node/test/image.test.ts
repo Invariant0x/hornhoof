@@ -127,6 +127,15 @@ describe('the node image', () => {
     expect(sources).not.toMatch(/carries obra\/superpowers/i);
   });
 
+  it("gives every agent hh-browse, which drives the image's own Playwright and Chromium and installs nothing", () => {
+    expect(runtime).toContain('COPY --chmod=755 apps/node/hh-browse.cjs /usr/local/bin/hh-browse');
+    expect(runtime.indexOf('COPY --chmod=755 apps/node/hh-browse.cjs')).toBeGreaterThan(runtime.indexOf('COPY --from=build /app/apps/node/dist apps/node/dist'));
+    const launcher = readFileSync(new URL('../hh-browse.cjs', import.meta.url), 'utf8');
+    expect(launcher).toMatch(/^#!\/usr\/bin\/env node\n/);
+    expect(launcher).toContain('/app/apps/node/dist/web-page/cli.js');
+    expect(launcher).not.toMatch(/npm|npx|install/);
+  });
+
   it('installs full Playwright Chromium, Firefox and WebKit at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {
     const browserStage = dockerfile.slice(dockerfile.indexOf('AS browser\n'), dockerfile.indexOf('AS quality\n'));
     expect(browserStage).not.toContain('ARG PLAYWRIGHT_VERSION=');

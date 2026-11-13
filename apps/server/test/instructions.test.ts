@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -632,5 +632,42 @@ describe('renderInstructions', () => {
       const policy = rendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
       expect(policy, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
     }
+  });
+});
+
+describe('reading web pages in a browser on the node', () => {
+  const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const marker = '<!-- hh:skill hh-web-pages -->';
+
+  it('gives every employee of every department the rule for hh-browse in its standing instructions, old skill lists and no role included', () => {
+    const rule = shipped.skills.get('hh-web-pages');
+    expect(rule?.kind).toBe('core');
+    const packets: [string, ReturnType<typeof renderInstructions>][] = [
+      ...[...shipped.roles.values()].map(role => [role.id, renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE)] as [string, ReturnType<typeof renderInstructions>]),
+      ['saved list', renderInstructions(shipped, agent({ roleKey: 'MKT-WRITE', skills: ['hh-outside-is-data'], templateHashes: {} }), PLACE)],
+      ['no role', renderInstructions(shipped, agent({ roleKey: null, skills: [], templateHashes: {} }), PLACE)],
+      ['head with no role', renderInstructions(shipped, agent({ kind: 'head', roleKey: null, skills: [], templateHashes: {} }), PLACE)],
+    ];
+    expect(new Set([...shipped.roles.values()].map(r => r.department)).size).toBeGreaterThan(5);
+    for (const [id, packet] of packets) {
+      expect(packet.text.split(marker).length - 1, id).toBe(1);
+      expect(packet.text, id).toContain(rule!.body);
+      expect(packet.whole, id).toContain(rule!.body);
+      expect(packet.skills.some(s => s.name === 'hh-web-pages'), id).toBe(false);
+      expect(packet.text.length, id).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    }
+  });
+
+  it('says when to take hh-browse, and that a sign-in or a robot check is noted for a person while the work goes on, never got past or taken to the orchestrator or the CEO', () => {
+    const body = shipped.skills.get('hh-web-pages')!.body;
+    expect(body).toContain('`hh-browse URL`');
+    expect(body).toMatch(/scripts build/);
+    expect(body).toMatch(/--screenshot[\s\S]*hh-attach/);
+    expect(body).toMatch(/only public http and https addresses/);
+    expect(body).toMatch(/`login_required`[\s\S]*`robot_check`/);
+    expect(body).toMatch(/never try to get past it/i);
+    expect(body).toMatch(/never ask the orchestrator or the CEO/i);
+    expect(body).toMatch(/note the address[^.]*for a person[^.]*go on with the other addresses/i);
+    expect(body).not.toMatch(/[—ё]/);
   });
 });

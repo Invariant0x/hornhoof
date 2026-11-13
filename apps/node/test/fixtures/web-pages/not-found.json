@@ -1,0 +1,17 @@
+{
+  "title": "Page not found",
+  "text": "Page not found\n\nThe page you asked for does not exist. Go to the start page.",
+  "textLength": 76,
+  "links": [
+    {
+      "text": "the start page",
+      "url": "https://shop.example/"
+    }
+  ],
+  "linkCount": 1,
+  "frames": [],
+  "scripts": [],
+  "markers": [],
+  "passwordFields": 0,
+  "height": 800
+}

@@ -38,7 +38,7 @@ describe('templates', () => {
 
   it('makes each ability self-contained instead of relying on another selected skill', () => {
     const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch'].includes(ref)), skill.id).toEqual([]);
+    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch', 'hh-browse'].includes(ref)), skill.id).toEqual([]);
   });
 
   it('keeps small work proportionate without waiving gates or permissions', () => {
