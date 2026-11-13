@@ -5,6 +5,122 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.5] - 2026-11-13
+
+Each department runs turns of its own, so the work of one department no longer waits for another's or piles up in one
+turn of the whole company.
+
+### Changed
+
+- A turn belongs to one top-level department, with the work of its products and sub-units. Each department has at most
+  one running turn and its planned ones wait in line behind it; turns of different departments run side by side.
+  Turn numbers still count across the company, so each turn keeps its own branch.
+- A new task with nothing above it joins the running turn of its own department, and none while that department runs no
+  turn or works all the time. Work under a task stays in that task's turn.
+- The head of a department lays out, adds to, renames and merges the turns of its own department, and reads its list
+  for later turns; the orchestrator does it for every department. Both hear when a turn of the department is over.
+- A new goal gets a new turn of the department that owns it, and work is added to a turn only for that turn's own goal,
+  so a turn closes once its goal is done.
+- A task may wait for a task of another turn or department once that turn has started.
+- The map shows on each department's card its own turn, and the circle in the middle holds all running turns together.
+  The Tasks screen lists in a department's table its own turns, and another department's only while it holds a task of
+  this one. The report of a turn compares it with the earlier turns of the same department.
+- The owner of a department, besides people with the whole company, picks how its planned turn runs.
+- A department that is removed closes its turns, which stay in the history.
+- The update gives every turn its department: a running or planned turn that of its first unfinished task, of a
+  department that runs turns before one that works all the time, any other that of its first task. A running turn keeps
+  only its own department's work; other departments' tasks in it go on outside turns, and nothing of them is lost. A planned turn with work of several departments is split into one planned turn for each, with the next free
+  numbers. Each department's planned turn then starts by itself within a minute when the department runs none.
+
+## [0.23.4] - 2026-11-13
+
+Every employee pushes each commit and branch at once, and the head of the department decides what goes into the main
+branch.
+
+### Changed
+
+- Every employee pushes each commit and each branch to the repository as soon as it is made, finished or not, so no work
+  stays only on one machine. A push brings nothing into the main branch: which pushed branches go there and when, and
+  how the repository is laid out, the head of the department decides.
+
+### Fixed
+
+- A server that stops no longer waits up to a minute for a connection that never asked anything.
+- A head is no longer woken every quarter of an hour about a quiet department when its work is paused with a reason:
+  a pause explains the quiet whatever the task's status.
+
+## [0.23.3] - 2026-11-13
+
+A person's assistant can write to its owner in their chat when asked in its window, and an assistant's program can hand
+its whole conversation to a new session.
+
+### Added
+
+- When the owner asks their assistant in its window in Hornhoof to write to them in their chat, the assistant sends
+  those words there in its own voice. The assistant's program gets them as a reply that answers no message of its own.
+- An assistant's program can send, beside the new words, its whole conversation with the owner (`freshText`, up to
+  200000 characters). The assistant's agent reads it in place of the new words when its session starts anew: a first
+  session, a change of plan, machine or instructions, or a conversation the owner cleared in the terminal. A session
+  that goes on reads only the new words. The assistant's `/me` now says `contract: 2`, so a program sends `freshText`
+  only to a server that takes it.
+
+### Changed
+
+- The words an assistant's program sends may now be up to 50000 characters, up from 20000. Longer words are refused,
+  not cut.
+
+## [0.23.2] - 2026-11-13
+
+Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, heads'
+Telegram bots take files, and a machine whose sign-in was refused stops starting turns that cannot work.
+
+### Added
+
+- A click on a line of the company map puts a bend on it, drawn as a small circle. The line runs through its bends in
+  straight pieces, a bend can be dragged or moved with the arrow keys, and a click on it takes it away. Each person's
+  bends are kept with their own arrangement of the map, and "Put back as it was" clears them too.
+- A head's Telegram bot, which answered anything but text with "I take only text messages for now", now passes on
+  documents, archives, photos (an album as one message), voice, audio and video messages and still stickers as files
+  the agent downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its
+  transcript when `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY`
+  and `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears
+  why. The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
+
+### Changed
+
+- A department does what the people who run it decide, without the orchestrator or the CEO. Its head hires, moves,
+  renames, changes and fires its employees, and changes its teams and products, in the turn that answers those people.
+  The orchestrator no longer stands between a department's people and their head.
+- Everyone in a company sees the whole company: every department, its structure, every employee with what they work on
+  and how, the map's animations, each department's tasks, tree, speed and numbers. The window, conversation and terminal
+  of an employee open only for the people of that employee's department, and a click on someone else's employee says so
+  instead of showing an error. The orchestrator stays with those who run the whole company.
+- In a department's scheme, every unit hangs from one line under the head, with no empty space beside it.
+
+### Fixed
+
+- When a provider refused a machine's sign-in, the machine kept starting turns that failed at once, each in its own
+  terminal. It now stays signed out until the sign-in changes, also when the program reported the refusal as a failure
+  or the sign-in was made in the program itself.
+- The window of a person's own assistant no longer closes and opens again every time the company's picture refreshes.
+- When two people wrote to one head's Telegram bot, the second person's words went into the turn that answered the
+  first, and from then on every word of that turn went to both chats: one person got the answer to the other's
+  question. A person's words now wait for a turn of their own when the running turn answers someone else in Telegram,
+  or when they come from Telegram and the running turn is another person's. The head is also told that its answer goes
+  to the writer alone.
+
+## [0.23.1] - 2026-11-13
+
+A machine whose agent program update was cut off half way can update it again, and the machine's log says why an update
+or a sign-in failed.
+
+### Fixed
+
+- When a machine slept or shut down in the middle of updating Claude Code, Codex or Kimi Code, npm left a copy of the
+  program aside, and every later update of that program failed at once with "Could not update". The node now clears
+  that copy before it installs.
+- The machine's log now says why a program update failed and how a sign-in's program ended, without any part of a token.
+
 ## [0.23.0] - 2026-11-12
 
 The work of turns 19 to 23: themes, the forms of people, assistants, employees and plans on one layout, a chat that

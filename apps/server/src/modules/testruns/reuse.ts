@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
 import { reusableUnits } from './reuse-evidence.js';
+import { openTurnOf } from '../tasks/turn-department.js';
 
 /* Reusing green test results. A file that passed at a fingerprint need not run again at that fingerprint. Every doubt runs the
    file: no fingerprint, no green result, a group with one file changed, a machine that sent none. Every so many turns a run
@@ -111,12 +112,11 @@ export function reuseView(cache: TestRunFileCache | null, parts: Pick<Part, 'fai
     mismatches: cache.mismatches.map(file => file.file), failedFiles, notes: cache.notes } };
 }
 
-/* The turn a run belongs to: its task's, or the one open now. */
-async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId'>): Promise<number | null> {
+/* The turn a run belongs to: its task's, or the one its department runs now. */
+async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId' | 'departmentId'>): Promise<number | null> {
   const [own] = await db.select({ number: turns.number }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(eq(tasks.id, run.taskId));
   if (own) return own.number;
-  const [open] = await db.select({ number: turns.number }).from(turns).where(and(eq(turns.companyId, run.companyId), eq(turns.status, 'open')));
-  return open?.number ?? null;
+  return (await openTurnOf(db, run.companyId, run.departmentId))?.number ?? null;
 }
 /* What a release relies on was proved on its own line: the repository's main branch or the turn's. A job writes its own report, so
    what another branch says holds for that branch's work and no further, and a turn's full run is of the turn's branch. */

@@ -11,8 +11,8 @@ export type Who = 'orchestrator' | 'employee';
 type Rect = { x: number; y: number; width: number; height: number };
 
 const WORDS = {
-  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Chat', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook', back: 'Back to terminal' },
-  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Чат', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот', back: 'К терминалу' },
+  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Chat', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook', back: 'Back to terminal', backToChat: 'Back to conversation' },
+  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Чат', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот', back: 'К терминалу', backToChat: 'К переписке' },
 };
 
 const NOTES: NoteView[] = [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-11-04T00:00:00.000Z' }];

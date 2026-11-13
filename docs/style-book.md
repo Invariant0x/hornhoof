@@ -1,6 +1,6 @@
 # Hornhoof style book
 
-**Version 1.2, approved by the head of Design on 2026-11-07.** The head of Design owns this book (section 8).
+**Version 1.3, approved by the head of Design on 2026-11-13.** The head of Design owns this book (section 8).
 
 **Base.** `apps/web/src/theme.css` at commit `a354cc276d6f92792e4e602627d7300dfc04f251`, SHA256 `6efe8ccd9c9d420114e212c0cbf6c99d4a1ac97771b8ceebb00c1f8549a412ec`. Colours, type, sizes, components, fonts and languages were read at that commit (#655). Counts of sizes and weights in sections 2 and 3 were taken at `2fed0c54` and not recounted.
 
@@ -41,6 +41,10 @@ All colours are tokens in `:root` of `theme.css`. Light is the default. Dark app
 | `--ok` | `#13753D` | `#5FD08A` | Success text and line |
 | `--red` | `#C62828` | `#FF6B6B` | Alarm fill, line and text |
 | `--on-red` | `#FFFFFF` | `#2A0606` | Text on `--red` |
+| `--on-pink` | `#000000` | `#141A22` | Text on `--pink` fills: `.nav-count`. Skin role `on_attention` |
+| `--scrim` | `rgba(10, 20, 30, .35)` | `rgba(10, 20, 30, .35)` | Dim layer behind a dialog: `.dialog-back`. Skin role `scrim` |
+| `--scrollbar-thumb` | `#768695` | `#687A8F` | Thumb of the page scrollbar, `scrollbar-color`. Skin role `scrollbar_thumb` |
+| `--scrollbar-track` | `#F8FAFC` | `#1B232D` | Track of the page scrollbar, `scrollbar-color`. Skin role `scrollbar_track` |
 | `--idle` | `#C5D0DB` | `#2C3744` | Empty track, `.spinner` ring, panel bar lights |
 | `--dot` | `rgba(30, 60, 90, .17)` | `rgba(140, 175, 205, .15)` | Dots of the map grid |
 | `--glow` | `rgba(0, 163, 189, .10)` | `rgba(70, 224, 239, .10)` | Focus halo, chosen background |
@@ -78,6 +82,8 @@ Fixed pairs:
 | `--on-red` on `--red` | 5.62 | 6.71 |
 | `--ink` on `--hud` over `--bg` | 15.60 | 13.95 |
 | `--muted` on `--hud` over `--bg` | 6.34 | 6.35 |
+| `--on-pink` on `--pink` | 4.90 | 6.31 |
+| `--scrollbar-thumb` on `--scrollbar-track` (control, limit 3:1) | 3.57 | 3.60 |
 
 Lines against what they stand on. The limit of 3:1 is for controls; `--line` only divides content, so it is shown for reference:
 
@@ -96,7 +102,7 @@ Lines against what they stand on. The limit of 3:1 is for controls; `--line` onl
 
 Every focus ring in `theme.css` is drawn in `--cyan-ink`, the general `:focus-visible` among them, as #777 asks: it holds 3:1 on every surface where `--cyan` does not.
 
-**GAP.** 7 uses of raw colours sit outside the tokens in `theme.css`. Where: `rgba(10, 20, 30, .35)` in `.dialog-back`, `#15191F` in `.t-term`, `#dcdcdc` in `.t-load`, `#2b323b` in `.t-load .spinner`, `#fff` in `.nav-count`. The whole product has 35: see `hornhoof-themes.md`, section 8.
+**GAP.** 3 raw colours, in 5 uses, still sit outside the tokens in `theme.css`: `#15191F` in `.t-term` and `.t-load`, `#dcdcdc` in `.t-load` and `.t-load .spinner`, `#2b323b` in `.t-load .spinner`. `.dialog-back` uses `--scrim` and `.nav-count` uses `--on-pink` since 1.3. For the whole product, see `hornhoof-themes.md`, section 8.
 
 ### Local variables
 
@@ -109,8 +115,11 @@ These are set on components, not themes: `--cut`, `--c2`, `--edge`, `--strip-roo
 | `--f-display` | `'Tektur', 'Onest', system-ui, sans-serif` | Headings, buttons, tabs |
 | `--f-body` | `'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif` | Body text |
 | `--f-mono` | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Commands, code, keys |
+| `--cut-k` | `1` | Scale of every cut corner, set by the skin on `:root`: `0` square (Matrix), `1` the usual cut (Cyberpunk, Light, Pixel), a person's own skin from `0` to `1.5` |
 
-Beside the colours and the fonts, a theme sets one more token, `--cut-k`: how far corners are cut, `1` the usual cut and `0` square, as in Matrix.
+`--cut-k` scales every cut corner: `calc(var(--cut) * var(--cut-k))`. The skin's shape decides how the corner is drawn: one slanted cut, or two square steps of `calc(2px * var(--cut-k))` in Pixel.
+
+**RULE.** New components with a cut corner multiply their `--cut` by `--cut-k` and never set `--cut-k` themselves.
 
 Fonts are imported in `apps/web/src/main.tsx`:
 
@@ -433,6 +442,7 @@ Real sources in the repository:
 | 1.0 | 2026-11-05 | First version: built from the code, numbers of section 6 after the CEO's choice, rules 11 to 13, section 9 | Head of Design |
 | 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
 | 1.2 | 2026-11-07 | Base moved to `a354cc27` (#655). Themes and modes told apart. GAPs and counts updated. Rules 14 and 15 of section 6, from the verdict on #591. One exception added. Reading before work extended to giving out tasks | Head of Design |
+| 1.3 | 2026-11-13 | Tokens of skin file version 2: `--on-pink`, `--scrim`, `--scrollbar-thumb`, `--scrollbar-track` and `--cut-k`, with their contrast. Raw colours of `.dialog-back` and `.nav-count` removed from the GAP (#789) | Head of Design |
 
 ## 9. Browsers
 

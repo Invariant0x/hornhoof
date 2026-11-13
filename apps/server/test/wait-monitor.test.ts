@@ -11,7 +11,7 @@ async function quietDepartment() {
   const c = await waitCompany({ turn: false });
   const now = new Date();
   const since = new Date(now.getTime() - 15 * MINUTE);
-  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Deliver work', openedAt: since }).returning();
+  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Deliver work', openedAt: since }).returning();
   const task = await c.task();
   await c.db.update(tasks).set({ turnId: turn!.id, updatedAt: since, externalWait: { since: since.toISOString(), until: new Date(now.getTime() + 120 * MINUTE).toISOString(), reason: 'Machine run' } }).where(eq(tasks.id, task.id));
   return { ...c, taskRow: task, turn: turn!, now };
@@ -89,8 +89,8 @@ describe('quiet departments', () => {
   it.each(['blocked', 'waiting', 'paused', 'prerequisite', 'person', 'run', 'children'] as const)('counts a %s wait as known with no timer of its own', async kind => {
     const c = await quietDepartment();
     await c.db.update(tasks).set({ externalWait: null, ...(kind === 'blocked' || kind === 'waiting' ? { status: kind } : {}) }).where(eq(tasks.id, c.taskRow.id));
-    /* Paused with its reason: the one who paused it said why, and the work waits for its resume. */
-    if (kind === 'paused') await c.db.update(tasks).set({ paused: { at: c.now.toISOString(), reason: 'Waits for the CEO to decide.', by: { agentId: c.orchestrator.id }, root: c.taskRow.id } }).where(eq(tasks.id, c.taskRow.id));
+    /* A task its holder paused with a reason stays at work by status: the pause alone explains it. */
+    if (kind === 'paused') await c.db.update(tasks).set({ paused: { at: c.now.toISOString(), reason: 'Waits for the test stand', by: { agentId: c.head.id }, root: c.taskRow.id } }).where(eq(tasks.id, c.taskRow.id));
     if (kind === 'prerequisite') {
       const prerequisite = await c.task();
       await c.db.update(tasks).set({ departmentId: c.watcher.departmentId }).where(eq(tasks.id, prerequisite.id));
@@ -193,6 +193,14 @@ describe('quiet departments', () => {
     await c.run();
     await checkWaitHealth(c.ctx, c.now);
     expect(await c.messages(c.head.id)).toEqual([]);
+  });
+
+  it('checks a turn only against the work of its own department', async () => {
+    const c = await unexplained();
+    await c.db.update(turns).set({ departmentId: c.watcher.departmentId }).where(eq(turns.id, c.turn.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toEqual([]);
+    expect(await c.messages(c.orchestrator.id)).toEqual([]);
   });
 
   it('keeps unrelated department descendants outside its quiet scope', async () => {

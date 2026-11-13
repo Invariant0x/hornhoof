@@ -1,7 +1,7 @@
 import type { TaskWaitView, WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { AgentViewer } from '../../auth/agent-view.js';
-import { seesAgentId } from '../../auth/agent-view.js';
+import { knowsAgentId } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
 import { tasks, taskWaits } from '../../db/schema.js';
 import type { Task, Tx } from './engine.js';
@@ -48,11 +48,11 @@ export const shownWaits = (waits: TaskWait[], seenPrerequisite: (id: string) => 
 
 function shownOwner(viewer: AgentViewer, owner: WaitOwnerBinding | null): WaitOwnerBinding | null {
   if (!owner || viewer.full) return owner;
-  if ('agentId' in owner) return seesAgentId(viewer, owner.agentId) ? owner : null;
+  if ('agentId' in owner) return knowsAgentId(viewer, owner.agentId) ? owner : null;
   return owner.personId === viewer.personId ? owner : null;
 }
 
-/* Whom a wait answers to goes when that is someone this person does not see. */
+/* Whom a wait answers to goes when that is an agent this person does not know of, or another person. */
 export const maskWaits = (viewer: AgentViewer, waits: TaskWaitView[]): TaskWaitView[] => waits.map(wait => ({ ...wait, owner: shownOwner(viewer, wait.owner) }));
 
 export type WaitPage = { waits: TaskWaitView[]; next: string | null };

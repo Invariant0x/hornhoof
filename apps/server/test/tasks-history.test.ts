@@ -38,7 +38,7 @@ async function company() {
     .insert(turns)
     .values(Array.from({ length: TURNS - 1 }, (_, i) => ({ companyId, number: i + 1, title: `Turn ${i + 1}`, goal: 'Old work.', status: 'closed' as const, closedAt: new Date() })))
     .returning();
-  const [open] = await db.insert(turns).values({ companyId, number: TURNS, title: 'Payments', goal: 'Take card payments.', status: 'open', openedAt: new Date() }).returning();
+  const [open] = await db.insert(turns).values({ companyId, departmentId: dev!.id, number: TURNS, title: 'Payments', goal: 'Take card payments.', status: 'open', openedAt: new Date() }).returning();
   let number = 0;
   for (const turn of history) {
     const done = { companyId, turnId: turn.id, departmentId: dev!.id, status: 'done' as const, closedAt: new Date(), executorAgentId: bruno.id, createdByAgentId: head.id };

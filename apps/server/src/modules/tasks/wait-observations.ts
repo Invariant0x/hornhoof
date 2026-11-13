@@ -39,7 +39,7 @@ async function unexplained(ctx: Ctx, rows: Task[], now: Date): Promise<Task[]> {
 async function taskWaitReason(ctx: Ctx, task: Task, now: Date): Promise<string | null> {
   if (task.externalWait && new Date(task.externalWait.until) > now) return `${task.externalWait.reason}, until ${task.externalWait.until}`;
   if (task.status === 'blocked' || task.status === 'waiting') return task.status;
-  /* Whoever paused it said why, and its work waits until they resume it. */
+  /* A pause holds work so that nothing wakes its holder, whatever its status: its reason explains the quiet. */
   if (task.paused) return `paused: ${task.paused.reason}`;
   return await waitingForTasks(ctx, task) ?? await waitingForService(ctx, task);
 }

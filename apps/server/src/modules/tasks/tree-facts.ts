@@ -2,7 +2,7 @@ import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'drizzle-orm';
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import type { Task, Tx } from './engine.js';
 import { NUDGES, treeOwnerSince, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
@@ -11,6 +11,7 @@ import { countedFindings } from './review-findings.js';
 import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { readTurnHistory, upTo } from './tree-history.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
+import { openTurnOf } from './turn-department.js';
 
 type Reader = Db | Tx;
 
@@ -233,10 +234,8 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
   };
 }
 
+/* The tree of the turn the department runs now, its top-level department's open one. */
 export async function treeFacts(db: Db, companyId: string, departmentId: string, sees: (t: Task) => boolean): Promise<TreeFacts> {
-  const [turn] = await db
-    .select({ id: turns.id, number: turns.number, createdAt: turns.createdAt, openedAt: turns.openedAt })
-    .from(turns)
-    .where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
-  return treeFactsOf(db, companyId, departmentId, sees, turn ?? null);
+  const turn = await openTurnOf(db, companyId, departmentId);
+  return treeFactsOf(db, companyId, departmentId, sees, turn && { id: turn.id, number: turn.number, createdAt: turn.createdAt, openedAt: turn.openedAt });
 }

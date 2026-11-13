@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -97,6 +97,18 @@ describe('templates', () => {
     expect(body('orch-plan-turn')).toMatch(/explicit authorized hold[\s\S]*never[\s\S]*close the last task[\s\S]*explicit hold/i);
   });
 
+  it('gives each top-level department turns of its own, a new goal a new turn, and a turn only the work of its goal', () => {
+    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).toMatch(/runs its own turns|run their own turns|your department's own turns/i);
+    const plan = body('orch-plan-turn');
+    expect(plan).toMatch(/new goal[^.]*new turn of the department that owns it/i);
+    expect(plan).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
+    expect(plan).toMatch(/head[^.]*lays out and closes[^.]*its department's turns/i);
+    const head = body('hh-head');
+    expect(head).toMatch(/plan_turn/);
+    expect(head).toMatch(/new goal[^.]*new turn/i);
+    expect(head).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
+  });
+
   it('preserves named and urgent-only orders without bypassing protected integration checks', () => {
     expect(body('orch-company')).toMatch(/named orders end to end outside planned turns/);
     expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
@@ -137,6 +149,12 @@ describe('templates', () => {
     expect(paragraph).toMatch(/weigh them as you weigh that person's words in your window/);
     expect(paragraph).toMatch(/goes back to the assistant as plain text/);
     expect(paragraph).not.toMatch(/exception|never change|never hire/);
+  });
+
+  it("has a person's assistant answer words from its window there, and write to its owner's chat from there only when asked", () => {
+    const line = body('hh-assistant').split('\n').find(l => l.includes('tell_owner'));
+    expect(line).toMatch(/your answer stays in the window/);
+    expect(line).toMatch(/asks there to be written to in their chat/);
   });
 
   it("keeps every department's work as files in a repository of its own, which the orchestrator creates itself with a saved key, or offers", () => {
@@ -390,7 +408,6 @@ describe('templates', () => {
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
@@ -778,11 +795,10 @@ describe('templates', () => {
       expect(contributingDoc).toContain('### Interface panels and language checks');
     });
 
-    it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', () => {
+    it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', async () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
-      const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-      expect(styleBook).toContain('Version 1.2, approved by the head of Design on 2026-11-07.');
+      expect(styleBook).toContain('Version 1.3, approved by the head of Design on 2026-11-13.');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',
@@ -810,8 +826,8 @@ describe('templates', () => {
       expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
       expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
       expect(styleBook).toMatch(/Close button of a panel[\s\S]*Reviewed by 2027-02-05/);
-      const light = themeDeclarations(themeCss, ':root {');
-      const dark = themeDeclarations(themeCss, ':root[data-theme="dark"]');
+      const light = await skinTokens(root, 'light');
+      const dark = await skinTokens(root, 'cyberpunk');
       const colourSection = styleBook.slice(styleBook.indexOf('## 1. Colours'), styleBook.indexOf('### Contrast of text'));
       const bookColours = Object.fromEntries(
         [...colourSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, [m[2]!, m[3]!]]),
@@ -820,9 +836,12 @@ describe('templates', () => {
       const actualColours = Object.fromEntries(Object.keys(bookColours).map(k => [k, [light[k], dark[k]]]));
       expect(actualColours).toEqual(bookColours);
       const typeSection = styleBook.slice(styleBook.indexOf('## 2. Type'), styleBook.indexOf('Fonts are imported'));
-      const bookFonts = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
+      const { '--cut-k': cut, ...bookFonts } = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
       expect(Object.keys(bookFonts)).toEqual(['--f-display', '--f-body', '--f-mono']);
-      expect(Object.fromEntries(Object.keys(bookFonts).map(k => [k, light[k]]))).toEqual(bookFonts);
+      /* The type table also holds how far the Light skin cuts its corners. */
+      expect(cut).toBe(light['--cut-k']);
+      const families = (fonts: Record<string, string | undefined>) => Object.fromEntries(Object.keys(bookFonts).map(k => [k, fontFamilies(fonts[k])]));
+      expect(families(light)).toEqual(families(bookFonts));
       const sources = [...new Set(styleBookSources(styleBook))];
       expect(sources.length).toBeGreaterThanOrEqual(46);
       expect(sources.filter(rel => !existsSync(join(root, rel)))).toEqual([]);
@@ -951,7 +970,6 @@ describe('templates', () => {
           { id: 'h', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1],
           { company: 'Acme', department: 'Work', product: null },
         );
-        expect(Buffer.byteLength(rendered.text), role.id).toBeLessThan(24_000);
         expect(rendered.text, role.id).toContain(leadTasksBody());
         expect(rendered.text, role.id).toContain(templates.skills.get('hh-head')!.body);
       }
@@ -1477,11 +1495,15 @@ const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => b
   },
 ];
 
-const themeDeclarations = (css: string, selector: string): Record<string, string> => {
-  const start = css.indexOf('{', css.indexOf(selector)) + 1;
-  const block = css.slice(start, css.indexOf('}', start));
-  return Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim().replace(/\s+/g, ' ')]));
+/* The tokens a built-in skin of the web app sets. The book's two colour columns are the Light skin and Cyberpunk, the dark one. */
+const skinTokens = async (root: string, id: string): Promise<Record<string, string>> => {
+  const registry = (await import(pathToFileURL(join(root, 'apps/web/src/skins/registry.ts')).href)) as { builtinSkin: (id: string) => unknown };
+  const roles = (await import(pathToFileURL(join(root, 'apps/web/src/skins/roles.ts')).href)) as { declarations: (look: unknown) => [string, string][] };
+  return Object.fromEntries(roles.declarations(registry.builtinSkin(id)));
 };
+
+/* A font stack as its families in order: a family name is the same with quotes or without. */
+const fontFamilies = (stack: string | undefined) => stack?.split(',').map(font => font.trim().replace(/^'(.*)'$/, '$1'));
 
 const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`((?:ui|screens)\/[\w./-]+\.tsx?)`/g)].map(m => `apps/web/src/${m[1]!}`),

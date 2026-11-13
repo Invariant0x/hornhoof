@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WHOLE, type Access } from '../src/auth/access.js';
-import { hiddenParty, maskEnvelope, seesAgent, seesAgentId, type AgentViewer } from '../src/auth/agent-view.js';
-import { seesTask, type TaskPlace } from '../src/modules/tasks/sight.js';
+import { hiddenParty, knowsAgentId, maskEnvelope, seesAgent, seesAgentId, type AgentViewer } from '../src/auth/agent-view.js';
+import { actsOnTask, seesTask, type TaskPlace } from '../src/modules/tasks/sight.js';
 
 const listed = (departments: string[], teams: string[] = []): Access => ({ whole: false, departments: new Set(departments), teams: new Set(teams) });
 const person = (access: Access, plans: string[] = ['mine'], agents: string[] = ['seen']): AgentViewer => ({ full: false, personId: 'me', access, plans: new Set(plans), agents: new Set(agents), own: new Set(), apart: new Set() });
@@ -69,7 +69,21 @@ describe('who sees an agent', () => {
   });
 });
 
-describe('who sees a task', () => {
+describe('who knows of an agent and sees a task', () => {
+  const task = (over: Partial<TaskPlace> = {}): TaskPlace => ({ departmentId: 'dev', productId: null, createdByPersonId: null, createdByAgentId: null, assigneeAgentId: null, executorAgentId: null, ...over });
+
+  it("knows of every agent but another person's assistant's own, and sees every task but its work", () => {
+    const viewer = { ...person(listed(['sales'])), own: new Set(['ava']), apart: new Set(['max']) };
+    expect([knowsAgentId(viewer, 'other'), knowsAgentId(viewer, 'ava'), knowsAgentId(viewer, 'max'), knowsAgentId(viewer, null)]).toEqual([true, true, false, false]);
+    expect(seesTask(viewer, task({ assigneeAgentId: 'other' }))).toBe(true);
+    expect(seesTask(viewer, task({ departmentId: null }))).toBe(true);
+    expect(seesTask(viewer, task({ createdByAgentId: 'max', assigneeAgentId: 'other' }))).toBe(true);
+    expect(seesTask(viewer, task({ assigneeAgentId: 'max' }))).toBe(false);
+    expect(seesTask(viewer, task({ executorAgentId: 'max' }))).toBe(false);
+  });
+});
+
+describe('who changes a task', () => {
   const task = (over: Partial<TaskPlace> = {}): TaskPlace => ({ departmentId: 'dev', productId: null, createdByPersonId: null, createdByAgentId: null, assigneeAgentId: null, executorAgentId: null, ...over });
   const viewer = person(listed(['dev']));
 
@@ -80,26 +94,26 @@ describe('who sees a task', () => {
   ];
 
   it.each(roles)('goes with a seen agent as %s', (_name, over) => {
-    expect(seesTask(viewer, task(over))).toBe(true);
-    expect(seesTask(person(listed(['sales'])), task(over))).toBe(false);
+    expect(actsOnTask(viewer, task(over))).toBe(true);
+    expect(actsOnTask(person(listed(['sales'])), task(over))).toBe(false);
   });
 
   it('goes with the person who gave it, and with nobody else who only reaches the department', () => {
-    expect(seesTask(viewer, task({ createdByPersonId: 'me' }))).toBe(true);
-    expect(seesTask(viewer, task({ createdByPersonId: 'someone', assigneeAgentId: 'other' }))).toBe(false);
-    expect(seesTask(viewer, task())).toBe(false);
+    expect(actsOnTask(viewer, task({ createdByPersonId: 'me' }))).toBe(true);
+    expect(actsOnTask(viewer, task({ createdByPersonId: 'someone', assigneeAgentId: 'other' }))).toBe(false);
+    expect(actsOnTask(viewer, task())).toBe(false);
   });
 
   it('stays in the places the person reaches, even a task they gave', () => {
-    expect(seesTask(person(listed(['sales'])), task({ createdByPersonId: 'me' }))).toBe(false);
-    expect(seesTask(person(WHOLE), task({ departmentId: null, assigneeAgentId: 'seen' }))).toBe(true);
-    expect(seesTask(viewer, task({ departmentId: null, assigneeAgentId: 'seen' }))).toBe(false);
-    expect(seesTask(viewer, task({ departmentId: 'dev', productId: 'shop', assigneeAgentId: 'seen' }))).toBe(true);
+    expect(actsOnTask(person(listed(['sales'])), task({ createdByPersonId: 'me' }))).toBe(false);
+    expect(actsOnTask(person(WHOLE), task({ departmentId: null, assigneeAgentId: 'seen' }))).toBe(true);
+    expect(actsOnTask(viewer, task({ departmentId: null, assigneeAgentId: 'seen' }))).toBe(false);
+    expect(actsOnTask(viewer, task({ departmentId: 'dev', productId: 'shop', assigneeAgentId: 'seen' }))).toBe(true);
   });
 
   it('shows the full view everything it reaches', () => {
-    expect(seesTask(full, task())).toBe(true);
-    expect(seesTask({ ...full, access: listed(['sales']) }, task())).toBe(false);
+    expect(actsOnTask(full, task())).toBe(true);
+    expect(actsOnTask({ ...full, access: listed(['sales']) }, task())).toBe(false);
   });
 });
 

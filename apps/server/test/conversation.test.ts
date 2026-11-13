@@ -704,12 +704,12 @@ describe("an employee's conversation", () => {
 
   async function inNewCompanyTurn(kind: 'head' | 'orchestrator') {
     const company = await withEmployee('head');
-    const { app, db, ceo, builtin, bruno } = company;
+    const { app, db, ceo, builtin, bruno, dev } = company;
     const id = kind === 'head' ? bruno.id : 'orchestrator';
     await sayTo(app, ceo, id, 'We agreed to support card payments.');
     await finish(builtin, await nextRun(builtin), 'sess-1');
     await until(async () => !(await stateOf(app, ceo, id)).busy);
-    await db.insert(turns).values({ companyId: bruno.companyId, number: 1, goal: 'Card payments.', status: 'open', openedAt: new Date() });
+    await db.insert(turns).values({ companyId: bruno.companyId, departmentId: dev.id, number: 1, goal: 'Card payments.', status: 'open', openedAt: new Date() });
     return { ...company, id };
   }
 
@@ -783,12 +783,19 @@ describe("an employee's conversation", () => {
     expect(fresh.prompt.endsWith(`Ivan (CEO): The new turn starts.${IVAN_IS}`)).toBe(true);
   });
 
-  it('starts a member in a clean session when a new turn of the company opens, and goes on in it during the turn', async () => {
-    const { app, db, ceo, builtin, bruno } = await withEmployee();
+  it('starts a member in a clean session when a new turn of its department opens, and goes on in it during the turn', async () => {
+    const { app, db, ceo, builtin, bruno, dev, sales } = await withEmployee();
     await sayTo(app, ceo, bruno.id, 'Hello');
     await finish(builtin, await nextRun(builtin), 'sess-1');
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
-    await db.insert(turns).values({ companyId: bruno.companyId, number: 1, goal: 'Card payments.', status: 'open', openedAt: new Date() });
+    /* Another department's turn is not his. */
+    await db.insert(turns).values({ companyId: bruno.companyId, departmentId: sales.id, number: 1, goal: 'Launch.', status: 'open', openedAt: new Date() });
+    await sayTo(app, ceo, bruno.id, 'Sales starts a turn.');
+    const same = await nextRun(builtin);
+    expect(same.sessionId).toBe('sess-1');
+    await finish(builtin, same, 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    await db.insert(turns).values({ companyId: bruno.companyId, departmentId: dev.id, number: 2, goal: 'Card payments.', status: 'open', openedAt: new Date() });
     await sayTo(app, ceo, bruno.id, 'The new turn starts.');
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();

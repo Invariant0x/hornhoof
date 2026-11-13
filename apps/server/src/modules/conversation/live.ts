@@ -3,7 +3,7 @@ import { NEXT_TURN_WORDS } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, subscriptions } from '../../db/schema.js';
+import { jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
@@ -41,7 +41,7 @@ export async function sayLive(
   required = false,
 ): Promise<string | null> {
   const [running] = await ctx.db
-    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, sub: subscriptions })
+    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, createdBy: jobs.createdBy, sub: subscriptions })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), isNull(jobs.error)))
@@ -49,11 +49,30 @@ export async function sayLive(
   const node = running && identityOf(running.sub, running.nodeId);
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
   if (!takesLiveWords(ctx, node, running.sub.provider)) return null;
+  if (await answersSomeoneElse(ctx, running, source)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
   if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
   return missedLive(required);
 }
+
+/* Whether a person's words would go into a turn that answers someone else in Telegram. Every word of a turn goes back to
+   each Telegram chat a message of the turn came from, so words of one person typed into another's turn would carry the
+   answer to the one into the chat of the other, and the agent could not tell whose question each answer is for. Such words
+   wait for a turn of their own: the words of a turn whose Telegram chats are all the person's own, or, from Telegram, of a
+   turn that is not another person's. Words that are no person's, and words between people in the window, go in as before. */
+export async function answersSomeoneElse(ctx: Pick<Ctx, 'db'>, running: { id: string; createdBy: string | null }, source?: MessageSource): Promise<boolean> {
+  const personId = source?.personId;
+  if (!personId) return false;
+  const chats = await ctx.db.select({ chatId: telegramReplies.chatId }).from(telegramReplies).where(eq(telegramReplies.jobId, running.id));
+  if (chats.length) {
+    const [me] = await ctx.db.select({ telegram: people.telegramUserId }).from(people).where(eq(people.id, personId));
+    if (chats.some(c => c.chatId !== me?.telegram)) return true;
+  }
+  return fromTelegram(source?.data) && running.createdBy !== null && running.createdBy !== personId;
+}
+
+const fromTelegram = (data: unknown): boolean => !!data && typeof data === 'object' && 'channel' in data && data.channel === 'telegram';
 
 /* A node without live terminals never takes words into a turn, nor a program that takes typed words as a turn of its own:
    they wait for the next one. */

@@ -40,19 +40,13 @@ it('gives every select a shared theme-colored arrow inset from the right edge an
   }
 });
 
-it("paints what an agent does from the theme's tokens, and an alarm and the frame around it red, light and dark", () => {
+it("paints what an agent does from the theme's tokens, and an alarm and the frame around it in the theme's danger", () => {
   expect(decl('.ast', 'color')).toBe('var(--muted)');
   expect(decl('.ast.work', 'color')).toBe('var(--cyan-ink)');
   expect(decl('.ast.person', 'color')).toBe('var(--pink-ink)');
   expect(decl('.ast.alarm', 'background')).toBe('var(--red)');
   expect(decl('.ast.alarm', 'color')).toBe('var(--on-red)');
   for (const frame of ['.schip:has(.ast.alarm) > .edge', '.shead:has(.ast.alarm) > .edge', '.tview .lchip:has(.ast.alarm)']) expect(decl(frame, 'background')).toBe('var(--red)');
-  const dark = '(prefers-color-scheme: dark)';
-  for (const [selector, media] of [[':root', null], [':root:not([data-theme="light"])', dark], [':root[data-theme="dark"]', null]] as const) {
-    expect(decl(selector, '--red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
-    expect(decl(selector, '--on-red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
-  }
-  expect(decl(':root', '--red')).not.toBe(decl(':root[data-theme="dark"]', '--red'));
   /* The tree's shared fixed-size Chip keeps the state badge visible and clips only long text on its single status line. */
   expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
   expect(decl('.ast', 'flex')).toBe('none');
@@ -93,4 +87,16 @@ it('draws every focus ring in the accent ink, which keeps 3:1 on every surface o
   const rings = RULES.filter(r => r.selectors.some(s => s.includes(':focus-visible')) && r.decls.outline && r.decls.outline !== 'none');
   expect(rings.map(r => r.selectors.join(', '))).toEqual(expect.arrayContaining([':focus-visible', '.segments label:has(input:focus-visible)', '.seg button:focus-visible', 'button.hub:focus-visible', '.t-mh:focus-visible']));
   for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
+});
+
+it('lets a finger take a line of the company map and a bend on it as easily as a block\'s grip', () => {
+  /* In the map's own units, against its zoom: a browser finds what a pointer is on without vector-effect, by the drawn width. */
+  expect(decl('.wires .hit', 'stroke-width')).toBe('calc(12px / var(--k, 1))');
+  expect(decl('.wires .hit', 'stroke-width', '(pointer: coarse)')).toBe('calc(24px / var(--k, 1))');
+  expect(decl('.wires .hit', 'vector-effect')).toBeUndefined();
+  /* A phone flashes nothing over the map where a finger touches a line or a bend: neither is drawn. */
+  expect(decl('.wires .hit', '-webkit-tap-highlight-color')).toBe('transparent');
+  expect(decl('.bend', '-webkit-tap-highlight-color')).toBe('transparent');
+  expect(['width', 'height', 'margin'].map(p => decl('.bend', p))).toEqual(['28px', '28px', '-14px 0 0 -14px']);
+  expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
 });

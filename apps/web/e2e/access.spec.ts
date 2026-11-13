@@ -17,13 +17,14 @@ function person(me: Me, departments: string[]): PersonView {
   };
 }
 
-function restricted(full: Tree, me: Me, departmentAccess: boolean): Tree {
+/* What a person of part of the company reads: every employee, and Bruno opening when he is theirs. */
+function restricted(full: Tree, me: Me, departmentAccess: boolean, opensBruno: boolean): Tree {
   const department = full.org.departments[0]!;
   return {
     ...full,
     org: {
       ...full.org,
-      departments: [{ ...department, employees: department.employees.filter(employee => employee.id === 'a1'), people: departmentAccess ? [person(me, ['d2'])] : [] }],
+      departments: [{ ...department, employees: department.employees.map(employee => ({ ...employee, opens: employee.id === 'a1' && opensBruno })), people: departmentAccess ? [person(me, ['d2'])] : [] }],
     },
   };
 }
@@ -61,41 +62,33 @@ for (const role of roles) {
   test(`${role.name}: agent window follows both access conditions`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
-    const full = fullDepartment(), shown = role.me.person.scopeKind === 'company' ? full : restricted(full, role.me, role.departmentAccess);
+    const full = fullDepartment(), shown = role.me.person.scopeKind === 'company' ? full : restricted(full, role.me, role.departmentAccess, role.allowed);
     await serveAccess(page, role.me, shown, { agentStatus: role.status });
-    if (!role.departmentAccess) {
-      await page.goto('/departments/d2');
-      await expect(page.getByRole('heading', { name: 'Insufficient permissions' })).toBeVisible();
-      await expect(page.locator('body')).not.toContainText('Bruno');
+    /* Every department opens for everyone; an employee who is not theirs says so and opens no window, with no refusal. */
+    await openOwnChip(page);
+    if (role.allowed) {
+      await expect(page.getByRole('complementary', { name: /Bruno/ })).toBeVisible();
+    } else {
+      await expect(page.getByText('Bruno: everyone sees the work, and only the people of this department open the window.').first()).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Insufficient permissions' })).toHaveCount(0);
       await expect(page.locator('body')).not.toContainText('Hidden resource details.');
       await expect(page.getByRole('complementary')).toHaveCount(0);
-    } else {
-      await openOwnChip(page);
-      if (role.allowed) {
-        await expect(page.getByRole('complementary', { name: /Bruno/ })).toBeVisible();
-      } else {
-        const denied = page.getByRole('dialog', { name: 'Insufficient permissions' });
-        await expect(denied).toBeVisible();
-        await expect(denied).not.toContainText('Bruno');
-        await expect(denied).not.toContainText('Hidden resource details.');
-        await expect(page.getByRole('complementary')).toHaveCount(0);
-      }
     }
   });
 }
 
-test('a limited roster removes hidden agents and work from schema, tree and task lists', async ({ page }) => {
+test('a person of part of the company sees every employee and the whole work in schema, tree and task lists', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
-  const full = fullDepartment(), shown = restricted(full, REGULAR, true);
+  const full = fullDepartment(), shown = restricted(full, REGULAR, true, true);
   await serveAccess(page, REGULAR, shown);
   await page.goto('/departments/d2');
-  await expect(page.locator('.dcanvas .dept-chip')).toHaveCount(1);
-  await expect(page.locator('.dcanvas')).not.toContainText('Timur');
+  await expect(page.locator('.dcanvas .dept-chip')).toHaveCount(12);
+  await expect(page.locator('.dcanvas')).toContainText('Timur');
   await page.getByRole('button', { name: 'Tree', exact: true }).click();
-  await expect(page.locator('.tv-labs .dept-chip')).toHaveCount(1);
-  await expect(page.locator('.tv-in')).not.toContainText('Timur');
-  await expect(page.locator('.tv-in')).not.toContainText('Checkout step 63');
+  await expect(page.locator('.tv-labs .dept-chip')).toHaveCount(12);
+  await expect(page.locator('.tv-in')).toContainText('Timur');
+  await expect(page.locator('.tv-in')).toContainText('Checkout step 63');
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
   await expect(page.locator('.tasks')).toContainText(`#${OWN_TASK.number} ${OWN_TASK.title}`);
   await expect(page.locator('.tasks')).not.toContainText('Hidden task of another agent');
@@ -110,7 +103,7 @@ for (const lang of ['en', 'ru'] as const) {
           localStorage.setItem('hh-lang', lang);
           localStorage.setItem('hh-theme', theme);
         }, { lang, theme });
-        const full = fullDepartment(), shown = restricted(full, REGULAR, true);
+        const full = fullDepartment(), shown = restricted(full, REGULAR, true, true);
         await serveAccess(page, REGULAR, shown, { taskStatus: 403 });
         const heading = lang === 'en' ? 'Insufficient permissions' : 'Недостаточно прав';
         await page.goto('/tasks/secret');

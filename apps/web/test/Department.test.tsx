@@ -692,14 +692,28 @@ describe('Department view', () => {
     expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
   });
 
-  it("closes a department to people who do not reach it", async () => {
+  it('opens a department and its tasks to people who do not reach it, with no task for them to give it', async () => {
     const user = userEvent.setup();
-    const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
-    await user.click(await screen.findByRole('button', { name: /^Development/ }));
-    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Department tasks' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
-    expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(false);
+    const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }] }, DEV_ORG, listed('p7', 'Kira'));
+    await flyIn(user);
+    expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
+    await drawer(user, 'Department tasks');
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    expect(within(tasks).queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(true);
+  });
+
+  it("says in plain words that an employee's window is for the people of its department, and opens none", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, opens: false })) }] };
+    const calls = shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] }, org, listed('p7', 'Kira'));
+    await flyIn(user);
+    await user.click(screen.getByRole('button', { name: /Bruno/ }));
+    expect(await screen.findAllByText('Bruno: everyone sees the work, and only the people of this department open the window.')).not.toHaveLength(0);
+    expect(screen.queryByRole('complementary', { name: 'Bruno, Backend engineer' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path.startsWith('/api/agents/b1'))).toBe(false);
   });
 
   it('shows and changes the repository for people who see the whole company', async () => {
@@ -1283,7 +1297,7 @@ describe('Department work tree', () => {
     shell(treeRoute({ ...DEV_TREE, turn: null }));
     await user.click(await screen.findByRole('button', { name: /^Разработка/ }));
     await user.click(screen.getByRole('button', { name: 'Дерево' }));
-    expect(await screen.findByText('Сейчас нет открытого хода.')).toBeInTheDocument();
+    expect(await screen.findByText('Сейчас у отдела нет открытого хода.')).toBeInTheDocument();
     expect(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Карта' })).toHaveAttribute('title', 'Карта');
     expect(screen.getByRole('button', { name: 'Скорость' })).toHaveAttribute('title', 'Скорость');
   });

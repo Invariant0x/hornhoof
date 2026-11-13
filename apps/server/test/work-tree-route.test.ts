@@ -9,7 +9,7 @@ import { treeFacts } from '../src/modules/tasks/tree-facts.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { candidateChecks } from './development-echelons-verification.js';
-import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const { app, db } = await testApp();
@@ -44,7 +44,7 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const [turn] = openTurn
     ? await db
         .insert(turns)
-        .values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', createdAt: turnOpenedAt, openedAt: turnOpenedAt })
+        .values({ companyId, departmentId: dev!.id, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', createdAt: turnOpenedAt, openedAt: turnOpenedAt })
         .returning()
     : [];
 
@@ -231,7 +231,7 @@ describe('GET /api/departments/:id/tree', () => {
     expect(tree.lines.find(line => line.taskId === task.id)?.mergedAt).toEqual(expect.any(String));
   });
 
-  it('keeps candidate and finding details private for a scoped tree reader', async () => {
+  it("keeps candidate and finding details private for a scoped tree reader, who reads every stage's owner", async () => {
     const c = await company();
     /* A person of a product alone runs nothing of the department: the repository's details stay with its people. */
     const [shop] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, name: 'Shop', roleCode: 'DEV' }).returning();
@@ -242,13 +242,12 @@ describe('GET /api/departments/:id/tree', () => {
     const token = await invitePerson(c.app, c.ceoToken, { name: 'Dev', email: 'dev@acme.com', access: { departments: [shop!.id] } });
     const listed = await invitePerson(c.app, c.ceoToken, { name: 'Lee', email: 'lee@acme.com', access: { departments: [c.dev.id] } });
     expect((await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(listed) })).body).toContain('The boundary needs a contract.');
-    await ownPlan(c.db, 'dev@acme.com', c.bruno.id, c.rita.id);
     const response = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(token) });
     expect(response.statusCode).toBe(200);
     const { tree } = response.json<{ tree: DepartmentTree }>();
     expect(tree.lines.find(line => line.taskId === task.id)).toMatchObject({
       echelons: { stage: 'review', ownerAgentId: c.rita.id, candidateId: null, assignment: null,
-        stages: expect.arrayContaining([expect.objectContaining({ stage: 'security', ownerAgentId: null, inputCandidateId: null, candidateId: null })]) },
+        stages: expect.arrayContaining([expect.objectContaining({ stage: 'security', ownerAgentId: expect.any(String), inputCandidateId: null, candidateId: null })]) },
       echelonFindings: { uniqueReported: 1, uniqueConfirmed: 0, review: { reported: 1, confirmed: 0 }, issues: [] },
     });
     expect(response.body).not.toContain('logic/totals.ts');
@@ -301,7 +300,7 @@ describe('GET /api/departments/:id/tree', () => {
     ]);
   });
 
-  it('returns 403 when a person only reaches another department, 404 for a product or unknown id, and filters lines by product access', async () => {
+  it('returns the tree of any department to everyone of the company, and 404 for a product or unknown id', async () => {
     const { app, db, companyId, ceoToken, dev, sales, bruno, kai, member } = await company();
     const [shop] = await db.insert(departments).values({ companyId, parentId: dev.id, name: 'Shop', roleCode: 'DEV' }).returning();
     const [other] = await db.insert(departments).values({ companyId, parentId: dev.id, name: 'Backoffice', roleCode: 'DEV' }).returning();
@@ -311,10 +310,11 @@ describe('GET /api/departments/:id/tree', () => {
 
     const expected404 = { error: { code: 'not_found', message: 'This department does not exist.', reason: 'department_unknown' } };
     const salesPerson = await invitePerson(app, ceoToken, { name: 'Sasha', email: 'sasha@acme.com', access: { departments: [sales.id] } });
-    const denied = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(salesPerson) });
-    expect(denied.statusCode).toBe(403);
-    expect(denied.json().error.reason).toBe('not_your_department');
-    expect(denied.body).not.toContain('Shop checkout');
+    const another = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(salesPerson) });
+    expect(another.statusCode).toBe(200);
+    const all = (await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(ceoToken) })).json<{ tree: DepartmentTree }>().tree.lines.map(l => l.title);
+    expect(all).toEqual(expect.arrayContaining(['Backoffice export', 'Shop checkout']));
+    expect(another.json<{ tree: DepartmentTree }>().tree.lines.map(l => l.title)).toEqual(all);
 
     const onProduct = await app.inject({ method: 'GET', url: `/api/departments/${shop!.id}/tree`, ...as(ceoToken) });
     expect(onProduct.statusCode).toBe(404);
@@ -325,11 +325,9 @@ describe('GET /api/departments/:id/tree', () => {
     expect(onUnknown.json()).toEqual(expected404);
 
     const shopPerson = await invitePerson(app, ceoToken, { name: 'Polina', email: 'polina@acme.com', access: { departments: [shop!.id] } });
-    await ownPlan(db, 'polina@acme.com', bruno.id);
-    await db.update(agents).set({ productId: shop!.id }).where(eq(agents.id, bruno.id));
     const scoped = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(shopPerson) });
     expect(scoped.statusCode).toBe(200);
-    expect(scoped.json<{ tree: DepartmentTree }>().tree.lines.map(l => l.title)).toEqual(['Shop checkout']);
+    expect(scoped.json<{ tree: DepartmentTree }>().tree.lines.map(l => l.title)).toEqual(all);
   });
 
   it('returns turn null and empty lists when there is no open turn, and runs a fixed number of queries across line counts', async () => {

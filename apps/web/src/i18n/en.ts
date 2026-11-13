@@ -1,5 +1,6 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
-import type { TemplateError } from '../theme-template';
+import type { BuiltinSkinId } from '../skins/registry';
+import type { SkinErrorCode } from '../skins/validate';
 import type { EmployeeStatus, FailureKind } from '../types';
 import { plural } from './plural';
 
@@ -11,6 +12,9 @@ export type StatusCounts = Partial<Record<EmployeeStatus, number>>;
 export function summary(counts: StatusCounts, words: Record<EmployeeStatus, string>): string {
   return STATUS_ORDER.flatMap(st => (counts[st] ? [`${words[st]}: ${counts[st]}`] : [])).join(', ');
 }
+
+/* What is wrong with a skin file, from the field to fix and the value it is about; each language says it its own way. */
+type SkinErrorWords = Record<SkinErrorCode | 'read_failed', (key: string, value: string) => string>;
 
 /* English is the source. Every other language has to match this shape. */
 
@@ -106,6 +110,8 @@ export const en = {
   profile: {
     title: 'Settings',
     nameRequired: 'Enter your name.',
+    sections: 'Settings sections',
+    profile: 'Profile',
   },
   settings: {
     menu: 'Company settings',
@@ -157,42 +163,86 @@ export const en = {
     sections: 'Sections',
     tabs: { map: 'Map', tasks: 'Tasks', people: 'People', subscriptions: 'Subscriptions', machines: 'Machines', improvements: 'Improvements', outbound: 'Outbound' },
     account: 'Account',
-    theme: 'Theme',
-    light: 'Light',
-    dark: 'Dark',
-    matrix: 'Matrix',
-    cyberpunk: 'Cyberpunk',
-    custom: 'Custom template',
     language: 'Language',
     logOut: 'Log out',
     version: (v: string) => `Version ${v}`,
   },
-  /* A theme template of a person's own, kept in this browser: loaded from a JSON file, downloaded as a sample, reset. */
-  themeTemplate: {
-    menu: 'Set up template…',
-    title: 'Custom template',
-    look: 'Look',
-    about: 'A theme template is kept in a JSON file. It changes only colors, fonts and corner cuts, and the layout stays the same. Download the theme that is on as a sample, change its values and load it back.',
-    loaded: (name: string) => (name ? `Your template "${name}" is loaded.` : 'Your template is loaded.'),
-    none: 'No template is loaded. A built-in theme is on.',
-    load: 'Load template',
-    download: 'Download template',
-    reset: 'Reset template',
+  /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
+  skins: {
+    title: 'Themes',
+    go: (name: string) => `Go to themes. Current: ${name}`,
+    desc: 'Choose your own look. Other members keep their themes.',
+    local: 'Your choice stays in this browser.',
+    add: 'Add from file',
+    loading: 'Reading file...',
+    busy: 'Reading the file. Your other skins are still available.',
+    catalog: 'Skin catalog',
+    catalogHint: 'One click applies a theme',
+    builtIn: 'Built-in',
+    own: 'Custom',
+    byDefault: 'Default',
+    current: 'Current',
+    apply: 'Apply',
+    applied: 'Applied',
+    download: 'Download',
+    remove: 'Remove',
+    names: { cyberpunk: 'Cyberpunk', light: 'Light', matrix: 'Matrix', pixel: 'Pixel' } satisfies Record<BuiltinSkinId, string>,
+    descs: {
+      cyberpunk: 'A night console with a cyan accent.',
+      light: 'Light surfaces and clear text.',
+      matrix: 'A green accent and square frames.',
+      pixel: 'A warm retro console with dotted type.',
+    } satisfies Record<BuiltinSkinId, string>,
+    ownDesc: 'A skin from your file.',
+    preview: { task: 'Task', note: 'Prepare a mockup', ready: 'Ready', open: 'Open', product: 'Hornhoof' },
+    empty: 'No custom skins yet',
+    emptyHint: 'Add a file. Download any built-in skin to use as a sample.',
+    nowOn: (name: string) => `“${name}” is now applied.`,
+    added: (name: string) => `“${name}” was added. You can now apply it.`,
+    removed: (name: string) => `“${name}” was removed.`,
+    restored: (name: string) => `“${name}” was restored.`,
+    undo: 'Undo',
+    addFailed: 'Could not add the skin',
+    full: (limit: number) => `Your collection already has ${limit} skins. Remove one you do not need and add the file again.`,
+    notKept: 'Could not save the skin in this browser. Free up space or allow storage, then add the file again.',
+    downloadFailed: (name: string) => `Could not download “${name}”. Try again.`,
+    guide: 'Your own skin in a minute',
+    steps: [
+      'Download any skin as a sample and open the file.',
+      'Change the colors, allowed fonts and corner cuts. Or ask AI to create a file from the sample.',
+      'Add the file here. Your new skin joins the catalog. Then select Apply.',
+    ],
+    askAi: 'Copy request for AI',
+    aiRequest:
+      'Create a Hornhoof skin from this JSON sample. Keep every field and the format. Change only colors, allowed fonts and cut. Check text contrast at 4.5:1 and control borders and focus at 3:1. Return JSON only.',
+    copied: 'Request copied',
+    notCopied: 'Could not copy the request. Try again.',
+    note: 'The grid, spacing and button sizes stay the same in every theme. Words and actions keep their places.',
+    /* What is wrong with a file and how to fix it: the field, and for some the value or what the field takes. */
     errors: {
-      too_large: () => 'The file is too large. A template takes up to 64 KB.',
-      not_json: () => 'This file is not JSON. Download a template as a sample and change its values.',
-      not_template: () => 'This is not a Hornhoof theme template: it needs "format": "hornhoof-theme" and "version": 1. Download a template as a sample and change its values.',
-      unknown_key: (key: string) => `${key}: a template has no such field. It changes only colors, fonts and corner cuts.`,
-      not_object: (key: string) => `${key}: write it as a group of values in curly braces, as in the sample.`,
-      bad_base: () => 'base: name one of the built-in themes: light, dark, matrix or cyberpunk.',
-      bad_scheme: () => 'scheme: write light or dark.',
-      bad_name: () => 'name: write the name as text of up to 60 characters.',
-      unsafe: (key: string) => `${key}: this looks like code. Links such as url(), expressions, tags and control characters are not allowed.`,
-      bad_color: (key: string) => `${key}: this is not a color. Write it as #RRGGBB or rgba(0, 0, 0, 0.5).`,
-      bad_font: (key: string) => `${key}: write a list of up to 6 font names in Latin letters, digits, spaces and hyphens that ends with a common family such as sans-serif or monospace.`,
-      bad_cut: () => 'cut: the corner cut is a number from 0 to 1.5.',
-      read_failed: () => 'The file could not be read. Try again or pick another file.',
-    } satisfies Record<TemplateError['code'] | 'read_failed', (key: string) => string>,
+      too_large: () => 'The file is larger than 64 KB. Download a sample and copy your settings into it.',
+      not_json: () => 'Could not read the file. Check that it is JSON and add it again.',
+      read_failed: () => 'Could not read the file. Try adding it again.',
+      not_skin: () => 'This is not a Hornhoof skin file. Download a sample and copy your settings into it.',
+      forbidden_key: key => `“${key}” is not allowed: a key of this name could change how Hornhoof works. Remove it and add the file again.`,
+      bad_version: () => 'This file version is not supported. Download a new sample and copy your settings into it.',
+      layout_locked: key => `“${key}” would change the grid, sizes or spacing, which stay the same in every theme. Remove it and add the file again.`,
+      unknown_key: key => `“${key}” is not supported here. Remove it and add the file again.`,
+      missing: key => `The file is missing “${key}”. Add it using the sample and try again.`,
+      not_object: key => `“${key}” must be a group of fields in curly braces, as in the sample. Fix it and add the file again.`,
+      bad_base: (key, value) => `The ${key} field needs a built-in skin: ${value}. Fix the field and add the file again.`,
+      bad_name: key => `The ${key} field needs a name of 1 to 120 characters. Fix the field and add the file again.`,
+      bad_scheme: key => `The ${key} field needs dark or light. Fix the field and add the file again.`,
+      unsafe: key => `The ${key} field holds code, a link or hidden characters. Keep only the value and add the file again.`,
+      bad_color: key => `The ${key} field needs a color in #RRGGBB or rgba() format. Fix the field and add the file again.`,
+      opaque: (key, value) => `The ${key} field needs a solid color: only ${value} may be see-through. Fix the field and add the file again.`,
+      bad_font: (key, value) => `“${value}” is not supported for “${key}”. Choose a font from the sample.`,
+      font_list: key =>
+        `The ${key} field needs a list of up to 6 fonts from the sample, without repeats, that ends with a generic font such as sans-serif. Fix the field and add the file again.`,
+      bad_cut: key => `The ${key} field needs a number from 0 to 1.5. Fix the field and add the file again.`,
+      low_contrast: (key, value) => `Text in “${key}” is hard to read on “${value}”. Change one of the colors and add the file again.`,
+      faint_line: (key, value) => `Borders in “${key}” are hard to see on “${value}”. Change one of the colors and add the file again.`,
+    } satisfies SkinErrorWords as SkinErrorWords,
   },
   map: {
     leaders: 'Company leaders',
@@ -215,7 +265,12 @@ export const en = {
     moveBlock: (name: string) => `Move ${name}`,
     putBack: 'Put back as it was',
     layoutNotSaved: 'Could not save where you moved it. Move it again to try once more.',
+    /* A dot a person put on a line of their own map, which the line passes at right angles wherever its blocks stand. */
+    bend: (from: string, to: string) => `Bend in the line: ${from} and ${to}. Drag it or use the arrow keys to move it, click it to remove it`,
+    addBend: 'Click to put a bend in this line',
     needsSubscription: 'Needs a subscription to start',
+    /* For a person who is not shown which subscription the orchestrator works on. */
+    hasSubscription: 'Has a subscription to work on',
     runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,
@@ -790,11 +845,11 @@ export const en = {
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
-    /* Whether a department works in the company's turns, which count its tasks on the map, or all the time. */
+    /* Whether a department works in turns of its own, which count its tasks on the map, or all the time. */
     workMode: {
       title: 'How it works',
       turns: 'Works in turns',
-      turnsHint: 'Its tasks are counted on the map: on its card and on the circle in the middle.',
+      turnsHint: 'It runs turns of its own, one after another, whatever other departments do. Its tasks are counted on the map: on its card and on the circle in the middle.',
       continuous: 'Works all the time',
       continuousHint: 'Without turns. Its card on the map shows no turn.',
       isTurns: 'Works in turns: its tasks are counted on the map.',
@@ -822,7 +877,7 @@ export const en = {
     treeButton: 'Tree',
     mapButton: 'Map',
     speed: 'Speed',
-    treeNoTurn: 'No turn is open now.',
+    treeNoTurn: 'This department runs no turn now.',
     treeCanvas: 'Work tree',
     tree: {
       treeAria: (n: number) => `Tree of turn ${n}`,
@@ -887,13 +942,13 @@ export const en = {
         turn: 'Turn',
         num: (n: number) => String(n),
         secs: (n: number) => `${n} s`,
-        noTurn: 'No turn has run yet, so there is nothing to report.',
+        noTurn: 'This department has not run a turn yet, so there is nothing to report.',
         noAccess: 'Only people who reach the whole department see its report.',
         noTasks: (n: number) => `This department had no tasks in turn ${n}.`,
         source: { live: 'still running, counted just now', closed: 'saved when the turn closed', rebuilt: 'worked out later from the events of the turn' },
-        comparedBoth: (a: number, b: number) => `Changes are to the previous turn ${a} and to the starting turn ${b}.`,
+        comparedBoth: (a: number, b: number) => `Changes are to this department's previous turn ${a} and to its starting turn ${b}.`,
         comparedOne: (n: number) => `Changes are to turn ${n}.`,
-        comparedNone: 'There is no earlier turn to compare with.',
+        comparedNone: 'This department has no earlier turn to compare with.',
         noAbout: 'This department has no description yet, so the report has no numbers of its own for it.',
         hasAbout: 'Numbers of its own come from the description of the department; its tools do not send them to this report yet.',
         sections: { tasks: 'Tasks', time: 'How long it took', stages: 'Time by stage', agents: 'Time of the agents', turns: 'Agent turns', waits: 'Waits by reason', problems: 'Hand-ins and failures', quality: 'Quality after release', kinds: 'By kind of task', tests: 'Test time' },
@@ -1025,6 +1080,8 @@ export const en = {
     switchedOff: 'Switched off',
     isOn: (name: string) => `${name} is on`,
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'on' : 'switched off'}`,
+    /* An employee this person sees at work but does not open. */
+    closedAgent: (name: string) => `${name}: everyone sees the work, and only the people of this department open the window.`,
     roleOn: (role: string) => `${role} takes part in the work`,
     roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'everyone on' : 'everyone switched off'}`,
     needsSubscription: 'Assign a subscription to start',
@@ -1188,9 +1245,9 @@ export const en = {
       someone: 'another employee',
     },
     heading: 'Tasks',
-    intro: 'The orchestrator lays the work out in turns: one runs now, the next ones wait for it. To add or change something, write to him.',
+    intro: 'Each department works in turns of its own: one runs now, the next ones wait for it. The orchestrator and the department\'s head lay them out. To add or change something, write to one of them.',
     writeOrchestrator: 'Write to the orchestrator',
-    noTurns: 'No turns yet. Tell the orchestrator what the company should do, and he lays it out here as turns and tasks.',
+    noTurns: 'No turns in this department yet. Tell the orchestrator or the department\'s head what to do, and the work shows up here as turns and tasks.',
     navWaiting: (n: number) => `Tasks, ${n} waiting for you`,
     turn: (n: number) => `Turn ${n}`,
     workKinds: { bug: 'Bug', known_behavior: 'Known behavior', unknown_path: 'Unknown path', legacy_code: 'Legacy code' },
@@ -1556,7 +1613,8 @@ export const en = {
     agent_not_ready: 'This employee cannot answer right now.',
     not_your_department: 'This employee works in a department you do not have access to.',
     agent_hidden: 'You can open only employees on your own plan in your departments, and every employee of a department you own.',
-    task_hidden: 'This task is the work of an employee you cannot open.',
+    task_hidden: "This task is the work of another person's assistant, and only that person sees it.",
+    task_not_yours: 'You can change only tasks you gave and tasks of employees you can open.',
     ceo_view_only: 'Only the CEO, the CEO delegate and the owner of the department see this.',
     attachment_hidden: 'This file belongs to work you cannot open.',
     file_empty: 'This file is empty, or it is a folder. Send a file with something in it.',
@@ -1591,7 +1649,8 @@ export const en = {
     backlog_unknown: 'This task is no longer in the list.',
     turn_open: 'A turn is running. Close it before starting the next.',
     turn_mode_fixed: 'This turn has started, so it keeps the way it runs. Plan new work in a new turn.',
-    no_turnkey_team: 'No sub-unit works turnkey yet, so nobody can do a turn alone. Mark one as "Works turnkey" on its department\'s screen first, or run the turn in stages.',
+    turn_department: 'These turns belong to different departments, and each department runs its own.',
+    no_turnkey_team: 'No sub-unit of this department works turnkey yet, so nobody can do its turn alone. Mark one as "Works turnkey" on the department\'s screen first, or run the turn in stages.',
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',

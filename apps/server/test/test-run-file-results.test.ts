@@ -34,7 +34,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://example.test/fixture.git' }).returning();
   await db.update(turns).set({ status: 'closed' }).where(eq(turns.companyId, companyId));
-  const [turn] = await db.insert(turns).values({ companyId, number: turnNumber + 100, goal: 'Fixture', status: 'open' }).returning();
+  const [turn] = await db.insert(turns).values({ companyId, departmentId: department!.id, number: turnNumber + 100, goal: 'Fixture', status: 'open' }).returning();
   await db.update(turns).set({ number: turnNumber }).where(eq(turns.id, turn!.id));
   const [task] = await db.insert(tasks).values({ companyId, departmentId: department!.id, number: 1, title: 'Reuse fixture', status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id, turnId: turn!.id }).returning();
   await db.transaction(tx => createCoordinationRoute(tx, task!));

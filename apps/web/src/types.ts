@@ -159,6 +159,9 @@ export type Employee = {
   /* Its latest failed turn, or null. */
   failure: TurnFailure | null;
   obsolete?: TurnObsolete | null;
+  /* Whether this person opens its window and card. Everyone sees every employee of the company and its work; its own
+     window is for the people of its department. */
+  opens?: boolean;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -189,8 +192,8 @@ export type Department = {
   repoHost?: RepoHost | null;
   /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
   ownerPersonId?: string | null;
-  /* Whether it works in the company's turns or all the time, and the tasks of the open turn it has done out of all it has, as
-     far as this person sees them; none for a department that works all the time, while no turn is open or out of reach. */
+  /* Whether it works in turns of its own or all the time, and the tasks of its open turn done out of all, as far as this
+     person sees them; none for a department that works all the time, while it runs no turn or out of reach. */
   workMode?: DepartmentWorkMode;
   turnProgress?: DepartmentTurnProgress | null;
 };
@@ -234,7 +237,7 @@ export type Briefing = {
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean; planned?: boolean } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
@@ -543,8 +546,9 @@ export type Decisions = {
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
-/* A turn as the orchestrator laid it out: a short title, its main point, and the people's own words it came from (only for
-   people who see the whole company). Planned turns wait in number order. */
+/* A turn as the orchestrator or a department's head laid it out: a short title, its main point, and the people's own words
+   it came from (only for people who see the whole company). Each top-level department runs its own turns; its planned ones
+   wait in number order. */
 export type TurnMode = 'echelons' | 'turnkey';
 
 export type TurnView = {
@@ -555,6 +559,10 @@ export type TurnView = {
   status: 'planned' | 'open' | 'closed';
   /* How the turn runs, fixed once it starts: through the stages, or by one employee of a turnkey team alone. */
   mode: TurnMode;
+  /* The department whose turn it is; none only for a closed turn of a department that was removed. */
+  departmentId: string | null;
+  /* Whether this person may pick how it runs while it is planned: with the whole company, or as the department's owner. */
+  canChangeMode: boolean;
   messages: { by: string; text: string; at: string }[];
   taskId: string | null;
   startedAt: string;

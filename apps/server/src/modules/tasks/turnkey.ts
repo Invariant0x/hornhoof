@@ -15,12 +15,12 @@ export async function turnkeyTeamOf(db: Db | Tx, companyId: string, agentId: str
   return team ?? null;
 }
 
-/* A turnkey turn needs someone to carry it: a member of a turnkey team who is still at work. */
-export async function requireTurnkeyTeam(db: Db | Tx, companyId: string): Promise<void> {
+/* A turnkey turn needs someone in its department to carry it: a member of a turnkey team there who is still at work. */
+export async function requireTurnkeyTeam(db: Db | Tx, companyId: string, departmentId: string): Promise<void> {
   const [member] = await db.select({ id: agents.id }).from(agents)
-    .innerJoin(teams, and(eq(teams.id, agents.teamId), eq(teams.companyId, companyId), eq(teams.turnkey, true)))
+    .innerJoin(teams, and(eq(teams.id, agents.teamId), eq(teams.companyId, companyId), eq(teams.departmentId, departmentId), eq(teams.turnkey, true)))
     .where(and(eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
-  if (!member) throw refuse(409, 'no_turnkey_team', 'There is no turnkey team with a member to carry a turnkey turn. Mark a sub-unit "Works turnkey" on its department\'s screen first, or start the turn in echelons.');
+  if (!member) throw refuse(409, 'no_turnkey_team', 'This department has no turnkey team with a member to carry a turnkey turn. Mark a sub-unit of it "Works turnkey" on its screen first, or start the turn in echelons.');
 }
 
 /* Where a task is made: its company, its turn, if any, and who holds it. */

@@ -18,7 +18,7 @@ describe('workspace addresses', () => {
     ['/profile', { kind: 'profile' }],
     ['/settings', { kind: 'settings' }],
     ['/about', { kind: 'about' }],
-    ['/theme', { kind: 'theme' }],
+    ['/themes', { kind: 'themes' }],
     ['/invite/abc123', { kind: 'invite', token: 'abc123' }],
     ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
   ] as const)('opens and shares %s', (path, route) => {
@@ -26,7 +26,7 @@ describe('workspace addresses', () => {
     expect(routePath(route)).toBe(path);
   });
 
-  it.each(['/missing', '/tasks/a/b', '/departments', '/tasks/%', '/people/%2fsecret', '/machines/%5cevil', '//outside.example', 'https://outside.example/tasks', '/\\outside.example', '/people/%00', '/people/..'])('rejects unknown or unsafe destination %s', path => {
+  it.each(['/missing', '/tasks/a/b', '/theme', '/departments', '/tasks/%', '/people/%2fsecret', '/machines/%5cevil', '//outside.example', 'https://outside.example/tasks', '/\\outside.example', '/people/%00', '/people/..'])('rejects unknown or unsafe destination %s', path => {
     expect(parseRoute(path)).toEqual({ kind: 'unavailable' });
   });
 

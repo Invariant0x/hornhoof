@@ -192,6 +192,24 @@ describe('a sign-in its program refused', () => {
     server.send({ type: 'cred.put', kind: 'claude_token', version: 2, sealed: await seal(bytes(TOKEN.replace('a', 'b')), [me.recipient]) });
     await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === true);
   });
+
+  /* A provider that refuses every sign-in for a while, as on 2026-11-13, must not get a new turn in a terminal every look. */
+  it.each([
+    ['ended on the sign-in', { error: 'not_logged_in' as const }],
+    ['failed on the sign-in', { error: 'agent_failed' as const, failure: { kind: 'auth' as const, text: 'authentication_failed: Please run /login', retryable: false } }],
+  ])('keeps the node signed out after a turn that %s, with no sign-in from Hornhoof to compare, until one comes', async (_, ended) => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    const refusing: ProviderAdapter = { ...adapter, run: async () => ({ ok: false, sessionId: null, result: '', output: '', limits: null, ...ended }) };
+    fakeLooks();
+    const { server, me } = await node({ adapter: refusing, loginCheckMs: 30 }, dir);
+    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 2_147_483_647 - 30_000, prompt: 'hi', instructions: null, toolToken: null });
+    await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === false);
+    await vi.advanceTimersByTimeAsync(90);
+    await server.marked();
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: false });
+    server.send({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: await seal(bytes(TOKEN), [me.recipient]) });
+    await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === true);
+  });
 });
 
 describe("sign-in files in the agents' home", () => {

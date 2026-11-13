@@ -14,7 +14,7 @@ import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, start
 import { agentState } from '../src/modules/conversation/queue.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan, ownDatabases, echelonsTurn } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownDatabases, echelonsTurn } from './helpers.js';
 import { rowsRead } from './rows-read.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -88,7 +88,7 @@ describe('lines between a head and its employees', () => {
     expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
   });
 
-  it('reports the actual rework event time only in its department, and drops it after ten minutes', async () => {
+  it('reports the actual rework event time only in its department, to everyone of the company, and drops it after ten minutes', async () => {
     const { app, ceo, ctx, db, bruno, rita, member, org, dev, sales, atCommit, run, hana } = await company();
     const task = await member('Checkout API', bruno.id, rita.id);
     await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass', review: { baseCommit: BASE } });
@@ -104,7 +104,7 @@ describe('lines between a head and its employees', () => {
     expect(snapshot.departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
     expect(snapshot.departments.find(d => d.id === sales.id)!.reworkAt).toBeNull();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
-    expect((await org(maria)).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+    expect((await org(maria)).departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
     await db.update(taskEvents).set({ createdAt: new Date(Date.parse(snapshot.serverNow) - 600_000) }).where(eq(taskEvents.id, event!.id));
     expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
   });
@@ -398,27 +398,22 @@ describe('the cycles of a line', () => {
 });
 
 describe('who sees the lines', () => {
-  it("shows a person only the lines between agents they see, and no task or job of them", async () => {
+  it('shows everyone of the company every line between its agents, and no task or job of them', async () => {
     const { app, ctx, ceo, dev, sales, orchestrator, bruno, hana, member, run, org } = await company();
     const api = await member('Checkout API', bruno.id);
     await run(bruno.id, api.id);
     await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
+    const all = await org();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
-    const hers = await org(maria);
-    expect(lineOf(hers, hana.id, bruno.id)).toBeUndefined();
-    expect(lineOf(hers, orchestrator.id, hana.id)).toBeUndefined();
     const dan = await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { whole: true } });
-    /* The whole company runs no department, so a line takes both of its ends on his plans: on his plan only Bruno, it does
-       not show; with Hana too, it does. */
-    await ownPlan(ctx.db, 'dan@acme.com', bruno.id);
-    expect(lineOf(await org(dan), hana.id, bruno.id)).toBeUndefined();
-    await ownPlan(ctx.db, 'dan@acme.com', hana.id, bruno.id);
-    const his = await org(dan);
-    expect(stateOf(his, hana, bruno)).toBe('yellow');
-    expect(Object.keys(lineOf(his, hana.id, bruno.id)!).sort()).toEqual(['downstreamAgentId', 'returnedAt', 'returnedEpoch', 'upstreamAgentId', 'workEpoch', 'working']);
-    /* A person of the department runs it and sees its lines on whoever's plan. */
     const lee = await invitePerson(app, ceo, { name: 'Lee', email: 'lee@acme.com', access: { departments: [dev.id] } });
-    expect(stateOf(await org(lee), hana, bruno)).toBe('yellow');
+    /* One of another department, one with the whole company and no plan, one of the department itself. */
+    for (const token of [maria, dan, lee]) {
+      const theirs = await org(token);
+      expect(stateOf(theirs, hana, bruno)).toBe('yellow');
+      expect(lineOf(theirs, orchestrator.id, hana.id)).toEqual(lineOf(all, orchestrator.id, hana.id));
+      expect(Object.keys(lineOf(theirs, hana.id, bruno.id)!).sort()).toEqual(['downstreamAgentId', 'returnedAt', 'returnedEpoch', 'upstreamAgentId', 'workEpoch', 'working']);
+    }
   });
 });
 
@@ -679,7 +674,7 @@ describe('the lines of a company with a long history', () => {
     const { db, acme, sub, dev, hana, bruno, felix, rita, hire } = c;
     const closed = await db
       .insert(turns)
-      .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 2, goal: `Goal ${i + 2}`, status: 'closed' as const })))
+      .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 100, goal: `Goal ${i + 100}`, status: 'closed' as const })))
       .returning({ id: turns.id });
     const statusOf = (i: number): 'blocked' | 'planned' | 'done' | 'cancelled' => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
     for (let from = 0; from < 2000; from += 500) {

@@ -45,7 +45,7 @@ describe('the task in an agent window', () => {
     expect((await app.inject({ url: `/api/tasks/${current!.id}`, ...as(viewer) })).statusCode).toBe(200);
   });
 
-  it('omits a task outside the viewer access even when the employee is accessible', async () => {
+  it("shows a task outside the viewer's access too, as everyone sees the company's tasks", async () => {
     const { app, db, ceo, insertTask, companyId, department, product, employee } = await company();
     const viewer = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [product.id] } });
     await ownPlan(db, 'maria@acme.com', employee.id);
@@ -53,8 +53,8 @@ describe('the task in an agent window', () => {
     await db.insert(jobs).values({ companyId, subscriptionId: employee.subscriptionId!, agentId: employee.id, taskId: current!.id, prompt: 'work', status: 'running', timeoutMs: 1000 });
     const response = await app.inject({ url: `/api/agents/${employee.id}`, ...as(viewer) });
     expect(response.statusCode).toBe(200);
-    expect(response.json().currentTask).toBeNull();
-    expect((await app.inject({ url: `/api/tasks/${current!.id}`, ...as(viewer) })).statusCode).toBe(403);
+    expect(response.json().currentTask).toEqual({ id: current!.id, number: 12, title: 'Department private work' });
+    expect((await app.inject({ url: `/api/tasks/${current!.id}`, ...as(viewer) })).statusCode).toBe(200);
   });
 
   it('retains a held task while waiting without a running program and excludes unfinished prerequisites', async () => {

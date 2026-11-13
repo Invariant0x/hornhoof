@@ -42,7 +42,7 @@ async function company() {
   const rita = await hire('Rita', 'worker', 'DEV-REV', reviewPlan!.id);
   await hire('Tess', 'worker', 'DEV-TEST');
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
-  await db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
+  await db.insert(turns).values({ companyId, departmentId: dev!.id, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, over: object = {}) =>
     (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, ...over })).task;
@@ -458,7 +458,7 @@ describe('an approval of a commit', () => {
 
   it('names another commit only from this task or its department in this turn', async () => {
     const c = await company();
-    const [turn5] = await c.db.insert(turns).values({ companyId: c.companyId, number: 5, title: 'Next', goal: 'Next.', status: 'planned' }).returning();
+    const [turn5] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 5, title: 'Next', goal: 'Next.', status: 'planned' }).returning();
     const later = await c.member('Later');
     await c.db.update(tasks).set({ turnId: turn5!.id }).where(eq(tasks.id, later.id));
     await c.aRun({ taskId: later.id, commitSha: OLD_COMMIT });

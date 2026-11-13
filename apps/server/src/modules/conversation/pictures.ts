@@ -43,8 +43,12 @@ export function withPictures(text: string, pictures: MessagePicture[]): string {
   const lines = pictures.map(p => `${p.name}: hh-fetch message ${p.id}`);
   const one = pictures.length === 1;
   const came = pictures.some(p => p.file) ? `${one ? 'A file came' : 'Files came'} with this message. To open one` : `${one ? 'A picture came' : 'Pictures came'} with this message. To see one`;
-  return `${text}\n\n${came}, run its command, then open the file it prints:\n${lines.join('\n')}`;
+  return `${text}\n\n${came}, run its command, then open the file it prints:\n${lines.join('\n')}\n\n${KEEP_IN_REPOSITORY}`;
 }
+
+/* Hornhoof drops a message's files 30 days on, so what the team sends is kept where the department keeps its work. */
+export const KEEP_IN_REPOSITORY =
+  'Hornhoof keeps the files of a message for 30 days only. When you work in a repository, save each of these files into it, in the folder where your department keeps such files (unpack an archive there only when its contents are what is needed), and commit it, unless the person said not to keep it.';
 
 /* A person who may write to the agent sends a picture or any other file as raw bytes. Its bytes say whether it is a
    picture, whatever its name and type say; anything else is kept as bytes of no type. Whoever may not gets turned away
@@ -58,15 +62,22 @@ export function pictureRoutes(app: FastifyInstance, ctx: Ctx): void {
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       if (!bytes.length) throw new ApiError(400, 'validation', 'This file is empty, or it is a folder. Send a file with something in it.', 'file_empty');
       if (bytes.length > MESSAGE_FILE_BYTES) throw new ApiError(413, 'validation', `A file is at most ${MESSAGE_FILE_BYTES / 1024 / 1024} MB.`, 'file_too_big');
-      const picture = pictureType(bytes);
-      await checkPictureRoom(ctx, me.companyId, bytes.length);
-      const name = fileName(NameQuery.parse(req.query).name ?? '') ?? (picture ? `picture.${EXTENSION[picture]}` : 'file');
-      const [row] = await ctx.db
-        .insert(attachments)
-        .values({ companyId: me.companyId, agentId: agent.id, personId: me.id, name, mediaType: picture ?? 'application/octet-stream', bytes, size: bytes.length })
-        .returning({ id: attachments.id });
+      const kept = await keepMessageFile(ctx, me, agent.id, bytes, NameQuery.parse(req.query).name ?? '');
       reply.code(201);
-      return { id: row!.id, name };
+      return kept;
     });
   });
+}
+
+/* Keeps a file a person sends this agent with a message, from its window or through its Telegram bot, under its cleaned
+   name; whoever calls this has checked that the person may write to the agent and that the file is not too big. */
+export async function keepMessageFile(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, agentId: string, bytes: Buffer, rawName: string): Promise<{ id: string; name: string }> {
+  const picture = pictureType(bytes);
+  await checkPictureRoom(ctx, me.companyId, bytes.length);
+  const name = fileName(rawName) ?? (picture ? `picture.${EXTENSION[picture]}` : 'file');
+  const [row] = await ctx.db
+    .insert(attachments)
+    .values({ companyId: me.companyId, agentId, personId: me.id, name, mediaType: picture ?? 'application/octet-stream', bytes, size: bytes.length })
+    .returning({ id: attachments.id });
+  return { id: row!.id, name };
 }

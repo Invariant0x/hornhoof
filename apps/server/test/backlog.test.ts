@@ -58,16 +58,16 @@ const text = (r: Res) => r.content[0]!.text;
 const names = async (c: Client) => (await c.listTools()).tools.map(t => t.name);
 
 describe("a department's tasks and its list for later turns", () => {
-  it("answer a person with one department only for that department: another one's tasks and list are refused and stay as they were", async () => {
+  it("show a person with one department every department's tasks, and keep another one's list refused and as it was", async () => {
     const { db, ceoToken, dora, dev, sales, send, put, listed } = await company();
     const [salesItem] = await put(ceoToken, sales.id, 'Call the new leads');
     const picked = (await send(dora, 'GET', '/api/task-departments')).json();
-    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development' }] });
+    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development' }, { id: sales.id, name: null, templateKey: 'sales' }] });
     expect((await send(dora, 'GET', `/api/tasks?department=${dev.id}`)).statusCode).toBe(200);
+    expect((await send(dora, 'GET', `/api/tasks?department=${sales.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/departments/${dev.id}/backlog`)).statusCode).toBe(200);
 
     const refused = [
-      await send(dora, 'GET', `/api/tasks?department=${sales.id}`),
       await send(dora, 'GET', '/api/tasks?department=none'),
       await send(dora, 'GET', `/api/departments/${sales.id}/backlog`),
       await send(dora, 'POST', `/api/departments/${sales.id}/backlog`, { title: 'Mine now', text: '' }),
@@ -79,7 +79,6 @@ describe("a department's tasks and its list for later turns", () => {
       await send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [salesItem] }),
     ];
     expect(refused.map(r => [r.statusCode, r.json().error.reason])).toEqual([
-      [403, 'not_your_department'],
       [403, 'not_your_department'],
       [403, 'not_your_department'],
       [403, 'not_your_department'],
@@ -141,17 +140,19 @@ describe("a department's tasks and its list for later turns", () => {
     expect(rows.map(t => [t.n, t.mode, t.status, t.goal])).toEqual([[1, 'turnkey', 'open', 'A'], [2, 'echelons', 'planned', 'B'], [3, 'turnkey', 'planned', 'C']]);
   });
 
-  it('are no work for agents: nobody is woken, heads and members neither list nor read an item, and only the orchestrator takes it into a turn', async () => {
+  it('are no work for agents: nobody is woken, no task shows them, members do not list them, and the head of the department or the orchestrator takes them into a turn', async () => {
     const { db, ceoToken, orchestrator, hana, bruno, dev, tools, put } = await company();
     const [item] = await put(ceoToken, dev.id, 'Write the price page');
     expect(await db.select().from(jobs)).toEqual([]);
     expect(await db.select().from(tasks)).toEqual([]);
     for (const agent of [hana, bruno]) {
       const client = await tools(agent);
-      expect(await names(client)).not.toContain('backlog');
       expect(text(await call(client, 'tasks'))).not.toContain('Write the price page');
       expect(await call(client, 'task', { task: item })).toMatchObject({ isError: true });
     }
+    expect(await names(await tools(bruno))).not.toContain('backlog');
+    /* The head lays out the turns of its own department, so it reads its list too. */
+    expect(JSON.parse(text(await call(await tools(hana), 'backlog')))).toMatchObject([{ department: { id: dev.id }, items: [{ id: item }] }]);
 
     const boss = await tools(orchestrator);
     const lists = JSON.parse(text(await call(boss, 'backlog')));

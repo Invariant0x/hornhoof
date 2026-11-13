@@ -35,6 +35,7 @@ async function conversation() {
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   /* The orchestrator's runs that answer a message, by the message they answer. */
   const runs: string[] = [];
   const speaker = { companyId, agentId: orchestrator!.id, subscriptionId: sub!.id, personId: ceo!.id, name: ceo!.name };
@@ -48,7 +49,7 @@ async function conversation() {
   };
   const say = async (text: string, at: number, run = false) => (await sayMany([{ text, at, run }]))[0]!;
   const by = (jobId = runs.at(-1)!): By => ({ companyId, agentId: orchestrator!.id, jobId });
-  return { app, db, companyId, agentId: orchestrator!.id, ceo: ceo!, runs, say, sayMany, by };
+  return { app, db, companyId, departmentId: dev!.id, agentId: orchestrator!.id, ceo: ceo!, runs, say, sayMany, by };
 }
 
 type Conversation = Awaited<ReturnType<typeof conversation>>;
@@ -66,7 +67,7 @@ function historicalWords(start: number, now: number): Word[] {
 
 function historicalTurn(c: Conversation, n: number, day: number, messages: TurnMessage[]): typeof turns.$inferInsert {
   const open = n === TURNS;
-  return { companyId: c.companyId, number: n, title: `Turn ${n}`, goal: '', status: open ? 'open' : 'closed', messages, createdByAgentId: c.agentId, openedAt: new Date(day), closedAt: open ? null : new Date(day + DAY / 2) };
+  return { companyId: c.companyId, departmentId: c.departmentId, number: n, title: `Turn ${n}`, goal: '', status: open ? 'open' : 'closed', messages, createdByAgentId: c.agentId, openedAt: new Date(day), closedAt: open ? null : new Date(day + DAY / 2) };
 }
 
 async function historicalTasks(c: Conversation, turnIds: Map<number, string>, start: number) {
@@ -198,7 +199,7 @@ describe('the people\'s words a turn keeps, over a long history', () => {
     const h = await conversation();
     const message = await h.say('Fresh point', Date.now(), true);
     const legacy = { by: message.by, text: message.text, at: message.at };
-    await h.db.insert(turns).values({ companyId: h.companyId, number: 1, goal: '', messages: [legacy] });
+    await h.db.insert(turns).values({ companyId: h.companyId, departmentId: h.departmentId, number: 1, goal: '', messages: [legacy] });
     expect(await h.db.transaction(tx => newWords(tx, h.by(), 1))).toEqual([message]);
   });
 
