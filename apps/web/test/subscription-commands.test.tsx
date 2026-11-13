@@ -43,7 +43,7 @@ describe('subscription install commands', () => {
     const first = view();
     await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
     await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
-    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    await user.click(screen.getByRole('button', { name: 'Show command' }));
     const row = await screen.findByRole('row', { name: 'Claude' });
     expect(within(row).getByText('Waiting for the machine')).toBeInTheDocument();
     const block = screen.getByRole('region', { name: 'Install Claude' });
@@ -107,7 +107,7 @@ it('does not let a list request started before Get the command erase its returne
   view();
   await user.click(screen.getByRole('button', { name: 'Connect a subscription' }));
   await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
-  await user.click(screen.getByRole('button', { name: 'Get the command' }));
+  await user.click(screen.getByRole('button', { name: 'Show command' }));
   expect(await screen.findByRole('row', { name: 'Claude' })).toBeInTheDocument();
   await act(async () => { release([200, { subscriptions: [] }]); });
   expect(screen.getByRole('row', { name: 'Claude' })).toBeInTheDocument();

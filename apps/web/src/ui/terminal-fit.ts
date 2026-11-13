@@ -17,10 +17,18 @@ const MIN_COLS = 2;
 const MIN_ROWS = 1;
 /* Reserves room for overlay or auto-expanding scrollbars that rest below 15px and widen when active. */
 const MIN_SCROLLBAR_GUTTER = 15;
+/* How many copies of a character xterm lays out to measure it. */
+const MEASURED_COPIES = 32;
+
+/* The DOM renderer's cache of glyph widths, from which it sets the letter-spacing that fits each character to its cell. */
+type WidthCache = { _measureElements: HTMLElement[]; _measure(c: string, variant: number): number };
+
+type DomRenderer = { _widthCache?: WidthCache; handleCharSizeChanged(): void };
 
 type RenderService = {
   dimensions: { css: { cell: { width: number; height: number } } };
   clear(): void;
+  _renderer?: { value?: DomRenderer };
 };
 
 type XtermFitCore = {
@@ -154,4 +162,27 @@ export function observeTerminalFit(term: Terminal, box: HTMLElement, onChange: (
   const scrollArea = term.element?.querySelector('.xterm-scroll-area');
   if (scrollArea) observer.observe(scrollArea);
   return () => observer.disconnect();
+}
+
+/* xterm 5.5 and 6.0 measure a glyph as the offsetWidth of 32 copies, a whole number of pixels: Monaco 12px of 7.2012 px
+   counts as 7.1875, the letter-spacing that fits it to a 7.1985 px cell comes out 0.0137 px too wide, and 131 columns of
+   text run 1.8 px past the screen, their last character cut and off the cursor and the selection. Measured by its
+   fractional width, every character fills its own cell. Widths measured the old way are forgotten and the spacing of the
+   rows is set again; xterm measures with the same function from then on, as the font or the pixel ratio changes. */
+export function measureGlyphsExactly(term: Terminal): void {
+  const renderer = coreOf(term)?._renderService?._renderer?.value;
+  const cache = renderer?._widthCache;
+  if (!renderer || !cache) return;
+  cache._measure = fractionalMeasure(cache._measureElements);
+  renderer.handleCharSizeChanged();
+}
+
+/* Copies of a character on the cache's element of its variant (regular, bold, italic, bold italic), by the width they
+   lay out to. */
+function fractionalMeasure(elements: HTMLElement[]) {
+  return (c: string, variant: number): number => {
+    const element = elements[variant]!;
+    element.textContent = c.repeat(MEASURED_COPIES);
+    return element.getBoundingClientRect().width / MEASURED_COPIES;
+  };
 }

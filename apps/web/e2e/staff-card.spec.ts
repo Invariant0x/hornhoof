@@ -33,8 +33,8 @@ const decisions = (name: string): Decisions => ({
 });
 
 const WORDS = {
-  en: { department: 'Operations', tasks: /^Tasks/, required: 'Required', here: 'Already here: Argus', hire: 'Hire (3)', watch: /Task watchdog/, operator: /Program operator/, extra: /Integrations engineer/, runs: 'Where Program operator runs' },
-  ru: { department: 'Операции', tasks: /^Задачи/, required: 'Обязательная роль', here: 'Уже в отделе: Argus', hire: 'Нанять (3)', watch: /Сторож задач/, operator: /Оператор программ/, extra: /Инженер интеграций/, runs: 'Где работает Оператор программ' },
+  en: { department: 'Operations', tasks: /^Tasks/, required: 'Required role', here: 'Already here: Argus', hire: 'Hire (3)', watch: /Task watchdog/, operator: /Program operator/, extra: /Integrations engineer/, runs: 'Subscription for Program operator' },
+  ru: { department: 'Операции', tasks: /^Задачи/, required: 'Обязательная роль', here: 'Уже в отделе: Argus', hire: 'Нанять (3)', watch: /Сторож задач/, operator: /Оператор программ/, extra: /Инженер интеграций/, runs: 'Подписка для Оператор программ' },
 };
 
 for (const lang of ['en', 'ru'] as const) {

@@ -7,9 +7,10 @@ import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSub
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
+import { waitedForReturn } from '../nodes/connections.js';
 import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
-import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, uncountedSinceMove, wentOn, wentOnAfterReturn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
@@ -631,12 +632,15 @@ async function commentsInTurn(db: Ctx['db'], agentId: string, task: Task, starte
   return Number(told?.n ?? 0);
 }
 
-const continuationOfTurn = (error: string | null, comments: number) => error === 'timeout' || comments > 0 ? wentOn : silentTurn;
+/* A timeout or a comment says the program worked and continues under the other counter. The first turn since the task last
+   moved that waited in line until its node came back counts under neither. */
+async function continuationOf(ctx: Ctx, agentId: string, task: Task, job: HeldJob) {
+  if ((await waitedForReturn(ctx.db, job)) && !(await uncountedSinceMove(ctx.db, agentId, task))) return wentOnAfterReturn;
+  return job.error === 'timeout' || (await commentsInTurn(ctx.db, agentId, task, job.startedAt)) > 0 ? wentOn : silentTurn;
+}
 
 async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: HeldJob) {
-  /* A timeout or a comment says the program worked and continues under the other counter. */
-  const comments = await commentsInTurn(ctx.db, agentId, task, job.startedAt);
-  const advance = continuationOfTurn(job.error, comments);
+  const advance = await continuationOf(ctx, agentId, task, job);
   const moved = await advance(ctx, agentId, task).catch(changedWhileResuming);
   if (moved) await wakeAll(ctx, moved.wakes);
 }

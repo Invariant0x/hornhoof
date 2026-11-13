@@ -2,8 +2,9 @@ import { and, eq, gte, inArray, lte, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, taskEvents } from '../../db/schema.js';
 import { conversationOf, GONE_ALONG, onAgent } from '../conversation/queue.js';
+import { waitedForReturn } from '../nodes/connections.js';
 import { turnAgain } from './again.js';
-import { published } from './engine.js';
+import { published, uncountedSinceMove } from './engine.js';
 import { repeatedTurn } from './wake-state.js';
 
 /* What an agent records on a task for what it was woken for: its work handed in, a verdict, a report, why it is blocked,
@@ -50,7 +51,8 @@ function howEnded(job: Pick<typeof jobs.$inferSelect, 'exitCode' | 'exitSignal'>
 /* A turn on a task whose program failed before the turn recorded what it was woken for goes on once, with a short reminder
    to finish with its tool: in its session, or, when that session cannot go on, anew with the same work, which the turn
    takes along as it goes out. One that was such a continuation already does not; its end goes on as any failed turn's.
-   Says whether it went on. */
+   The first turn since the task last moved that waited in line until its node came back does not count for the stuck
+   counter here either. Says whether it went on. */
 export async function continueOnce(ctx: Ctx, jobId: string): Promise<'continued' | null> {
   const found = await repeatedTurn(ctx.db, jobId, 'continue');
   if (!found) return null;
@@ -59,13 +61,14 @@ export async function continueOnce(ctx: Ctx, jobId: string): Promise<'continued'
   const note = continuationNote(job, task);
   const next = await onAgent(ctx, agent.id, () => turnAgain(ctx, found, note, { continueOf: job.id }, note));
   const then = next ? `Hornhoof goes on with it once: turn ${next}.` : `Hornhoof could not go on with it: ${agent.name} has no subscription.`;
+  const afterReturn = (await waitedForReturn(ctx.db, job)) && !(await uncountedSinceMove(ctx.db, agent.id, task));
   await ctx.db.insert(taskEvents).values({
     companyId: task.companyId,
     taskId: task.id,
     kind: 'continued',
     agentId: agent.id,
     text: `${agent.name}'s turn ${job.id} ended without recording its work: ${how}. ${then}`,
-    data: { job: job.id, exit: { code: job.exitCode, signal: job.exitSignal }, continuation: next },
+    data: { job: job.id, exit: { code: job.exitCode, signal: job.exitSignal }, continuation: next, ...(afterReturn ? { afterReturn } : {}) },
   });
   published(ctx, task);
   return next ? 'continued' : null;

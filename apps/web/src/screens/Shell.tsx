@@ -3,7 +3,6 @@ import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
-import { currentTheme, setTheme, type Theme } from '../theme';
 import type { ComputerAccessView, Me, Org } from '../types';
 import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
@@ -15,6 +14,7 @@ import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
+import { ThemeChoice, ThemeTemplateDialog } from '../ui/ThemePicker';
 import { useUpdates, type Updates } from '../updates';
 import { About } from './About';
 import type { StaffAsk } from './AgentWindow';
@@ -36,12 +36,11 @@ import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './Rou
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
-const THEMES: Theme[] = ['light', 'dark'];
-
-type AccountDialogName = 'about' | 'versions' | 'profile' | 'settings';
+const ACCOUNT_DIALOGS = ['about', 'versions', 'profile', 'settings', 'theme'] as const;
+type AccountDialogName = (typeof ACCOUNT_DIALOGS)[number];
 
 function dialogOf(route: Route): AccountDialogName | null {
-  return route.kind === 'about' || route.kind === 'versions' || route.kind === 'profile' || route.kind === 'settings' ? route.kind : null;
+  return ACCOUNT_DIALOGS.find(kind => kind === route.kind) ?? null;
 }
 
 function workspaceOf(route: Route, backgrounds: Route[]) {
@@ -61,6 +60,7 @@ function AccountDialog({ active, me, updates, onRenamed, onClose, onHome }: { ac
     versions: <Versions updates={updates} onClose={onClose} onHome={onHome} />,
     profile: <Profile me={me} onRenamed={onRenamed} onClose={onClose} />,
     settings: <Settings me={me} onClose={onClose} onHome={onHome} />,
+    theme: <ThemeTemplateDialog onClose={onClose} />,
   }[active];
 }
 
@@ -107,6 +107,7 @@ function AccountMenu({
   onProfile,
   onSettings,
   onAbout,
+  onTemplate,
   toDecide,
 }: {
   me: Me;
@@ -118,17 +119,12 @@ function AccountMenu({
   onProfile: () => void;
   onSettings?: () => void;
   onAbout: () => void;
+  onTemplate: () => void;
   toDecide: number;
 }) {
   const t = useT();
   const { language, setLanguage } = useLanguage();
-  const [theme, setThemeState] = useState<Theme>(currentTheme);
   const version = useVersion();
-
-  function pickTheme(next: Theme) {
-    setTheme(next);
-    setThemeState(next);
-  }
 
   return (
     <div className="account-menu">
@@ -136,16 +132,10 @@ function AccountMenu({
         <b>{me.person.name}</b>
         <span>{me.person.email}</span>
       </p>
-      <div className="menu-row" role="group" aria-label={t.shell.theme}>
-        <span>{t.shell.theme}</span>
-        <div className="seg">
-          {THEMES.map(id => (
-            <button key={id} type="button" aria-pressed={theme === id} onClick={() => pickTheme(id)}>
-              {t.shell[id]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <ThemeChoice />
+      <button className="btn small ghost" type="button" onClick={() => { onClose(); onTemplate(); }}>
+        {t.themeTemplate.menu}
+      </button>
       <div className="menu-row" role="group" aria-label={t.shell.language}>
         <span>{t.shell.language}</span>
         <div className="seg">
@@ -265,7 +255,7 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} onTemplate={() => openAccount('theme')} toDecide={toDecide} />}
       </div>
     </div>
   );

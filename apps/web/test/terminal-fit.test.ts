@@ -7,6 +7,7 @@ import { AgentTerminal } from '../src/ui/AgentTerminal';
 import {
   fitTerminal,
   fitTerminalDimensions,
+  measureGlyphsExactly,
   measureTerminalFit,
   observeTerminalFit,
 } from '../src/ui/terminal-fit';
@@ -273,6 +274,69 @@ describe('measureTerminalFit, fitTerminal and observeTerminalFit DOM helpers', (
     const stop = observeTerminalFit(term as unknown as Terminal, box, () => {});
     expect(() => stop()).not.toThrow();
     box.remove();
+  });
+});
+
+/* What a browser lays out for copies of one glyph: a fractional width in 1/64 px, and offsetWidth rounded to whole pixels. */
+function layOutGlyph(glyph: number): HTMLSpanElement {
+  const span = document.createElement('span');
+  const width = () => Math.round((span.textContent ?? '').length * glyph * 64) / 64;
+  Object.defineProperty(span, 'offsetWidth', { get: () => Math.round(width()) });
+  span.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width(), bottom: 14, width: width(), height: 14, toJSON: () => ({}) });
+  return span;
+}
+
+/* Stand-in for the DOM renderer of xterm 5.5: a cache of glyph widths measured on its own elements, and the letter-spacing
+   that fits the measured glyph to its cell, set again when the size of a character changes. */
+class GlyphRenderer {
+  spacing = 0;
+  private widths = new Map<string, number>();
+  _widthCache = {
+    _measureElements: [layOutGlyph(7.201171875), layOutGlyph(7.25), layOutGlyph(7.201171875), layOutGlyph(7.25)],
+    _measure: (c: string, variant: number) => {
+      const element = this._widthCache._measureElements[variant]!;
+      element.textContent = c.repeat(32);
+      return element.offsetWidth / 32;
+    },
+  };
+
+  constructor(public readonly cell: number) {}
+
+  width(c: string, variant = 0): number {
+    const key = `${c}${variant}`;
+    if (!this.widths.has(key)) this.widths.set(key, this._widthCache._measure(c, variant));
+    return this.widths.get(key)!;
+  }
+
+  handleCharSizeChanged() {
+    this.widths.clear();
+    this.spacing = this.cell - this.width('W');
+  }
+}
+
+function termWith(renderer: unknown): Terminal {
+  return { rows: 38, _core: { _renderService: { _renderer: { value: renderer } } } } as unknown as Terminal;
+}
+
+describe('measureGlyphsExactly', () => {
+  it('fits Monaco 12px of 7.2012 px to a 7.1985 px cell, where a whole-pixel offsetWidth took it for 7.1875', () => {
+    /* 131 columns on a 943 px screen, as the window of 1440 px lays them out. */
+    const renderer = new GlyphRenderer(943 / 131);
+    renderer.handleCharSizeChanged();
+    expect(131 * (7.201171875 + renderer.spacing) - 943).toBeGreaterThan(1.7);
+
+    measureGlyphsExactly(termWith(renderer));
+
+    expect(renderer.spacing).toBeCloseTo(943 / 131 - 7.201171875, 4);
+    expect(Math.abs(131 * (7.201171875 + renderer.spacing) - 943)).toBeLessThan(0.01);
+    expect(renderer.width('W', 1)).toBeCloseTo(7.25, 4);
+    expect(renderer._widthCache._measureElements[1]!.textContent).toBe('W'.repeat(32));
+  });
+
+  it('leaves a terminal whose renderer keeps no width cache as it is', () => {
+    expect(() => measureGlyphsExactly(termWith(undefined))).not.toThrow();
+    expect(() => measureGlyphsExactly(termWith({ handleCharSizeChanged() {} }))).not.toThrow();
+    expect(() => measureGlyphsExactly({ rows: 24 } as unknown as Terminal)).not.toThrow();
   });
 });
 

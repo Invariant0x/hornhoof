@@ -31,6 +31,47 @@ export function DeputyIcon() {
   );
 }
 
+/* A pencil, by the heading of a form that changes a person. */
+export function EditIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10.8 2.8l2.4 2.4L5.6 12.8H3.2v-2.4z" />
+      <path d="M9.2 4.4l2.4 2.4" />
+    </svg>
+  );
+}
+
+/* Two figures, by the heading of the card that hires into a department. */
+export function StaffIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="6" cy="5.4" r="2.4" />
+      <path d="M1.6 13.6c0-2.6 2-4.4 4.4-4.4s4.4 1.8 4.4 4.4" />
+      <path d="M10.6 3.2a2.4 2.4 0 0 1 0 4.4M12 9.6c1.5.6 2.4 2 2.4 4" />
+    </svg>
+  );
+}
+
+/* A key, by the line that says whether an assistant has one. */
+export function KeyIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="5" cy="8" r="2.8" />
+      <path d="M7.8 8h6.4M12 8v2.4M14.2 8v1.6" />
+    </svg>
+  );
+}
+
+/* A triangle with a mark, at the start of a warning line. */
+export function AlertIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.8l6.4 11.6H1.6z" />
+      <path d="M8 6.2v3.4M8 11.4v.2" />
+    </svg>
+  );
+}
+
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 30 30" aria-hidden="true">

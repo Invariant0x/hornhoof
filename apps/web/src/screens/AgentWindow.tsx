@@ -11,6 +11,7 @@ import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../u
 import { AgentCard } from '../ui/AgentCard';
 import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
 import { AgentTerminal } from '../ui/AgentTerminal';
+import { useChatScroll } from '../ui/chat-scroll';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { ComputerStrip } from '../ui/ComputerStrip';
@@ -291,6 +292,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [card, setCard] = useState<AgentCardView | null>(null);
   const [events, setEvents] = useState<EventView[]>([]);
   const [state, setState] = useState<OrchestratorState | null>(null);
+  /* The chat shows once its whole history is in: drawn a page at a time from the oldest, it would open on old lines and run
+     down to the newest. */
+  const [historyIn, setHistoryIn] = useState(false);
   const [text, setText] = useState('');
   /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
   const [manual, setManual] = useState<boolean | null>(null);
@@ -308,7 +312,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
-  const log = useRef<HTMLDivElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,7 +375,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           setState(res.state);
         }
         if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
-        if (res.events.length < PAGE) break;
+        if (res.events.length < PAGE) {
+          setHistoryIn(true);
+          break;
+        }
       }
     } catch (err) {
       if (mounted.current) {
@@ -476,13 +482,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const program = provider ? PROGRAM_NAMES[provider] : 'Claude';
   /* The terminal opens as soon as the agent's state says it can, without waiting for the card. */
   const opens = terminal && state !== null;
+  const chat = known && !terminal && historyIn;
   /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
-  const dragging = usePictureDrop(box, known && !terminal, state?.ready ?? false, pictures.add);
-
-  useLayoutEffect(() => {
-    const el = log.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, state?.busy, view, known]);
+  const dragging = usePictureDrop(box, chat, state?.ready ?? false, pictures.add);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -563,6 +565,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   );
   const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
+  const { log, onScroll } = useChatScroll(chat && !place?.minimized, `${events.length} ${state?.busy} ${commands.length} ${hasCards}`);
 
   const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
   const authorOf = (e: LogEvent): string => {
@@ -662,7 +665,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   return (
     <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} stop={stop} onToggle={toggleView} />}>
       {terminal && state === null && failure === null && <TerminalPlace t={t} state={null} program={program} />}
-      {!known && !opens && !(terminal && failure === null) && (
+      {((!known && !opens && !(terminal && failure === null)) || (!terminal && !historyIn)) && (
         <div className="t-log" aria-busy="true">
           {failure !== null && (
             <p className="alert" role="alert">
@@ -684,8 +687,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           {after}
         </div>
       )}
-      {known && !terminal && (
-        <div className="t-log chat" ref={log} role="log" aria-label={t.window.chat.conversation}>
+      {chat && (
+        <div className="t-log chat" ref={log} role="log" aria-label={t.window.chat.conversation} onScroll={onScroll}>
           {ready && !shown.length && <p className="chat-empty">{t.window.chat.empty}</p>}
           {chatItems(shown).map(item =>
             item.kind === 'steps' ? (
@@ -714,7 +717,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         />
       )}
       {known && <StateNotes state={state} ready={ready} sub={sub} />}
-      {known && !terminal && (ready || state.busy) && <ChatState state={state} onStop={stop} />}
+      {chat && (ready || state.busy) && <ChatState state={state} onStop={stop} />}
       {dragging && (
         <div className="t-drop" role="status">
           {t.window.dropPictures}
@@ -725,7 +728,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           {errorText(t, pictures.refused)}
         </p>
       )}
-      {known && !terminal && (
+      {chat && (
         <form
           className="t-in chat-in"
           onSubmit={e => {
@@ -748,7 +751,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       <div className="t-st">
         {known && <span>{where}</span>}
-        {known && !terminal && <span>{t.window.hint}</span>}
+        {chat && <span>{t.window.hint}</span>}
       </div>
     </AgentWindowLayout>
   );

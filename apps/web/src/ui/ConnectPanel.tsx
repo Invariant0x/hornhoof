@@ -3,8 +3,10 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { SubView } from '../types';
 import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
+import { BusyLabel } from './BusyLabel';
 import { CommandBox, toActiveCommand, type ActiveCommand } from './CommandBox';
 import { Edge } from './Edge';
+import { ProviderMark } from './icons';
 
 type Props = { onDone: () => void; onCommand?: (shown: ActiveCommand, subscriptions: SubView[]) => void; onSkip?: () => void; skipLabel?: string };
 
@@ -38,12 +40,14 @@ export function ConnectPanel({ onDone, onCommand, onSkip, skipLabel }: Props) {
 
   if (command) {
     return (
-      <Edge className="panel" cut={12}>
-        <h2>{t.subs.connectHeading}</h2>
-        <p className="muted">{t.subs.runThis}</p>
+      <Edge className="panel form-card" cut={12}>
+        <div className="form-head">
+          <h2 className="form-title">{t.subs.connectHeading}</h2>
+          <p className="muted">{t.subs.runThis}</p>
+        </div>
         <CommandBox command={command} />
         <p className="muted">{t.subs.joinOnce}</p>
-        <div className="actions">
+        <div className="form-foot">
           <button className="btn" type="button" onClick={onDone}>{t.common.done}</button>
         </div>
       </Edge>
@@ -51,24 +55,29 @@ export function ConnectPanel({ onDone, onCommand, onSkip, skipLabel }: Props) {
   }
 
   return (
-    <Edge className="panel" cut={12}>
-      <h2>{t.subs.connectHeading}</h2>
-      <p className="muted">{t.subs.connectIntro}</p>
-      <form onSubmit={e => void submit(e)} className="connect-form">
+    <Edge className="panel form-card" cut={12}>
+      <div className="form-head">
+        <h2 className="form-title">{t.subs.connectHeading}</h2>
+        <p className="muted">{t.subs.connectIntro}</p>
+      </div>
+      <form onSubmit={e => void submit(e)} className="form-grid connect-form">
         <fieldset className="plans">
           <legend className="sr">{t.subs.connectHeading}</legend>
           {PLAN_PROVIDERS.map(p => (
             <label key={p} className={picked.includes(p) ? 'plan on' : 'plan'}>
               <input type="checkbox" checked={picked.includes(p)} onChange={() => toggle(p)} aria-label={PROVIDER_NAMES[p]} aria-describedby={`plan-${p}`} />
+              <ProviderMark provider={p} />
               <b>{PROVIDER_NAMES[p]}</b>
               <span id={`plan-${p}`} className="muted">{t.subs.plans[p]}</span>
             </label>
           ))}
         </fieldset>
         {failure && <p className="alert" role="alert">{failure}</p>}
-        <div className="actions">
+        <div className="form-foot">
+          <button className="btn" type="submit" aria-busy={busy} disabled={busy || picked.length === 0}>
+            <BusyLabel busy={busy} idle={t.subs.getCommand} working={t.subs.preparing} />
+          </button>
           {onSkip && <button className="btn ghost" type="button" onClick={onSkip}>{skipLabel ?? t.subs.skip}</button>}
-          <button className="btn" type="submit" disabled={busy || picked.length === 0}>{t.subs.getCommand}</button>
         </div>
       </form>
     </Edge>

@@ -3,6 +3,8 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { SubView } from '../types';
+import { BusyLabel } from './BusyLabel';
+import { Field } from './Field';
 
 /* Plans that sign in with a key pasted once, and where their owner gets one. */
 export const KEY_PLANS = {
@@ -46,19 +48,19 @@ export function KeyForm({ sub, onDone, onCancel }: { sub: SubView & { provider: 
     }
   }
 
+  /* The note says how the key is kept, with where to get one after it. */
+  const hint = <>{t.subs.keyNote} <a href={plan.page} target="_blank" rel="noreferrer">{t.subs.keyPage(provider)}</a>.</>;
   return (
-    <form className="key-form" onSubmit={e => void save(e)}>
-      <label>
-        <span>{t.subs.keyField(provider)}</span>
-        <input type="password" autoComplete="off" spellCheck={false} value={key} onChange={e => setKey(e.target.value)} />
-      </label>
-      <p className="muted">
-        <a href={plan.page} target="_blank" rel="noreferrer">{t.subs.keyPage(provider)}</a>. {t.subs.keyNote}
-      </p>
+    <form className="key-form form-grid" onSubmit={e => void save(e)}>
+      <Field label={t.subs.keyField(provider)} hint={hint}>
+        {p => <input {...p} className="mono" type="password" autoComplete="off" spellCheck={false} value={key} onChange={e => setKey(e.target.value)} />}
+      </Field>
       {problem && <p className="alert" role="alert">{problem}</p>}
-      <div className="actions">
-        <button className="btn small" type="submit" disabled={busy || !key.trim()}>{t.subs.saveKey}</button>
-        <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+      <div className="form-foot">
+        <button className="btn" type="submit" aria-busy={busy} disabled={busy || !key.trim()}>
+          <BusyLabel busy={busy} idle={t.subs.connectKey} working={t.subs.connecting} />
+        </button>
+        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
       </div>
     </form>
   );
