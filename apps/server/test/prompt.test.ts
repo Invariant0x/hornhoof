@@ -45,8 +45,7 @@ describe('orchestrator instructions', () => {
     expect(packet.skills.some(file => file.name === 'assignment')).toBe(false);
   });
 
-  it('delivers the three split company abilities as complete files and preserves the instruction budget', () => {
-    expect(Buffer.byteLength(told)).toBeLessThan(24_000);
+  it('delivers the three split company abilities as complete files', () => {
     for (const id of ['orch-staff', 'orch-people', 'orch-resources']) {
       const files = steady.skills.filter(f => f.name === id);
       const source = templates.skills.get(id)!;

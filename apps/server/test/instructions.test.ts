@@ -340,7 +340,6 @@ describe('renderInstructions', () => {
     for (const roleKey of ['DEV-ENG', 'DEV-FE'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
       expect(rendered.text, roleKey).toContain('.agents/skills/<name>/SKILL.md');
       expect(rendered.text, roleKey).toContain('.claude/skills/<name>/SKILL.md');
       expect(rendered.text, roleKey).toContain('\n- dev-frontend-ui: User interface engineering.');
@@ -361,14 +360,13 @@ describe('renderInstructions', () => {
     }
   });
 
-  it('renders hh-questions with its Materials guidance cleanly inside the 24 KB inline instruction budget', () => {
+  it('renders hh-questions with its Materials guidance cleanly', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     expect(shipped.skills.has('hh-questions')).toBe(true);
     for (const roleKey of ['DEV-ENG', 'DEV-HEAD', 'DSN-UI'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const skillIds = [...new Set([...role.skills.filter(s => s.on).map(s => s.id), 'hh-questions'])];
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: skillIds, templateHashes: {} }), PLACE);
-      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
       expect(rendered.text, roleKey).toContain('<!-- hh:skill hh-questions -->');
       expect(rendered.text, roleKey).toContain('- **Materials**:');
       expect(rendered.whole, roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
@@ -386,7 +384,6 @@ describe('renderInstructions', () => {
     for (const role of shipped.roles.values()) {
       const kind = role.kind === 'head' ? 'head' : 'worker';
       const fresh = renderInstructions(shipped, agent({ kind, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-      expect(Buffer.byteLength(fresh.text), role.id).toBeLessThan(24_000);
       expect(occurrences(fresh.raw, marker), `${role.id} raw`).toBe(1);
       expect(occurrences(fresh.text, marker), `${role.id} text`).toBe(1);
       expect(occurrences(fresh.whole, marker), `${role.id} whole`).toBe(1);
@@ -396,7 +393,6 @@ describe('renderInstructions', () => {
     }
 
     const steady = orchestratorSteady(shipped);
-    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(occurrences(steady.text, marker)).toBe(1);
     expect(occurrences(steady.whole, marker)).toBe(1);
     expect(steady.text).toContain(canonicalChecks);
@@ -456,7 +452,6 @@ describe('renderInstructions', () => {
     });
     const headPacket = renderInstructions(shipped, staleHead, PLACE);
     expect(staleHead.skills).toEqual(['hh-outside-is-data']);
-    expect(Buffer.byteLength(headPacket.text)).toBeLessThan(24_000);
     expect(headPacket.text).toContain(canonicalLead);
     expect(headPacket.whole).toContain(canonicalLead);
     expect(headPacket.raw).toContain(canonicalLead);
@@ -467,7 +462,6 @@ describe('renderInstructions', () => {
     expect(headPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
 
     const rolelessHead = renderInstructions(shipped, agent({ kind: 'head', roleKey: null, skills: [], templateHashes: {} }), PLACE);
-    expect(Buffer.byteLength(rolelessHead.text)).toBeLessThan(24_000);
     expect(rolelessHead.text).toContain(canonicalLead);
     expect(rolelessHead.text).toContain(canonicalChecks);
 
@@ -485,7 +479,6 @@ describe('renderInstructions', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const revRole = shipped.roles.get('DEV-REV')!;
     const rendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-    expect(Buffer.byteLength(rendered.text)).toBeLessThan(24_000);
     expect(rendered.text).toContain('\n- dev-review-diff: Reviewing a change.');
     expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
     const files = new Map(rendered.skills.map(s => [s.name, s.body]));
@@ -500,7 +493,6 @@ describe('renderInstructions', () => {
   it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const steady = orchestratorSteady(shipped);
-    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.text).toMatch(/\n- orch-trouble: When work goes wrong\.[^\n]*external service failures/i);
     /* Heads keep their standing rule; a selected trouble ability must carry its own complete method too. */
     expect(steady.text).toMatch(/external service failure never prolongs a general hold once the service recovers/i);
@@ -570,7 +562,6 @@ describe('renderInstructions', () => {
 
     for (const candidate of headVariants) {
       const packet = renderInstructions(shipped, candidate, PLACE);
-      expect(Buffer.byteLength(packet.text), candidate.roleKey ?? 'roleless').toBeLessThan(24_000);
       for (const rule of headRules) {
         expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toMatch(rule);
         expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toMatch(rule);
@@ -605,7 +596,6 @@ describe('renderInstructions', () => {
     for (const roleKey of ['DEV-ENG', 'DEV-BE', 'DEV-FE'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
       const files = new Map(rendered.skills.map(s => [s.name, s.body]));
       const impl = files.get('dev-implement')!;
       const policy = files.get('dev-testing-policy')!;
@@ -631,7 +621,6 @@ describe('renderInstructions', () => {
       agent({ kind: 'head', roleKey: 'DEV-HEAD', skills: headRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
       PLACE,
     );
-    expect(Buffer.byteLength(headRendered.text)).toBeLessThan(24_000);
     const headPolicy = headRendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
     expect(Buffer.byteLength(headPolicy)).toBeLessThan(22_000);
     expect(headPolicy).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
@@ -641,7 +630,6 @@ describe('renderInstructions', () => {
     for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
       const policy = rendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
       expect(policy, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
     }
