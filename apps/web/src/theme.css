@@ -2010,8 +2010,10 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
   .orch > .t-bar button.bar-word { padding: 0; width: 28px; justify-content: center; align-items: center; }
   .bar-word svg { display: block; }
   .bar-word span { display: none; }
-  .orch > .t-bar button.bar-word.both { width: auto; padding: 0 8px; gap: 6px; }
-  .bar-word.both span { display: inline; }
+  /* The switch between the chat and the terminal says its word too, unless a panel covers the window: the way back then takes
+     the word's room, and the switch keeps its icon and its name, as the buttons beside it do. */
+  .orch:not(.with-panels) > .t-bar button.bar-word.both { width: auto; padding: 0 8px; gap: 6px; }
+  .orch:not(.with-panels) .bar-word.both span { display: inline; }
   /* A panel takes the whole window here: what lies under it is out of reach for the keyboard too. */
   .orch.with-panels .agent-conversation { display: none; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }

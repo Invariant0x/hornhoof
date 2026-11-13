@@ -116,9 +116,10 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     const put = await box(mapWorld);
     await restore.click();
     await expect(main).toHaveClass(/with-window/);
-    /* A window that opens leaves the map where the person put it; Fit then shows all of it clear of the window. */
+    /* A window that opens leaves the map where the person put it; Fit then shows all of it clear of the window. On a phone the
+       window covers the map and its Fit, so it is pressed from the keyboard, as above. */
     expect(await box(mapWorld)).toEqual(put);
-    await mapFit.click();
+    await activate(mapFit);
     if (width > 760) await expect.poll(() => box(mapWorld)).not.toEqual(mapWithoutWindow);
     expect(live.connections).toBe(connections);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
