@@ -478,7 +478,7 @@ describe('Map', () => {
     fireEvent.click(line, { clientX: 519, clientY: 260 });
     /* The bend sits on the line, which runs on as it did, with a dot like the one where a trace turns. */
     const bend = screen.getByRole('button', { name: 'Bend in the line: Orchestrator and Marketing. Drag it or use the arrow keys to move it, click it to remove it' });
-    expect([parseFloat(bend.style.left) + parseFloat(bend.style.width) / 2, parseFloat(bend.style.top) + parseFloat(bend.style.height) / 2]).toEqual([516, 260]);
+    expect([parseFloat(bend.style.left), parseFloat(bend.style.top)]).toEqual([516, 260]);
     expect(trace()).toBe(before);
     expect([...container.querySelectorAll('.wires .via')].map(c => `${c.getAttribute('cx')}:${c.getAttribute('cy')}`)).toContain('516:260');
     await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[516, 260]] } } }));
@@ -513,6 +513,9 @@ describe('Map', () => {
     expect(trace()).toBe('M 600 420 L 480 420 L 480 200 L 390 200');
     expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
     fireEvent.pointerUp(bend, { clientX: 64, clientY: 140, pointerId: 1 });
+    /* The click the browser sends as the hand lets go keeps it there. */
+    fireEvent.click(bend, { clientX: 64, clientY: 140, detail: 1 });
+    expect(bend.isConnected).toBe(true);
     expect(container.querySelector<HTMLElement>('.world')!.style.transform).toBe(view);
     await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[480, 300]] } } }));
     fireEvent.keyDown(bend, { key: 'ArrowLeft' });
@@ -529,8 +532,18 @@ describe('Map', () => {
     fireEvent.pointerDown(bend, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
     fireEvent.pointerMove(bend, { clientX: 100, clientY: 214, pointerId: 1 });
     /* 6 above the hub's middle line, where the line leaves the hub, the bend comes level with it and the line runs straight out. */
-    expect(parseFloat(bend.style.top) + parseFloat(bend.style.height) / 2).toBe(420);
+    expect(parseFloat(bend.style.top)).toBe(420);
     expect(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d')).toBe('M 600 420 L 480 420 L 480 200 L 390 200');
+  });
+
+  it('tells the lines how far the map is zoomed, so a line takes a click as wide on the screen at any zoom', async () => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    await waitFor(() => expect(scale()).toBeLessThan(1));
+    expect(Number(container.querySelector<SVGElement>('.wires')!.style.getPropertyValue('--k'))).toBe(scale());
   });
 
   it('takes a bend away with a press that does not move it, or from the keyboard, and the line runs its own way again', async () => {
@@ -547,13 +560,21 @@ describe('Map', () => {
     fireEvent.pointerDown(bend, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
     fireEvent.pointerMove(bend, { clientX: 101, clientY: 101, pointerId: 1 });
     fireEvent.pointerUp(bend, { clientX: 101, clientY: 101, pointerId: 1 });
+    /* It goes with the click that follows, which a finger's tap sends to what is under it then: the bend, not the line. */
+    expect(bend.isConnected).toBe(true);
+    fireEvent.click(bend, { clientX: 101, clientY: 101, detail: 1 });
+    expect(bend.isConnected).toBe(false);
     expect(trace('d1')).toBe(home[0]);
     await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': null } } }));
     const development = () => screen.queryAllByRole('button', { name: /^Bend in the line: Orchestrator and Development/ });
     expect(development()).toHaveLength(2);
     fireEvent.keyDown(development()[1]!, { key: 'Delete' });
     await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d2': [[720, 300]] } } }));
-    /* Enter or Space on a bend is a click on it. */
+    /* Enter or Space on a bend is a click on it, also after a finger moved it, which sends no click as it lets go. */
+    fireEvent.pointerDown(development()[0]!, { clientX: 100, clientY: 100, pointerId: 2, button: 0, pointerType: 'touch' });
+    fireEvent.pointerMove(development()[0]!, { clientX: 100, clientY: 140, pointerId: 2, pointerType: 'touch' });
+    fireEvent.pointerUp(development()[0]!, { clientX: 100, clientY: 140, pointerId: 2, pointerType: 'touch' });
+    fireEvent.keyDown(development()[0]!, { key: 'Enter' });
     fireEvent.click(development()[0]!);
     expect(development()).toEqual([]);
     expect(trace('d2')).toBe(home[1]);

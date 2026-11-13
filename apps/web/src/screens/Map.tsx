@@ -1,6 +1,6 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
@@ -41,9 +41,9 @@ const PING_MS = 950;
 const FLASH_MS = 1400;
 /* A grip is this big to touch on the screen at any zoom. An arrow key moves its block this far, ten times as far with Shift. */
 const GRIP = 44, KEY_STEP = 10;
-/* A bend's handle is this big on the screen at any zoom; a click this near a corner of a line puts the bend on the corner, and
-   a bend the hand brings this near level with the next stop of its line comes level with it. */
-const BEND = 28, SNAP = 12;
+/* A click this near a corner of a line puts the bend on the corner, and a bend the hand brings this near level with the next
+   stop of its line comes level with it. */
+const SNAP = 12;
 
 /* Where the map stood when this person left it, kept in this browser for each company and person, so a reload opens it there. */
 const viewKey = (me: Me) => `hh-map-view:${me.company.id}:${me.person.id}`;
@@ -451,25 +451,30 @@ function Grip({ label, corner, from, k, onMove, onPut, onTap }: { label: string;
   );
 }
 
-/* The handle over a bend a person put on a line: drag it by mouse, touch or pen, or move it with the arrow keys; a press on it
-   that does not move takes the bend away, as Delete, Enter and Space do. Nothing is drawn for it but the dot of the line under
-   it, and the ring of the keyboard's focus. It stays the same size on the screen at any zoom; align brings it level with the
-   stops of its line as the hand moves it. While the hand moves, onMove shows the line through it where it is, and null puts
-   it back; onPut keeps the place where the hand let go. */
+/* The handle over a bend a person put on a line: drag it by mouse, touch or pen, or move it with the arrow keys; a click on it
+   that did not move it takes the bend away, as Delete, Enter and Space do. The click, not the letting go: a finger's tap sends
+   its click to what is under it after it lets go, which would be the line, and the line would put the bend back. Nothing is
+   drawn for it but the dot of the line under it, and the ring of the keyboard's focus. The stylesheet sizes it and sets its
+   middle on the point; it stays the same size on the screen at any zoom. align brings it level with the stops of its line as
+   the hand moves it. While the hand moves, onMove shows the line through it where it is, and null puts it back; onPut keeps
+   the place where the hand let go. */
 function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string; at: Point; k: number; align(at: Point): Point; onMove(at: Point | null): void; onPut(at: Point): void; onRemove(): void }) {
   const press = useRef<{ id: number; x: number; y: number; from: Point; at: Point | null } | null>(null);
+  /* The last press moved the bend: the click the browser sends as the hand lets go is not one. */
+  const moved = useRef(false);
   return (
     <button
       type="button"
       className="bend"
       aria-label={label}
       title={label}
-      style={{ left: at[0] - BEND / 2, top: at[1] - BEND / 2, width: BEND, height: BEND, transform: `scale(${1 / k})` }}
+      style={{ left: at[0], top: at[1], transform: `scale(${1 / k})` }}
       onPointerDown={e => {
         e.stopPropagation();
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture?.(e.pointerId);
         press.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from: at, at: null };
+        moved.current = false;
       }}
       onPointerMove={e => {
         const p = press.current;
@@ -485,8 +490,8 @@ function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string;
         if (!p || p.id !== e.pointerId) return;
         e.stopPropagation();
         press.current = null;
+        moved.current = !!p.at;
         if (p.at) onPut(p.at);
-        else onRemove();
       }}
       onPointerCancel={e => {
         if (press.current?.id !== e.pointerId) return;
@@ -494,6 +499,8 @@ function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string;
         onMove(null);
       }}
       onKeyDown={e => {
+        /* A key's click is its own, whatever the last press did. */
+        moved.current = false;
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
           onRemove();
@@ -505,9 +512,9 @@ function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string;
         const n = e.shiftKey ? KEY_STEP * 10 : KEY_STEP;
         onPut([at[0] + step[0] * n, at[1] + step[1] * n]);
       }}
-      /* Enter, Space or a screen reader's click, which no pointer pressed; a pointer's press was taken as it let go. */
-      onClick={e => {
-        if (e.detail === 0) onRemove();
+      onClick={() => {
+        if (moved.current) moved.current = false;
+        else onRemove();
       }}
     />
   );
@@ -797,7 +804,8 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         }}
       >
         <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
-        <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+        {/* --k: how far the map is zoomed, for what has to stay one size on the screen and take the pointer there. */}
+        <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
           <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
           <Roads arr={arr} bends={bent.flatMap(l => bends[l.key]!)} />
           <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
