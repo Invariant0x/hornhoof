@@ -40,7 +40,8 @@ function packed(s: Stand, id: string, files: Record<string, string>, more: (dir:
   const extra = more(dir);
   mkdirSync(join(s.control, 'uploads'), { recursive: true });
   const file = join(s.control, 'uploads', `${NID}-${id}.tar.gz`);
-  const made = spawnSync('tar', ['-czf', file, '-C', dir, ...Object.keys(files), ...extra], { encoding: 'utf8' });
+  /* The names go in as they are given: GNU tar would take the way out of the folder off a name. */
+  const made = spawnSync('tar', ['-czPf', file, '-C', dir, ...Object.keys(files), ...extra], { encoding: 'utf8' });
   if (!existsSync(file)) throw new Error(`The test could not pack an upload: ${made.stderr}`);
   return file;
 }
