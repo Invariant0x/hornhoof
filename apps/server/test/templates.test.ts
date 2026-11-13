@@ -758,7 +758,7 @@ describe('templates', () => {
     it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', async () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
-      expect(styleBook).toContain('Version 1.2, approved by the head of Design on 2026-11-07.');
+      expect(styleBook).toContain('Version 1.3, approved by the head of Design on 2026-11-13.');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',
@@ -796,8 +796,10 @@ describe('templates', () => {
       const actualColours = Object.fromEntries(Object.keys(bookColours).map(k => [k, [light[k], dark[k]]]));
       expect(actualColours).toEqual(bookColours);
       const typeSection = styleBook.slice(styleBook.indexOf('## 2. Type'), styleBook.indexOf('Fonts are imported'));
-      const bookFonts = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
+      const { '--cut-k': cut, ...bookFonts } = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
       expect(Object.keys(bookFonts)).toEqual(['--f-display', '--f-body', '--f-mono']);
+      /* The type table also holds how far the Light skin cuts its corners. */
+      expect(cut).toBe(light['--cut-k']);
       const families = (fonts: Record<string, string | undefined>) => Object.fromEntries(Object.keys(bookFonts).map(k => [k, fontFamilies(fonts[k])]));
       expect(families(light)).toEqual(families(bookFonts));
       const sources = [...new Set(styleBookSources(styleBook))];
