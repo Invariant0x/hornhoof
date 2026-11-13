@@ -86,9 +86,12 @@ const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue
 /* The person who did it, or null when the orchestrator did it for the owner. */
 export const personOf = (me: Person): string | null => (me.via ? null : me.id);
 
-/* Who a change is by: the person, or the orchestrator when it acts for the owner. A head carries out the decision of the
-   person its turn answers, so what it changes is that person's. */
-export const changedBy = (me: Person) => (me.via && !me.viaHead ? { personId: null, byOrchestrator: true } : { personId: me.id, byOrchestrator: false });
+/* The orchestrator acts for the owner, as itself: not a head carrying out the decision of the person its turn answers. */
+export const viaOrchestrator = (me: Person): boolean => !!me.via && !me.viaHead;
+
+/* Who a change is by: the person, or the orchestrator when it acts for the owner. What a head changes is the decision of
+   the person its turn answers, so it is that person's. */
+export const changedBy = (me: Person) => (viaOrchestrator(me) ? { personId: null, byOrchestrator: true } : { personId: me.id, byOrchestrator: false });
 
 /* Who acts on a task: the person, or the orchestrator when it acts for the owner. */
 export const actorOf = (me: Person): { personId: string } | { agentId: string } => (me.via ? { agentId: me.via } : { personId: me.id });
