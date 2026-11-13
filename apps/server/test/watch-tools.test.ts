@@ -335,6 +335,66 @@ describe('tools a skill grants', () => {
     ]);
   });
 
+  /* Made-up credentials and private places that a holder or a program may write into what it says. */
+  const GITHUB_TOKEN = 'ghp_' + 'syntheticWatchToken0'.repeat(3);
+  const HOME = '/home/fixture805/private-project/.env';
+
+  it("keeps credentials and private paths of another department's blocked task out of what a failure collector reads, at its start and its end", async () => {
+    const { app, bruno, task } = await company(['ops-failure-review']);
+    /* The second token sits where a cut made before cleaning would leave only its end. */
+    const second = 'ghp_' + 'secondWatchToken0123'.repeat(3);
+    const reason = `Status: BLOCKED. Could not read ${HOME} with Authorization: Bearer ${GITHUB_TOKEN}. ` + 'x'.repeat(900) + ` ${second}` + 'y'.repeat(480) + `\nNext: token=${GITHUB_TOKEN} path=${HOME} or C:\\Users\\fixture\\.ssh\\id_rsa or /Users/fixture/keys.`;
+    await blocked(app.ctx, bruno.id, task.id, reason);
+    const client = await mcp(app, TOKEN);
+    expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
+    const [held] = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).blocked as { why: string; whyTail: string }[];
+    for (const words of [held!.why, held!.whyTail]) {
+      for (const secret of [GITHUB_TOKEN, second.slice(-20), HOME, 'fixture805', 'C:\\Users\\fixture', '/Users/fixture']) expect(words).not.toContain(secret);
+    }
+    expect(held!.why.length).toBeLessThanOrEqual(400);
+    expect(held!.whyTail.length).toBeLessThanOrEqual(500);
+    expect(held!.why).toContain('Status: BLOCKED. Could not read');
+    expect(held!.whyTail).toContain('Next: token=');
+  });
+
+  it("keeps credentials and private paths of another department's failed turn out of its reason and its output, from its failure and its result alike", async () => {
+    const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const turn = { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const, error: 'agent_failed' };
+    await db.insert(jobs).values([
+      { ...turn, tail: '', failure: { kind: 'unknown', text: `Cannot load ${HOME}/credential-loader`, retryable: false }, finishedAt: ago(30) },
+      { ...turn, tail: '', result: `Push refused for https://bruno:${GITHUB_TOKEN}@github.com/acme/app.git from /Users/fixture/app`, finishedAt: ago(20) },
+      { ...turn, tail: `npm ERR! token=${GITHUB_TOKEN} in /root/.npmrc`, finishedAt: ago(10) },
+    ]);
+    const client = await mcp(app, TOKEN);
+    expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
+    const failed = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).failed as { tail: string; reason: string | null }[];
+    expect(failed).toHaveLength(3);
+    for (const { tail, reason } of failed) {
+      for (const words of [tail, reason ?? '']) {
+        for (const secret of [GITHUB_TOKEN, HOME, 'fixture805', '/Users/fixture', '/root/.npmrc']) expect(words).not.toContain(secret);
+      }
+      expect((reason ?? '').length).toBeLessThanOrEqual(400);
+    }
+    expect(failed.map(f => f.reason)).toEqual([null, expect.stringContaining('Push refused for https://'), expect.stringContaining('unknown: Cannot load')]);
+    expect(failed[0]!.tail).toContain('npm ERR! token=');
+  });
+
+  it('lets a failure collector of the same department read what its own task says as it is', async () => {
+    const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
+    const own = 'tool-token-watch-own-department-0123456';
+    await db.update(agents).set({ skills: ['ops-failure-review'] }).where(eq(agents.id, hana.id));
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
+    const reason = `Status: BLOCKED. Could not read ${HOME}. ` + 'x'.repeat(900) + ` Next: path=${HOME}`;
+    await blocked(app.ctx, bruno.id, task.id, reason);
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: '', failure: { kind: 'unknown', text: `Cannot load ${HOME}`, retryable: false }, finishedAt: new Date() });
+    const client = await mcp(app, own);
+    expect((await call(client, 'task', { task: task.number })).isError).toBeFalsy();
+    const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { reason: string }[]; blocked: { why: string; whyTail: string }[] };
+    expect(recent.blocked).toEqual([expect.objectContaining({ why: reason.slice(0, 400), whyTail: reason.slice(-500) })]);
+    expect(recent.failed).toEqual([expect.objectContaining({ reason: `unknown: Cannot load ${HOME}` })]);
+  });
+
   it("tell a failure collector how the turn ended that a blocked task went out in along with another task", async () => {
     const { app, db, dev, acme, sub, hana } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
