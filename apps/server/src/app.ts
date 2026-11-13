@@ -183,6 +183,8 @@ const TAKE_OVER_SLOWEST_MS = 30_000;
 const TAKE_OVER_SAID = 5;
 /* How soon the carry of a restore is tried again after it could not be applied. */
 const RESTORE_RETRY_MS = 10_000;
+/* For how long a connection that has sent nothing is waited for once the app closes. */
+const SILENT_CONNECTION_MS = 1000;
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
@@ -209,15 +211,23 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   /* A connection nobody has asked anything on yet is not idle to Node: it keeps the server from closing until its first
-     request comes or a minute has passed. A client's pool leaves such connections behind. Nothing is lost with one, so
-     they go as the app closes; a connection that has sent anything is left to end as it will. */
+     request comes or a minute has passed. A client's pool leaves such connections behind. Once the app closes, each
+     connection that is open, and each that still comes while its parts stop, gets a moment for words already on their
+     way to arrive, and goes if it has sent none by then; one that has sent anything is left to end as it will. */
   const connections = new Set<Socket>();
+  let closing = false;
+  const endIfSilent = (socket: Socket): void => {
+    const timer = setTimeout(() => socket.bytesRead === 0 && socket.destroy(), SILENT_CONNECTION_MS);
+    socket.once('close', () => clearTimeout(timer));
+  };
   app.server.on('connection', socket => {
     connections.add(socket);
     socket.once('close', () => connections.delete(socket));
+    if (closing) endIfSilent(socket);
   });
   app.addHook('preClose', async () => {
-    for (const socket of connections) if (socket.bytesRead === 0) socket.destroy();
+    closing = true;
+    for (const socket of connections) endIfSilent(socket);
   });
   /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
   app.addHook('preClose', async () => {
