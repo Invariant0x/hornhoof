@@ -51,6 +51,30 @@ describe("a worker following the server's build", () => {
     expect(s.request()).toMatchObject({ tag: B2.tag });
   });
 
+  it('takes back a request that only waits once the server names no build to it, or the one it runs', () => {
+    for (const named of [null, B1]) {
+      const s = standUp(named ? B1.commit : undefined);
+      /* Asked while the server named another build, or before this machine knew what it runs. */
+      const waiting = new Following({ dir: s.dir, controlDir: s.controlDir, now: () => s.clock.now, log: () => undefined });
+      waiting.heard(B1, null);
+      const asked = s.request()!;
+      s.updater(asked.id, 'running', 'wait');
+      s.following.heard(named, null);
+      expect([s.request(), s.asked()], String(named?.tag)).toEqual([null, null]);
+      expect(s.following.update()).toBeNull();
+    }
+    /* One the updater installs is left to end, and so is one that has ended. */
+    for (const [state, step] of [['running', 'install'], ['running', 'health'], ['done', 'finished'], ['failed', 'finished']] as const) {
+      const s = standUp();
+      s.following.heard(B1, null);
+      const asked = s.request()!;
+      s.updater(asked.id, state, step);
+      s.following.heard(null, null);
+      expect(s.request(), `${state} ${step}`).toEqual(asked);
+      expect(s.asked(), `${state} ${step}`).toMatchObject({ id: asked.id });
+    }
+  });
+
   it('says how far its updater is with that request, and nothing of any other', () => {
     const s = standUp();
     expect(s.following.update()).toBeNull();

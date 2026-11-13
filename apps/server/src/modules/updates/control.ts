@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /* What the updater writes about the update it runs or ran last. */
@@ -103,6 +103,13 @@ export class UpdaterControl {
 
   status(): UpdaterStatus | null {
     return statusWithBuild(this.dir);
+  }
+
+  /* A request is taken back by its id, so one that came after it stays. An updater that waits with it sees that it is
+     gone and leaves it. */
+  withdraw(id: string): void {
+    const file = join(this.dir, 'request.json');
+    if (controlJson<UpdateRequest>(this.dir, 'request.json')?.id === id) rmSync(file, { force: true });
   }
 
   /* Written whole and then moved, so the updater never reads half a request. */

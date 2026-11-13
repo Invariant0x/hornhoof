@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { renameSync, writeFileSync } from 'node:fs';
+import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { UpdateState } from '../../db/schema.js';
@@ -34,7 +34,8 @@ export class Following {
   /* What the server's last view said of its build and of this machine's turn. */
   heard(build: LeaderBuild | null, go: Go | null): void {
     try {
-      if (build) this.ask(build);
+      if (build && !this.runs(build)) this.ask(build);
+      else this.leave();
       if (go) this.pass(go);
     } catch (err) {
       if (this.hourly.due('follow')) this.opts.log(`Could not hand the server's build to this machine's updater: ${reasonOf(err)}`);
@@ -61,12 +62,28 @@ export class Following {
     return mine.success ? mine.data : null;
   }
 
+  /* The build this machine runs is never asked for: a server that has not heard from the machine yet names its build
+     to it, and the updater would wait a day for a turn the server never gives, with everything else it does for the
+     machine waiting behind that. */
+  private runs(build: LeaderBuild): boolean {
+    return Boolean(this.opts.commit) && build.commit === this.opts.commit;
+  }
+
+  /* The server names no build to this machine, or the one it runs: a request of this keeper's that still downloads or
+     waits for its turn is taken back, since that turn never comes. One that is being installed is left to end, and one
+     that has ended stays as what it was. */
+  private leave(): void {
+    const mine = this.asked();
+    if (!mine) return;
+    const status = this.control.status();
+    if (status?.id === mine.id && (status.state !== 'running' || CHANGING.has(status.step))) return;
+    this.control.withdraw(mine.id);
+    rmSync(join(this.opts.dir, FOLLOW_FILE), { force: true });
+  }
+
   /* One request per build. A newer build replaces a request that still downloads or waits, and never one that is being
-     installed. A build whose install failed here is asked for again only hours later. The build this machine runs is
-     never asked for: a server that has not heard from the machine yet names its build to it, and the updater would wait
-     a day for a turn the server never gives, with everything else it does for the machine waiting behind that. */
+     installed. A build whose install failed here is asked for again only hours later. */
   private ask(build: LeaderBuild): void {
-    if (this.opts.commit && build.commit === this.opts.commit) return;
     const mine = this.asked();
     const status = this.control.status();
     if (status?.state === 'running' && CHANGING.has(status.step)) return;
