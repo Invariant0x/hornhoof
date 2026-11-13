@@ -41,8 +41,13 @@ for name in expected_fonts.keys() - book_fonts.keys():
     problems.append(f'missing from the book: {name}')
 for name in book_fonts.keys() - expected_fonts.keys():
     problems.append(f'not in the skins: {name}')
+def families(stack):
+    """A font stack as its families in order: a family name is the same with quotes or without."""
+    return [font.strip().removeprefix("'").removesuffix("'") for font in stack.split(',')]
+
+
 for name in expected_fonts.keys() & book_fonts.keys():
-    if expected_fonts[name] != book_fonts[name]:
+    if families(expected_fonts[name]) != families(book_fonts[name]):
         problems.append(f'value differs: {name} book {book_fonts[name]} theme {expected_fonts[name]}')
 print(f'tokens: theme {len(light)} (colours {len(expected_colours)}, fonts {len(expected_fonts)}); book colours {len(book_colours)}, fonts {len(book_fonts)}')
 
