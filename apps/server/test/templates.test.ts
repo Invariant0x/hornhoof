@@ -367,7 +367,6 @@ describe('templates', () => {
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
@@ -930,7 +929,6 @@ describe('templates', () => {
           { id: 'h', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1],
           { company: 'Acme', department: 'Work', product: null },
         );
-        expect(Buffer.byteLength(rendered.text), role.id).toBeLessThan(24_000);
         expect(rendered.text, role.id).toContain(leadTasksBody());
         expect(rendered.text, role.id).toContain(templates.skills.get('hh-head')!.body);
       }

@@ -67,6 +67,11 @@ describe('the route of every department template', () => {
     expect(templates.skills.get('orch-company')!.body).toMatch(/every department's work goes through the stages of that department's own route[^.]*hands in a document in place of a commit/);
   });
 
+  it('tells every member to push each commit and branch at once, and leaves the main branch and the layout to the head', () => {
+    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/Push every commit and every branch[^.]*as soon as[^.]*only on your machine[^.]*merges nothing into the main branch/);
+    expect(templates.skills.get('hh-head')!.body).toMatch(/push every branch at once[^.]*pushed branches go into the main branch[^.]*how the repository is laid out, you decide/);
+  });
+
   it('takes a department made from no template through the route of Development', () => {
     expect(templates.stagesOf(null)).toBe(templates.stagesOf('development'));
   });

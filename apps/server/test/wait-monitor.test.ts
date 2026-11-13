@@ -86,9 +86,11 @@ describe('quiet departments', () => {
     for (const who of [c.watcher, c.head, c.orchestrator, c.agent]) expect(await c.messages(who.id)).toEqual([]);
   });
 
-  it.each(['blocked', 'waiting', 'prerequisite', 'person', 'run', 'children'] as const)('counts a %s wait as known with no timer of its own', async kind => {
+  it.each(['blocked', 'waiting', 'paused', 'prerequisite', 'person', 'run', 'children'] as const)('counts a %s wait as known with no timer of its own', async kind => {
     const c = await quietDepartment();
     await c.db.update(tasks).set({ externalWait: null, ...(kind === 'blocked' || kind === 'waiting' ? { status: kind } : {}) }).where(eq(tasks.id, c.taskRow.id));
+    /* A task its holder paused with a reason stays at work by status: the pause alone explains it. */
+    if (kind === 'paused') await c.db.update(tasks).set({ paused: { at: c.now.toISOString(), reason: 'Waits for the test stand', by: { agentId: c.head.id }, root: c.taskRow.id } }).where(eq(tasks.id, c.taskRow.id));
     if (kind === 'prerequisite') {
       const prerequisite = await c.task();
       await c.db.update(tasks).set({ departmentId: c.watcher.departmentId }).where(eq(tasks.id, prerequisite.id));
