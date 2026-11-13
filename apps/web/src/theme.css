@@ -219,7 +219,7 @@ select:disabled { opacity: .55; }
 .avatar { width: 44px; height: 44px; cursor: pointer; color: var(--ink); font-family: var(--f-display); font-size: 15px; font-weight: 600; }
 .avatar:hover { border-color: var(--line2); }
 .account-menu {
-  position: absolute; right: 0; top: 52px; z-index: 20; width: 240px;
+  position: absolute; inset-inline-end: 0; top: 52px; z-index: 20; width: 240px;
   display: grid; gap: 12px; padding: 14px;
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 10px 30px var(--shadow);
 }
@@ -339,6 +339,7 @@ select:disabled { opacity: .55; }
 .skin-name { font-family: var(--f-display); overflow-wrap: anywhere; }
 .skin-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .skin-card .entry-actions { position: relative; z-index: 1; flex-wrap: wrap; justify-content: flex-start; }
+.skin-card a.btn { text-decoration: none; }
 .skin-ask { position: relative; z-index: 1; display: grid; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
 /* A preview in the card's own tokens: its page, a panel with text and the accent, four status colours and its button. */
 .skin-swatch {

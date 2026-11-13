@@ -2,21 +2,27 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
-import { sampleOf, templateText, THEMES } from '../src/theme-template';
+import { collectionText } from '../src/skins/collection';
+import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
+import type { Skin } from '../src/skins/roles';
 import type { Decisions, PersonView, ProposalDecision, Roster, SubView } from '../src/types';
 import { serveApi } from './api';
 
 /* The forms of stage 1 as Design drew them: adding and editing a person, a personal AI assistant with its key, hiring into a
-   department and connecting plans and keys. In each built-in theme and a custom template every block of a form stands in
-   the same place with the same size, text stays readable, controls keep their heights, and nothing runs off the screen,
+   department and connecting plans and keys. In each built-in theme and a theme of a person's own every block of a form
+   stands in the same place with the same size as in every other theme with the same fonts, text stays readable, controls
+   keep their heights, and nothing runs off the screen,
    on the longest and the shortest shipped language, at a phone's width and a desktop's. What each engine measured is kept
    in a file, so the three engines can be compared with each other. */
 test.describe.configure({ timeout: 0 });
 
-const CHOICES = [...THEMES, 'custom'] as const;
+/* A theme of a person's own that changes only colours of Cyberpunk, so its layout must match Cyberpunk's exactly. */
+const { id: _cyberpunk, ...CYBERPUNK } = builtinSkin('cyberpunk')!;
+const CUSTOM: Skin = { ...CYBERPUNK, name: 'Dusk', colors: { ...CYBERPUNK.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
+const CHOICES = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'] as const;
 type Choice = (typeof CHOICES)[number];
-/* A template that changes only colours, so its layout must match the built-in themes exactly. */
-const CUSTOM = { ...sampleOf('dark'), name: 'Neon', colors: { ...sampleOf('dark').colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
+/* The fonts of a theme: blocks stand in the same place in every theme written in the same fonts. */
+const fontsOf = (choice: Choice) => JSON.stringify((builtinSkin(choice) ?? CUSTOM).fonts);
 const RTL = /^(?:ar|he|fa|ur|ps|sd|ug|yi)(?:-|$)/;
 const WIDTHS = [1440, 375];
 
@@ -99,10 +105,10 @@ function watchProblems(page: Page): string[] {
 }
 
 async function setTheme(page: Page, choice: Choice) {
-  await page.evaluate(({ choice, custom }) => {
-    if (choice === 'custom') localStorage.setItem('hh-theme-custom', custom);
+  await page.evaluate(({ choice, collection }) => {
+    localStorage.setItem('hh-skins', collection);
     localStorage.setItem('hh-theme', choice);
-  }, { choice, custom: templateText(CUSTOM) });
+  }, { choice, collection: collectionText([{ id: 'custom-1', skin: CUSTOM }]) });
 }
 
 /* Where every block and control of the open form stands, with its padding, margin, border and font. */
@@ -287,15 +293,16 @@ test('every form of stage 1 keeps its layout in each theme, on the longest and t
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     await page.evaluate(lang => localStorage.setItem('hh-lang', lang), language);
     for (const form of FORMS) {
-      let first: Record<string, unknown>[] | null = null;
+      const first = new Map<string, Record<string, unknown>[]>();
       for (const choice of CHOICES) {
         await setTheme(page, choice);
         const found = await openForm(page, form, words);
-        await expect(page.locator('html')).toHaveAttribute('data-theme', choice === 'custom' ? CUSTOM.base : choice);
+        await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
         const now = await geometry(found);
-        if (first) expect(now, `${language} ${width} ${form.name} in ${choice}`).toEqual(first);
-        else (report.geometry as Record<string, unknown>)[`${language}-${width}-${form.name}`] = now;
-        first ??= now;
+        const same = first.get(fontsOf(choice));
+        if (same) expect(now, `${language} ${width} ${form.name} in ${choice}`).toEqual(same);
+        else (report.geometry as Record<string, unknown>)[`${language}-${width}-${form.name}-${choice}`] = now;
+        if (!same) first.set(fontsOf(choice), now);
         const lowest = await lowestContrast(found);
         (report.contrast as Record<string, unknown>)[`${language}-${width}-${form.name}-${choice}`] = lowest;
         expect(lowest.ratio, `${language} ${width} ${form.name} ${choice} ${lowest.what}`).toBeGreaterThanOrEqual(4.5);
