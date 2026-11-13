@@ -2,7 +2,32 @@
    of a call, so an error here carries Telegram's code and words, never the address or the token. */
 
 export type TelegramUser = { id: number; is_bot: boolean; first_name: string; username?: string; language_code?: string };
-export type TelegramMessage = { message_id: number; from?: TelegramUser; chat: { id: number; type: string }; text?: string };
+/* A file as Telegram gives it in a message: its id to ask getFile for, and what Telegram says of it. */
+export type TelegramFile = { file_id: string; file_unique_id?: string; file_size?: number; file_name?: string; mime_type?: string; duration?: number };
+export type TelegramSticker = TelegramFile & { emoji?: string; set_name?: string; is_animated?: boolean; is_video?: boolean };
+export type TelegramMessage = {
+  message_id: number;
+  from?: TelegramUser;
+  chat: { id: number; type: string };
+  text?: string;
+  caption?: string;
+  /* The photos and files sent together as one album share it, each in an update of its own. */
+  media_group_id?: string;
+  /* Each size of one photo, the biggest last. */
+  photo?: TelegramFile[];
+  document?: TelegramFile;
+  voice?: TelegramFile;
+  audio?: TelegramFile & { title?: string; performer?: string };
+  video?: TelegramFile;
+  video_note?: TelegramFile;
+  animation?: TelegramFile;
+  sticker?: TelegramSticker;
+  contact?: { phone_number: string; first_name: string; last_name?: string };
+  location?: { latitude: number; longitude: number };
+  venue?: { location: { latitude: number; longitude: number }; title: string; address: string };
+  poll?: { question: string; options: { text: string }[] };
+  forward_origin?: unknown;
+};
 export type TelegramUpdate = { update_id: number; message?: TelegramMessage };
 
 /* code: Telegram's own, or none when it could not be reached. retryAfter: the seconds it asks to wait, when it asks. */
@@ -67,4 +92,23 @@ export function splitForTelegram(text: string, max = TELEGRAM_TEXT_MAX): string[
   }
   if (rest) pieces.push(rest);
   return pieces;
+}
+
+/* The most of one file Telegram gives a bot. */
+export const TELEGRAM_FILE_BYTES = 20 * 1024 * 1024;
+
+/* A file of a message, by its id: Telegram names where it lies, and the bytes come from there. The token goes only into the
+   address, and never into an error. */
+export async function downloadFile(base: string, token: string, fileId: string, signal?: AbortSignal): Promise<Buffer> {
+  const file = await callTelegram<{ file_path?: string; file_size?: number }>(base, token, 'getFile', { file_id: fileId }, signal);
+  if (!file.file_path) throw new TelegramError(null, 'Telegram gave no path for this file.');
+  if ((file.file_size ?? 0) > TELEGRAM_FILE_BYTES) throw new TelegramError(400, 'Bad Request: file is too big');
+  let res: Response;
+  try {
+    res = await fetch(`${base}/file/bot${token}/${file.file_path}`, { signal });
+  } catch {
+    throw new TelegramError(null, 'Telegram could not be reached.');
+  }
+  if (!res.ok) throw new TelegramError(res.status, `Telegram answered ${res.status} for a file.`);
+  return Buffer.from(await res.arrayBuffer());
 }

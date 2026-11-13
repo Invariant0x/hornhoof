@@ -5,7 +5,8 @@ import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, telegramBots, telegramReplies } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { turnGoingOn } from '../conversation/queue.js';
-import { getUpdates, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
+import { downloadFile, getUpdates, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
+import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
 import { agentName, WORDS } from './words.js';
 
@@ -21,6 +22,19 @@ const OPEN = ['queued', 'running'] as const;
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
 /* A chat that blocked the bot, or that Telegram does not know, takes nothing from it any more. */
 const chatGone = (err: unknown) => err instanceof TelegramError && (err.code === 403 || err.code === 400);
+
+/* The updates in turn, the photos and files of one album together, as the person sent them as one message. */
+export function albums(updates: TelegramUpdate[]): TelegramUpdate[][] {
+  const groups: TelegramUpdate[][] = [];
+  for (const update of updates) {
+    const album = update.message?.media_group_id;
+    const last = groups.at(-1);
+    const before = last?.at(-1)?.message;
+    if (album && last && before?.media_group_id === album && before.chat.id === update.message!.chat.id) last.push(update);
+    else groups.push([update]);
+  }
+  return groups;
+}
 
 /* One bot: its long poll for people's messages, and the answers it carries back to their chats. */
 class Listener {
@@ -62,6 +76,10 @@ class Listener {
     for (const piece of splitForTelegram(text)) if (piece.trim()) await sendText(this.ctx.config.telegramApiUrl, this.token, chatId, piece, this.abort.signal);
   };
 
+  private fetchFile = (fileId: string): Promise<Buffer> => downloadFile(this.ctx.config.telegramApiUrl, this.token, fileId, this.abort.signal);
+
+  private transcribe = (bytes: Buffer, name: string): Promise<string | null> => transcribe(this.ctx.config, bytes, name);
+
   private warn(err: unknown, what: string): void {
     this.ctx.log.warn({ error: err instanceof TelegramError ? { code: err.code, message: err.message } : loggable(err), agentId: this.bot.agentId, bot: this.bot.username }, what);
   }
@@ -73,11 +91,11 @@ class Listener {
       try {
         const updates = await getUpdates(this.ctx.config.telegramApiUrl, this.token, offset, this.abort.signal);
         pause = FIRST_PAUSE_MS;
-        for (const update of updates) {
+        for (const group of albums(updates)) {
           if (this.stopped) break;
           /* Telegram forgets an update the next call confirms, so the offset moves on only once the update is marked read. */
-          await this.take(update);
-          offset = Math.max(offset, update.update_id + 1);
+          await this.take(group);
+          offset = Math.max(offset, group.at(-1)!.update_id + 1);
         }
         this.answer(true);
       } catch (err) {
@@ -91,15 +109,16 @@ class Listener {
   }
 
   /* The update is marked read before it is handled, so a restart never takes it twice; a stop waits for it to be handled. */
-  private async take(update: TelegramUpdate): Promise<void> {
+  private async take(group: TelegramUpdate[]): Promise<void> {
+    const first = group[0]!.update_id;
     const marked = await this.ctx.db
       .update(telegramBots)
-      .set({ updateOffset: update.update_id + 1 })
-      .where(and(eq(telegramBots.id, this.bot.id), lte(telegramBots.updateOffset, update.update_id)))
+      .set({ updateOffset: group.at(-1)!.update_id + 1 })
+      .where(and(eq(telegramBots.id, this.bot.id), lte(telegramBots.updateOffset, first)))
       .returning({ id: telegramBots.id });
     if (!marked.length) return;
     try {
-      if (await receive(this.ctx, this.bot, update, this.say)) this.answer();
+      if (await receive(this.ctx, this.bot, group, this.say, this.fetchFile, this.transcribe)) this.answer();
     } catch (err) {
       if (!this.stopped) this.warn(err, 'A message to a Telegram bot could not be handled.');
     }
