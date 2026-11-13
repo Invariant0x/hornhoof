@@ -5,6 +5,46 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.2] - 2026-11-13
+
+Departments run themselves, everyone in a company sees the same company, the lines of the map can be bent, heads'
+Telegram bots take files, and a machine whose sign-in was refused stops starting turns that cannot work.
+
+### Added
+
+- A click on a line of the company map puts a bend on it, drawn as a small circle. The line runs through its bends in
+  straight pieces, a bend can be dragged or moved with the arrow keys, and a click on it takes it away. Each person's
+  bends are kept with their own arrangement of the map, and "Put back as it was" clears them too.
+- A head's Telegram bot, which answered anything but text with "I take only text messages for now", now passes on
+  documents, archives, photos (an album as one message), voice, audio and video messages and still stickers as files
+  the agent downloads, and moving stickers, contacts, places and polls as words. A voice message also gets its
+  transcript when `TRANSCRIBE_URL` (any service that answers as OpenAI's `/v1/audio/transcriptions`), `TRANSCRIBE_KEY`
+  and `TRANSCRIBE_MODEL` are set in `.env`. A file over the 20 MB Telegram gives a bot is named, and the person hears
+  why. The agent is told to save the files it gets into its department's repository, as Hornhoof keeps them 30 days.
+
+### Changed
+
+- A department does what the people who run it decide, without the orchestrator or the CEO. Its head hires, moves,
+  renames, changes and fires its employees, and changes its teams and products, in the turn that answers those people.
+  The orchestrator no longer stands between a department's people and their head.
+- Everyone in a company sees the whole company: every department, its structure, every employee with what they work on
+  and how, the map's animations, each department's tasks, tree, speed and numbers. The window, conversation and terminal
+  of an employee open only for the people of that employee's department, and a click on someone else's employee says so
+  instead of showing an error. The orchestrator stays with those who run the whole company.
+- In a department's scheme, every unit hangs from one line under the head, with no empty space beside it.
+
+### Fixed
+
+- When a provider refused a machine's sign-in, the machine kept starting turns that failed at once, each in its own
+  terminal. It now stays signed out until the sign-in changes, also when the program reported the refusal as a failure
+  or the sign-in was made in the program itself.
+- The window of a person's own assistant no longer closes and opens again every time the company's picture refreshes.
+- When two people wrote to one head's Telegram bot, the second person's words went into the turn that answered the
+  first, and from then on every word of that turn went to both chats: one person got the answer to the other's
+  question. A person's words now wait for a turn of their own when the running turn answers someone else in Telegram,
+  or when they come from Telegram and the running turn is another person's. The head is also told that its answer goes
+  to the writer alone.
+
 ## [0.23.1] - 2026-11-13
 
 A machine whose agent program update was cut off half way can update it again, and the machine's log says why an update

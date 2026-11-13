@@ -77,7 +77,7 @@ it('changes an existing department between turns and continuous without changing
   expect((await c.org()).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
 });
 
-it('filters hidden work identically to turnView and gives no progress for an unreached department', async () => {
+it('counts the same tasks as turnView for everyone, of every department, reached or not', async () => {
   const c = await fixture();
   const dana = await invitePerson(c.app, c.ceo, { name: 'Dana', email: 'dana@example.test', access: { departments: [c.dev.id] } });
   const [person] = await c.db.select().from(people).where(eq(people.email, 'dana@example.test'));
@@ -85,9 +85,9 @@ it('filters hidden work identically to turnView and gives no progress for an unr
   await c.add(c.dev.id, { status: 'working' });
   await c.add(c.sales.id, { status: 'done' });
   const map = new Map((await c.org(dana)).departments.map(d => [d.id, d]));
-  expect(map.get(c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
-  expect(map.get(c.sales.id)!.turnProgress).toBeNull();
-  expect((await c.current(dana)).tasks).toEqual({ total: 1, done: 1 });
+  expect(map.get(c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 2, done: 1 });
+  expect(map.get(c.sales.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
+  expect((await c.current(dana)).tasks).toEqual({ total: 3, done: 2 });
   expect((await c.org()).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 2, done: 1 });
 });
 
@@ -115,19 +115,19 @@ it('propagates a failed count instead of returning an invented zero', async () =
 });
 
 
-it('shows viewer-filtered department progress through product-only and team-only access', async () => {
+it('shows the whole progress to product-only and team-only access, and keeps changing the mode with the department', async () => {
   const c = await fixture();
   const [product] = await c.db.insert(departments).values({ companyId: c.companyId, roleCode: 'DEV', parentId: c.dev.id, name: 'Product' }).returning();
   const productToken = await invitePerson(c.app, c.ceo, { name: 'Product reader', email: 'product@example.test', access: { departments: [product!.id] } });
   const [person] = await c.db.select().from(people).where(eq(people.email, 'product@example.test'));
   await c.add(c.dev.id, { status: 'done', productId: product!.id, createdByPersonId: person!.id });
   await c.add(c.dev.id, { status: 'done' });
-  expect((await c.org(productToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
-  expect((await c.current(productToken)).tasks).toEqual({ total: 1, done: 1 });
+  expect((await c.org(productToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 2, done: 2 });
+  expect((await c.current(productToken)).tasks).toEqual({ total: 2, done: 2 });
   const [team] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'One team' }).returning();
   const teamToken = await invitePerson(c.app, c.ceo, { name: 'Team reader', email: 'team@example.test', access: { teams: [team!.id] } });
-  expect((await c.org(teamToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 0, done: 0 });
-  expect((await c.current(teamToken)).tasks).toEqual({ total: 0, done: 0 });
+  expect((await c.org(teamToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 2, done: 2 });
+  expect((await c.current(teamToken)).tasks).toEqual({ total: 2, done: 2 });
   for (const token of [productToken, teamToken]) {
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/work-mode`, payload: { workMode: 'continuous' }, ...as(token) })).statusCode).toBe(403);
   }

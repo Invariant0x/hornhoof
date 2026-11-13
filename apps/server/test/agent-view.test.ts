@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, people, requests, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { as, echelonsTurn } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
@@ -128,40 +128,38 @@ describe('one agent', () => {
 describe('the company map', () => {
   const namesOf = (org: { departments: { id: string; employees: { name: string }[] }[] }, id: string) => org.departments.find(d => d.id === id)!.employees.map(e => e.name).sort();
 
-  it('lists only the agents the viewer sees, and every agent for the CEO and the delegate', async () => {
+  it('lists every employee to everyone, and marks the ones each person opens', async () => {
     const c = await aclCompany();
     const org = async (viewer: Viewer) => (await c.get('/api/org', c.tokens[viewer])).json();
-    expect(namesOf(await org('ann'), c.dev.id)).toEqual(['Mina']);
-    expect(namesOf(await org('ann'), c.sales.id)).toEqual([]);
-    expect(namesOf(await org('olga'), c.dev.id)).toEqual(['Hana', 'Mina', 'Oleg', 'Otto']);
-    expect(namesOf(await org('olga'), c.sales.id)).toEqual([]);
-    expect(namesOf(await org('wes'), c.sales.id)).toEqual(['Wanda']);
-    for (const viewer of ['ceo', 'lisa'] as const) {
-      expect(namesOf(await org(viewer), c.dev.id)).toEqual(['Hana', 'Mina', 'Oleg', 'Otto']);
-      expect(namesOf(await org(viewer), c.sales.id)).toEqual(['Awa', 'Fara', 'Lena', 'Wanda']);
+    const opened = (org: { departments: { employees: { id: string; opens?: boolean }[] }[] }) => org.departments.flatMap(d => d.employees.filter(e => e.opens).map(e => e.id)).sort();
+    for (const viewer of VIEWERS) {
+      const seen = await org(viewer);
+      expect(namesOf(seen, c.dev.id)).toEqual(['Hana', 'Mina', 'Oleg', 'Otto']);
+      expect(namesOf(seen, c.sales.id)).toEqual(['Awa', 'Fara', 'Lena', 'Wanda']);
+      expect(opened(seen), viewer).toEqual(SEEN[viewer].map(crew => c.crew[crew].id).sort());
     }
   });
 
-  it('says nothing of other agents in its counts, roles, lines and work, nor of the orchestrator', async () => {
+  it("shows everyone the company's counts, roles, lines and work, and the orchestrator's state without his plan or machine", async () => {
     const c = await aclCompany();
-    const hiddenWork = await c.work('Hidden work', c.crew.other);
+    const work = await c.work('Hidden work', c.crew.other);
     c.app.ctx.bus.publish(c.companyId, { type: 'pulse', from: { kind: 'agent', id: c.crew.head.id, departmentId: c.dev.id }, to: { kind: 'agent', id: c.crew.other.id, departmentId: c.dev.id } });
     c.app.ctx.bus.publish(c.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: c.dev.id } });
-    const res = await c.get('/api/org', c.tokens.ann);
-    const org = res.json();
-    expect(leaks(res, [c.crew.other, c.crew.away, c.crew.far, c.crew.head, c.crew.owned, c.crew.wide, c.crew.deputy, c.orchestrator])).toEqual([]);
-    expect(res.body).not.toContain(hiddenWork.title);
-    expect(org.orchestrator).toBeUndefined();
-    expect(org.agents).toEqual({ total: 1, working: 0 });
-    const dev = org.departments.find((d: { id: string }) => d.id === c.dev.id);
-    expect(dev.agents).toEqual({ total: 1, working: 0 });
-    expect(dev.roles.map((r: { id: string }) => r.id)).toEqual(['DEV-BE']);
-    expect(dev.current).toBeNull();
-    expect(dev.reworkAt).toBeNull();
-    expect([org.live, org.workLines, dev.live, dev.workLines]).toEqual([[], [], [], []]);
-    const sales = org.departments.find((d: { id: string }) => d.id === c.sales.id);
-    expect(sales.agents).toEqual({ total: 0, working: 0 });
-    expect(sales.roles).toEqual([]);
+    const ann = (await c.get('/api/org', c.tokens.ann)).json(), ceo = (await c.get('/api/org', c.tokens.ceo)).json();
+    type Card = Record<string, unknown> & { id: string; employees: { name: string; state: string; status: string; task: { id: string } | null }[] };
+    const dept = (org: { departments: Card[] }, id: string) => org.departments.find(d => d.id === id)!;
+    const shown = (d: ReturnType<typeof dept>) => [d.agents, d.roles, d.current, d.reworkAt, d.live, d.workLines, d.turnProgress, d.employees.map(e => [e.name, e.state, e.status, e.task?.id ?? null])];
+    expect(ann.agents).toEqual(ceo.agents);
+    expect([ann.live, ann.workLines]).toEqual([ceo.live, ceo.workLines]);
+    expect(ann.live).toHaveLength(1);
+    for (const id of [c.dev.id, c.sales.id]) expect(shown(dept(ann, id))).toEqual(shown(dept(ceo, id)));
+    expect((dept(ann, c.dev.id).current as { id: string }).id).toBe(work.id);
+    expect(dept(ann, c.dev.id).live).toHaveLength(1);
+    expect(ann.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: false, subscription: null, machine: null, planned: true });
+    expect(ceo.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: true, planned: true });
+    /* Whether he has a plan at all is the company's to know; without one he needs it, for everyone. */
+    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.orchestrator.id));
+    for (const viewer of ['ann', 'ceo'] as const) expect((await c.get('/api/org', c.tokens[viewer])).json().orchestrator).toMatchObject({ subscription: null, planned: false });
   });
 
   it('shows the work of an own agent in the department it works in', async () => {
@@ -169,7 +167,7 @@ describe('the company map', () => {
     const own = await c.work('Own work', c.crew.mine);
     const org = (await c.get('/api/org', c.tokens.ann)).json();
     const dev = org.departments.find((d: { id: string }) => d.id === c.dev.id);
-    expect(dev.employees[0].task.id).toBe(own.id);
+    expect(dev.employees.find((e: { id: string }) => e.id === c.crew.mine.id).task.id).toBe(own.id);
     expect(dev.current.id).toBe(own.id);
   });
 
@@ -186,7 +184,7 @@ describe('the company map', () => {
 });
 
 describe('tasks', () => {
-  it('opens a task of a seen agent, or one the person gave, and closes the rest with 403', async () => {
+  it('opens every task of the company to everyone, and lets only whoever acts on its work change it', async () => {
     const c = await aclCompany();
     const own = await c.work('Own work', c.crew.mine);
     const hidden = await c.work('Hidden work', c.crew.other);
@@ -194,18 +192,17 @@ describe('tasks', () => {
     /* Ann has a product of Development and gives no task to the department itself; Wes, with the whole company, does. */
     const given = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Given by Wes', department: c.dev.id }, ...as(c.tokens.wes) });
     expect(given.statusCode).toBe(201);
-    expect(leaks(given, [c.crew.head])).toEqual([]);
     const givenId = given.json().task.id as string;
     expect((await c.get(`/api/tasks/${own.id}`, c.tokens.ann)).statusCode).toBe(200);
     expect((await c.get(`/api/tasks/${givenId}`, c.tokens.wes)).statusCode).toBe(200);
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.wes)).statusCode).toBe(403);
+    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.wes)).statusCode).toBe(200);
     for (const task of [hidden, elsewhere]) {
       const res = await c.get(`/api/tasks/${task.id}`, c.tokens.ann);
-      expect(res.statusCode).toBe(403);
-      expect(res.json().error.reason).toBe('task_hidden');
-      expect(res.body).not.toContain(task.title);
+      expect(res.statusCode).toBe(200);
+      expect(res.json().task.title).toBe(task.title);
       for (const write of [{ url: `/api/tasks/${task.id}/comments`, payload: { text: 'hi' } }, { url: `/api/tasks/${task.id}/cancel`, payload: {} }]) {
-        expect((await c.app.inject({ method: 'POST', ...write, ...as(c.tokens.ann) })).statusCode).toBe(403);
+        const refused = await c.app.inject({ method: 'POST', ...write, ...as(c.tokens.ann) });
+        expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'task_not_yours']);
       }
     }
     expect((await c.db.select().from(tasks).where(eq(tasks.id, hidden.id)))[0]!.status).not.toBe('cancelled');
@@ -214,24 +211,24 @@ describe('tasks', () => {
     expect((await c.get('/api/tasks/00000000-0000-4000-8000-000000000000', c.tokens.ann)).statusCode).toBe(404);
   });
 
-  it('lists only them, for every status and department', async () => {
+  it('lists every task of every department to everyone, for every status', async () => {
     const c = await aclCompany();
     const own = await c.work('Own work', c.crew.mine);
-    await c.work('Hidden work', c.crew.other);
-    await c.work('Far work', c.crew.away, c.sales.id);
+    const hidden = await c.work('Hidden work', c.crew.other);
+    const far = await c.work('Far work', c.crew.away, c.sales.id);
     for (const query of [`?department=${c.dev.id}`, `?status=all&department=${c.dev.id}`]) {
       const res = await c.get(`/api/tasks${query}`, c.tokens.ann);
       expect(res.statusCode).toBe(200);
-      expect(res.body).not.toContain('Hidden work');
-      expect(res.body).not.toContain('Far work');
-      expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual([own.id]);
-      expect(leaks(res, [c.crew.other, c.crew.far, c.crew.head])).toEqual([]);
+      expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual([hidden.id, own.id]);
+      expect(res.json().tasks.map((t: { assignee: { name: string } | null }) => t.assignee?.name)).toEqual(['Otto', 'Mina']);
     }
-    expect((await c.get(`/api/tasks?department=${c.sales.id}`, c.tokens.ann)).statusCode).toBe(403);
+    const sales = await c.get(`/api/tasks?department=${c.sales.id}`, c.tokens.ann);
+    expect(sales.json().tasks.map((t: { id: string }) => t.id)).toEqual([far.id]);
+    expect((await c.get('/api/task-departments', c.tokens.ann)).json().departments.map((d: { id: string }) => d.id)).toEqual([c.dev.id, c.sales.id]);
     expect((await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ceo)).json().tasks).toHaveLength(2);
   });
 
-  it('names no hidden agent on a seen task: not its stage owners, log, requests or files', async () => {
+  it("names every employee on a task, and leaves out the words of agents the person does not open", async () => {
     const c = await aclCompany();
     const { createTask, comment, ask } = await import('../src/modules/tasks/engine.js');
     await echelonsTurn(c.db, c.companyId);
@@ -241,40 +238,42 @@ describe('tasks', () => {
     await comment(c.app.ctx, { agentId: c.crew.mine.id }, task.id, 'Mina says hello');
     await comment(c.app.ctx, { personId: c.ids.ann }, task.id, 'Ann says hello');
     await ask(c.app.ctx, c.crew.mine.id, task.id, { text: 'Mina asks', kind: 'question' });
+    await c.db.insert(requests).values({ companyId: c.companyId, taskId: task.id, agentId: c.crew.other.id, kind: 'question', text: 'Otto asks', status: 'answered', answer: 'Yes', answeredAt: new Date() });
     const res = await c.get(`/api/tasks/${task.id}`, c.tokens.ann);
     expect(res.statusCode).toBe(200);
     const t = res.json().task;
-    expect(leaks(res, [c.crew.other, c.crew.head])).toEqual([]);
-    expect(res.body).not.toContain('Hidden parent');
     expect(res.body).not.toContain('Otto was here');
-    expect(t.parentId).toBeNull();
-    expect(t.parent).toBeNull();
+    expect(res.body).not.toContain('Otto asks');
+    expect(t.parent.id).toBe(parent.id);
     expect(t).not.toHaveProperty('gates');
-    expect(t.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBeNull();
-    expect(t.createdBy).toBeNull();
+    expect(t.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBe(c.crew.other.id);
+    expect(t.createdBy).toMatchObject({ kind: 'agent', id: c.crew.head.id, name: 'Hana' });
     expect(t.assignee.id).toBe(c.crew.mine.id);
     expect(t.executor.id).toBe(c.crew.mine.id);
     expect(t.log.map((l: { text: string }) => l.text)).toEqual(expect.arrayContaining(['Mina says hello', 'Ann says hello']));
-    expect(t.requests[0].agent.id).toBe(c.crew.mine.id);
+    /* Otto's line says that he wrote, not what. */
+    expect(t.log.find((l: { by: { id: string } | null; kind: string }) => l.kind === 'comment' && l.by?.id === c.crew.other.id)).toMatchObject({ by: { name: 'Otto' }, text: '', data: {} });
+    expect(t.requests.map((r: { agent: { id: string } }) => r.agent.id)).toEqual([c.crew.mine.id]);
     const whole = await c.get(`/api/tasks/${task.id}`, c.tokens.lisa);
     expect(whole.json().task.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBe(c.crew.other.id);
     expect(whole.body).toContain('Otto was here');
     expect(whole.json().task.parent.id).toBe(parent.id);
   });
 
-  it('keeps to the agent it was given by the person who gave it, not by the department alone, outside a department one owns', async () => {
+  it('lets the work of an agent be changed by whoever acts on that agent, not by the department alone, outside a department one owns', async () => {
     const c = await aclCompany();
     const hidden = await c.work('Hidden work', c.crew.other);
     const far = await c.work('Far work', c.crew.far, c.sales.id);
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.wes)).statusCode).toBe(403);
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.bob)).statusCode).toBe(200);
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.olga)).statusCode).toBe(200);
-    expect((await c.get(`/api/tasks/${far.id}`, c.tokens.olga)).statusCode).toBe(403);
+    const say = async (viewer: Viewer, id: string) => (await c.app.inject({ method: 'POST', url: `/api/tasks/${id}/comments`, payload: { text: 'hi' }, ...as(c.tokens[viewer]) })).statusCode;
+    expect(await say('wes', hidden.id)).toBe(403);
+    expect(await say('bob', hidden.id)).toBe(201);
+    expect(await say('olga', hidden.id)).toBe(201);
+    expect(await say('olga', far.id)).toBe(403);
   });
 });
 
 describe('the department tree', () => {
-  it('draws only the lines of seen agents, and 403 for a department out of reach', async () => {
+  it('draws every line of any department for everyone', async () => {
     const c = await aclCompany();
     await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date(Date.now() - 3_600_000) });
     const [turn] = await c.db.select().from(turns);
@@ -286,22 +285,19 @@ describe('the department tree', () => {
     const res = await c.get(`/api/departments/${c.dev.id}/tree`, c.tokens.ann);
     expect(res.statusCode).toBe(200);
     const { tree } = res.json();
-    expect(tree.lines.map((l: { taskId: string }) => l.taskId)).toEqual([own.id]);
-    expect(leaks(res, [c.crew.other, c.crew.head])).toEqual([]);
-    expect(res.body).not.toContain('Hidden work');
-    const out = await c.get(`/api/departments/${c.sales.id}/tree`, c.tokens.ann);
-    expect(out.statusCode).toBe(403);
+    expect(tree.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
+    expect((await c.get(`/api/departments/${c.sales.id}/tree`, c.tokens.ann)).statusCode).toBe(200);
     expect((await c.get('/api/departments/00000000-0000-4000-8000-000000000000/tree', c.tokens.ann)).statusCode).toBe(404);
     const whole = (await c.get(`/api/departments/${c.dev.id}/tree`, c.tokens.lisa)).json().tree;
     expect(whole.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
   });
 
-  it('keeps the numbers of a whole department from anyone but the CEO, the delegate and its owner', async () => {
+  it('gives the numbers of a whole department to everyone of the company, as its screen', async () => {
     const c = await aclCompany();
     await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', openedAt: new Date() });
-    for (const viewer of ['ann', 'wes'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(403);
-    for (const viewer of ['ceo', 'lisa', 'olga'] as const) expect((await c.get(`/api/departments/${c.dev.id}/pipeline`, c.tokens[viewer])).statusCode).toBe(200);
-    expect((await c.get(`/api/departments/${c.sales.id}/pipeline`, c.tokens.olga)).statusCode).toBe(403);
+    for (const viewer of VIEWERS) {
+      for (const department of [c.dev, c.sales]) expect((await c.get(`/api/departments/${department.id}/pipeline`, c.tokens[viewer])).statusCode, viewer).toBe(200);
+    }
   });
 });
 

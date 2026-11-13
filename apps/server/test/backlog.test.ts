@@ -58,16 +58,16 @@ const text = (r: Res) => r.content[0]!.text;
 const names = async (c: Client) => (await c.listTools()).tools.map(t => t.name);
 
 describe("a department's tasks and its list for later turns", () => {
-  it("answer a person with one department only for that department: another one's tasks and list are refused and stay as they were", async () => {
+  it("show a person with one department every department's tasks, and keep another one's list refused and as it was", async () => {
     const { db, ceoToken, dora, dev, sales, send, put, listed } = await company();
     const [salesItem] = await put(ceoToken, sales.id, 'Call the new leads');
     const picked = (await send(dora, 'GET', '/api/task-departments')).json();
-    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development' }] });
+    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development' }, { id: sales.id, name: null, templateKey: 'sales' }] });
     expect((await send(dora, 'GET', `/api/tasks?department=${dev.id}`)).statusCode).toBe(200);
+    expect((await send(dora, 'GET', `/api/tasks?department=${sales.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/departments/${dev.id}/backlog`)).statusCode).toBe(200);
 
     const refused = [
-      await send(dora, 'GET', `/api/tasks?department=${sales.id}`),
       await send(dora, 'GET', '/api/tasks?department=none'),
       await send(dora, 'GET', `/api/departments/${sales.id}/backlog`),
       await send(dora, 'POST', `/api/departments/${sales.id}/backlog`, { title: 'Mine now', text: '' }),
@@ -79,7 +79,6 @@ describe("a department's tasks and its list for later turns", () => {
       await send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [salesItem] }),
     ];
     expect(refused.map(r => [r.statusCode, r.json().error.reason])).toEqual([
-      [403, 'not_your_department'],
       [403, 'not_your_department'],
       [403, 'not_your_department'],
       [403, 'not_your_department'],

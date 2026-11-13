@@ -358,9 +358,9 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   }));
 }
 
-/* The staff card's lines from the orchestrator's: what it leaves out is what the card starts with. A role the department
-   does not have goes through as it is, for the route to name. */
-async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[]): Promise<HireLine[]> {
+/* The staff card's lines from the orchestrator's or a head's: what it leaves out is what the card starts with. A role the
+   department does not have goes through as it is, for the route to name. */
+export async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[]): Promise<HireLine[]> {
   const products = await ctx.db.select().from(departments).where(eq(departments.parentId, dept.id));
   const out: HireLine[] = [];
   for (const line of lines) {

@@ -110,12 +110,19 @@ function staffedNote(click: string, department: string, hired: Hired[], present:
 
 const CARD: DecisionSubject = { source: 'proposal' };
 
-/* A structure change that only adds products and changes sub-units of departments that are there, and leaves the company's
-   brief, is a decision of those departments; making or removing one, or a card, is the CEO's. */
-function structureSubject(body: z.infer<typeof BuildBody>): DecisionSubject {
+/* A structure change that only adds and removes products and changes sub-units of departments that are there, and leaves
+   the company's brief, is a decision of those departments: a product's is the department's that holds it. Making or
+   removing a department, or a card, is the CEO's. */
+async function structureSubject(db: Db, companyId: string, body: z.infer<typeof BuildBody>): Promise<DecisionSubject> {
   if (body.proposalId || body.brief !== undefined) return CARD;
-  const changed = body.items.map(item => (isNew(item) || item.remove ? null : item.department));
-  return changed.every((id): id is string => id !== null) ? { source: 'proposal', departments: changed } : CARD;
+  const changed: string[] = [];
+  for (const item of body.items) {
+    if (isNew(item)) return CARD;
+    const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
+    if (item.remove && !dept?.parentId) return CARD;
+    changed.push(dept?.parentId ?? item.department);
+  }
+  return { source: 'proposal', departments: changed };
 }
 
 /* Checks that a sub-unit belongs to this department of this company before changing or removing it. */
@@ -234,7 +241,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     /* Who may ask is checked before what was asked, so a body that does not parse is the CEO's card to refuse. */
     const asked = BuildBody.safeParse(req.body);
-    const subject = asked.success ? structureSubject(asked.data) : CARD;
+    const subject = asked.success ? await structureSubject(db, me.companyId, asked.data) : CARD;
     const on = await cardDecision(me, subject);
     const body = BuildBody.parse(req.body);
 

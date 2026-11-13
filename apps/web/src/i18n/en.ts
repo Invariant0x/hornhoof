@@ -253,7 +253,12 @@ export const en = {
     moveBlock: (name: string) => `Move ${name}`,
     putBack: 'Put back as it was',
     layoutNotSaved: 'Could not save where you moved it. Move it again to try once more.',
+    /* A dot a person put on a line of their own map, which the line passes at right angles wherever its blocks stand. */
+    bend: (from: string, to: string) => `Bend in the line: ${from} and ${to}. Drag it or use the arrow keys to move it, click it to remove it`,
+    addBend: 'Click to put a bend in this line',
     needsSubscription: 'Needs a subscription to start',
+    /* For a person who is not shown which subscription the orchestrator works on. */
+    hasSubscription: 'Has a subscription to work on',
     runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,
@@ -1063,6 +1068,8 @@ export const en = {
     switchedOff: 'Switched off',
     isOn: (name: string) => `${name} is on`,
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'on' : 'switched off'}`,
+    /* An employee this person sees at work but does not open. */
+    closedAgent: (name: string) => `${name}: everyone sees the work, and only the people of this department open the window.`,
     roleOn: (role: string) => `${role} takes part in the work`,
     roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'everyone on' : 'everyone switched off'}`,
     needsSubscription: 'Assign a subscription to start',
@@ -1594,7 +1601,8 @@ export const en = {
     agent_not_ready: 'This employee cannot answer right now.',
     not_your_department: 'This employee works in a department you do not have access to.',
     agent_hidden: 'You can open only employees on your own plan in your departments, and every employee of a department you own.',
-    task_hidden: 'This task is the work of an employee you cannot open.',
+    task_hidden: "This task is the work of another person's assistant, and only that person sees it.",
+    task_not_yours: 'You can change only tasks you gave and tasks of employees you can open.',
     ceo_view_only: 'Only the CEO, the CEO delegate and the owner of the department see this.',
     attachment_hidden: 'This file belongs to work you cannot open.',
     file_empty: 'This file is empty, or it is a folder. Send a file with something in it.',
