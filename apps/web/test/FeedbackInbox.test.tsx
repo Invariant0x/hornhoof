@@ -11,6 +11,7 @@ import { decisions, DEV_ORG, ME, mockApi } from './api-mock';
 
 const card = (over: Partial<InboxCard>): InboxCard => ({
   id: 'f1',
+  number: 1,
   kind: 'bug',
   title: 'Terminal froze after an update',
   text: 'The agent terminal stayed black.',
@@ -27,8 +28,8 @@ const card = (over: Partial<InboxCard>): InboxCard => ({
 });
 const CARDS: InboxCard[] = [
   card({ id: 'f1', title: 'Terminal froze after an update', priority: 'high', signals: 5, installations: 3, errorCode: 'terminal_lost', versions: ['0.18.11', '0.18.9'], platforms: ['darwin arm64', 'linux x64'] }),
-  card({ id: 'f2', kind: 'idea', title: 'Click [here](javascript:alert(1))', text: '<b>bold</b> and https://evil.example and **stars**', priority: 'low' }),
-  card({ id: 'f3', kind: 'improvement', title: 'Show the queue', priority: 'normal', issue: { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12' } }),
+  card({ id: 'f2', number: 2, kind: 'idea', title: 'Click [here](javascript:alert(1))', text: '<b>bold</b> and https://evil.example and **stars**', priority: 'low' }),
+  card({ id: 'f3', number: 3, kind: 'improvement', title: 'Show the queue', priority: 'normal', issue: { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12' } }),
 ];
 
 function page(routes: Record<string, unknown> = {}, language = 'en') {
@@ -68,6 +69,9 @@ describe('the feedback inbox', () => {
     expect(first).toHaveTextContent('Versions: 0.18.11, 0.18.9');
     expect(first).toHaveTextContent('Machines: darwin arm64, linux x64');
     expect(first).toHaveTextContent('Error code: terminal_lost');
+    /* The number an installation knows its report by. */
+    expect(within(first).getByText('Report 1')).toBeInTheDocument();
+    expect(within(items[1]!).getByText('Report 2')).toBeInTheDocument();
     expect(within(items[1]!).getByText('Idea')).toBeInTheDocument();
     expect(within(items[1]!).getByText('Low priority')).toBeInTheDocument();
   });
@@ -118,6 +122,7 @@ describe('the feedback inbox', () => {
     expect(within(first).getByText('Ошибка')).toBeInTheDocument();
     expect(within(first).getByText('Высокий приоритет')).toBeInTheDocument();
     expect(first).toHaveTextContent('5 сигналов с 3 установок');
+    expect(within(first).getByText('Обращение № 1')).toBeInTheDocument();
     expect(within(first).getByRole('button', { name: 'Создать Issue на GitHub' })).toBeInTheDocument();
     expect(document.body.textContent!).not.toMatch(/[ё—]/);
   });
