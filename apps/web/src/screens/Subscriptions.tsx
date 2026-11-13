@@ -110,9 +110,11 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
 }
 
-/* What the head of the card says under the state: until when a plan at its limit waits. */
-function limitLine(t: Messages, language: Language, s: SubView, now: number): string | null {
-  if (stateOf(s, now) !== 'limit') return null;
+/* What the head of the card says under the state: until when a plan at its limit waits, or where an offline plan waits. */
+function stateLine(t: Messages, language: Language, s: SubView, now: number): string | null {
+  const state = stateOf(s, now);
+  if (state === 'offline' && s.status === 'ready') return t.cards.notes.offline(s.machines.length === 1 ? s.machines[0]!.hostname : '');
+  if (state !== 'limit') return null;
   const limit = limitState(s.limits, now);
   const at = clock(language, limit.resetsAt);
   const duration = resetDurationAt(t, limit.resetsAt, now);
@@ -366,7 +368,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   const name = subName(t, s);
   return (
     <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>} state={<SubscriptionStatus sub={s} now={now} />} line={limitLine(t, language, s, now)} />}
+      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>

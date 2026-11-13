@@ -30,6 +30,21 @@ import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
+const LOAD_SEEN_MS = 60_000;
+const loadSeenAt = new WeakMap<Ctx, Map<string, number>>();
+
+async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<void> {
+  if (id.kind !== 'node') return;
+  let byNode = loadSeenAt.get(ctx);
+  if (!byNode) {
+    byNode = new Map();
+    loadSeenAt.set(ctx, byNode);
+  }
+  const at = now.getTime(), prev = byNode.get(id.nodeId);
+  if (prev !== undefined && at >= prev && at - prev < LOAD_SEEN_MS) return;
+  byNode.set(id.nodeId, at);
+  await ctx.db.update(nodes).set({ lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode));
+}
 
 const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
@@ -287,6 +302,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
       const { type: _, live, ...load } = msg;
       ctx.hub.report(id, load);
+      await touchNodeSeen(ctx, id, now);
       await checkQueueLoad(ctx, id);
       /* A machine that freed up takes a part that waits, and starts the programs that waited for its memory. */
       await pumpTests(ctx);

@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { SubView } from '../src/types';
 import { openAgent } from './agent-window-panels-api';
 import { CARD } from './agent-window-api';
+import { box, serveApi } from './api';
 
 const BEFORE = process.env.LIMITS_BEFORE === '1';
 const NOW = Date.parse('2026-11-04T22:00:00.000Z');
@@ -82,3 +84,106 @@ test('fresh Antigravity limits replace the stale snapshot without a reload of th
   await expect(card).toContainText('30%');
   await expect(card).not.toContainText('Unknown,');
 });
+
+const CLAUDE_NOW = Date.parse('2026-11-13T21:06:00.000Z');
+
+function claudePlans(): SubView[] {
+  const agent = {
+    id: 'b1', canOpen: true, name: 'Neo', busy: false,
+    title: { en: 'Developer', ru: 'Разработчик' },
+    department: { id: 'd2', name: 'Development' },
+    provider: 'claude' as const, since: null, task: null, withCeo: false,
+  };
+  const base = {
+    provider: 'claude' as const, kind: 'personal' as const, label: 'Claude', status: 'ready' as const,
+    last4: null, place: { kind: 'company' as const, id: null, name: 'Whole company' },
+    budget: null, isOrchestrator: false, accounts: [], tier: 'Max', accountsDiffer: false, signedInOnce: true, leaseMachine: null,
+  };
+  return [
+    {
+      ...base, id: 's-ivan-claude', online: true, owner: { id: 'p1', name: 'Ivan' },
+      machines: [{ id: 'm-ivan', hostname: '0xs-MacBook-Pro.local', status: 'ready', online: true }],
+      limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-18T12:00:00.000Z' }], complete: true },
+      limitsUpdatedAt: '2026-11-13T21:02:00.000Z', agents: [agent],
+    },
+    {
+      ...base, id: 's-luiza-claude', online: false, owner: { id: 'p2', name: 'Luiza' },
+      machines: [{ id: 'm-luiza', hostname: 'Marselle', status: 'ready', online: false }],
+      limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.72, resetsAt: '2026-11-17T12:00:00.000Z' }], complete: true },
+      limitsUpdatedAt: '2026-11-13T17:22:00.000Z', agents: [agent],
+    },
+    {
+      ...base, id: 's-max-claude', online: false, owner: { id: 'p3', name: 'Max' },
+      machines: [{ id: 'm-max', hostname: 'DESKTOP-AB84Q08', status: 'ready', online: false }],
+      limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.55, resetsAt: '2026-11-18T00:00:00.000Z' }], complete: true },
+      limitsUpdatedAt: '2026-11-13T18:51:00.000Z', agents: [],
+    },
+  ];
+}
+
+for (const lang of ['en', 'ru'] as const) for (const skin of BUILTIN_SKINS.map(s => s.id)) for (const width of [1440, 375]) {
+  const mode = skin === 'light' ? 'light' : `dark ${skin}`;
+  test(`Subscriptions complete single-window Claude and offline machines: ${lang} ${mode} ${width}`, async ({ page }, info) => {
+    const t = messages[lang];
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text()); });
+    page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.install({ time: CLAUDE_NOW });
+    await page.addInitScript(({ lang, skin }) => {
+      localStorage.setItem('hh-lang', lang);
+      localStorage.setItem('hh-theme', skin);
+    }, { lang, skin });
+    await serveApi(page);
+    await page.route('**/api/version', route => route.fulfill({ json: { version: '0.23.5', commit: 'task-802' } }));
+    await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.23.5', commit: 'task-802' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
+    await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: claudePlans() } }));
+    await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
+    await page.goto('/');
+    await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
+
+    const ivanRow = page.locator('tr.rm', { hasText: 'Ivan' });
+    const luizaRow = page.locator('tr.rm', { hasText: 'Luiza' });
+    const maxRow = page.locator('tr.rm').filter({ has: page.locator('td', { hasText: /^Max$/ }) });
+    const luizaOffline = t.subs.offlineLimit(lang === 'en' ? '05:22 PM' : '17:22');
+    const maxOffline = t.subs.offlineLimit(lang === 'en' ? '06:51 PM' : '18:51');
+
+    await expect(ivanRow).toContainText(t.subs.notOnPlan);
+    await expect(ivanRow).toContainText('96%');
+    await expect(ivanRow).not.toContainText(/Unknown,|Неизвестно,/);
+
+    await expect(luizaRow).toContainText(t.subs.states.offline);
+    await expect(luizaRow).toContainText(luizaOffline);
+    await expect(luizaRow).not.toContainText(/Unknown,|Неизвестно,/);
+
+    await expect(maxRow).toContainText(t.subs.states.offline);
+    await expect(maxRow).toContainText(maxOffline);
+    await expect(maxRow).not.toContainText(/Unknown,|Неизвестно,/);
+
+    await ivanRow.locator('button.rowbtn').click();
+    await luizaRow.locator('button.rowbtn').click();
+
+    const ivanCard = page.getByRole('article', { name: 'Claude, Ivan', exact: true });
+    const luizaCard = page.getByRole('article', { name: 'Claude, Luiza', exact: true });
+    await expect(ivanCard).toContainText(t.subs.notOnPlan);
+    await expect(ivanCard).toContainText('96%');
+    await expect(ivanCard).not.toContainText(/Unknown,|Неизвестно,/);
+
+    await expect(luizaCard).toContainText(t.cards.notes.offline('Marselle'));
+    await expect(luizaCard).toContainText(luizaOffline);
+    await expect(luizaCard).not.toContainText(/Unknown,|Неизвестно,/);
+
+    for (const card of [ivanCard, luizaCard]) {
+      const blocks = await box(card.locator('.blocks'));
+      for (const blk of await card.locator('.blocks > .blk').all()) {
+        const own = await box(blk);
+        expect(own.x + own.width).toBeLessThanOrEqual(blocks.x + blocks.width + 1);
+      }
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`subscriptions-claude-${lang}-${skin}-${width}.png`), fullPage: true });
+    await ivanCard.screenshot({ path: info.outputPath(`subscriptions-ivan-${lang}-${skin}-${width}.png`) });
+    expect(errors).toEqual([]);
+  });
+}

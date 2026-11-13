@@ -233,6 +233,7 @@ describe('Claude Code', () => {
         { name: 'five_hour', utilization: 0.38, resetsAt: new Date(1793307000 * 1000).toISOString() },
         { name: 'seven_day', utilization: 0.66, resetsAt: new Date(1793516400 * 1000).toISOString() },
       ],
+      complete: true,
     });
   });
 

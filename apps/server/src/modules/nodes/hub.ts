@@ -37,6 +37,8 @@ export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf
 
 /* A node that misses this many pings in a row is dropped. */
 const MISSED_PINGS = 3;
+/* Every live node reports its load every 20 s; one silent for three minutes is gone even if a relay answers pings. */
+const NODE_SILENCE_MS = 3 * 60_000;
 
 const REPLACED = 'Replaced by a newer connection.';
 const DISCONNECTED = 'Disconnected in Hornhoof.';
@@ -53,7 +55,7 @@ export type LinkEnd = { link: string; at: Date; cause: ConnectionEnd; code: numb
    image is, none from a node built by hand or from before. link: this connection in the node's history. chain: what this
    socket has to do one after another, as job.started is stored before job.done. ending: what the server knows of why the
    socket is closing. ended: the end of the connection is on its way to the history. */
-type Entry = { programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
+type Entry = { programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; heardAt: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -77,6 +79,7 @@ export type NodeTransport = Readonly<{ linkId: string }>;
 
 type HubOptions = {
   pingMs: number;
+  silenceMs?: number;
   onMessage(id: NodeIdentity, msg: ProgramNodeMessage, transport: NodeTransport): Promise<void>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
@@ -113,7 +116,7 @@ export class NodeHub {
     const report = (err: unknown) => this.opts.onError?.(err);
     const link = randomUUID();
     const started = this.opts.onConnected?.(id, link, at).catch(report) ?? Promise.resolve();
-    const entry: Entry = { link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
+    const entry: Entry = { link, chain: started, ending: null, ended: false, socket, keyHash, missed: 0, heardAt: at.getTime(), greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     socket.on('pong', () => {
@@ -161,6 +164,8 @@ export class NodeHub {
     if (this.sockets.get(key) !== entry) return chain;
     const msg = parseOperatorNodeMessage(raw);
     if (!msg) return chain;
+    entry.heardAt = Date.now();
+    entry.missed = 0;
     this.capturePrograms(entry, msg);
     if (isTerminalFrame(msg)) {
       this.forwardTerminal(id, msg);
@@ -344,9 +349,11 @@ export class NodeHub {
   }
 
   private sweep(): void {
+    const silenceMs = this.opts.silenceMs ?? NODE_SILENCE_MS;
+    const now = Date.now();
     for (const entry of this.sockets.values()) {
-      if (entry.missed >= MISSED_PINGS) {
-        entry.ending ??= { cause: 'missed_pongs', at: new Date(), error: null };
+      if (entry.missed >= MISSED_PINGS || now - entry.heardAt >= silenceMs) {
+        entry.ending ??= { cause: 'missed_pongs', at: new Date(now), error: null };
         entry.socket.terminate();
         continue;
       }
