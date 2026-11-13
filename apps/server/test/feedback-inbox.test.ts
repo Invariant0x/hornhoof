@@ -192,6 +192,37 @@ describe('the inbox of Hornhoof developers', () => {
     expect(await cards()).toHaveLength(201);
   });
 
+  it('bounds signals across made-up installation IDs before counting per-installation attempts', async () => {
+    const { receive, cards, later } = await inbox();
+    for (let i = 0; i < 20; i++) expect((await receive(report({ installation: installationId(i), repeats: 100 }))).statusCode).toBe(202);
+    expect(await cards()).toMatchObject([{ signals: 2000, installations: 20 }]);
+    const over = await receive(report({ installation: installationId(100), repeats: 100 }));
+    expect([over.statusCode, over.headers['retry-after']]).toEqual([429, '3600']);
+    expect((await receive(report({ installation: installationId(101) }))).statusCode).toBe(429);
+    later(HOUR / 2);
+    for (let i = 0; i < 10; i++) expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(429);
+    expect(await cards()).toMatchObject([{ signals: 2000, installations: 20 }]);
+    later(HOUR / 2);
+    for (let i = 0; i < 10; i++) expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(202);
+    expect((await receive(report({ installation: installationId(100) }))).statusCode).toBe(429);
+    expect(await cards()).toMatchObject([{ signals: 2010, installations: 21 }]);
+  });
+
+  it('refuses a repeat batch whole and names when enough of the signal budget returns', async () => {
+    const { receive, cards, later } = await inbox();
+    expect((await receive(report({ installation: installationId(0), repeats: 50 }))).statusCode).toBe(202);
+    later(1000);
+    for (let i = 1; i < 20; i++) expect((await receive(report({ installation: installationId(i), repeats: 100 }))).statusCode).toBe(202);
+    const over = await receive(report({ installation: installationId(100), repeats: 51 }));
+    expect([over.statusCode, over.headers['retry-after']]).toEqual([429, '3600']);
+    expect((await receive(report({ installation: installationId(100), repeats: 50 }))).statusCode).toBe(202);
+    later(HOUR - 1000);
+    const stillOver = await receive(report({ installation: installationId(101), repeats: 51 }));
+    expect([stillOver.statusCode, stillOver.headers['retry-after']]).toEqual([429, '1']);
+    expect((await receive(report({ installation: installationId(101), repeats: 50 }))).statusCode).toBe(202);
+    expect(await cards()).toMatchObject([{ signals: 2050, installations: 22 }]);
+  });
+
   it("puts what its own people send straight into the list, without hornhoof.org", async () => {
     const { app, ceo, relay, cards } = await inbox();
     const idea = { kind: 'idea', title: 'A map of the whole company', text: 'Mail me at ivan@acme.example' };
