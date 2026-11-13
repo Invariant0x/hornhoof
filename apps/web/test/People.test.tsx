@@ -781,6 +781,16 @@ describe('the forms to add and edit people', () => {
     expect(screen.queryByLabelText('Program')).not.toBeInTheDocument();
   });
 
+  it('keeps the focus on the choice of person or assistant, so the arrow keys go on moving between them', async () => {
+    mockApi(lists);
+    const user = userEvent.setup();
+    await openInvite(user);
+    await user.click(screen.getByRole('radio', { name: 'Personal AI assistant' }));
+    expect(screen.getByRole('radio', { name: 'Personal AI assistant' })).toHaveFocus();
+    await user.click(screen.getByRole('radio', { name: 'Person' }));
+    expect(screen.getByRole('radio', { name: 'Person' })).toHaveFocus();
+  });
+
   it('says Creating… on the main button while the invite goes, keeping its place before Cancel', async () => {
     let finish!: (reply: [number, unknown]) => void;
     mockApi({ ...lists, 'POST /api/people/invite': () => new Promise(resolve => { finish = resolve; }) });
