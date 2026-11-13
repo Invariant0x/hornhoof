@@ -15,15 +15,50 @@ import { programRestartStatus, restartProgram } from '../tasks/program-restarts.
 import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
+import { agentSeesTask } from '../tasks/views.js';
 import { OPERATIONS_ROLES } from '../program-operator/access.js';
 import { registerOperatorTools, registerProgramAccessTools } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 
+type Reader = Parameters<typeof agentSeesTask>[0];
+type TaskSight = Parameters<typeof agentSeesTask>[1];
+type Failure = { kind: string; text: string } | null;
+
+/* Who reads failures, to know whose work it may open. */
+const readerOf = async (ctx: Ctx, agentId: string): Promise<Reader | undefined> =>
+  (await ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId)))[0];
+
+/* Whether a reader may open a task as task shows it. */
+const opensTask = (reader: Reader | undefined, task: TaskSight): boolean => reader !== undefined && agentSeesTask(reader, task);
+
+/* Whether a reader may open the work a turn's words come from: its task, or for a turn on no task its agent's department. */
+function opensTurn(reader: Reader | undefined, task: TaskSight | null, agent: { id: string | null; departmentId: string | null }): boolean {
+  if (task) return opensTask(reader, task);
+  return reader !== undefined && (reader.kind === 'orchestrator' || reader.id === agent.id || (reader.departmentId !== null && reader.departmentId === agent.departmentId));
+}
+
+/* Words as a reader gets them: as they are where it may open their work, else with no credential and no private path, cleaned
+   before any cut so that no part of either is left at its edge. */
+const shown = (text: string, open: boolean): string => (open ? text : cleanDiagnostic(text));
+
 /* Why a turn failed as Hornhoof recorded it, beside the end of its output, which a program that never wrote leaves empty. */
-const failureReason = (failure: { kind: string; text: string } | null, result: string | null): string | null =>
-  (failure?.text ? `${failure.kind}: ${failure.text}` : result?.trim() || null)?.slice(0, TAIL) ?? null;
+function failureReason(failure: Failure, result: string | null, open: boolean): string | null {
+  const reason = failure?.text ? `${failure.kind}: ${shown(failure.text, open)}` : shown(result?.trim() ?? '', open);
+  return reason ? reason.slice(0, TAIL) : null;
+}
+
+type FailedRow = { agentId: string | null; departmentId: string | null; tail: string; failure: Failure; result: string | null; sight: TaskSight | null };
+
+/* A failed turn as a reader gets it: its department by name, the end of its output and why it failed. */
+function failedLine<T extends FailedRow>(row: T, reader: Reader | undefined, names: Map<string, string>) {
+  /* What decides the reader's view stays out of what it reads. */
+  const { agentId, departmentId, tail, failure, result, sight, ...line } = row;
+  const open = opensTurn(reader, sight, { id: agentId, departmentId });
+  return { ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason: failureReason(failure, result, open) };
+}
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 type Agent = typeof agents.$inferSelect;
@@ -36,11 +71,11 @@ const WHY_TAIL = 500;
 /* Queued turns Hornhoof ended unsent on purpose, as their task went to another holder or waits for the tasks before it: no
    program ran, so there is nothing to find. */
 const ENDED_UNSENT = ['handed_on', 'waiting'];
-/* The start of what a holder said when it stopped, and its end when it says more than the start holds. */
-const heldWords = (said: { text: string } | undefined) => ({
-  why: said ? said.text.slice(0, TAIL) : null,
-  whyTail: said && said.text.length > TAIL ? said.text.slice(-WHY_TAIL) : null,
-});
+/* The start of what a holder said when it stopped, and its end when it says more than the start holds, as the reader gets it. */
+function heldWords(said: { text: string } | undefined, open: boolean) {
+  const text = said ? shown(said.text, open) : null;
+  return { why: text === null ? null : text.slice(0, TAIL), whyTail: text !== null && text.length > TAIL ? text.slice(-WHY_TAIL) : null };
+}
 const FAILED_MAX = 50;
 /* Tool calls and results read for where agents stumbled, the newest first. */
 const STUMBLES_MAX = 1000;
@@ -203,6 +238,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the reason Hornhoof recorded, the end of its output and the task, and the tasks blocked now, ' +
           'with the start of what their holder said when it stopped, its end in whyTail when it is longer, and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'The words of work you may not open, as task shows it, come with no credential and no private path in them. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
@@ -210,8 +246,10 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       },
       async ({ hours }) => {
         const names = await deptNames();
+        const reader = await readerOf(ctx, job.agentId);
         const failed = await db
-          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption })
+          .select({ agent: agents.name, agentId: jobs.agentId, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption,
+            sight: { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId } })
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
@@ -219,13 +257,14 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
-          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt })
+          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt,
+            sight: { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId } })
           .from(tasks)
           .leftJoin(agents, eq(agents.id, tasks.assigneeAgentId))
           .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked')))
           .orderBy(tasks.updatedAt);
         const blocked = [];
-        for (const { id, holderId, ...task } of stuck) {
+        for (const { id, holderId, sight, ...task } of stuck) {
           /* What its holder said when it stopped, and how its last turn on it ended: enough to group causes without the task itself. */
           const [said] = await db
             .select({ text: taskEvents.text })
@@ -243,7 +282,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             : [];
           /* A turn that went out inside another one ended as that one did. */
           const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
-          blocked.push({ ...task, ...heldWords(said), lastTurn: lastTurn ?? null });
+          blocked.push({ ...task, ...heldWords(said, opensTask(reader, sight)), lastTurn: lastTurn ?? null });
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>
@@ -278,7 +317,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           stops.push({ ...stop, lastTurn: last ? (last.result?.trim() || last.tail).slice(-TAIL) : null });
         }
         return json({
-          failed: failed.map(({ departmentId, tail, failure, result, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL), reason: failureReason(failure, result) })),
+          failed: failed.map(row => failedLine(row, reader, names)),
           blocked,
           missing: missing.map(({ value, ...m }) => ({ ...value, ...m })),
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip unused tally example field

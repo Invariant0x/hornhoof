@@ -42,6 +42,10 @@
     "./echelons": {
       "types": "./dist/echelons.d.ts",
       "default": "./dist/echelons.js"
+    },
+    "./redaction": {
+      "types": "./dist/redaction.d.ts",
+      "default": "./dist/redaction.js"
     }
   },
   "types": "./dist/index.d.ts",

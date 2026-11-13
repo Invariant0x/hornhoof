@@ -16,7 +16,7 @@ import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
 
 /* Task log text and its automatic files have the same agent readership. */
-export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
+export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
   return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
     ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id));
 }

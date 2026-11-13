@@ -368,19 +368,21 @@ describe('tools a skill grants', () => {
       { ...turn, tail: '', failure: { kind: 'unknown', text: `Cannot load ${HOME}/credential-loader`, retryable: false }, finishedAt: ago(30) },
       { ...turn, tail: '', result: `Push refused for https://bruno:${GITHUB_TOKEN}@github.com/acme/app.git from /Users/fixture/app`, finishedAt: ago(20) },
       { ...turn, tail: `npm ERR! token=${GITHUB_TOKEN} in /root/.npmrc`, finishedAt: ago(10) },
+      /* A turn on no task is the work of its agent's department. */
+      { ...turn, taskId: null, tail: `git push failed: key=${GITHUB_TOKEN} for /home/fixture805/app`, finishedAt: ago(5) },
     ]);
     const client = await mcp(app, TOKEN);
     expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
     const failed = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).failed as { tail: string; reason: string | null }[];
-    expect(failed).toHaveLength(3);
+    expect(failed).toHaveLength(4);
     for (const { tail, reason } of failed) {
       for (const words of [tail, reason ?? '']) {
         for (const secret of [GITHUB_TOKEN, HOME, 'fixture805', '/Users/fixture', '/root/.npmrc']) expect(words).not.toContain(secret);
       }
       expect((reason ?? '').length).toBeLessThanOrEqual(400);
     }
-    expect(failed.map(f => f.reason)).toEqual([null, expect.stringContaining('Push refused for https://'), expect.stringContaining('unknown: Cannot load')]);
-    expect(failed[0]!.tail).toContain('npm ERR! token=');
+    expect(failed.map(f => f.reason)).toEqual([null, null, expect.stringContaining('Push refused for https://'), expect.stringContaining('unknown: Cannot load')]);
+    expect(failed.map(f => f.tail)).toEqual(['git push failed: key=[hidden] for [hidden]', 'npm ERR! token=[hidden] in [hidden]', '', '']);
   });
 
   it('lets a failure collector of the same department read what its own task says as it is', async () => {
@@ -390,12 +392,20 @@ describe('tools a skill grants', () => {
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
     const reason = `Status: BLOCKED. Could not read ${HOME}. ` + 'x'.repeat(900) + ` Next: path=${HOME}`;
     await blocked(app.ctx, bruno.id, task.id, reason);
-    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: '', failure: { kind: 'unknown', text: `Cannot load ${HOME}`, retryable: false }, finishedAt: new Date() });
+    const turn = { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const, error: 'agent_failed' };
+    await db.insert(jobs).values([
+      { ...turn, taskId: task.id, tail: '', failure: { kind: 'unknown', text: `Cannot load ${HOME}`, retryable: false }, finishedAt: new Date(Date.now() - 60_000) },
+      /* A turn on no task of an agent of the same department. */
+      { ...turn, tail: `git push failed for ${HOME}`, finishedAt: new Date() },
+    ]);
     const client = await mcp(app, own);
     expect((await call(client, 'task', { task: task.number })).isError).toBeFalsy();
-    const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { reason: string }[]; blocked: { why: string; whyTail: string }[] };
+    const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { reason: string | null; tail: string }[]; blocked: { why: string; whyTail: string }[] };
     expect(recent.blocked).toEqual([expect.objectContaining({ why: reason.slice(0, 400), whyTail: reason.slice(-500) })]);
-    expect(recent.failed).toEqual([expect.objectContaining({ reason: `unknown: Cannot load ${HOME}` })]);
+    expect(recent.failed).toEqual([
+      expect.objectContaining({ tail: `git push failed for ${HOME}`, reason: null }),
+      expect.objectContaining({ tail: '', reason: `unknown: Cannot load ${HOME}` }),
+    ]);
   });
 
   it("tell a failure collector how the turn ended that a blocked task went out in along with another task", async () => {
