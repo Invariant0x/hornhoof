@@ -13,11 +13,15 @@ const FEWEST_SAMPLES = 10;
 /* memory and cores: what the keeper's container sees, which on a Mac is what Docker's VM was given. */
 export type MachineMeasures = { uptimeS: number; fsyncP99Ms: number | null; diskFree: number; memory: number; cores: number };
 
-/* The rank in whole numbers first, so no error of floating point moves it. */
+/* The rank in whole numbers first, so no error of floating point moves it. With fewer than a hundred samples the
+   ninety-ninth of a hundred would be the slowest one of all, and one slow write while a machine is still being set up
+   would call its disk slow for its first half hour: until then the single slowest is left out, as it is from a hundred
+   on. */
 export function fsyncP99(samples: readonly number[]): number | null {
   if (samples.length < FEWEST_SAMPLES) return null;
   const sorted = [...samples].sort((a, b) => a - b);
-  return sorted[Math.ceil((sorted.length * 99) / 100) - 1]!;
+  const rank = Math.ceil((sorted.length * 99) / 100);
+  return sorted[Math.min(rank, sorted.length - 1) - 1]!;
 }
 
 export function keepLatest(samples: readonly number[], ms: number): number[] {

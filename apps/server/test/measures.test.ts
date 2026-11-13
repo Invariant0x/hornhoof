@@ -38,7 +38,19 @@ describe('fsyncP99', () => {
 
   it('has none with fewer than 10 samples', () => {
     expect(fsyncP99(oneTo(9))).toBeNull();
-    expect(fsyncP99(oneTo(10))).toBe(10);
+    expect(fsyncP99(oneTo(10))).toBe(9);
+  });
+
+  it('leaves the single slowest write out while it has fewer than a hundred', () => {
+    /* One slow write while the machine was still being set up says nothing of its disk. */
+    const quick = Array.from({ length: 40 }, () => 3);
+    expect(fsyncP99([...quick, 900])).toBe(3);
+    /* A disk that is slow shows in the rest of its writes. */
+    expect(fsyncP99([...quick, 900, 800])).toBe(800);
+    expect(fsyncP99(Array.from({ length: 40 }, () => 120))).toBe(120);
+    /* From a hundred on the rank is the plain one, which leaves one in a hundred out by itself. */
+    expect(fsyncP99(oneTo(99))).toBe(98);
+    expect(fsyncP99(oneTo(100))).toBe(99);
   });
 
   it('takes the nearest rank, not a value between two samples', () => {
