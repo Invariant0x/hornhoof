@@ -1,5 +1,4 @@
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Plugin } from 'vite';
 import { bundleSkinsBoot, skinsBoot } from '../skins-boot.config';
@@ -8,7 +7,7 @@ import { COLOR_TOKENS } from '../src/skins/roles';
 import { skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
-const SKINS = fileURLToPath(new URL('../src/skins/', import.meta.url));
+const SKINS = resolve(process.cwd(), 'src/skins');
 /* A hook of the plugin as the function it is, whichever form Vite allows it to take. */
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
 const hook = (plugin: Plugin, name: keyof Plugin): Hook => {

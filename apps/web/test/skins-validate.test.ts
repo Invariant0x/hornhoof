@@ -65,8 +65,8 @@ describe('the safety check of a skin file', () => {
   it.each(['__proto__', 'constructor', 'prototype'])('refuses the key %s anywhere in the file, before anything else', key => {
     const at = (path: string) => ({ code: 'forbidden_key', key: path });
     expect(refused(file().replace('{', `{"${key}": {"polluted": true},`))).toEqual(at(key));
-    expect(refused(file().replace('"colors": {', `"colors": {"${key}": "#000000",`))).toEqual(at(`colors.${key}`));
-    expect(refused(file().replace('"fonts": {', `"fonts": {"${key}": ["serif"],`))).toEqual(at(`fonts.${key}`));
+    expect(refused(file().replace('"colors":{', `"colors":{"${key}": "#000000",`))).toEqual(at(`colors.${key}`));
+    expect(refused(file().replace('"fonts":{', `"fonts":{"${key}": ["serif"],`))).toEqual(at(`fonts.${key}`));
     expect(refused(`{"${key}": 1}`)).toEqual(at(key));
     expect(refused(`{"a": [{"b": {"${key}": 1}}]}`)).toEqual(at(`a.0.b.${key}`));
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();

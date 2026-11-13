@@ -1,65 +1,7 @@
-/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. A theme sets
-   only these tokens: colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay
-   the same in every theme. src/theme-template.ts holds the same values for the samples it gives out. */
-:root {
-  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #768695;
-  --ink: #0F1B27; --muted: #4C5A68;
-  --p-claude: #A84628; --p-kimi: #125BC7; --p-glm: #3D47D6; --p-antigravity: #157331;
-  --cyan: #00A3BD; --cyan-ink: #006E80; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #13753D;
-  --red: #C62828; --on-red: #FFFFFF;
-  --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
-  --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
-  --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
-  --f-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --f-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --cut-k: 1;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
-    --ink: #E3EAF1; --muted: #93A0AE;
-    --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
-    --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
-    --red: #FF6B6B; --on-red: #2A0606;
-    --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
-    --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #687A8F;
-  --ink: #E3EAF1; --muted: #93A0AE;
-  --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
-  --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
-  --red: #FF6B6B; --on-red: #2A0606;
-  --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
-  --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
-  color-scheme: dark;
-}
-/* Matrix: phosphor green on near black, square frames. Roles leave green so they stay apart. */
-:root[data-theme="matrix"] {
-  --bg: #050A06; --surface: #0A130D; --surface2: #101D14; --line: #1E3525; --line2: #4A7856;
-  --ink: #D4F7DC; --muted: #84B390;
-  --p-claude: #F08A66; --p-kimi: #639EFF; --p-glm: #8F97FF; --p-antigravity: #6EE08E;
-  --cyan: #00E05A; --cyan-ink: #66FF99; --amber: #E5B82E; --amber-ink: #F5CD56; --pink: #F25C9A; --pink-ink: #FF8AB8; --ok: #42DEC2;
-  --red: #FF5247; --on-red: #260402;
-  --idle: #1B3021; --dot: rgba(82, 224, 128, .16); --glow: rgba(0, 224, 90, .14);
-  --btn: #00E05A; --on-btn: #021C0B; --hud: rgba(8, 16, 11, .88); --shadow: rgba(0, 0, 0, .62);
-  --cut-k: 0;
-  color-scheme: dark;
-}
-/* Cyberpunk: deep violet night with neon cyan lines and links, a yellow main button and magenta attention. */
-:root[data-theme="cyberpunk"] {
-  --bg: #0B0720; --surface: #140D33; --surface2: #1C1342; --line: #33275E; --line2: #7E6BC4;
-  --ink: #F5F0FF; --muted: #B9AEE0;
-  --p-claude: #FF9A73; --p-kimi: #73A9FF; --p-glm: #A3A9FF; --p-antigravity: #6FE592;
-  --cyan: #00E5FF; --cyan-ink: #5CF0FF; --amber: #FF9E2C; --amber-ink: #FFB866; --pink: #FF2BD6; --pink-ink: #FF7AE5; --ok: #3DFFA8;
-  --red: #FF4766; --on-red: #1A0008;
-  --idle: #2A1F55; --dot: rgba(0, 229, 255, .14); --glow: rgba(255, 43, 214, .16);
-  --btn: #FCEE0A; --on-btn: #1A1400; --hud: rgba(17, 11, 43, .86); --shadow: rgba(0, 0, 0, .6);
-  color-scheme: dark;
-}
+/* Tokens from prototype v4. Their values come from the skin on the page: src/skins/registry.ts for the built-in skins
+   and a person's own skins, set on the root by the script at the top of index.html before the page draws. A skin sets
+   only colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay the same in
+   every skin, so this file keeps them and no value of a skin. */
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -367,17 +309,62 @@ select:disabled { opacity: .55; }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* The themes two by two, each a 44 px target 8 px from the next; a name too long for its button wraps by words. The custom
-   template, a fifth choice, takes the whole row. */
-.seg.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.seg.themes button { min-height: 44px; margin: 0; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
-.seg.themes button:nth-child(5) { grid-column: 1 / -1; }
-/* The custom theme template: what it is, whether one is on, and its three actions. The load button is a label around a
-   hidden file field, so the field's focus shows on the label. */
-.theme-template { display: grid; gap: 10px; }
-.theme-template > p { margin: 0; font-size: 13px; }
-.theme-template a.btn { text-decoration: none; }
-.theme-load:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* The Themes row of the account menu: the section's name and the theme on now, one 44 px target. */
+.menu-link {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 12px;
+  min-height: 44px; margin: 0; padding: 8px 12px; cursor: pointer; text-align: start;
+  border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; font-size: 13px;
+}
+.menu-link > span { color: var(--muted); }
+.menu-link > b { font-weight: 600; color: var(--cyan-ink); overflow-wrap: anywhere; }
+.menu-link:hover { border-color: var(--cyan); }
+.menu-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* The sections of a person's settings, a 44 px target each; the open one is marked as a pressed choice is. */
+.settings-nav button { min-height: 44px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.settings-nav button[aria-current='page'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
+/* Themes: the theme on now, a card for each built-in theme and each of a person's own, loading files and the guide. */
+.skins { display: grid; gap: 16px; min-width: 0; }
+.skins p { margin: 0; }
+.skins h3 { margin: 0; font-size: 15px; }
+.skins h4 { margin: 0; font-size: 14px; }
+.skins-now { font-weight: 600; }
+.skins-part { display: grid; gap: 10px; min-width: 0; }
+.skin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.skin-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; align-content: start; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--line2); background: var(--surface2); }
+.skin-card:has(.skin-pick[aria-pressed='true']) { border-color: var(--cyan); box-shadow: inset 0 0 0 1px var(--cyan); }
+.skin-pick { display: block; width: 100%; min-height: 44px; margin: 0; padding: 0; border: 0; background: none; cursor: pointer; }
+/* The whole card picks its theme; its actions stand above that. */
+.skin-pick::after { content: ''; position: absolute; inset: 0; }
+.skin-pick:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.skin-name { font-family: var(--f-display); overflow-wrap: anywhere; }
+.skin-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.skin-card .entry-actions { position: relative; z-index: 1; flex-wrap: wrap; justify-content: flex-start; }
+.skin-ask { position: relative; z-index: 1; display: grid; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
+/* A preview in the card's own tokens: its page, a panel with text and the accent, four status colours and its button. */
+.skin-swatch {
+  --cut: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 6px;
+  height: 64px; padding: 8px; background: var(--bg); border: 1px solid var(--line);
+}
+.skin-panel { grid-row: 1 / -1; display: grid; gap: 4px; align-content: center; height: 100%; padding: 4px 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
+.skin-aa { color: var(--ink); font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1; }
+.skin-bar { height: 3px; background: var(--cyan); }
+.skin-dots { display: flex; justify-content: flex-end; gap: 4px; }
+.skin-dots i { width: 8px; height: 8px; border-radius: 50%; }
+.skin-dots .accent { background: var(--cyan); }
+.skin-dots .success { background: var(--ok); }
+.skin-dots .warning { background: var(--amber); }
+.skin-dots .attention { background: var(--pink); }
+.skin-btn { --cut: 5px; justify-self: end; width: 28px; height: 12px; background: var(--btn); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
+.skins-load { justify-content: flex-start; }
+.skins-load > label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.skins-added { color: var(--ok); font-size: 13px; }
+.skins-problems { display: grid; gap: 4px; margin: 0; padding-inline-start: 16px; overflow-wrap: anywhere; }
+.skins-empty { color: var(--muted); font-size: 13px; }
+.skins-guide { display: grid; gap: 8px; padding-block-start: 12px; border-block-start: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.skins-guide h4 { margin-block-start: 4px; }
+.skins-guide :is(ol, ul) { display: grid; gap: 4px; margin: 0; padding-inline-start: 18px; }
+.skins-prompt { padding: 8px 12px; border-inline-start: 3px solid var(--cyan); background: var(--surface2); font-family: var(--f-mono); font-size: 12.5px; }
 .body { position: absolute; inset: 0; overflow: auto; }
 /* A page scrolls under the floating header, so a band in the page's own color stays at the top of what scrolls, as tall
    as the header and the gap above it: text never shows around the glass blocks. It takes no room from the page. */

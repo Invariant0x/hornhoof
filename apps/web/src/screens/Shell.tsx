@@ -10,7 +10,7 @@ import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
-import { ThemeChoice, ThemeTemplateDialog } from '../ui/ThemePicker';
+import { ThemesMenuItem } from '../ui/Themes';
 import { useUpdates, type Updates } from '../updates';
 import { About } from './About';
 import type { StaffAsk } from './AgentWindow';
@@ -21,7 +21,7 @@ import { Improvements } from './Improvements';
 import { Machines } from './Machines';
 import { MapScreen } from './Map';
 import { People } from './People';
-import { Profile } from './Profile';
+import { Profile, type SettingsSection } from './Profile';
 import { Settings } from './Settings';
 import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
@@ -32,7 +32,7 @@ import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './Rou
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
-const ACCOUNT_DIALOGS = ['about', 'versions', 'profile', 'settings', 'theme'] as const;
+const ACCOUNT_DIALOGS = ['about', 'versions', 'profile', 'settings', 'themes'] as const;
 type AccountDialogName = (typeof ACCOUNT_DIALOGS)[number];
 
 function dialogOf(route: Route): AccountDialogName | null {
@@ -49,14 +49,16 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
   return { accountDialog, pageRoute, taskId, tab, deptId };
 }
 
-function AccountDialog({ active, me, updates, onRenamed, onClose, onHome }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onClose: () => void; onHome: () => void }) {
+function AccountDialog({ active, me, updates, onRenamed, onSection, onClose, onHome }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onSection: (section: SettingsSection) => void; onClose: () => void; onHome: () => void }) {
   if (!active) return null;
+  /* Profile and Themes are two sections of one window, so switching keeps the window and its focus. */
+  const personal = <Profile key="personal" me={me} section={active === 'themes' ? 'themes' : 'profile'} onSection={onSection} onRenamed={onRenamed} onClose={onClose} />;
   return {
     about: <About onClose={onClose} />,
     versions: <Versions updates={updates} onClose={onClose} onHome={onHome} />,
-    profile: <Profile me={me} onRenamed={onRenamed} onClose={onClose} />,
+    profile: personal,
     settings: <Settings me={me} onClose={onClose} onHome={onHome} />,
-    theme: <ThemeTemplateDialog onClose={onClose} />,
+    themes: personal,
   }[active];
 }
 
@@ -71,7 +73,7 @@ function AccountMenu({
   onProfile,
   onSettings,
   onAbout,
-  onTemplate,
+  onThemes,
   toDecide,
 }: {
   me: Me;
@@ -83,7 +85,7 @@ function AccountMenu({
   onProfile: () => void;
   onSettings?: () => void;
   onAbout: () => void;
-  onTemplate: () => void;
+  onThemes: () => void;
   toDecide: number;
 }) {
   const t = useT();
@@ -96,10 +98,7 @@ function AccountMenu({
         <b>{me.person.name}</b>
         <span>{me.person.email}</span>
       </p>
-      <ThemeChoice />
-      <button className="btn small ghost" type="button" onClick={() => { onClose(); onTemplate(); }}>
-        {t.themeTemplate.menu}
-      </button>
+      <ThemesMenuItem onOpen={() => { onClose(); onThemes(); }} />
       <div className="menu-row" role="group" aria-label={t.shell.language}>
         <span>{t.shell.language}</span>
         <div className="seg">
@@ -218,7 +217,7 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} onTemplate={() => openAccount('theme')} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} onThemes={() => openAccount('themes')} toDecide={toDecide} />}
       </div>
     </div>
   );
@@ -299,7 +298,7 @@ function DepartmentWorkspace({ tab, me, dept, missingDepartment, org, shown, tas
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
-  const { route, navigate, backgrounds, closeOverlay } = useRoute();
+  const { route, navigate, backgrounds, switchOverlay, closeOverlay } = useRoute();
   const { accountDialog, pageRoute, taskId, tab, deptId } = workspaceOf(route, backgrounds);
   const goHome = () => navigate({ kind: 'map' });
   const openAccount = (kind: AccountDialogName) => navigate({ kind }, route);
@@ -422,7 +421,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onSection={section => switchOverlay({ kind: section })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </AgentWindowContext>

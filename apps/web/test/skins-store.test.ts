@@ -6,7 +6,8 @@ import { chooseSkin, forgetSkin, initSkins, keepSkins, lookOf, skinsState, subsc
 import { skinText } from '../src/skins/validate';
 
 const root = document.documentElement;
-const skin = (name: string, bg = '#010203'): Skin => ({ ...builtinSkin('matrix')!, name, colors: { ...builtinSkin('matrix')!.colors, bg } });
+const { id: _matrix, ...MATRIX } = builtinSkin('matrix')!;
+const skin = (name: string, bg = '#010203'): Skin => ({ ...MATRIX, name, colors: { ...MATRIX.colors, bg } });
 const inline = () => Object.fromEntries(SKIN_PROPERTIES.map(property => [property, root.style.getPropertyValue(property)]).filter(([, value]) => value));
 
 function clearPage() {

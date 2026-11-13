@@ -69,9 +69,10 @@ describe('the registry of built-in skins', () => {
 
 describe('one source for the values of a skin', () => {
   it('keeps no colour, font or cut of a skin in theme.css and no light or dark mode of the system', () => {
-    const declared = RULES.flatMap(rule => Object.keys(rule.decls).map(property => ({ property, where: rule.selectors.join(', ') })));
+    const declared = RULES.flatMap(rule => Object.entries(rule.decls).map(([property, value]) => ({ property, value, where: rule.selectors.join(', ') })));
     const skinTokens: string[] = [...Object.values(COLOR_TOKENS), ...Object.values(FONT_TOKENS), CUT_TOKEN];
-    expect(declared.filter(({ property }) => skinTokens.includes(property))).toEqual([]);
+    /* A component may point a token at another one, as a busy department's glow takes the accent; a value is the skin's. */
+    expect(declared.filter(({ property, value }) => skinTokens.includes(property) && !/^var\(--[a-z0-9-]+\)$/.test(value))).toEqual([]);
     expect(RULES.filter(rule => rule.media?.includes('prefers-color-scheme'))).toEqual([]);
     expect(RULES.filter(rule => rule.selectors.some(selector => selector.includes('data-theme')))).toEqual([]);
   });
