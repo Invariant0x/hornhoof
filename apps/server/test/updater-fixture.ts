@@ -58,6 +58,9 @@ const standEnv = (s: Stand, env: Record<string, string>) => ({
   STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} node=${APP}-node@${NODE_DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`,
   HORNHOOF_CONTROL_DIR: s.control,
   HORNHOOF_SERVER_DIR: s.server,
+  /* A machine whose installer wrote its system down, as every machine set up by this build has: a Mac, where the updater
+     looks at nothing of the computer. A test of what it learns by itself gives an empty system, or Linux. */
+  HORNHOOF_HOST_OS: 'darwin',
   HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
   HORNHOOF_HEALTH_WAIT: '1',
   HORNHOOF_SQL_DIR: SQL,
