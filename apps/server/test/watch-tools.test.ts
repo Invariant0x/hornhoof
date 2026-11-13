@@ -301,8 +301,37 @@ describe('tools a skill grants', () => {
         holder: 'Bruno',
         since: expect.any(String),
         why: 'Waits for #40: the staging database does not answer.',
+        whyTail: null,
         lastTurn: { status: 'failed', error: 'timeout', at: hung.toISOString() },
       },
+    ]);
+  });
+
+  it('let a failure collector read the end of a long blocked reason, where its holder says what stops it, beside its start', async () => {
+    const { app, db, bruno, task } = await company(['ops-failure-review']);
+    const files = Array.from({ length: 40 }, (_, i) => `apps/web/e2e/agent-state-${i}.spec.ts`).join(', ');
+    const reason = `Status: BLOCKED. What changed: ${files}. Concerns: the browser suite needs the candidate's own build. Next: the head gives the Tests stage a machine with the browsers.`;
+    await blocked(app.ctx, bruno.id, task.id, reason);
+    const recent = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text) as { blocked: { why: string; whyTail: string | null }[] };
+    expect(recent.blocked).toEqual([expect.objectContaining({ why: reason.slice(0, 400), whyTail: reason.slice(-500) })]);
+    expect(recent.blocked[0]!.whyTail).toContain('Next: the head gives the Tests stage a machine with the browsers.');
+    expect(await db.select().from(tasks).where(eq(tasks.id, task.id))).toEqual([expect.objectContaining({ status: 'blocked' })]);
+  });
+
+  it('let a failure collector read why a turn failed when its program left no output, and leave out turns Hornhoof ended before they started', async () => {
+    const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    await db.insert(jobs).values([
+      /* The task went to another holder, or waits for tasks before it: its queued turn ended unsent, with no program. */
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'handed_on', tail: '', finishedAt: ago(30) },
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'waiting', tail: '', finishedAt: ago(29) },
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: '', result: 'The terminal output recorder did not start.', finishedAt: ago(20) },
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: '', failure: { kind: 'overloaded', text: 'Selected model is at capacity.', retryable: true }, finishedAt: ago(10) },
+    ]);
+    const recent = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text) as { failed: { error: string; tail: string; reason: string | null }[] };
+    expect(recent.failed).toEqual([
+      expect.objectContaining({ error: 'agent_failed', tail: '', reason: 'overloaded: Selected model is at capacity.' }),
+      expect.objectContaining({ error: 'agent_failed', tail: '', reason: 'The terminal output recorder did not start.' }),
     ]);
   });
 
