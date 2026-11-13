@@ -85,6 +85,16 @@ describe('a department owner on the screen', () => {
     ]) expect((await send(c, c.danaToken, 'POST', '/api/departments/build', payload)).statusCode, JSON.stringify(payload)).toBe(403);
   });
 
+  it('removes a product of their own department, and of no other', async () => {
+    const c = await owned();
+    const [stand] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Stand', roleCode: 'SAL', parentId: c.sales.id, position: 4 }).returning();
+    expect((await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: stand!.id, remove: true }] })).statusCode).toBe(403);
+    const removed = await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.product.id, remove: true }] });
+    expect(removed.statusCode, removed.body).toBe(201);
+    expect(await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).toEqual([]);
+    expect(await c.db.select({ id: departments.id }).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
+  });
+
   it('removes an employee of their department, which someone who sees the whole company but has no department may not', async () => {
     const c = await company();
     const ira = await onHerPlan(c, 'Ira');

@@ -187,15 +187,16 @@ describe('the orchestrator', () => {
     expect(text(await call(woken, 'add_tasks', { turn: 1, tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_DEPARTMENT_OWNER);
   });
 
-  it('alone has set_urgent and set_team_urgent_only', async () => {
+  it('alone has set_urgent, and set_team_urgent_only beside heads, who mark their own sub-units', async () => {
     const c = await company();
     const names = async (agent: { id: string }) => (await (await c.tools(agent)).listTools()).tools.map(t => t.name);
     expect(await names(c.orchestrator)).toEqual(expect.arrayContaining(['set_urgent', 'set_team_urgent_only']));
-    for (const agent of [c.head, c.bruno]) {
-      const has = await names(agent);
-      expect(has).not.toContain('set_urgent');
-      expect(has).not.toContain('set_team_urgent_only');
-    }
+    const head = await names(c.head);
+    expect(head).not.toContain('set_urgent');
+    expect(head).toContain('set_team_urgent_only');
+    const worker = await names(c.bruno);
+    expect(worker).not.toContain('set_urgent');
+    expect(worker).not.toContain('set_team_urgent_only');
   });
 
   it('sets a task urgent, only in a turn that answers the CEO or the department\'s owner, with all that is under it', async () => {

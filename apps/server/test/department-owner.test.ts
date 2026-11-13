@@ -279,6 +279,17 @@ describe('approvals with a department owner', () => {
     }
   });
 
+  it('lets everyone given the department answer it beside the named owner, while it stays addressed to her', async () => {
+    const c = await company();
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    const ola = await invitePerson(c.app, c.ceoToken, { name: 'Ola', email: 'ola@acme.com', access: { departments: [c.dev.id] } });
+    const request = await asked(c);
+    expect((await waiting(c, ola)).requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.dana, canAnswer: true }]);
+    const done = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(ola) });
+    expect(done.statusCode, done.body).toBe(200);
+    expect(done.json().request.status).toBe('approved');
+  });
+
   it('leaves a former owner the right while she has the department, takes it at once with her access, and the waiting approval goes to the new owner', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
