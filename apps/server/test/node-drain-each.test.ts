@@ -247,6 +247,20 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
   });
 
+  it("keeps an assistant's own agent off the node past the limit, as a worker: the company does not wait for it", async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const google = await f.plan('antigravity');
+    const node = await f.online(google.key);
+    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
+    const [own] = await f.db.insert(agents).values({ companyId: f.company.id, subscriptionId: google.plan, nodeId: google.nodeId, kind: 'assistant', model: '', name: 'Ava' }).returning();
+    await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    await f.server('POST');
+    const job = await f.turnFor(own!.id);
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect(await f.gotTurnOf(own!.id, node)).toBe(false);
+    expect((await f.statusOf(job)).status).toBe('queued');
+  });
+
   it('holds a head on the built-in node up to the limit too, when the company key runs it', async () => {
     const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
     const builtin = await f.online(NODE_KEY);

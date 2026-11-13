@@ -6,7 +6,7 @@ import { viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { canViewComputer } from '../computer/access.js';
 import type { StreamMessage } from './bus.js';
-import { heardBy } from './stream-view.js';
+import { heardBy, heardInFull } from './stream-view.js';
 
 /* Whether a message is for this person at all, by where they reach and what is theirs. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
@@ -45,8 +45,10 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const unsubscribe = ctx.bus.subscribe(me.companyId, m => {
       if (!isFor(m, me, viewer.access)) return;
-      if (viewer.full) send(m);
-      else checked = checked.then(() => check(m)).catch((err: unknown) => req.log.warn({ err }, 'A message of the stream was not checked, so it was not sent.'));
+      if (viewer.full) {
+        const heard = heardInFull(viewer, m);
+        if (heard) send(heard);
+      } else checked = checked.then(() => check(m)).catch((err: unknown) => req.log.warn({ err }, 'A message of the stream was not checked, so it was not sent.'));
     });
     /* The ping keeps proxies from closing the stream and looks at the person again: a signed-out or disabled person stops
        hearing anything, and changed access applies from here on. A change of anyone's access looks at once. */

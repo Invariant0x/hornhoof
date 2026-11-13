@@ -46,18 +46,26 @@ export function withOwned(access: Access, named: readonly string[]): Access {
 /* Everyone given a department runs it in full, as its named owner does, and there may be many of them: they see and change
    every employee of it on whoever's plan, its sub-units, repository and approvals. A team or a product alone is not a department. */
 export async function accessOf(db: Pick<Db, 'select'>, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
-  const named = (await db.select({ id: departments.id }).from(departments).where(eq(departments.ownerPersonId, person.id))).map(d => d.id);
-  if (person.scopeKind === 'company') return withOwned(WHOLE, named);
-  const rows = await db.select().from(personAccess).where(eq(personAccess.personId, person.id));
-  const listed = rows.flatMap(r => (r.departmentId ? [r.departmentId] : []));
-  const given = listed.length ? (await db.select({ id: departments.id }).from(departments).where(and(inArray(departments.id, listed), isNull(departments.parentId)))).map(d => d.id) : [];
-  return withOwned(
-    {
-      whole: false,
-      departments: new Set(listed),
-      teams: new Set(rows.flatMap(r => (r.teamId ? [r.teamId] : []))),
-    },
-    [...new Set([...named, ...given])],
+  return (await accessesOf(db, [person])).get(person.id)!;
+}
+
+/* The same for several people at once, in as many reads as for one. */
+export async function accessesOf(db: Pick<Db, 'select'>, persons: readonly Pick<Person, 'id' | 'scopeKind'>[]): Promise<Map<string, Access>> {
+  if (!persons.length) return new Map();
+  const named = await db.select({ id: departments.id, ownerPersonId: departments.ownerPersonId }).from(departments).where(inArray(departments.ownerPersonId, persons.map(p => p.id)));
+  const namedOf = (id: string) => named.filter(d => d.ownerPersonId === id).map(d => d.id);
+  const listedPeople = persons.filter(p => p.scopeKind !== 'company').map(p => p.id);
+  const rows = listedPeople.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedPeople)) : [];
+  const listed = [...new Set(rows.flatMap(r => (r.departmentId ? [r.departmentId] : [])))];
+  const tops = new Set(listed.length ? (await db.select({ id: departments.id }).from(departments).where(and(inArray(departments.id, listed), isNull(departments.parentId)))).map(d => d.id) : []);
+  return new Map(
+    persons.map(person => {
+      if (person.scopeKind === 'company') return [person.id, withOwned(WHOLE, namedOf(person.id))];
+      const theirs = rows.filter(r => r.personId === person.id);
+      const depts = theirs.flatMap(r => (r.departmentId ? [r.departmentId] : []));
+      const access = { whole: false, departments: new Set(depts), teams: new Set(theirs.flatMap(r => (r.teamId ? [r.teamId] : []))) };
+      return [person.id, withOwned(access, [...new Set([...namedOf(person.id), ...depts.filter(id => tops.has(id))])])];
+    }),
   );
 }
 

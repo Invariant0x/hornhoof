@@ -3,13 +3,15 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { personColumns, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { changedBy, personColumns, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
-import { agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { releaseLeftProgram } from '../agents/left-programs.js';
 import { afterPlanMove } from '../agents/routes.js';
+import { onAgent } from '../conversation/queue.js';
 import { publicUrl } from '../link/link.js';
 import { personView } from '../people/views.js';
 import { settingsFor } from './programs.js';
@@ -67,31 +69,59 @@ async function managedAssistant(db: Db, me: Person, id: string): Promise<Person 
 }
 
 /* The plan the assistant's own agent thinks on: a personal plan of its owner, which only its owner picks, as it is their
-   sign-in that works for it. The first plan makes the agent; none leaves it waiting with nothing to run on. */
-async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'id' | 'name' | 'companyId'> & { assistantOf: string | null }, planId: string | null): Promise<void> {
+   sign-in that works for it. The first plan makes the agent, once however many screens pick at the same moment; none
+   leaves it waiting with nothing to run on. A switched off assistant's agent takes no plan. */
+export async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'id' | 'name' | 'companyId' | 'status'> & { assistantOf: string | null }, planId: string | null): Promise<void> {
   const { db } = ctx;
   if (assistant.assistantOf !== me.id) throw new ApiError(403, 'forbidden', "Only the assistant's owner picks the plan its agent thinks on.", 'assistant_plan_owner_only');
   if (planId) {
+    if (assistant.status === 'disabled') throw new ApiError(409, 'conflict', "A switched off assistant's agent takes no plan: switch the assistant on first.", 'assistant_switched_off');
     const [plan] = await db
       .select({ id: subscriptions.id })
       .from(subscriptions)
       .where(and(eq(subscriptions.id, planId), eq(subscriptions.companyId, me.companyId), eq(subscriptions.kind, 'personal'), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)));
     if (!plan) throw new ApiError(409, 'conflict', "An assistant's agent thinks only on a personal plan of its owner.", 'assistant_plan_invalid');
   }
-  const [{ agentId } = { agentId: null }] = await db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistant.id));
-  if (!agentId) {
-    if (!planId) return;
-    await db.transaction(async tx => {
-      const [agent] = await tx.insert(agents).values({ companyId: me.companyId, kind: 'assistant', name: assistant.name, model: '', subscriptionId: planId, createdBy: me.id }).returning({ id: agents.id });
-      await tx.update(assistants).set({ agentId: agent!.id }).where(eq(assistants.personId, assistant.id));
+  /* The assistant's row stays locked while its agent is made, so a pick at the same moment finds that agent. */
+  const found = await db.transaction(async tx => {
+    const [row] = await tx.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistant.id)).for('update');
+    if (row?.agentId || !planId) return row?.agentId ?? null;
+    const [agent] = await tx.insert(agents).values({ companyId: me.companyId, kind: 'assistant', name: assistant.name, model: '', subscriptionId: planId, createdBy: me.id }).returning({ id: agents.id });
+    await tx.update(assistants).set({ agentId: agent!.id }).where(eq(assistants.personId, assistant.id));
+    return undefined;
+  });
+  if (found === null) return;
+  if (found) {
+    /* In the agent's line, from the plan it is on at that moment, as every change of its plan goes. */
+    const agent = await onAgent(ctx, found, async () => {
+      const [now] = await db.select().from(agents).where(eq(agents.id, found));
+      if (!now || now.subscriptionId === planId) return null;
+      await db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, found));
+      return now;
     });
-  } else {
-    const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
-    if (agent!.subscriptionId === planId) return;
-    await db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, agentId));
-    await afterPlanMove(ctx, agent!, { ...agent!, subscriptionId: planId });
+    if (!agent) return;
+    await afterPlanMove(ctx, agent, { ...agent, subscriptionId: planId });
   }
   ctx.bus.accessChanged(me.companyId);
+}
+
+/* A switched off assistant's own agent lets go of its owner's plan, as agents do when their plan's owner is switched off:
+   nothing of it runs on the owner's sign-in until the assistant is on again and its owner picks a plan once more. */
+export async function releaseAssistantAgent(ctx: Ctx, assistantId: string, by: Person): Promise<void> {
+  const { db } = ctx;
+  const [row] = await db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistantId));
+  if (!row?.agentId) return;
+  const id = row.agentId;
+  const left = await onAgent(ctx, id, async () => {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, id));
+    if (!agent?.subscriptionId) return null;
+    await db.transaction(async tx => {
+      await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
+    });
+    return agent.subscriptionId;
+  });
+  if (left) await releaseLeftProgram(ctx, id, left);
 }
 
 /* Adding an assistant on the People screen, changing how it is reached, the plan its own agent thinks on, and its key:

@@ -1,6 +1,6 @@
 import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { accessOf } from '../../auth/access.js';
+import { accessesOf } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, nodes, people, subscriptions, teams } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
@@ -20,11 +20,12 @@ async function leadersOf(db: Db, companyId: string, depts: (typeof departments.$
     .from(people)
     .where(and(eq(people.companyId, companyId), ne(people.status, 'disabled'), eq(people.isAgent, false)))
     .orderBy(asc(people.createdAt));
+  const access = await accessesOf(db, rows.filter(p => p.scopeKind !== 'company'));
   const leaders: { name: string; title: string; runs?: string[] }[] = [];
   for (const p of rows) {
     if (p.scopeKind === 'company') leaders.push({ name: p.name, title: p.title });
     else {
-      const owns = (await accessOf(db, p)).owns ?? new Set<string>();
+      const owns = access.get(p.id)!.owns ?? new Set<string>();
       const runs = depts.filter(d => owns.has(d.id)).map(deptName);
       if (runs.length) leaders.push({ name: p.name, title: p.title, runs });
     }
