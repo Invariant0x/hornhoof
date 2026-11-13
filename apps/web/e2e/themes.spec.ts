@@ -171,6 +171,60 @@ async function shot(page: Page, info: TestInfo, name: string) {
   if (room > size.height) await page.setViewportSize(size);
 }
 
+/* The pixels of a picture that hold ink, unlike its top left corner, the ground, leaving out a margin at its edges:
+   read by the page itself, so each engine reads its own drawing. */
+async function inkOf(page: Page, picture: Buffer, margin = 0): Promise<[number, number][]> {
+  return page.evaluate(async ({ png, margin }) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    const marks: [number, number][] = [];
+    for (let at = 0; at < data.length; at += 4) {
+      const [x, y] = [(at / 4) % bitmap.width, Math.floor(at / 4 / bitmap.width)];
+      const inside = x >= margin && y >= margin && x < bitmap.width - margin && y < bitmap.height - margin;
+      if (inside && Math.abs(data[at]! - data[0]!) + Math.abs(data[at + 1]! - data[1]!) + Math.abs(data[at + 2]! - data[2]!) > 96) marks.push([x, y]);
+    }
+    return marks;
+  }, { png: picture.toString('base64'), margin });
+}
+
+/* How tall lowercase letters stand in a font, as drawn: rows of pixels in CSS pixels, the height a person sees. The line
+   is padded, and only what stands inside its padding counts: a picture of a box can take in a row of the page beside it. */
+async function lowercaseHeight(page: Page, font: string): Promise<number> {
+  const probe = await page.evaluate(async font => {
+    const line = document.createElement('span');
+    line.className = 'height-probe';
+    line.style.cssText = `position: fixed; inset-block-start: 0; inset-inline-start: 0; z-index: 2147483647; padding: 8px; background: var(--surface); color: var(--ink); font: ${font}; line-height: 1.4`;
+    line.textContent = 'хохохо';
+    document.body.append(line);
+    const style = getComputedStyle(line);
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`, line.textContent);
+    return true;
+  }, font);
+  expect(probe).toBe(true);
+  const marks = await inkOf(page, await page.locator('.height-probe').screenshot(), 4);
+  await page.evaluate(() => document.querySelector('.height-probe')?.remove());
+  const rows = marks.map(([, y]) => y);
+  return (Math.max(...rows) - Math.min(...rows) + 1) / (await page.evaluate(() => devicePixelRatio));
+}
+
+/* Where an angle quote points: to the side its middle stands out to, against its top. */
+async function pointing(page: Page, arrow: Locator): Promise<'left' | 'right'> {
+  const marks = await inkOf(page, await arrow.screenshot());
+  const rows = marks.map(([, y]) => y);
+  const [top, bottom] = [Math.min(...rows), Math.max(...rows)];
+  const third = (bottom - top + 1) / 3;
+  const across = (from: number, to: number) => {
+    const xs = marks.filter(([, y]) => y >= from && y < to).map(([x]) => x);
+    return xs.reduce((sum, x) => sum + x, 0) / xs.length;
+  };
+  return across(top + third, bottom + 1 - third) > across(top, top + third) ? 'right' : 'left';
+}
+
 /* Applies a skin with a click on its card and waits until the page and the line under the heading say so. */
 async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
   const name = nameOf(words, language, choice);
@@ -284,6 +338,48 @@ test('Pixel writes headings and buttons in Handjet, served by Hornhoof itself in
   expect(await dialog.getByRole('button', { name: `${words.skins.download}: ${words.skins.names.pixel}`, exact: true }).evaluate(element => getComputedStyle(element).clipPath)).toBe('none');
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names.light}`, exact: true }).click();
   expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(6);
+  expect(problems).toEqual([]);
+});
+
+/* Measured as Design does, on what is drawn: lowercase of a button (14 px), a heading (18 px) and a large title. */
+test('Pixel lowercase stands as tall as Tektur, within a pixel, at the size of a button, a heading and a title, and no weight or slant of its dots is faked', async ({ page, browserName }, info) => {
+  const problems = watchProblems(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await prepare(page, 'ru', 'pixel', false);
+  await page.goto('/');
+  /* On the page itself: the settings window is drawn above anything the page puts on top. */
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'pixel');
+  const heights: Record<string, { handjet: number; tektur: number }> = {};
+  for (const size of [14, 18, 56]) heights[`${size}px`] = { handjet: await lowercaseHeight(page, `600 ${size}px var(--f-display)`), tektur: await lowercaseHeight(page, `600 ${size}px Tektur`) };
+  writeFileSync(info.outputPath('lowercase-heights.json'), JSON.stringify({ browserName, heights }, null, 2));
+  for (const [size, { handjet, tektur }] of Object.entries(heights)) expect(Math.abs(handjet - tektur), `${browserName} ${size}: Handjet ${handjet}, Tektur ${tektur}`).toBeLessThanOrEqual(1);
+  const words = await messagesFor('ru');
+  const dialog = await openThemes(page, words);
+  const heading = dialog.getByRole('heading', { name: words.skins.names.pixel, exact: true });
+  expect(await heading.evaluate(element => getComputedStyle(element).fontSynthesis)).toBe('none');
+  /* The Pixel card beside Cyberpunk's, written in Tektur, on one picture for Design. */
+  const card = (name: string) => dialog.locator('.skin-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  await page.setViewportSize({ width: 1440, height: Math.max(900, content + 64) });
+  const [first, second] = [(await card(words.skins.names.cyberpunk).boundingBox())!, (await card(words.skins.names.pixel).boundingBox())!];
+  const x = Math.min(first.x, second.x), y = Math.min(first.y, second.y);
+  await page.screenshot({ path: info.outputPath(`${browserName}-ru-1440-cards-cyberpunk-pixel.png`), animations: 'disabled', clip: { x, y, width: Math.max(first.x + first.width, second.x + second.width) - x, height: Math.max(first.y + first.height, second.y + second.height) - y } });
+  expect(problems).toEqual([]);
+});
+
+test('the arrow of the Themes row in the account menu points to the end of the line, left to right and right to left', async ({ page }) => {
+  const problems = watchProblems(page);
+  await prepare(page, 'en', null, false);
+  const words = await messagesFor('en');
+  for (const skin of ['cyberpunk', 'pixel'] as const) for (const [dir, end] of [['ltr', 'right'], ['rtl', 'left']] as const) {
+    await page.goto('/');
+    await page.evaluate(choice => localStorage.setItem('hh-theme', choice), skin);
+    await page.reload();
+    await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
+    await page.getByRole('button', { name: words.shell.account, exact: true }).click();
+    const row = page.getByRole('button', { name: words.skins.go(words.skins.names[skin]), exact: true });
+    expect(await pointing(page, row.locator('.menu-arrow')), `${skin} ${dir}`).toBe(end);
+  }
   expect(problems).toEqual([]);
 });
 
