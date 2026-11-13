@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiFailure } from './api';
 import { errorText, useT } from './i18n';
+import { forgetOrg } from './org';
 import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
@@ -30,6 +31,10 @@ export function App() {
 function Screens() {
   const t = useT();
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  /* Whoever signs in next on this tab sees nothing of the company the one before saw. The company is forgotten as the
+     person leaves, before the next one's screens ask for theirs. */
+  const person = screen.kind === 'shell' ? screen.me.person.id : null;
+  useEffect(() => () => forgetOrg(), [person]);
 
   const decide = useCallback(async (welcome = false) => {
     const route = parseRoute(window.location.pathname);

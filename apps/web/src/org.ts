@@ -84,29 +84,54 @@ function useFetchOnReturn(enabled: boolean, load: () => void): void {
   }, [enabled, load]);
 }
 
+/* The company as the newest answer showed it, for every screen that shows it: a screen that opens again, or one that does not
+   ask yet, shows it at once instead of an empty map while its own answer comes. */
+let known: Org | null = null;
+const watchers = new Set<(org: Org) => void>();
+/* Answers can come back out of order, to any screen; one older than the company shown is dropped. */
+let asked = 0;
+let shown = 0;
+
+function share(org: Org): void {
+  known = org;
+  for (const watch of watchers) watch(org);
+}
+
+/* Signing out forgets the company, with the answers still on their way for it. */
+export function forgetOrg(): void {
+  known = null;
+  shown = ++asked;
+}
+
 /* The company as /api/org shows it, kept fresh from the live stream while enabled. */
 export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
-  const [org, setOrg] = useState<Org | null>(null);
+  const [org, setOrg] = useState<Org | null>(() => known);
   const [failure, setFailure] = useState<unknown>(null);
   const mounted = useRef(true);
-  /* Answers can come back out of order; one older than the answer on screen is dropped. */
-  const asked = useRef(0);
-  const shown = useRef(0);
 
-  const load = useCallback(() => {
-    const n = ++asked.current;
-    const fresh = () => {
-      if (!mounted.current || n < shown.current) return false;
-      shown.current = n;
-      return true;
+  useEffect(() => {
+    const watch = (next: Org) => {
+      setOrg(next);
+      setFailure(null);
     };
+    watchers.add(watch);
+    /* An answer that came between the first drawing and now. */
+    if (known) watch(known);
+    return () => {
+      watchers.delete(watch);
+    };
+  }, []);
+
+  /* A screen that went away meanwhile still leaves its answer for the screens after it. */
+  const load = useCallback(() => {
+    const n = ++asked;
     api.get<Org>('/api/org').then(
       data => {
-        if (!fresh()) return;
-        setOrg(data);
-        setFailure(null);
+        if (n < shown) return;
+        shown = n;
+        share(data);
       },
-      err => fresh() && setFailure(err),
+      err => mounted.current && n >= shown && setFailure(err),
     );
   }, []);
 

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
-import { ME, mockApi, signedOut } from './api-mock';
+import { DEV_ORG, ME, mockApi, signedOut } from './api-mock';
 
 describe('App', () => {
   it('opens setup when no company exists', async () => {
@@ -46,6 +46,31 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Log in' }));
     expect(await screen.findByText('Acme')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Log in' })).not.toBeInTheDocument();
+  });
+
+  it('shows the next person who logs in on the tab nothing of the company the one before saw', async () => {
+    let signedIn = true;
+    let first = true;
+    mockApi({
+      'GET /api/setup': [200, { needed: false }],
+      'GET /api/me': () => (signedIn ? [200, ME] : [401, signedOut]),
+      'POST /api/auth/logout': () => ((signedIn = false), [204]),
+      'POST /api/auth/login': () => ((signedIn = true), [200, { person: ME.person }]),
+      /* The next person's company is still on its way. */
+      'GET /api/org': () => (first ? [200, DEV_ORG] : new Promise(() => {})),
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    expect(await screen.findByRole('button', { name: /^Development/ })).toBeInTheDocument();
+    first = false;
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'Log out' }));
+    await user.type(await screen.findByLabelText('Email'), 'maria@acme.com');
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery');
+    await user.click(screen.getByRole('button', { name: 'Log in' }));
+    expect(await screen.findByText('Acme')).toBeInTheDocument();
+    expect(container.querySelector('.map[aria-busy]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Development/ })).not.toBeInTheDocument();
   });
 
   it('opens the workspace when a person who joined from an invite skips connecting a subscription', async () => {
