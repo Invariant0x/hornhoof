@@ -50,22 +50,24 @@ export class ProgramUpdates {
     return signal ? untilReady(pending, signal) : pending;
   }
 
-  update(changed: () => void = () => {}): Promise<void> {
+  /* Why an installation failed goes only to log, the machine's own output, never into what Hornhoof is told. */
+  update(changed: () => void = () => {}, log: (line: string) => void = () => {}): Promise<void> {
     if (this.pending) return this.pending;
     if (!this.entries.length) return Promise.resolve();
     this.state = this.state.map(program => ({ ...program, updating: true, failed: false }));
-    this.pending = Promise.resolve().then(() => this.installAll(changed)).finally(() => { this.pending = null; });
+    this.pending = Promise.resolve().then(() => this.installAll(changed, log)).finally(() => { this.pending = null; });
     changed();
     return this.pending;
   }
 
-  private async installAll(changed: () => void): Promise<void> {
+  private async installAll(changed: () => void, log: (line: string) => void): Promise<void> {
     for (const entry of this.entries) {
       let failed = false;
       try {
         await entry.install();
-      } catch {
+      } catch (err) {
         failed = true;
+        log(`Could not update ${entry.id}: ${err instanceof Error ? err.message : String(err)}`);
       }
       const version = entry.readVersion();
       this.state = this.state.map(program => program.id === entry.id ? { id: entry.id, version, updating: false, failed } : program);

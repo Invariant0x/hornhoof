@@ -117,6 +117,15 @@ describe('node-owned program updates', () => {
     ]);
   });
 
+  /* npm's own words go to the machine's output; Hornhoof's screen of the machine only says the update failed. */
+  it("says in the machine's output why a program could not be updated", async () => {
+    const lines: string[] = [];
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: async () => { throw new Error('npm error code ENOTEMPTY'); } }]);
+    await updates.update(() => {}, line => lines.push(line));
+    expect(updates.snapshot()).toEqual([{ id: 'claude', version: '1.0.0', updating: false, failed: true }]);
+    expect(lines).toEqual(['Could not update claude: npm error code ENOTEMPTY']);
+  });
+
   it('has no pending work or reports for a node without managed programs', async () => {
     const updates = new ProgramUpdates([]);
     const states: ProgramInfo[][] = [];

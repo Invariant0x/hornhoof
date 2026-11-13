@@ -40,6 +40,7 @@ import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
+import { nodeLog } from './node-log.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -206,6 +207,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const known = new Set(hidden);
   const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
   const log = life.log;
+  /* For a program's own words, which may hold what Hornhoof must not keep: the machine's output only, secrets hidden,
+     never the log the node gives Hornhoof. */
+  const onMachine = (line: string) => writeLog(nodeLog(line, [...known]));
   removeOldParts(dir, log);
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
@@ -292,6 +296,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           secrets: () => [...known],
           signedIn: () => signedInNow(),
           install,
+          log: onMachine,
         })
       : null;
   /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
@@ -370,7 +375,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
-  void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+  void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
     if (isProgramControl(m)) return applyProgramControl(m, checks, host);
@@ -392,7 +397,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       return;
     }
     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
-    if (m.type === 'programs.update') return programs.update(tellStatus);
+    if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();

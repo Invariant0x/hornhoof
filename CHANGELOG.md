@@ -5,6 +5,18 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.1] - 2026-11-13
+
+A machine whose agent program update was cut off half way can update it again, and the machine's log says why an update
+or a sign-in failed.
+
+### Fixed
+
+- When a machine slept or shut down in the middle of updating Claude Code, Codex or Kimi Code, npm left a copy of the
+  program aside, and every later update of that program failed at once with "Could not update". The node now clears
+  that copy before it installs.
+- The machine's log now says why a program update failed and how a sign-in's program ended, without any part of a token.
+
 ## [0.23.0] - 2026-11-12
 
 The work of turns 19 to 23: themes, the forms of people, assistants, employees and plans on one layout, a chat that
