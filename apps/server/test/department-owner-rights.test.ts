@@ -158,6 +158,7 @@ describe('what a department owner sees', () => {
 
   it('reads nothing of the key of a plan that is not theirs', async () => {
     const c = await owned();
+    await c.db.insert(teams).values({ id: '00000000-0000-4000-8000-000000007a2f', companyId: c.companyId, departmentId: c.dev.id, name: 'Web' });
     await c.db.update(subscriptions).set({ last4: '7a2f' }).where(eq(subscriptions.id, c.worker.subscriptionId!));
     expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().subscription.last4).toBe('7a2f');
     const card = (await send(c, c.danaToken, 'GET', `/api/agents/${c.worker.id}`)).json();
