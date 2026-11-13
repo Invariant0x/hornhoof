@@ -140,17 +140,19 @@ describe("a department's tasks and its list for later turns", () => {
     expect(rows.map(t => [t.n, t.mode, t.status, t.goal])).toEqual([[1, 'turnkey', 'open', 'A'], [2, 'echelons', 'planned', 'B'], [3, 'turnkey', 'planned', 'C']]);
   });
 
-  it('are no work for agents: nobody is woken, heads and members neither list nor read an item, and only the orchestrator takes it into a turn', async () => {
+  it('are no work for agents: nobody is woken, no task shows them, members do not list them, and the head of the department or the orchestrator takes them into a turn', async () => {
     const { db, ceoToken, orchestrator, hana, bruno, dev, tools, put } = await company();
     const [item] = await put(ceoToken, dev.id, 'Write the price page');
     expect(await db.select().from(jobs)).toEqual([]);
     expect(await db.select().from(tasks)).toEqual([]);
     for (const agent of [hana, bruno]) {
       const client = await tools(agent);
-      expect(await names(client)).not.toContain('backlog');
       expect(text(await call(client, 'tasks'))).not.toContain('Write the price page');
       expect(await call(client, 'task', { task: item })).toMatchObject({ isError: true });
     }
+    expect(await names(await tools(bruno))).not.toContain('backlog');
+    /* The head lays out the turns of its own department, so it reads its list too. */
+    expect(JSON.parse(text(await call(await tools(hana), 'backlog')))).toMatchObject([{ department: { id: dev.id }, items: [{ id: item }] }]);
 
     const boss = await tools(orchestrator);
     const lists = JSON.parse(text(await call(boss, 'backlog')));

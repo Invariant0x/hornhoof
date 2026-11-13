@@ -16,7 +16,7 @@ async function crossingRound(atOpening = false) {
   const startedAt = new Date(Date.now() - 60_000);
   const openedAt = atOpening ? startedAt : new Date(Date.now() - 30_000);
   await c.db.update(jobs).set({ startedAt }).where(eq(jobs.id, first));
-  await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'New work.', status: 'open', openedAt });
+  await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'New work.', status: 'open', openedAt });
   const done = (id: string, now = new Date()) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: id, ok: true, sessionId: 'old-session', result: 'Done.', tail: '', error: null }, now);
   const sent = (id: string) => c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'job.run' && m.jobId === id);
   return { ...c, first, enqueue, done, sent };

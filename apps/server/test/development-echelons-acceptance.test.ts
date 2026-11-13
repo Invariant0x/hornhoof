@@ -10,7 +10,7 @@ async function readyFixture(inTurn = true) {
   let integrationBranch = 'main';
   if (inTurn) {
     const [existing] = await f.db.select().from(turns).where(and(eq(turns.companyId, f.task.companyId), eq(turns.status, 'open')));
-    const turn = existing ?? (await f.db.insert(turns).values({ companyId: f.task.companyId, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() }).returning())[0]!;
+    const turn = existing ?? (await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() }).returning())[0]!;
     integrationBranch = `turn-${turn.number}`;
     await f.db.update(tasks).set({ turnId: turn.id }).where(eq(tasks.id, f.task.id));
   } else await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));

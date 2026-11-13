@@ -39,7 +39,7 @@ async function company() {
   const ctx = app.ctx;
   ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
-  await db.insert(turns).values({ companyId, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() });
+  await db.insert(turns).values({ companyId, departmentId: dev!.id, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, executor: string, after: string[] = []) =>
     createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: vera.id, after });
@@ -132,11 +132,14 @@ describe('a task that comes after others', () => {
     expect(await reason(submit(ctx, tess.id, tests.id, code))).toBe('task_invalid');
   });
 
-  it('comes only after tasks of its own turn that are not cancelled, and never after itself', async () => {
+  it('comes after work of any turn that started, but not after cancelled work, work of a turn yet to start, or itself', async () => {
     const { ctx, db, companyId, dev, head, bruno, tess, member } = await company();
-    const [old] = await db.insert(turns).values({ companyId, number: 1, goal: 'Old', status: 'closed', closedAt: new Date() }).returning();
+    const [old] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 1, goal: 'Old', status: 'closed', closedAt: new Date() }).returning();
     const [earlier] = await db.insert(tasks).values({ companyId, number: 90, turnId: old!.id, departmentId: dev.id, title: 'Old work', status: 'done', closedAt: new Date() }).returning();
-    expect(await reason(member('End-to-end tests', tess.id, [earlier!.id]))).toBe('task_invalid');
+    expect(await reason(member('Release notes', tess.id, [earlier!.id]))).toBe('ok');
+    const [next] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 18, goal: 'Next', status: 'planned' }).returning();
+    const [later] = await db.insert(tasks).values({ companyId, number: 990, turnId: next!.id, departmentId: dev.id, title: 'Later work', status: 'planned' }).returning();
+    expect(await reason(member('End-to-end tests', tess.id, [later!.id]))).toBe('task_invalid');
     const api = (await member('Checkout API', bruno.id)).task;
     await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, api.id));
     expect(await reason(member('End-to-end tests', tess.id, [api.id]))).toBe('task_invalid');

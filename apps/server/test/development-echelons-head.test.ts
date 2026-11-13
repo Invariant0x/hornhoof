@@ -57,7 +57,7 @@ describe('head decisions on the current route', () => {
   });
   it('applies explicit Cleanup to the department turn and to new tasks of that turn', async () => {
     const f = await fixture({ turn: null });
-    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, number: 1, title: 'Totals', goal: 'Correct totals', status: 'open', createdByAgentId: f.head.id }).returning();
+    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 1, title: 'Totals', goal: 'Correct totals', status: 'open', createdByAgentId: f.head.id }).returning();
     const first = (await f.create({ title: 'Turn first' })).task;
     const second = (await f.create({ title: 'Turn second' })).task;
     expect(first.turnId).toBe(turn!.id);

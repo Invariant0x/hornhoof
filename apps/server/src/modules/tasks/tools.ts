@@ -508,11 +508,11 @@ class TaskTools {
       {
         description:
           'How the pipeline went in a turn, for the company and by department: time from giving a task out to accepting it, the critical path apart from agent time, stages, agent turns with how many a task took and the share of the orchestrator, heads and Operations, waits by reason, returns, failures, interrupted turns, numbers by kind of task and test times, naming the files over 30 s and the tests over 1 s, the time budget of the testing policy. ' +
-          'Each number comes with the previous turn and the baseline turn and its change in percent. By default the running turn, else the last that ran. A department with described false has no description to take its own numbers from.',
-        inputSchema: { turn: Turn.optional() },
+          "Each number comes with the previous turn and the baseline turn of the same department and its change in percent. By default the running turn of the department named, else its last that ran. A department with described false has no description to take its own numbers from.",
+        inputSchema: { turn: Turn.optional(), department: z.uuid().optional().describe('The department whose turn to read when no turn is named.') },
       },
-      async ({ turn }) => this.run(async () => {
-        const report = await pipelineReport(this.db, this.job.companyId, turn);
+      async ({ turn, department }) => this.run(async () => {
+        const report = await pipelineReport(this.db, this.job.companyId, turn, department);
         const reviewFindings = await pipelineFindings(this.db, this.job.companyId, report);
         return { text: JSON.stringify({ ...report, reviewFindings }, english) };
       }),

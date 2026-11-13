@@ -1,7 +1,9 @@
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { departments, tasks, turns } from '../src/db/schema.js';
+import { agents, departments, people, tasks, turns } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { invitePerson } from './helpers.js';
 import { call, company, text, work } from './turns-company.js';
 
 const statuses = async (db: Awaited<ReturnType<typeof company>>['db']) =>
@@ -48,6 +50,34 @@ describe('turns of each department', () => {
       [2, 'closed', sales.id],
       [3, 'open', dev.id],
     ]);
+  });
+
+  it("starts at the next check a department's planned turn left waiting while its department runs none", async () => {
+    const { db, ctx, orchestrator, sales, sara, tools, queued } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Offers', goal: 'Special prices.', tasks: [work(sales.id, 'Price list')] });
+    /* As a company comes out of the update that gave each department its turns: the turn it waited for closed long ago. */
+    await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.number, 1));
+    await reconcile(ctx);
+    expect(await statuses(db)).toEqual([
+      [1, 'closed', sales.id],
+      [2, 'open', sales.id],
+    ]);
+    expect((await queued(sara.id)).map(j => j.prompt).join()).toContain('Price list');
+  });
+
+  it('closes the turns of a department that is removed, and keeps them in the history without it', async () => {
+    const { app, db, companyId, sales, ceoToken } = await company();
+    await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.departmentId, sales.id));
+    await db.insert(turns).values([
+      { companyId, departmentId: sales.id, number: 1, goal: 'Launch.', status: 'open', openedAt: new Date() },
+      { companyId, departmentId: sales.id, number: 2, goal: 'Offers.', status: 'planned' },
+    ]);
+    const removed = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ department: sales.id, note: '', remove: true }] }, headers: { cookie: `hh_session=${ceoToken}` } });
+    expect(removed.statusCode).toBe(201);
+    const kept = await db.select({ n: turns.number, s: turns.status, d: turns.departmentId, opened: turns.openedAt, closed: turns.closedAt }).from(turns).orderBy(asc(turns.number));
+    expect(kept.map(t => [t.n, t.s, t.d, t.opened !== null, t.closed !== null])).toEqual([[1, 'closed', null, true, true], [2, 'closed', null, false, true]]);
   });
 
   it('lays a turn out for one department only', async () => {
@@ -110,6 +140,44 @@ describe('turns of each department', () => {
     const done = await call(await tools(sara), 'report', { task: 2, done: true, summary: 'Prices are out.' });
     expect(text(done)).toContain('the last open task of Turn 2 "Offers"');
     expect((await queued(orchestrator.id)).map(j => j.prompt).join('\n')).toContain('Turn 2 "Offers"');
+  });
+});
+
+describe("each department's turn for people", () => {
+  it('shows on each department its own open turn, and the running turn of a department', async () => {
+    const { orchestrator, dev, sales, design, tools, ceoToken, get } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement'), work(sales.id, 'Mailing')] });
+    const org = (await get(ceoToken, '/api/org')).json() as { departments: { id: string; turnProgress: unknown }[] };
+    const progress = new Map(org.departments.map(d => [d.id, d.turnProgress]));
+    expect(progress.get(dev.id)).toEqual({ turnNumber: 1, done: 0, total: 1 });
+    expect(progress.get(sales.id)).toEqual({ turnNumber: 2, done: 0, total: 2 });
+    expect(progress.get(design.id)).toBeNull();
+    expect((await get(ceoToken, `/api/turns/current?department=${sales.id}`)).json().turn).toMatchObject({ number: 2, departmentId: sales.id, tasks: { total: 2, done: 0 } });
+    expect((await get(ceoToken, `/api/turns/current?department=${design.id}`)).json().turn).toBeNull();
+    expect((await get(ceoToken, `/api/departments/${sales.id}/tree`)).json().tree.turn).toMatchObject({ number: 2, branch: 'turn-2' });
+    expect((await get(ceoToken, `/api/departments/${dev.id}/tree`)).json().tree.turn).toMatchObject({ number: 1, branch: 'turn-1' });
+    const all = (await get(ceoToken, '/api/turns')).json().turns as { number: number; departmentId: string }[];
+    expect(all.map(t => [t.number, t.departmentId])).toEqual([[1, dev.id], [2, sales.id]]);
+  });
+
+  it("lets the owner of a department pick how its planned turn runs, and not how another department's runs", async () => {
+    const { app, db, orchestrator, dev, sales, tools, ceoToken, get } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Offers', goal: 'Special prices.', tasks: [work(sales.id, 'Price list')] });
+    const sam = await invitePerson(app, ceoToken, { name: 'Sam', email: 'sam@acme.test', access: { departments: [sales.id] } });
+    const [samRow] = await db.select().from(people).where(eq(people.email, 'sam@acme.test'));
+    await db.update(departments).set({ ownerPersonId: samRow!.id }).where(eq(departments.id, sales.id));
+    const patch = (token: string, number: number) => app.inject({ method: 'PATCH', url: `/api/turns/${number}`, payload: { mode: 'echelons' }, headers: { cookie: `hh_session=${token}` } });
+    expect((await patch(sam, 4)).statusCode).toBe(200);
+    expect((await patch(sam, 2)).statusCode).toBe(403);
+    expect((await patch(ceoToken, 2)).statusCode).toBe(200);
+    const seen = (await get(sam, '/api/turns')).json().turns as { number: number; canChangeMode: boolean }[];
+    expect(seen.map(t => [t.number, t.canChangeMode])).toEqual([[1, false], [2, false], [3, true], [4, true]]);
   });
 });
 

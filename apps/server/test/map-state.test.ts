@@ -674,7 +674,7 @@ describe('the lines of a company with a long history', () => {
     const { db, acme, sub, dev, hana, bruno, felix, rita, hire } = c;
     const closed = await db
       .insert(turns)
-      .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 2, goal: `Goal ${i + 2}`, status: 'closed' as const })))
+      .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 100, goal: `Goal ${i + 100}`, status: 'closed' as const })))
       .returning({ id: turns.id });
     const statusOf = (i: number): 'blocked' | 'planned' | 'done' | 'cancelled' => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
     for (let from = 0; from < 2000; from += 500) {

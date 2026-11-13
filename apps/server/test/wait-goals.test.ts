@@ -149,7 +149,7 @@ describe('a goal in danger', () => {
     const c = await company();
     const none = await c.held();
     expect((await c.say(none, { on: 'turn' })).isError).toBe(true);
-    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 5, goal: 'Launch', status: 'open', openedAt: new Date() }).returning();
+    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 5, goal: 'Launch', status: 'open', openedAt: new Date() }).returning();
     const work = await c.held('In the turn');
     expect((await c.say(work, { on: 'turn' })).isError).toBeFalsy();
     expect((await c.episodes(work))[0]).toMatchObject({ goalRefKind: 'turn', goalRefId: turn!.id });
@@ -159,7 +159,7 @@ describe('a goal in danger', () => {
 describe('the summary of a turn', () => {
   const inTurn = async () => {
     const c = await company();
-    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 5, title: 'Launch', goal: 'Ship the launch', status: 'open', openedAt: new Date() }).returning();
+    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 5, title: 'Launch', goal: 'Ship the launch', status: 'open', openedAt: new Date() }).returning();
     const reported = await c.held('Reported');
     const silent = await c.held('Closed with no word');
     return { ...c, turn: turn!, reported, silent };
