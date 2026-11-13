@@ -1,5 +1,5 @@
 import type { ConnectionEnd } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
 import { agents, companies, machines, nodeConnections, nodes, people } from '../../db/schema.js';
@@ -52,14 +52,15 @@ const newest = (dates: (Date | null)[]): Date | null => dates.reduce<Date | null
 const importantOf = (crew: { name: string; kind: string }[]): Important[] =>
   (['orchestrator', 'head'] as const).flatMap(kind => crew.filter(a => a.kind === kind).map(a => ({ name: a.name, kind })));
 
-/* The company's machines with agents on them that are away or came back lately. */
+/* The company's machines with agents on them that are away or came back lately. An assistant's own agent is its owner's
+   and does the company's work nowhere, so it counts on no card. */
 export async function machinesAway(ctx: Pick<Ctx, 'db' | 'startedAt'>, companyId: string, now: Date): Promise<MachineAway[]> {
   const crew = await ctx.db
     .select({ machineId: machines.id, hostname: machines.hostname, ownerId: machines.personId, name: agents.name, kind: agents.kind })
     .from(agents)
     .innerJoin(nodes, eq(nodes.id, agents.nodeId))
     .innerJoin(machines, eq(machines.id, nodes.machineId))
-    .where(and(eq(agents.companyId, companyId), isNull(agents.switchedOffAt), isNull(machines.revokedAt)));
+    .where(and(eq(agents.companyId, companyId), ne(agents.kind, 'assistant'), isNull(agents.switchedOffAt), isNull(machines.revokedAt)));
   const ids = [...new Set(crew.map(a => a.machineId))];
   if (!ids.length) return [];
   const [connections, heard, owners] = await Promise.all([

@@ -160,7 +160,8 @@ export type ErrorReason =
   | 'assistant_plan_invalid'
   | 'assistant_agent_card'
   | 'assistant_not_allowed'
-  | 'assistant_agent_refused';
+  | 'assistant_agent_refused'
+  | 'assistant_switched_off';
 
 /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {

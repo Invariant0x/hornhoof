@@ -106,7 +106,7 @@ export function hiddenParty(party: MessageParty): MessageParty {
 }
 
 export function maskEnvelope(viewer: AgentViewer, message: MessageEnvelope): MessageEnvelope {
-  if (viewer.full) return message;
+  if (viewer.full && !viewer.apart.size) return message;
   const shown = (party: MessageParty) => (party.kind === 'agent' && !seesAgentId(viewer, party.id) ? hiddenParty(party) : party);
   return { ...message, from: shown(message.from), to: shown(message.to), ...(message.senders ? { senders: message.senders.map(shown) } : {}) };
 }

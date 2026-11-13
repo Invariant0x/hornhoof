@@ -683,8 +683,9 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
 type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; roleKey: string | null };
 
-/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
-const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
+/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. An
+   assistant's own agent works for its owner alone, so it waits as a worker does. */
+const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the

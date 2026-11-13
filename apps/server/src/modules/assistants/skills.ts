@@ -17,6 +17,8 @@ const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().o
 
 type Called = { ok: boolean; text: string };
 const failed = (text: string): Called => ({ ok: false, text });
+const timedOut = (err: unknown) => err instanceof Error && err.name === 'TimeoutError';
+const late = `The assistant's program did not answer within ${SKILL_WAIT_MS / 1000} seconds.`;
 
 /* The answer's text, or null past the most an agent reads. */
 async function capped(res: Response): Promise<string | null> {
@@ -62,13 +64,19 @@ export async function callSkill(ctx: Ctx, job: { id: string; agentId: string }, 
       signal: AbortSignal.any([AbortSignal.timeout(SKILL_WAIT_MS), signal]),
     });
   } catch (err) {
-    return failed(err instanceof Error && err.name === 'TimeoutError' ? `The assistant's program did not answer within ${SKILL_WAIT_MS / 1000} seconds.` : "The assistant's program could not be reached at its skills address.");
+    return failed(timedOut(err) ? late : "The assistant's program could not be reached at its skills address.");
   }
   if (res.status < 200 || res.status >= 300) {
     await res.body?.cancel();
     return failed(`The assistant's program answered with status ${res.status}.`);
   }
-  const raw = await capped(res);
+  /* The answer comes within the same time, and a program that breaks off or stalls in the middle of it answered nothing. */
+  let raw: string | null;
+  try {
+    raw = await capped(res);
+  } catch (err) {
+    return failed(timedOut(err) ? late : "The assistant's program stopped in the middle of its answer.");
+  }
   if (raw === null) return failed(`The assistant's program answered with more than ${SKILL_ANSWER_BYTES / 1000} KB.`);
   let parsed: z.infer<typeof Answer>;
   try {

@@ -12,6 +12,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
+import { releaseAssistantAgent } from '../assistants/setup.js';
 import { onAgent } from '../conversation/queue.js';
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
@@ -324,6 +325,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
     if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
+    if (changes.status === 'disabled' && target.isAgent) await releaseAssistantAgent(ctx, id, me);
     tellOfChange(ctx, me.companyId, Boolean(changes.status || body.access), person.name !== target.name);
     return { person: await personView(db, person) };
   });

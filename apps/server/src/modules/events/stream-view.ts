@@ -13,8 +13,19 @@ type Filters = { [K in StreamMessage['type']]: (m: Extract<StreamMessage, { type
 /* A pulse shows where it runs: both of its ends must be this person or agents they see. */
 const seesEnd = (viewer: AgentViewer, end: Endpoint) => (end.kind === 'person' ? end.id === viewer.personId : end.kind === 'agent' && seesAgentId(viewer, end.id));
 
-/* How many of the agents this person sees are at work. */
-export const workingSeen = (db: Db, companyId: string, viewer: AgentViewer) => workingCount(db, companyId, viewer.full ? undefined : [...viewer.agents]);
+/* What someone with the full view hears of a message: all of it, but nothing of another person's assistant's own agent,
+   which its owner alone sees, nor its name at the other end of a message. */
+export function heardInFull(viewer: AgentViewer, m: StreamMessage): StreamMessage | null {
+  if (!viewer.apart.size) return m;
+  const apart = (end: Endpoint) => end.kind === 'agent' && viewer.apart.has(end.id);
+  if (m.type === 'agent_event') return viewer.apart.has(m.agentId) ? null : { ...m, event: maskEvent(viewer, m.event) };
+  if (m.type === 'context') return viewer.apart.has(m.agentId) ? null : m;
+  if (m.type === 'pulse') return apart(m.from) || apart(m.to) ? null : m;
+  return m;
+}
+
+/* How many of the employees this person sees are at work. */
+export const workingSeen = (db: Db, companyId: string, viewer: AgentViewer) => workingCount(db, companyId, viewer.full ? undefined : [...viewer.agents], true);
 
 const passes = (m: StreamMessage) => m;
 

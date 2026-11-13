@@ -124,13 +124,15 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
   return automaticMessage(message, job);
 }
 
-/* Agents with a job running right now, of these only when named. */
-export async function workingCount(db: Db, companyId: string, among?: string[]): Promise<number> {
+/* Agents with a job running right now, of these only when named. employees: of the company's employees alone, as the
+   screens count them; an assistant's own agent works for its owner, not for the company. */
+export async function workingCount(db: Db, companyId: string, among?: string[], employees = false): Promise<number> {
   if (among?.length === 0) return 0;
+  const assistantsOwn = db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
-    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), among ? inArray(jobs.agentId, among) : undefined));
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined));
   return Number(row?.n ?? 0);
 }
 
@@ -150,7 +152,7 @@ export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<
 
 /* How many agents work right now, for the map's counter. */
 export async function publishWorking(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string): Promise<void> {
-  ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId) });
+  ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId, undefined, true) });
 }
 
 function automaticMessage(message: MessageEnvelope, job: { retryOf?: string | null; continueOf?: string | null }): MessageEnvelope {
