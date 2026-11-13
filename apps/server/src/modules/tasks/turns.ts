@@ -11,6 +11,7 @@ import { handOff } from './pulses.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { recordTurnSummary } from './wait-goals.js';
+import { loggable } from '../../errors.js';
 import { backlogChanged, readBacklog, takeBacklog, type BacklogItem } from '../backlog/store.js';
 import { requireTurnkeyTeam } from './turnkey.js';
 
@@ -544,16 +545,21 @@ export async function startWaitingTurns(ctx: Live): Promise<Wake[]> {
     .from(turns)
     .where(and(eq(turns.status, 'planned'), isNotNull(turns.departmentId), notExists(ctx.db.select({ id: open.id }).from(open).where(and(eq(open.companyId, turns.companyId), eq(open.departmentId, turns.departmentId), eq(open.status, 'open'))))));
   const wakes: Wake[] = [];
+  /* One department's trouble keeps no other department or company from starting its turn. */
   for (const { companyId, departmentId } of waiting) {
-    const opened = await ctx.db.transaction(async tx => {
-      await lockCompany(tx, companyId);
-      const [running] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, departmentId!), eq(turns.status, 'open')));
-      return running ? null : openNext(ctx, tx, companyId, departmentId!);
-    });
-    if (!opened) continue;
-    ctx.bus.publish(companyId, { type: 'org' });
-    await announce(ctx, opened.started);
-    wakes.push(...wakesFor(opened.started));
+    try {
+      const opened = await ctx.db.transaction(async tx => {
+        await lockCompany(tx, companyId);
+        const [running] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, departmentId!), eq(turns.status, 'open')));
+        return running ? null : openNext(ctx, tx, companyId, departmentId!);
+      });
+      if (!opened) continue;
+      wakes.push(...wakesFor(opened.started));
+      ctx.bus.publish(companyId, { type: 'org' });
+      await announce(ctx, opened.started);
+    } catch (err) {
+      ctx.log?.error({ error: loggable(err), companyId, departmentId }, 'Starting the waiting turn of a department failed.');
+    }
   }
   return wakes;
 }

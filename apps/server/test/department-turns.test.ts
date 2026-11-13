@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, people, tasks, turns } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -65,6 +65,25 @@ describe('turns of each department', () => {
       [2, 'open', sales.id],
     ]);
     expect((await queued(sara.id)).map(j => j.prompt).join()).toContain('Price list');
+  });
+
+  it("starts every other department's waiting turn when starting one of them fails", async () => {
+    const { db, ctx, orchestrator, sales, dev, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(sales.id, 'Announcement')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Offers', goal: 'Special prices.', tasks: [work(sales.id, 'Price list')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Login', goal: 'People sign in.', tasks: [work(dev.id, 'Login page')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Sign-up', goal: 'People sign up.', tasks: [work(dev.id, 'Sign-up page')] });
+    await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(inArray(turns.number, [1, 3]));
+    /* The first turn that starts cannot be told about: that company's trouble stops no other department or company. */
+    const publish = ctx.bus.publish.bind(ctx.bus);
+    let failed = false;
+    ctx.bus.publish = ((...args: Parameters<typeof publish>) => {
+      if (!failed) { failed = true; throw new Error('The bus is down.'); }
+      return publish(...args);
+    }) as typeof ctx.bus.publish;
+    await expect(reconcile(ctx)).resolves.toBeUndefined();
+    expect((await statuses(db)).filter(([, status]) => status === 'open').map(([number]) => number).sort()).toEqual([2, 4]);
   });
 
   it('closes the turns of a department that is removed, and keeps them in the history without it', async () => {
