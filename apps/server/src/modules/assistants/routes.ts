@@ -18,7 +18,11 @@ import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
 
 /* With no agent named, the words go to the assistant's own agent. */
-export const MessageBody = z.object({ agentId: z.uuid().optional(), text: z.string().trim().min(1).max(20_000) }).strict();
+/* text: the new words. freshText: the program's whole conversation, which the assistant's own agent reads in their place
+   when its turn starts a new session. Nothing is cut: longer words are refused. */
+export const MessageBody = z.object({ agentId: z.uuid().optional(), text: z.string().trim().min(1).max(50_000), freshText: z.string().trim().min(1).max(200_000).optional() }).strict();
+/* A program may send each letter of both texts as an escape of six bytes. */
+export const MESSAGE_BYTES = 2 * 1024 * 1024;
 /* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
 export const LONGEST_WAIT_S = 50;
 export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
@@ -86,11 +90,12 @@ export async function agentsFor(ctx: Ctx, me: Person) {
 }
 
 export async function writeFor(ctx: Ctx, me: Person, body: unknown) {
-  const { agentId, text } = MessageBody.parse(body);
-  const own = agentId ?? (await ownAgentOf(ctx, me.assistant!.id));
+  const { agentId, text, freshText } = MessageBody.parse(body);
+  const mine = await ownAgentOf(ctx, me.assistant!.id);
+  const own = agentId ?? mine;
   if (!own) throw new ApiError(409, 'conflict', "This assistant has no agent of its own yet: its owner picks a plan for it on the assistant's card in People.", 'agent_not_ready');
   const agent = await writableAgent(ctx, me, own);
-  const id = await sendForOwner(ctx, me, agent, text);
+  const id = await sendForOwner(ctx, me, agent, text, agent.id === mine ? freshText : undefined);
   return { message: { id, agentId: agent.id } };
 }
 
@@ -118,7 +123,7 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/assistant/agents', async req => agentsFor(ctx, await requireAssistant(req, db)));
 
-  app.post('/api/assistant/messages', async (req, reply) => {
+  app.post('/api/assistant/messages', { bodyLimit: MESSAGE_BYTES }, async (req, reply) => {
     const sent = await writeFor(ctx, await requireAssistant(req, db), req.body);
     reply.code(202);
     return sent;

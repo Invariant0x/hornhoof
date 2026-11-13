@@ -51,7 +51,10 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
         'The answer comes later: read it with read_events, after the number `next` this gives.',
       inputSchema: {
         agentId: MessageBody.shape.agentId.describe("The agent's id, from list_agents."),
-        text: MessageBody.shape.text.describe("What you write, as your owner's words: 1 to 20000 characters."),
+        text: MessageBody.shape.text.describe("What you write, as your owner's words: 1 to 50000 characters."),
+        freshText: MessageBody.shape.freshText.describe(
+          "Optional, for the assistant's own agent: your whole conversation with your owner, up to 200000 characters, which it reads in place of text when its turn starts a new session.",
+        ),
       },
     },
     args =>
@@ -113,7 +116,7 @@ export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string
       description:
         "Sends your owner words in their chat with the assistant program now. Only for when your owner asks in your window to be written to there: " +
         "your answer to words from your window stays in the window, and your answer to the program's message reaches the chat by itself.",
-      inputSchema: { text: MessageBody.shape.text.describe('The words for your owner, as they will read them: 1 to 20000 characters.') },
+      inputSchema: { text: MessageBody.shape.text.describe('The words for your owner, as they will read them: 1 to 50000 characters.') },
     },
     args =>
       answer(async () => {
