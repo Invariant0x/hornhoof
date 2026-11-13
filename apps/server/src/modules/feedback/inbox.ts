@@ -18,6 +18,8 @@ const HOUR = 60 * 60 * 1000;
    installations cannot fill the list. */
 export const REPORTS_PER_HOUR = 10;
 export const NEW_CARDS_PER_HOUR = 200;
+/* Every signal consumes the shared budget, even when its report repeats an existing card under a made-up installation. */
+const SIGNALS_PER_HOUR = 2000;
 /* What a card keeps of the versions and machines its signals came with. */
 const KEPT = 20;
 /* How many cards are listed, the latest signalled first, before they go in the order of priority. */
@@ -39,16 +41,36 @@ export function fingerprintOf(kind: Kind, errorCode: string | null, title: strin
 }
 
 /* Counted on the server's clock, which tests move. */
-type Limits = { perInstallation: Attempts; newCards: Attempts };
+type SignalAttempt = { at: number; signals: number };
+type Limits = { perInstallation: Attempts; newCards: Attempts; signals: SignalAttempt[] };
 const kept = new WeakMap<object, Limits>();
 function limitsOf(ctx: object): Limits {
-  const found = kept.get(ctx) ?? { perInstallation: limiter({ max: REPORTS_PER_HOUR, windowMs: HOUR }), newCards: limiter({ max: NEW_CARDS_PER_HOUR, windowMs: HOUR }) };
+  const found = kept.get(ctx) ?? { perInstallation: limiter({ max: REPORTS_PER_HOUR, windowMs: HOUR }), newCards: limiter({ max: NEW_CARDS_PER_HOUR, windowMs: HOUR }), signals: [] };
   kept.set(ctx, found);
   return found;
 }
 function within(attempts: Attempts, key: string, now: number): void {
   const { allowed, retryAfterS } = attempts(key, now);
   if (!allowed) throw new ApiError(429, 'too_many', 'Too many reports came from here. Wait, then send again.', 'too_many_attempts', { retryAfterS });
+}
+
+/* Reserve a batch whole before any state keyed by the claimed installation is allocated. A refusal names when enough
+   earlier signals leave the rolling hour to fit this batch, without consuming any of the remaining budget. */
+function withinSignals(limits: Limits, signals: number, now: number): void {
+  const recent = limits.signals.filter(attempt => attempt.at > now - HOUR);
+  limits.signals = recent;
+  let excess = recent.reduce((total, attempt) => total + attempt.signals, signals) - SIGNALS_PER_HOUR;
+  if (excess > 0) {
+    let until = now;
+    for (const attempt of recent) {
+      excess -= attempt.signals;
+      until = attempt.at + HOUR;
+      if (excess <= 0) break;
+    }
+    const retryAfterS = Math.ceil((until - now) / 1000);
+    throw new ApiError(429, 'too_many', 'Too many signals came this hour. Wait, then send again.', 'too_many_attempts', { retryAfterS });
+  }
+  recent.push({ at: now, signals });
 }
 
 const merged = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort().slice(0, KEPT);
@@ -69,6 +91,8 @@ async function companyOf(ctx: Pick<Ctx, 'db'>): Promise<string> {
 export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Report): Promise<{ number: number; issue: IssueLink | null }> {
   const now = ctx.clock();
   const limits = limitsOf(ctx);
+  const signals = report.repeats ?? 1;
+  withinSignals(limits, signals, now);
   within(limits.perInstallation, report.installation, now);
   const companyId = await companyOf(ctx);
   const title = titleOf(report);
@@ -77,7 +101,6 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
   const at = new Date(now);
   const versions = [report.facts.version];
   const platforms = report.facts.platform;
-  const signals = report.repeats ?? 1;
   const taken = await ctx.db.transaction(async tx => {
     const place = and(eq(feedbackInbox.companyId, companyId), eq(feedbackInbox.fingerprint, fingerprint));
     let [card] = await tx.select().from(feedbackInbox).where(place).for('update');

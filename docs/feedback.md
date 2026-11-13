@@ -62,7 +62,7 @@ What the inbox answers:
 | 202 `{ "received": true, "number": 7, "issue": { "number": 1347, "url": "https://github.com/invariant0x/hornhoof/issues/1347" } }` | Taken: the number of its card in the inbox, and its issue, or `null` while it has none |
 | 400 | Not a report of version 1, or a field out of its limits |
 | 413 | A body over 16 KB |
-| 429 with `Retry-After` | Over 10 reports in an hour from one installation, or over 200 new cards in an hour from all |
+| 429 with `Retry-After` | Over 2000 signals in a rolling hour from all installations, over 10 reports from one installation, or over 200 new cards from all |
 | 404 | The server is not Hornhoof's own installation |
 
 ## The inbox
@@ -75,6 +75,15 @@ card into an issue in `invariant0x/hornhoof` with one press. The key is the GitH
 `invariant0x`, its own first, then a department's; it needs Issues: Read and write. Everything that came from installations
 goes into the issue inside code blocks, so nothing in it links, mentions or runs. Every card has a number, in the order
 cards were opened; an installation calls its report by it.
+
+The shared budget counts signals, not requests: `repeats: N` consumes N of the 2000 signals, and an ordinary report
+consumes one. A batch that would exceed it is refused whole, with `Retry-After` naming when enough budget returns.
+This check runs before the per-installation limit, so rotating installation IDs cannot bypass the shared limit or fill
+the limiter with new installation entries after that budget is exhausted.
+
+**Known limit.** An installation ID is claimed by the sender, without proof that it represents a distinct installation.
+Made-up IDs can still inflate the installation count and priority within the shared signal budget. Priority is only a
+hint for people reading the inbox; creating a GitHub Issue always requires a person's press.
 
 ## What becomes of a finding once it is sent
 
