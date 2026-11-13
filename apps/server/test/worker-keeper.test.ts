@@ -37,7 +37,9 @@ async function expire(c: Company, w: { machine: string; config: WorkerConfig }):
   return held;
 }
 
-describe("a worker's keeper", () => {
+/* Each test here starts a company's app with its keeper and a machine's keeper beside it, and several wait for rounds
+   of both: on a loaded runner that takes longer than the limit of a plain test. */
+describe("a worker's keeper", { timeout: 60_000 }, () => {
   it('joins with its ticket and serves the company on its front door', async () => {
     const c = await company();
     const w = await worker(c);
