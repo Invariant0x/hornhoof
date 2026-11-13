@@ -230,18 +230,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
   const checks = startCheckClient(dir, terminal, () => send);
-  /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
-     it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
+  /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it, empty when
+     Hornhoof gave it none: until it changes, the node stays signed out, so turns do not go round on a sign-in that no
+     longer works, each in a terminal, while the program itself still says it is signed in. */
   const planProvider = builtin ? null : (state as NodeState).provider;
   const credKind: CredKind | null = holdsSignIn && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
+  const signInNow = (): string => {
+    const held = credKind ? heldCredential(credHome, credKind) : null;
+    return held ? digestOf(held) : '';
+  };
   let refused: string | null = null;
   const signedInHere = async (): Promise<boolean> => {
     if (!single) return true;
     /* Only a Codex plan's machines are told they are spare. */
     if (isSpare(dir)) return false;
     if (refused !== null) {
-      const held = credKind ? heldCredential(credHome, credKind) : null;
-      if (held && digestOf(held) === refused) return false;
+      if (signInNow() === refused) return false;
       refused = null;
     }
     return single.loggedIn();
@@ -600,10 +604,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     await status();
     sendHeld(m.jobId);
     await renewedCodex().catch(() => {});
-    if (done.error === 'not_logged_in') {
+    /* The program may end on the sign-in or fail on it: either way its provider refused it. */
+    if (done.error === 'not_logged_in' || done.failure?.kind === 'auth') {
       loggedIn = false;
-      const held = credKind ? heldCredential(credHome, credKind) : null;
-      if (held) refused = digestOf(held);
+      if (credKind) refused = signInNow();
       void status();
     }
   }

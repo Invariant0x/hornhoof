@@ -7,9 +7,10 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import type { StreamMessage } from './bus.js';
 import { heardBy, heardInFull } from './stream-view.js';
 
-/* Whether a message is for this person at all, by where they reach and what is theirs. */
+/* Whether a message is for this person at all, by where they reach and what is theirs. A task goes to everyone of the
+   company, who sees all of its work; the rest that names a place goes where the person reaches. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
-  if ('spot' in m && !canReach(access, m.spot)) return false;
+  if ('spot' in m && m.type !== 'task' && !canReach(access, m.spot)) return false;
   /* It carries nothing, so every person's screens load the access that is theirs to see; the orchestrator acting for
      anyone sees none of it. */
   if (m.type === 'computer' && me.via) return false;
@@ -52,11 +53,16 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
       } else checked = checked.then(() => check(m)).catch((err: unknown) => req.log.warn({ err }, 'A message of the stream was not checked, so it was not sent.'));
     });
     /* The ping keeps proxies from closing the stream and looks at the person again: a signed-out or disabled person stops
-       hearing anything, and changed access applies from here on. A change of anyone's access looks at once. */
+       hearing anything, and changed access applies from here on. A change of anyone's access looks at once. Looks overlap,
+       as a change of access calls one beside the checks: each says who the person is unless one begun after it has said
+       so already, so an older one that ends later never brings back what they saw before. */
+    let begun = 0, said = 0;
     const look = async () => {
+      const mine = ++begun;
       try {
-        me = await requirePerson(req, ctx.db);
-        viewer = await viewerOf(ctx.db, me);
+        const person = await requirePerson(req, ctx.db);
+        const seen = await viewerOf(ctx.db, person);
+        if (mine > said) [me, viewer, said] = [person, seen, mine];
         return true;
       } catch {
         res.end();

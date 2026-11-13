@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
-import { useOrg } from '../org';
+import { notOpened, useOrg } from '../org';
 import { forgetOwnerKey } from '../owner-key';
 import type { ComputerAccessView, Me, Org } from '../types';
 import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
@@ -356,17 +356,19 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   useEffect(() => {
     if (taskId) hideWindow();
   }, [taskId, hideWindow]);
+  /* An agent the company shows this person but does not open to them gets no window, wherever its name is clicked. */
   const openAgent = useCallback((agentId: string) => {
+    if (org && notOpened(org, agentId)) return;
     if (taskId) navigate(pageRoute);
     openWindow(agentId);
-  }, [openWindow, taskId, navigate, pageRoute]);
+  }, [org, openWindow, taskId, navigate, pageRoute]);
   const openTask = useCallback((id: string) => {
     hideWindow();
     navigate({ kind: 'tasks', id }, pageRoute);
   }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  const missingDepartment = departmentIsMissing({ deptId, org, orgFailure, company, personId: me.person.id });
+  const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
   const updates = useUpdates(company);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */

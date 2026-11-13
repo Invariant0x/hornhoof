@@ -214,10 +214,14 @@ export const assistantRequests = pgTable(
    world. Each person keeps their own arrangement, which follows them to another device; a block not in it stands where the
    map places it. */
 export type MapBlocks = Record<string, { x: number; y: number }>;
+/* The bends a person put on the lines of the map, each line's in order from where it starts, as [x, y] in the same world.
+   A line runs through its bends at right angles wherever its blocks stand. */
+export type MapAnchors = Record<string, [number, number][]>;
 export const mapLayouts = pgTable('map_layouts', {
   personId: uuid('person_id').primaryKey().references(() => people.id),
   companyId: companyId(),
   blocks: jsonb('blocks').$type<MapBlocks>().notNull().default({}),
+  anchors: jsonb('anchors').$type<MapAnchors>().notNull().default({}),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -42,6 +42,11 @@ export type Config = {
   relayUrl: string;
   /* Where the Telegram Bot API answers; tests put a stand-in here. */
   telegramApiUrl: string;
+  /* A speech-to-text service that answers as OpenAI's /v1/audio/transcriptions does, its key and model: the words of voice
+     messages that come through Telegram. None: a voice message goes to the agent as its recording alone. */
+  transcribeUrl?: string;
+  transcribeKey?: string;
+  transcribeModel: string;
   /* The keeper container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
@@ -102,6 +107,9 @@ const Env = z.object({
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
+  TRANSCRIBE_URL: webAddress('TRANSCRIBE_URL must be an http:// or https:// address, like https://api.openai.com/v1/audio/transcriptions.'),
+  TRANSCRIBE_KEY: z.preprocess(unset, z.string().min(1).optional()),
+  TRANSCRIBE_MODEL: z.preprocess(unset, z.string().min(1).max(100).optional()),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
@@ -210,6 +218,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeKey: nodeKeyOf(env),
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
+    ...(set.TRANSCRIBE_URL ? { transcribeUrl: set.TRANSCRIBE_URL } : {}),
+    ...(set.TRANSCRIBE_KEY ? { transcribeKey: set.TRANSCRIBE_KEY } : {}),
+    transcribeModel: set.TRANSCRIBE_MODEL ?? 'whisper-1',
     tunnelHost: set.TUNNEL_HOST,
     keeper: set.HORNHOOF_KEEPER === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),

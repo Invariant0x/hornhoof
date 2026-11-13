@@ -31,9 +31,9 @@ describe('one public task snapshot', () => {
       for (const field of ['stage', 'gateCount', 'gates', 'panel', 'merging', 'bounces', 'turnReview']) expect(projection).not.toHaveProperty(field);
     }
   });
-  it('does not reveal a hidden checker or candidate through the contributor view', async () => {
+  it('names the checker to a contributor, as everyone sees who works on what, and keeps the candidate from them', async () => {
     const f = await fixture();
-    /* A person of a product alone runs nothing of the department: they see the author on their plan and not the checker. */
+    /* A person of a product alone runs nothing of the department: they see who checks, not the repository's candidate. */
     const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, name: 'Shop', parentId: f.author.departmentId!, roleCode: 'DEV', position: 1 }).returning();
     await f.db.update(agents).set({ productId: product!.id }).where(eq(agents.id, f.author.id));
     await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
@@ -44,8 +44,8 @@ describe('one public task snapshot', () => {
     const reply = await f.app.inject({ url: `/api/tasks/${f.task.id}`, ...as(token) });
     expect(reply.statusCode).toBe(200);
     const route = reply.json().task.echelons;
-    expect(route).toMatchObject({ stage: 'review', ownerAgentId: null, candidateId: null, assignment: null });
-    expect(JSON.stringify(route)).not.toContain(f.reviewer.id);
+    expect(route).toMatchObject({ stage: 'review', ownerAgentId: f.reviewer.id, candidateId: null, assignment: null });
+    expect(route.stages.every((step: { candidateId: string | null; inputCandidateId: string | null }) => !step.candidateId && !step.inputCandidateId)).toBe(true);
     expect((await f.app.inject({ url: `/api/tasks/${f.task.id}`, ...as(listed) })).json().task.echelons).toMatchObject({ ownerAgentId: f.reviewer.id, candidateId: expect.any(String) });
   });
   it('gives the owner of the task\'s department its checker and candidate, as the CEO reads them, in every projection', async () => {

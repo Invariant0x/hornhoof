@@ -51,7 +51,10 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   };
   if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, assistant, standing);
   if (telegram && standing) {
-    return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
+    return {
+      actor: { personId: me.id },
+      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram, ...(pictures.length ? { pictures } : {}) } },
+    };
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
   const who = standing && standing.department !== null ? `\n\n${whoIs(me, standing)}` : '';

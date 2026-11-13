@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
@@ -62,6 +62,20 @@ describe('restricted access screens', () => {
     expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
   });
 
+  it("keeps a person's own assistant window open, not built again, while the company refreshes", async () => {
+    const calls = mockApi({ ...allowed, 'GET /api/agents/b1': [200, { ...CARD, kind: 'assistant', department: null, role: null }] });
+    const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.filter(e => e.id !== 'b1') })) };
+    const { rerender } = render(<Windows org={org} />);
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    for (let i = 0; i < 3; i++) {
+      rerender(<Windows org={{ ...org }} />);
+      expect(screen.getByText(SECRET)).toBeInTheDocument();
+      await waitFor(() => expect(calls.filter(c => c.path === '/api/agents/b1').length).toBeGreaterThan(i + 1));
+    }
+    expect(screen.getByText(SECRET)).toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/agents/b1/events?after=0')).toHaveLength(1);
+  });
+
   it('drops an open agent journal as soon as a new org removes the agent', async () => {
     let access = true;
     mockApi({ ...allowed, 'GET /api/agents/b1': () => access ? [200, CARD] : refused });
@@ -93,6 +107,26 @@ describe('restricted access screens', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
+  it('closes the window of an employee the company says this person does not open, without asking the server', async () => {
+    const calls = mockApi(allowed);
+    const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(e => ({ ...e, opens: e.id !== 'b1' })) })) };
+    render(<Windows org={org} />);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path.startsWith('/api/agents/b1'))).toEqual([]);
+  });
+
+  it("closes the orchestrator's window for a person who does not open him, without asking the server", async () => {
+    const calls = mockApi({});
+    render(<Windows org={{ ...DEV_ORG, orchestrator: { ...DEV_ORG.orchestrator!, opens: false } }} id="orchestrator" />);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path.startsWith('/api/agents/'))).toEqual([]);
+  });
+
   it('shows a network failure without rendering an unchecked agent window', async () => {
     mockApi({ 'GET /api/agents/b1': [0, { error: { code: 'network', message: '' } }] });
     render(<Windows />);
@@ -102,17 +136,13 @@ describe('restricted access screens', () => {
 
   it.each([
     ['no department is selected', { deptId: null }, false],
-    ['the person sees the whole company', { company: true, personId: 'p1' }, false],
-    ['the person is listed in the department', {}, false],
-    ['the person is not listed in the department', { personId: 'p1' }, true],
-    ['the person reaches this department among others', { personId: 'p9', org: { ...DEV_ORG, people: [...DEV_ORG.people, { ...DEV_ORG.people[0]!, id: 'p9', deputy: true, departments: ['d1', 'd2'] }] } }, false],
-    ['the person reaches other departments only', { personId: 'p9', org: { ...DEV_ORG, people: [...DEV_ORG.people, { ...DEV_ORG.people[0]!, id: 'p9', deputy: true, departments: ['d1', 'd3'] }] } }, true],
+    ['the department is there, whoever the person is: everyone sees the whole company', {}, false],
     ['the department is absent', { deptId: 'closed' }, true],
     ['the organization is still loading', { org: null }, false],
     ['the organization read is denied', { org: null, orgFailure: new ApiFailure(403, 'forbidden', 'Hidden') }, true],
     ['the organization is absent on the server', { org: null, orgFailure: new ApiFailure(404, 'not_found', 'Hidden') }, true],
   ])('decides a missing department when %s', (_name, change, expected) => {
-    const input: Parameters<typeof departmentIsMissing>[0] = { deptId: 'd2', org: DEV_ORG, orgFailure: null, company: false, personId: 'p3', ...change };
+    const input: Parameters<typeof departmentIsMissing>[0] = { deptId: 'd2', org: DEV_ORG, orgFailure: null, ...change };
     expect(departmentIsMissing(input)).toBe(expected);
   });
 

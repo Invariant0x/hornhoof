@@ -726,99 +726,106 @@
     {
       "idx": 104,
       "version": "7",
-      "when": 1794494301292,
-      "tag": "0104_network_tables",
+      "when": 1794571256806,
+      "tag": "0104_map_anchors",
       "breakpoints": true
     },
     {
       "idx": 105,
       "version": "7",
-      "when": 1794494361292,
-      "tag": "0105_net",
+      "when": 1794571316806,
+      "tag": "0105_network_tables",
       "breakpoints": true
     },
     {
       "idx": 106,
       "version": "7",
-      "when": 1794494421292,
-      "tag": "0106_sources",
+      "when": 1794571376806,
+      "tag": "0106_net",
       "breakpoints": true
     },
     {
       "idx": 107,
       "version": "7",
-      "when": 1794494481292,
-      "tag": "0107_calls",
+      "when": 1794571436806,
+      "tag": "0107_sources",
       "breakpoints": true
     },
     {
       "idx": 108,
       "version": "7",
-      "when": 1794494541292,
-      "tag": "0108_network",
+      "when": 1794571496806,
+      "tag": "0108_calls",
       "breakpoints": true
     },
     {
       "idx": 109,
       "version": "7",
-      "when": 1794494601292,
-      "tag": "0109_machines_join",
+      "when": 1794571556806,
+      "tag": "0109_network",
       "breakpoints": true
     },
     {
       "idx": 110,
       "version": "7",
-      "when": 1794494661292,
-      "tag": "0110_computer_access",
+      "when": 1794571616806,
+      "tag": "0110_machines_join",
       "breakpoints": true
     },
     {
       "idx": 111,
       "version": "7",
-      "when": 1794494721292,
-      "tag": "0111_backups",
+      "when": 1794571676806,
+      "tag": "0111_computer_access",
       "breakpoints": true
     },
     {
       "idx": 112,
       "version": "7",
-      "when": 1794494781292,
-      "tag": "0112_net_backups",
+      "when": 1794571736806,
+      "tag": "0112_backups",
       "breakpoints": true
     },
     {
       "idx": 113,
       "version": "7",
-      "when": 1794494841292,
-      "tag": "0113_merges",
+      "when": 1794571796806,
+      "tag": "0113_net_backups",
       "breakpoints": true
     },
     {
       "idx": 114,
       "version": "7",
-      "when": 1794494901292,
-      "tag": "0114_copies",
+      "when": 1794571856806,
+      "tag": "0114_merges",
       "breakpoints": true
     },
     {
       "idx": 115,
       "version": "7",
-      "when": 1794494961292,
-      "tag": "0115_server_order",
+      "when": 1794571916806,
+      "tag": "0115_copies",
       "breakpoints": true
     },
     {
       "idx": 116,
       "version": "7",
-      "when": 1794495021292,
-      "tag": "0116_switch",
+      "when": 1794571976806,
+      "tag": "0116_server_order",
       "breakpoints": true
     },
     {
       "idx": 117,
       "version": "7",
-      "when": 1794495081292,
-      "tag": "0117_takeover",
+      "when": 1794572036806,
+      "tag": "0117_switch",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1794572096806,
+      "tag": "0118_takeover",
       "breakpoints": true
     }
   ]
