@@ -14,30 +14,33 @@ async function flush(c: AclCompany, stream: StreamReader) {
   await until(() => stream.messages.filter(m => m.type === 'org').length > before);
 }
 
-/* A pulse from the person to an agent, which the stream carries only while the person sees the agent. It is no agent event
-   and asks for no new look at the person, so it shows what the stream sees now and changes nothing a test counts. */
-const pulse = (c: AclCompany, personId: string, agent: { id: string; departmentId: string | null }) =>
-  c.app.ctx.bus.publish(c.companyId, { type: 'pulse', from: { kind: 'person', id: personId }, to: { kind: 'agent', id: agent.id, departmentId: agent.departmentId! } });
-const pulsesTo = (stream: StreamReader, agent: { id: string }) => stream.messages.filter(m => m.type === 'pulse' && (m.to as { id?: string }).id === agent.id).length;
+const said = (c: AclCompany, agent: { id: string }, text: string) => appendEvent(c.app.ctx, { companyId: c.companyId, agentId: agent.id, kind: 'text', data: { text } });
 
-/* The stream has taken a change of what the person sees: it carries a pulse to an agent they see only since. */
-async function seesNow(c: AclCompany, stream: StreamReader, personId: string, agent: { id: string; departmentId: string | null }) {
-  pulse(c, personId, agent);
-  await until(() => pulsesTo(stream, agent) > 0);
-}
+/* Words that only ask whether the stream carries an agent's conversation now: the counts below leave them out. */
+const PROBE = 'probe';
+const wordsOf = (m: StreamReader['messages'][number]) => (m as { event?: { data?: { text?: string } } }).event?.data?.text;
+const heard = (stream: StreamReader) => stream.messages.filter(m => m.type === 'agent_event' && wordsOf(m) !== PROBE);
+const probesOf = (stream: StreamReader, agent: { id: string }) => stream.messages.filter(m => m.type === 'agent_event' && m.agentId === agent.id && wordsOf(m) === PROBE).length;
 
-/* The stream has taken a change of what the person sees: it no longer carries a pulse to an agent they saw only before. The
-   flush after each pulse shows whether it went out, as messages come in the order they were published. */
-async function seesNoMore(c: AclCompany, stream: StreamReader, personId: string, agent: { id: string; departmentId: string | null }) {
+/* The stream has taken a change of who the person opens: it carries the words of an agent they open only since. */
+async function seesNow(c: AclCompany, stream: StreamReader, agent: { id: string }) {
   await until(async () => {
-    const before = pulsesTo(stream, agent);
-    pulse(c, personId, agent);
+    await said(c, agent, PROBE);
     await flush(c, stream);
-    return pulsesTo(stream, agent) === before;
+    return probesOf(stream, agent) > 0;
   });
 }
 
-const said = (c: AclCompany, agent: { id: string }, text: string) => appendEvent(c.app.ctx, { companyId: c.companyId, agentId: agent.id, kind: 'text', data: { text } });
+/* The stream has taken a change of who the person opens: it no longer carries the words of an agent they opened only
+   before. The flush after each shows whether they went out, as messages come in the order they were published. */
+async function seesNoMore(c: AclCompany, stream: StreamReader, agent: { id: string }) {
+  await until(async () => {
+    const before = probesOf(stream, agent);
+    await said(c, agent, PROBE);
+    await flush(c, stream);
+    return probesOf(stream, agent) === before;
+  });
+}
 
 describe('the live stream', () => {
   it('carries the conversation of a seen agent, and not of one on another plan or in another department', async () => {
@@ -91,7 +94,7 @@ describe('the live stream', () => {
     stream.close();
   });
 
-  it('carries a task only to someone who sees it, and the context of a seen agent', async () => {
+  it("carries every task and every agent's context to everyone, as the map and the departments show them", async () => {
     const c = await aclCompany();
     const own = await c.work('Own work', c.crew.mine);
     const hidden = await c.work('Hidden work', c.crew.other);
@@ -102,12 +105,12 @@ describe('the live stream', () => {
     c.app.ctx.bus.publish(c.companyId, { type: 'context', agentId: c.crew.other.id, used: 0.9 });
     c.app.ctx.bus.publish(c.companyId, { type: 'context', agentId: c.crew.mine.id, used: 0.5 });
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'task').map(m => m.id)).toEqual([own.id]);
-    expect(stream.messages.filter(m => m.type === 'context').map(m => m.agentId)).toEqual([c.crew.mine.id]);
+    expect(stream.messages.filter(m => m.type === 'task').map(m => m.id)).toEqual([hidden.id, own.id]);
+    expect(stream.messages.filter(m => m.type === 'context').map(m => m.agentId)).toEqual([c.crew.other.id, c.crew.mine.id]);
     stream.close();
   });
 
-  it('draws a pulse only between the person and agents they see', async () => {
+  it('draws every pulse of the company for everyone, as the map and the departments show them', async () => {
     const c = await aclCompany();
     const stream = await openStream(c.app, c.tokens.ann);
     const mine = { kind: 'agent' as const, id: c.crew.mine.id, departmentId: c.dev.id };
@@ -118,11 +121,16 @@ describe('the live stream', () => {
     c.app.ctx.bus.publish(c.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: c.dev.id } });
     c.app.ctx.bus.publish(c.companyId, { type: 'pulse', from: { kind: 'person', id: c.ids.bob }, to: other });
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'pulse')).toEqual([{ type: 'pulse', from: ann, to: mine }]);
+    expect(stream.messages.filter(m => m.type === 'pulse')).toEqual([
+      { type: 'pulse', from: ann, to: mine },
+      { type: 'pulse', from: other, to: mine },
+      { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: c.dev.id } },
+      { type: 'pulse', from: { kind: 'person', id: c.ids.bob }, to: other },
+    ]);
     stream.close();
   });
 
-  it('counts only the seen agents that work', async () => {
+  it('counts every agent that works', async () => {
     const c = await aclCompany();
     const stream = await openStream(c.app, c.tokens.ann);
     const running = (agent: { id: string }, subscriptionId: string) => c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId, agentId: agent.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() });
@@ -132,7 +140,7 @@ describe('the live stream', () => {
     await running(c.crew.mine, c.plans.ann.id);
     await publishWorking(c.app.ctx, c.companyId);
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'working').map(m => m.working)).toEqual([0, 1]);
+    expect(stream.messages.filter(m => m.type === 'working').map(m => m.working)).toEqual([2, 3]);
     stream.close();
   });
 
@@ -160,11 +168,11 @@ describe('the live stream', () => {
     const c = await aclCompany();
     const stream = await openStream(c.app, c.tokens.ann);
     expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.ann}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
-    await seesNow(c, stream, c.ids.ann, c.crew.away);
+    await seesNow(c, stream, c.crew.away);
     await said(c, c.crew.mine, 'Out of reach now');
     await said(c, c.crew.away, 'In reach now');
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'agent_event').map(m => m.agentId)).toEqual([c.crew.away.id]);
+    expect(heard(stream).map(m => m.agentId)).toEqual([c.crew.away.id]);
     stream.close();
   });
 
@@ -183,15 +191,15 @@ describe('the live stream', () => {
     await flush(c, stream);
     expect(stream.messages.some(m => m.type === 'agent_event')).toBe(false);
     await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.wes}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(c.tokens.ceo) });
-    await seesNow(c, stream, c.ids.wes, c.crew.far);
+    await seesNow(c, stream, c.crew.far);
     await said(c, c.crew.far, 'While delegate');
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'agent_event')).toHaveLength(1);
+    expect(heard(stream)).toHaveLength(1);
     await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.wes}/ceo-delegate`, payload: { isCeoDelegate: false }, ...as(c.tokens.ceo) });
-    await seesNoMore(c, stream, c.ids.wes, c.crew.far);
+    await seesNoMore(c, stream, c.crew.far);
     await said(c, c.crew.far, 'After');
     await flush(c, stream);
-    expect(stream.messages.filter(m => m.type === 'agent_event')).toHaveLength(1);
+    expect(heard(stream)).toHaveLength(1);
     stream.close();
   });
 });

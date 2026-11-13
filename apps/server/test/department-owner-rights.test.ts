@@ -144,7 +144,8 @@ describe('what a department owner sees', () => {
     /* The numbers of the whole department open to her; there are none before a turn. */
     expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.dev.id}/pipeline`)).json().error.reason).toBe('turn_unknown');
     expect((await send(c, c.danaToken, 'GET', `/api/agents/${c.seller.id}`)).json().error.reason).toBe('agent_hidden');
-    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.sales.id}/pipeline`)).json().error.reason).toBe('ceo_view_only');
+    /* Another department's numbers are the company's, which everyone reads. */
+    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.sales.id}/pipeline`)).json().error.reason).toBe('turn_unknown');
   });
 
   it('sees the work of an employee placed in a sub-unit of their department itself', async () => {

@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { accessOf, canReach } from '../../auth/access.js';
+import { viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, jobs, requests, tasks } from '../../db/schema.js';
-import { taskSpot } from '../tasks/engine.js';
+import { seesTask } from '../tasks/sight.js';
 
 type Task = typeof tasks.$inferSelect;
 type Agent = Pick<typeof agents.$inferSelect, 'id' | 'subscriptionId'>;
@@ -63,6 +63,6 @@ export async function agentWork(db: Db, companyId: string) {
 
 export async function currentAgentTask(db: Db, agent: typeof agents.$inferSelect, viewer: Person): Promise<{ id: string; number: number; title: string } | null> {
   const current = (await agentWork(db, agent.companyId)).doing(agent).task;
-  if (!current || !canReach(await accessOf(db, viewer), taskSpot(current))) return null;
+  if (!current || !seesTask(await viewerOf(db, viewer), current)) return null;
   return { id: current.id, number: current.number, title: current.title };
 }

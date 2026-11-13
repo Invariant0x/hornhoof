@@ -290,16 +290,18 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     ...d.people,
     ...deputies.filter(p => !p.access.whole && (p.access.departments.some(x => x.id === d.id) || p.access.teams.some(x => x.departmentId === d.id))),
   ];
-  /* Tasks are for people who reach the department; giving it one takes the department itself in the access, not only a team in it. */
+  /* Everyone of the company reads the department's tasks, tree and speed; giving it a task takes the department itself in
+     the access, not only a team in it. What it keeps for its agents names its repositories, so it stays with the people
+     who reach it. */
   const mine = reach.find(p => p.id === me.person.id);
-  const sees = company || !!mine;
+  const reaches = company || !!mine;
   const canGive = company || !!mine?.access.departments.some(x => x.id === d.id);
   /* Everyone given the department runs it as the whole company does, its named owner among them: its people, sub-units and
      repository. A team in it alone is not the department. */
   const runs = canGive;
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | 'hire' | null>(null);
-  const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, sees && (tree || drawer === 'speed'));
+  const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, tree || drawer === 'speed');
   const openAgent = useOpenAgent();
   const chrome = useDepartmentSpace(language, panel);
   useEffect(() => {
@@ -416,8 +418,12 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     shoot(fired);
   }, [d.employees, paths, shoot, later, t]);
 
+  /* An employee this person does not open says so on the line below instead of opening a window. */
   function open(agentId: string) {
-    if (!dragged()) onOpen(agentId);
+    if (dragged()) return;
+    const closed = d.employees.find(e => e.id === agentId && e.opens === false);
+    if (closed) setSaid({ key: Date.now(), at: hhmm(new Date()), text: t.dept.closedAgent(closed.name) });
+    else onOpen(agentId);
   }
 
   function openDecisions(personId: string) {
@@ -567,15 +573,11 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       </nav>
 
       <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>
-        {sees && <>
-          <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
-          <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
-        </>}
-        {sees && (
-          <button className={`hbtn glass${drawer === 'tasks' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'tasks'} onClick={() => setDrawer(drawer === 'tasks' ? null : 'tasks')}>
-            {t.dept.tasksButton}
-          </button>
-        )}
+        <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
+        <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
+        <button className={`hbtn glass${drawer === 'tasks' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'tasks'} onClick={() => setDrawer(drawer === 'tasks' ? null : 'tasks')}>
+          {t.dept.tasksButton}
+        </button>
         <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
           {t.dept.about}
         </button>
@@ -592,7 +594,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           <DrawerHead title={drawerTitle} onClose={() => setDrawer(null)} />
           {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
-            {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
+            {drawer === 'tasks' && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
             {drawer === 'hire' && runs && <StaffCard department={{ id: d.id, name: deptLabel(t, d) }} onDone={() => setDrawer(null)} onHide={() => setDrawer(null)} />}
             {drawer === 'about' && (
               <>
@@ -600,7 +602,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                 <DeptSubUnits department={d} company={runs} />
                 <DeptWorkMode department={d} shown={canGive} />
                 <DeptApprovals department={d} shown={canGive} />
-                {sees && (
+                {reaches && (
                   <section aria-labelledby={`${id}-briefing`}>
                     <h3 id={`${id}-briefing`}>{t.briefing.title}</h3>
                     <p className="muted">{t.briefing.intro}</p>
@@ -615,7 +617,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                       {d.products.map(p => (
                         <li key={p.id}>
                           <b>{p.name}</b>
-                          {sees && (
+                          {reaches && (
                             <section className="briefing-product" aria-label={`${t.briefing.title}: ${p.name}`}>
                               <h4>{t.briefing.title}</h4>
                               <BriefingPanel placeId={p.id} />

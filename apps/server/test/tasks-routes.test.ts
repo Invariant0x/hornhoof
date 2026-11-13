@@ -36,14 +36,15 @@ async function company({ turn = true } = {}) {
 }
 
 describe('tasks for people', () => {
-  it("shows a person only the tasks of agents they see and what waits for them", async () => {
+  it('shows everyone the tasks of the company, and a person only what waits for them', async () => {
     const { ctx, db, head, bruno, dev, sales, ceo, oleg, maria, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' });
     await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await get(oleg, `/api/tasks?department=${dev.id}`)).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
     expect((await get(maria, `/api/tasks?department=${sales.id}`)).json().tasks).toEqual([]);
-    expect((await get(maria, `/api/tasks/${task.id}`)).statusCode).toBe(403);
+    expect((await get(maria, `/api/tasks?department=${dev.id}`)).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
+    expect((await get(maria, `/api/tasks/${task.id}`)).json().task).toMatchObject({ number: 1, title: 'Checkout API', executor: { name: 'Bruno' } });
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task).toMatchObject({ number: 1, title: 'Checkout API', executor: { name: 'Bruno' } });
     expect((await get(oleg, '/api/requests')).json().requests).toMatchObject([{ kind: 'question', text: 'Which currency?', task: { number: 1, title: 'Checkout API' } }]);
     expect((await get(maria, '/api/requests')).json().requests).toEqual([]);
@@ -92,15 +93,15 @@ describe('tasks for people', () => {
     expect((await db.select().from(requests))[0]!.status).toBe('answered');
   });
 
-  it('shows inside a task only the tasks around it that the person sees', async () => {
+  it('shows inside a task the tasks around it, of whatever department', async () => {
     const { ctx, db, dev, sales, head, orchestrator, hire, ceo, oleg, maria, get } = await company();
     const sam = await hire('Sam', 'head', 'SAL-HEAD', sales.id);
     await ownPlan(db, 'oleg@acme.com', head.id);
     await ownPlan(db, 'maria@acme.com', sam.id);
     const { task: payments } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const { task: pricing } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: sales.id, parentId: payments.id, assigneeAgentId: sam.id });
-    expect((await get(oleg, `/api/tasks/${payments.id}`)).json().task.subtasks).toEqual([]);
-    expect((await get(maria, `/api/tasks/${pricing.id}`)).json().task.parent).toBe(null);
+    expect((await get(oleg, `/api/tasks/${payments.id}`)).json().task.subtasks.map((t: { id: string }) => t.id)).toEqual([pricing.id]);
+    expect((await get(maria, `/api/tasks/${pricing.id}`)).json().task.parent).toMatchObject({ id: payments.id });
     expect((await get(ceo, `/api/tasks/${payments.id}`)).json().task.subtasks.map((t: { id: string }) => t.id)).toEqual([pricing.id]);
     expect((await get(ceo, `/api/tasks/${pricing.id}`)).json().task.parent).toMatchObject({ id: payments.id });
   });
@@ -260,25 +261,25 @@ describe('tasks for people', () => {
     for (const bad of [0, 1.5, 1000]) expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev', testMemoryGb: bad })).statusCode).toBe(400);
   });
 
-  it("streams a task's changes only to people who see it", async () => {
+  it("streams a task's changes to everyone of the company", async () => {
     const { app, ctx, db, head, bruno, dev, oleg, maria } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const olegs = await openStream(app, oleg);
     const marias = await openStream(app, maria);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     await until(() => olegs.messages.some(m => m.type === 'task' && m.id === task.id));
-    expect(marias.messages.some(m => m.type === 'task')).toBe(false);
+    await until(() => marias.messages.some(m => m.type === 'task' && m.id === task.id));
     olegs.close();
     marias.close();
   });
 
-  it('shows what a department works on now, and keeps a department with open tasks', async () => {
+  it('shows everyone what a department works on now, and keeps a department with open tasks', async () => {
     const { ctx, db, companyId, ceo, maria, post, get, hire } = await company();
     const [design] = await db.insert(departments).values({ companyId, templateKey: 'design', roleCode: 'DSN', position: 3 }).returning();
     const lead = await hire('Dora', 'head', 'DSN-HEAD', design!.id);
     const { task } = await createTask(ctx, { personId: (await get(ceo, '/api/me')).json().person.id }, { title: 'Payments', brief: '', body: '', departmentId: design!.id, assigneeAgentId: lead!.id });
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toMatchObject({ number: 1, title: 'Payments' });
-    expect((await get(maria, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toBe(null);
+    expect((await get(maria, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toMatchObject({ number: 1, title: 'Payments' });
     await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, lead!.id));
     const dev = design!;
     const kept = await post(ceo, '/api/departments/build', { items: [{ department: dev.id, note: '', remove: true }] });
@@ -289,9 +290,9 @@ describe('tasks for people', () => {
     expect((await db.select().from(tasks))[0]).toMatchObject({ departmentId: null, status: 'cancelled' });
   });
 
-  it('hides an independent executor from a person who does not see that agent', async () => {
+  it('names an independent executor to everyone, also to one who does not open that agent', async () => {
     const { app, ctx, db, dev, head, bruno, ceo, oleg, get } = await company();
-    /* The whole company runs no department: such a person sees only the agents on a plan of their own. */
+    /* The whole company runs no department: such a person opens only the agents on a plan of their own. */
     const wes = await invitePerson(app, ceo, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
     await ownPlan(db, 'wes@acme.com', head.id);
     const prerequisite = (await createTask(ctx, { agentId: head.id }, { title: 'Prerequisite', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
@@ -300,7 +301,7 @@ describe('tasks for people', () => {
       independentPart: { title: 'Examples', brief: '', body: 'Write examples.', executor: bruno.id },
     }, ...as(wes) });
     expect(made.statusCode).toBe(201);
-    expect(made.json().task.independentPart).toBeNull();
+    expect(made.json().task.independentPart).toMatchObject({ title: 'Examples', executor: { id: bruno.id } });
     expect((await get(oleg, `/api/tasks/${made.json().task.id}`)).json().task.independentPart).toMatchObject({ title: 'Examples' });
   });
 });

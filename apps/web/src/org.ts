@@ -31,6 +31,14 @@ function agentIn(org: Org, agentId: string): AgentLive | undefined {
   return org.departments.flatMap(d => d.employees).find(e => e.id === agentId);
 }
 
+/* Whether the company says this person does not open this agent: everyone sees every employee and the orchestrator's state,
+   and opens the employees of their own departments, and the orchestrator with the whole company. */
+export function notOpened(org: Org, agentId: string): boolean {
+  const orchestrator = org.orchestrator;
+  if (orchestrator && (agentId === 'orchestrator' || agentId === orchestrator.id)) return orchestrator.opens === false;
+  return org.departments.some(d => d.employees.some(e => e.id === agentId && e.opens === false));
+}
+
 /* A person with a card on the map, with the department they belong to when they reach only one. */
 export type MapPerson = PersonView & { deputy?: boolean; departments?: string[]; home?: Department };
 

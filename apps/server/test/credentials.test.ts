@@ -436,13 +436,13 @@ describe('which account a plan runs on', () => {
     await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
     expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false, signedInOnce: false, leaseMachine: null });
 
-    /* Dana works in Sales only. The map shows her no orchestrator, so neither his plan nor Ivan's address. */
+    /* Dana works in Sales only. The map shows her the orchestrator's state, but neither his plan nor Ivan's address. */
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { departments: [sales!.id] } });
     await db.update(agents).set({ subscriptionId: plan }).where(eq(agents.kind, 'orchestrator'));
     const org = (await app.inject({ method: 'GET', url: '/api/org', ...as(dana) })).json();
-    expect(org.orchestrator).toBeUndefined();
+    expect(org.orchestrator).toMatchObject({ opens: false, subscription: null, machine: null });
     expect(JSON.stringify(org)).not.toContain('ivan.plans@example.com');
     const ceoOrg = (await app.inject({ method: 'GET', url: '/api/org', ...as(ceo) })).json();
     expect(ceoOrg.orchestrator.subscription.accounts[0].email).toBe('ivan.plans@example.com');

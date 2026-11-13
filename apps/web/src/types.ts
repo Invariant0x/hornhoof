@@ -159,6 +159,9 @@ export type Employee = {
   /* Its latest failed turn, or null. */
   failure: TurnFailure | null;
   obsolete?: TurnObsolete | null;
+  /* Whether this person opens its window and card. Everyone sees every employee of the company and its work; its own
+     window is for the people of its department. */
+  opens?: boolean;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -234,7 +237,7 @@ export type Briefing = {
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
