@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { arcD, dashLength, hubSectors, litSquares, sectorFill, sharePercent, TURN_CELLS, workingTurns, type WorkingTurn } from '../hub-turns';
-import { arrangedBounds, arrangeMap, deptKey, GAP, H, HALO, HUB, HUB_KEY, personKey, W, type DeptSpot, type MapArrangement, type TopPerson } from '../map-arrange';
+import { arrangedBounds, arrangeMap, bendAt, deptKey, GAP, H, HALO, HUB, HUB_KEY, PEOPLE_LINE, personKey, W, type DeptSpot, type MapArrangement, type MapLine, type TopPerson } from '../map-arrange';
 import { useMapLayout } from '../map-layout';
 import { drawOnce } from '../map-roads';
 import type { PeopleLayout, PersonChip } from '../map-people';
@@ -41,6 +41,9 @@ const PING_MS = 950;
 const FLASH_MS = 1400;
 /* A grip is this big to touch on the screen at any zoom. An arrow key moves its block this far, ten times as far with Shift. */
 const GRIP = 44, KEY_STEP = 10;
+/* A bend's handle is this big on the screen at any zoom; a click this near a corner of a line puts the bend on the corner, and
+   a bend the hand brings this near level with the next stop of its line comes level with it. */
+const BEND = 28, SNAP = 12;
 
 /* Where the map stood when this person left it, kept in this browser for each company and person, so a reload opens it there. */
 const viewKey = (me: Me) => `hh-map-view:${me.company.id}:${me.person.id}`;
@@ -298,12 +301,12 @@ function quietLines(arr: MapArrangement): { key: string; pts: Point[]; data: Rec
 }
 
 /* The roads of the map: a stretch that several lines share is drawn once, as thin as one line; and a dot, one to a place,
-   where the people's row leaves its bus, where a trace turns into its card and where a road forks. */
-function Roads({ arr }: { arr: MapArrangement }) {
+   where the people's row leaves its bus, where a trace turns into its card, where a road forks and on each bend a person put. */
+function Roads({ arr, bends }: { arr: MapArrangement; bends: Point[] }) {
   const lines = quietLines(arr);
   const drawn = drawOnce(lines.map(l => l.pts));
   const dots = new Map<string, Point>();
-  for (const p of [...(arr.bus ? [arr.bus.via] : []), ...arr.depts.flatMap(s => (s.via ? [s.via] : [])), ...arr.people.vias, ...arr.forks]) dots.set(`${p[0]}:${p[1]}`, p);
+  for (const p of [...(arr.bus ? [arr.bus.via] : []), ...arr.depts.flatMap(s => (s.via ? [s.via] : [])), ...arr.people.vias, ...arr.forks, ...bends]) dots.set(`${p[0]}:${p[1]}`, p);
   return (
     <>
       {lines.map((l, i) => drawn[i]!.length > 0 && <path key={l.key} className="tr" {...l.data} d={drawn[i]!.map(toD).join(' ')} />)}
@@ -312,6 +315,16 @@ function Roads({ arr }: { arr: MapArrangement }) {
       ))}
     </>
   );
+}
+
+/* The lines a person may bend, each taking the hand a little wider than it is drawn, the traces of departments on top; a click
+   on one puts a bend there. */
+function LineHits({ lines, title, onHit }: { lines: MapLine[]; title: string; onHit(line: MapLine, x: number, y: number): void }) {
+  return lines.map(l => (
+    <path key={l.key} className="hit" d={toD(l.pts)} data-line={l.key} onClick={e => onHit(l, e.clientX, e.clientY)}>
+      <title>{title}</title>
+    </path>
+  ));
 }
 
 /* Decisions run amber from the hub or the person's department, with the same bridges as the quiet trace. */
@@ -438,6 +451,68 @@ function Grip({ label, corner, from, k, onMove, onPut, onTap }: { label: string;
   );
 }
 
+/* The handle over a bend a person put on a line: drag it by mouse, touch or pen, or move it with the arrow keys; a press on it
+   that does not move takes the bend away, as Delete, Enter and Space do. Nothing is drawn for it but the dot of the line under
+   it, and the ring of the keyboard's focus. It stays the same size on the screen at any zoom; align brings it level with the
+   stops of its line as the hand moves it. While the hand moves, onMove shows the line through it where it is, and null puts
+   it back; onPut keeps the place where the hand let go. */
+function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string; at: Point; k: number; align(at: Point): Point; onMove(at: Point | null): void; onPut(at: Point): void; onRemove(): void }) {
+  const press = useRef<{ id: number; x: number; y: number; from: Point; at: Point | null } | null>(null);
+  return (
+    <button
+      type="button"
+      className="bend"
+      aria-label={label}
+      title={label}
+      style={{ left: at[0] - BEND / 2, top: at[1] - BEND / 2, width: BEND, height: BEND, transform: `scale(${1 / k})` }}
+      onPointerDown={e => {
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        press.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from: at, at: null };
+      }}
+      onPointerMove={e => {
+        const p = press.current;
+        if (!p || p.id !== e.pointerId) return;
+        e.stopPropagation();
+        const dx = e.clientX - p.x, dy = e.clientY - p.y;
+        if (!p.at && Math.abs(dx) + Math.abs(dy) <= DRAG_PX) return;
+        p.at = align([Math.round(p.from[0] + dx / k), Math.round(p.from[1] + dy / k)]);
+        onMove(p.at);
+      }}
+      onPointerUp={e => {
+        const p = press.current;
+        if (!p || p.id !== e.pointerId) return;
+        e.stopPropagation();
+        press.current = null;
+        if (p.at) onPut(p.at);
+        else onRemove();
+      }}
+      onPointerCancel={e => {
+        if (press.current?.id !== e.pointerId) return;
+        press.current = null;
+        onMove(null);
+      }}
+      onKeyDown={e => {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          onRemove();
+          return;
+        }
+        const step = ARROWS[e.key];
+        if (!step) return;
+        e.preventDefault();
+        const n = e.shiftKey ? KEY_STEP * 10 : KEY_STEP;
+        onPut([at[0] + step[0] * n, at[1] + step[1] * n]);
+      }}
+      /* Enter, Space or a screen reader's click, which no pointer pressed; a pointer's press was taken as it let go. */
+      onClick={e => {
+        if (e.detail === 0) onRemove();
+      }}
+    />
+  );
+}
+
 /* Where a block's grip stands: at its top left corner, and for the round hub on its rim, up and to the left. */
 const gripCorner = (key: string, r: Rect): Point => (key === HUB_KEY ? [r.x + HUB - Math.round(HUB * Math.SQRT1_2), r.y + HUB - Math.round(HUB * Math.SQRT1_2)] : [r.x, r.y]);
 
@@ -472,9 +547,15 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   /* Where this person put blocks, and the block their hand moves now. */
   const layout = useMapLayout();
   const [moving, setMoving] = useState<{ key: string; at: At } | null>(null);
+  /* The bend the hand moves now: on which line, which of its bends, and where. */
+  const [bending, setBending] = useState<{ line: string; i: number; at: Point } | null>(null);
+  const bends = useMemo(() => {
+    const kept = bending && layout.bends[bending.line];
+    return kept ? { ...layout.bends, [bending.line]: kept.map((p, i) => (i === bending.i ? bending.at : p)) } : layout.bends;
+  }, [layout.bends, bending]);
   /* The department whose card the pointer or the keyboard is on, so the hub shows its turn. */
   const [pointed, setPointed] = useState<string | null>(null);
-  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed) : null), [org, layout.placed, moving]);
+  const arr = useMemo(() => (org ? arrangeMap(org, moving ? { ...layout.placed, [moving.key]: moving.at } : layout.placed, bends) : null), [org, layout.placed, moving, bends]);
   /* Pulses and Fit read the map as it stands, without waiting for it to settle. */
   const arrRef = useRef(arr);
   arrRef.current = arr;
@@ -639,16 +720,21 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   /* What each grip names: the orchestrator, a department or a person. */
   const blockName = (key: string): string => {
     if (key === HUB_KEY) return t.map.orchestrator;
+    if (key === PEOPLE_LINE) return t.map.leaders;
     const dept = depts.find(d => deptKey(d.id) === key);
     return dept ? deptLabel(t, dept) : (allPeople.find(p => personKey(p.id) === key)?.name ?? '');
   };
-  const arranged = Object.keys(layout.placed).length > 0;
+  const arranged = Object.keys(layout.placed).length > 0 || Object.keys(layout.bends).length > 0;
+  /* Where a point on the screen is on the map. */
+  const worldAt = (cx: number, cy: number): Point => {
+    const r = box.current!.getBoundingClientRect();
+    return [(cx - r.left - view.x) / view.k, (cy - r.top - view.y) / view.k];
+  };
   /* A press on a grip that does not move it opens the card under it, as a press on that card does: a department, the
      orchestrator or a person's decisions. Grips of cards close together cover each other's corners at a small zoom, so the
      card is the one the press is on, the one drawn on top first. */
   const tapAt = (cx: number, cy: number) => {
-    const r = box.current!.getBoundingClientRect();
-    const x = (cx - r.left - view.x) / view.k, y = (cy - r.top - view.y) / view.k;
+    const [x, y] = worldAt(cx, cy);
     const on = (b: Rect) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
     const dept = [...spots].reverse().find(on);
     const person = allPeople.findLast(p => arr.blocks.some(b => b.key === personKey(p.id) && on(b.rect)));
@@ -657,6 +743,19 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
       if (company) onOpenOrchestrator();
     } else if (person) onOpenDecisions?.(person.id);
   };
+  /* A click on a line puts a bend where it landed, unless the hand dragged the map. */
+  const hitLine = (line: MapLine, cx: number, cy: number) => {
+    if (!dragged()) layout.bend(line.key, bendAt(line.pts, layout.bends[line.key] ?? [], worldAt(cx, cy), SNAP / view.k));
+  };
+  /* A bend comes level with the stop before it and the one after it on its line, its other bends or its ends, when the hand
+     brings it near. */
+  const alignOn = (line: MapLine, i: number) => (at: Point): Point => {
+    const own = layout.bends[line.key] ?? [];
+    const stops = [own[i - 1] ?? line.pts[0]!, own[i + 1] ?? line.pts[line.pts.length - 1]!];
+    const level = (k: 0 | 1) => stops.map(p => p[k]).filter(v => Math.abs(v - at[k]) <= SNAP / view.k).sort((p, q) => Math.abs(p - at[k]) - Math.abs(q - at[k]))[0] ?? at[k];
+    return [level(0), level(1)];
+  };
+  const bent = arr.lines.filter(l => bends[l.key]?.length);
   const hubArt = (
     <>
       <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
@@ -700,7 +799,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         <div className="halo" style={{ left: mx - HALO, top: my - HALO, width: 2 * HALO, height: 2 * HALO }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
           <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
-          <Roads arr={arr} />
+          <Roads arr={arr} bends={bent.flatMap(l => bends[l.key]!)} />
           <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
 
           <DecisionSignals ways={asked} still={still} placed={placed} prefix={wirePrefix} />
@@ -709,6 +808,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
               <Pulse pts={s.pts} speed={s.speed} once tone={s.tone} />
             </g>
           ))}
+          <LineHits lines={arr.lines} title={t.map.addBend} onHit={hitLine} />
         </svg>
 
         <PeopleRow org={org} people={topPeople} cards={arr.top} onOpen={openDecisions} />
@@ -794,6 +894,27 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             onTap={tapAt}
           />
         ))}
+
+        {bent.flatMap(l =>
+          bends[l.key]!.map((p, i) => (
+            <Bend
+              key={`${l.key}:${i}`}
+              label={t.map.bend(blockName(l.ends[0]), blockName(l.ends[1]))}
+              at={p}
+              k={view.k}
+              align={alignOn(l, i)}
+              onMove={at => setBending(at && { line: l.key, i, at })}
+              onPut={at => {
+                setBending(null);
+                layout.bend(l.key, (layout.bends[l.key] ?? []).map((q, j) => (j === i ? at : q)));
+              }}
+              onRemove={() => {
+                setBending(null);
+                layout.bend(l.key, (layout.bends[l.key] ?? []).filter((_, j) => j !== i));
+              }}
+            />
+          )),
+        )}
       </div>
 
       <ZoomBar
