@@ -5,6 +5,33 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.24.0] - 2026-11-13
+
+Each department runs turns of its own, so the work of one department no longer waits for another's or piles up in one
+turn of the whole company.
+
+### Changed
+
+- A turn belongs to one top-level department, with the work of its products and sub-units. Each department has at most
+  one running turn and its planned ones wait in line behind it; turns of different departments run side by side.
+  Turn numbers still count across the company, so each turn keeps its own branch.
+- A new task with nothing above it joins the running turn of its own department, and none while that department runs no
+  turn or works all the time. Work under a task stays in that task's turn.
+- The head of a department lays out, adds to, renames and merges the turns of its own department, and reads its list
+  for later turns; the orchestrator does it for every department. Both hear when a turn of the department is over.
+- A new goal gets a new turn of the department that owns it, and work is added to a turn only for that turn's own goal,
+  so a turn closes once its goal is done.
+- A task may wait for a task of another turn or department once that turn has started.
+- The map shows on each department's card its own turn, and the circle in the middle holds all running turns together.
+  The Tasks screen lists in a department's table its own turns, and another department's only while it holds a task of
+  this one. The report of a turn compares it with the earlier turns of the same department.
+- The owner of a department, besides people with the whole company, picks how its planned turn runs.
+- A department that is removed closes its turns, which stay in the history.
+- The update gives every turn its department: a running or planned turn that of its first unfinished task, any other
+  that of its first task. A running turn keeps only its own department's work; other departments' tasks in it go on outside turns, and nothing of them is
+  lost. A planned turn with work of several departments is split into one planned turn for each, with the next free
+  numbers. Each department's planned turn then starts by itself within a minute when the department runs none.
+
 ## [0.23.4] - 2026-11-13
 
 Every employee pushes each commit and branch at once, and the head of the department decides what goes into the main
