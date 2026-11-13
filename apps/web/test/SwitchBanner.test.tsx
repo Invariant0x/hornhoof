@@ -49,10 +49,11 @@ describe('the line that says where the company runs', () => {
     const { calls } = shown(() => ({ ...STILL, moving, from: 'm1', to: 'm2' }));
     await screen.findByText('Moving the company to mac. Your work is kept. About a minute.');
     const before = asked(calls, '/api/network/switch');
-    /* The clock also runs by itself, so a slow machine sees a look more: one each second is at least three, where one
+    /* The clock also runs by itself, so a slow machine sees a look more: one each second is three or four, where one
        every five would be one at most. */
     await act(() => vi.advanceTimersByTimeAsync(3000));
-    expect(asked(calls, '/api/network/switch') - before).toBeGreaterThanOrEqual(3);
+    const moved = asked(calls, '/api/network/switch') - before;
+    expect([moved >= 3, moved <= 4]).toEqual([true, true]);
     moving = false;
     await act(() => vi.advanceTimersByTimeAsync(1000));
     expect(await screen.findByText('the other banners')).toBeInTheDocument();
