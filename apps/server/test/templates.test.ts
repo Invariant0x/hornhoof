@@ -68,6 +68,18 @@ describe('templates', () => {
     expect(body('orch-plan-turn')).toMatch(/explicit authorized hold[\s\S]*never[\s\S]*close the last task[\s\S]*explicit hold/i);
   });
 
+  it('gives each top-level department turns of its own, a new goal a new turn, and a turn only the work of its goal', () => {
+    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).toMatch(/runs its own turns|run their own turns|your department's own turns/i);
+    const plan = body('orch-plan-turn');
+    expect(plan).toMatch(/new goal[^.]*new turn of the department that owns it/i);
+    expect(plan).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
+    expect(plan).toMatch(/head[^.]*lays out and closes[^.]*its department's turns/i);
+    const head = body('hh-head');
+    expect(head).toMatch(/plan_turn/);
+    expect(head).toMatch(/new goal[^.]*new turn/i);
+    expect(head).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
+  });
+
   it('preserves named and urgent-only orders without bypassing protected integration checks', () => {
     expect(body('orch-company')).toMatch(/named orders end to end outside planned turns/);
     expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
