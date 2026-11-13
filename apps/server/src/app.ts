@@ -1,4 +1,5 @@
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
+import type { Socket } from 'node:net';
 import type { ProviderId } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
@@ -118,6 +119,17 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onConnected: (id, link, at) => nodeConnected(ctx, id, link, at),
     onDisconnected: (id, end) => nodeDisconnected(ctx, id, end),
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
+  });
+  /* A connection nobody has asked anything on yet is not idle to Node: it keeps the server from closing until its first
+     request comes or a minute has passed. A client's pool leaves such connections behind. Nothing is lost with one, so
+     they go as the app closes; a connection that has sent anything is left to end as it will. */
+  const connections = new Set<Socket>();
+  app.server.on('connection', socket => {
+    connections.add(socket);
+    socket.once('close', () => connections.delete(socket));
+  });
+  app.addHook('preClose', async () => {
+    for (const socket of connections) if (socket.bytesRead === 0) socket.destroy();
   });
   /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
   app.addHook('preClose', async () => serverStopping(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Writing that the server stopped into the history of node connections failed.')));
