@@ -911,10 +911,16 @@ function heldNotice(agent: { name: string }, held: HeldPlanTurn): string {
   return `Hornhoof: ${agent.name}'s turn ${held.job.id} has waited for ${why} since ${held.since}. It waits until ${held.until}. Check the plan and give the work to another employee if one can take it.`;
 }
 
+/* A provider gives the same reset with other milliseconds each time it is asked: the hold is the same one to the minute. */
+const holdMinute = (until: string) => {
+  const at = Date.parse(until);
+  return Number.isNaN(at) ? until : new Date(Math.round(at / 60_000) * 60_000).toISOString();
+};
+
 async function tellOperationsOfHold(ctx: Ctx, agent: PlanAgent & { name: string }, sub: Plan): Promise<void> {
   const held = await planHeld(ctx, agent, sub);
   if (!held || Date.now() - Date.parse(held.since) <= HELD_NOTICE_MS) return;
-  await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${held.until}`);
+  await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${holdMinute(held.until)}`);
 }
 
 /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
