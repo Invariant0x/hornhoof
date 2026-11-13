@@ -52,8 +52,9 @@ function signIn(env: Record<string, string> = {}, install?: () => Promise<void>)
     return child;
   });
   const sent: NodeMessage[] = [];
+  const logged: string[] = [];
   const signedIn = vi.fn(async () => { sent.push({ type: 'status' } as NodeMessage); });
-  const login = new LoginTerminal({ setup: { provider: 'claude', bin: CLAUDE, tmux, env: { PATH: process.env.PATH ?? '', ...env } }, dir, home, send: m => sent.push(m), secrets: () => [], signedIn, install, pollMs: 10 });
+  const login = new LoginTerminal({ setup: { provider: 'claude', bin: CLAUDE, tmux, env: { PATH: process.env.PATH ?? '', ...env } }, dir, home, send: m => sent.push(m), secrets: () => [], signedIn, install, log: line => logged.push(line), pollMs: 10 });
   stops.push(() => login.shutdown());
   /* The program ends, having printed what it printed, with its exit code. */
   const ends = (output: string, code: number, shown = output) => {
@@ -63,7 +64,7 @@ function signIn(env: Record<string, string> = {}, install?: () => Promise<void>)
   };
   const frames = (termId: string) => sent.flatMap(m => (m.type === 'term.data' && m.termId === termId ? [m.data] : [])).join('');
   const done = () => sent.find((m): m is Extract<NodeMessage, { type: 'login.done' }> => m.type === 'login.done');
-  return { login, dir, home, launch, views, sent, ends, frames, done, signedIn };
+  return { login, dir, home, launch, views, sent, ends, frames, done, signedIn, logged };
 }
 
 describe("a plan's sign-in in a terminal on the node", () => {
@@ -108,6 +109,24 @@ describe("a plan's sign-in in a terminal on the node", () => {
     expect(s.done()).toMatchObject({ ok: false, error: expect.any(String) });
     expect(existsSync(join(s.home, 'claude-oauth-token'))).toBe(false);
     expect(s.signedIn).not.toHaveBeenCalled();
+  });
+
+  /* The owner sees only that the sign-in ended early; the machine's log keeps why, for whoever helps them. */
+  it("whose program ends at once says in the node's log how it ended and what it printed last", async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends("node:internal/modules/cjs/loader:1228\n  throw err;\n\nError: Cannot find module '/data/tools/lib/node_modules/@anthropic-ai/claude-code/cli.js'\n", 1);
+    await until(() => Boolean(s.done()));
+    expect(s.done()).toMatchObject({ ok: false });
+    expect(s.logged).toEqual([expect.stringMatching(/^The sign-in program ended with code 1: .*Cannot find module '\/data\/tools\/lib\/node_modules\/@anthropic-ai\/claude-code\/cli\.js'/)]);
+  });
+
+  it("keeps every piece of a printed token out of the node's log", async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends(printed(30), 1);
+    await until(() => Boolean(s.done()));
+    expect(s.logged).toEqual(['The sign-in program ended with code 1.']);
   });
 
   it('keeps nothing of a token its program does not take', async () => {
