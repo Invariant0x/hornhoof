@@ -250,5 +250,19 @@ describe.skipIf(process.getuid?.() === 0)("a root node's installation of the age
     expect(home).not.toBe(process.env.HOME);
     expect(cache).toBe(join(home!, 'cache'));
   });
+
+  /* npm moves the program's folder aside under a name that never changes, and fails with ENOTEMPTY while an earlier,
+     cut off installation's copy still lies there. */
+  it('clears the copy a cut off installation left aside before npm runs, and nothing else', async () => {
+    const tools = tmp();
+    const scope = join(tools, 'lib', 'node_modules', '@anthropic-ai');
+    mkdirSync(join(scope, '.claude-code-2DTsDk1V'), { recursive: true });
+    writeFileSync(join(scope, '.claude-code-2DTsDk1V', 'cli.js'), '');
+    for (const kept of ['claude-code', 'sdk', '.claude-code-notes']) mkdirSync(join(scope, kept));
+    mkdirSync(join(tools, 'bin'));
+    writeFileSync(join(tools, 'bin', 'npm'), `#!/bin/sh\nls -A ${scope} > ${join(tools, 'seen')}\n`, { mode: 0o755 });
+    await installPackage(tools, '@anthropic-ai/claude-code');
+    expect(readFileSync(join(tools, 'seen'), 'utf8').trim().split('\n').sort()).toEqual(['.claude-code-notes', 'claude-code', 'sdk']);
+  });
 });
 

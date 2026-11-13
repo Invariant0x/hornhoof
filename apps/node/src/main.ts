@@ -300,6 +300,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           secrets: () => [...known],
           signedIn: () => signedInNow(),
           install,
+          log,
         })
       : null;
   /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
@@ -384,7 +385,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       removal.refused();
     },
   });
-  void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+  void programs.update(tellStatus, log).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
     if (isProgramControl(m)) return applyProgramControl(m, checks, host);
@@ -406,7 +407,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       return;
     }
     if (acknowledged(m, outbox)) return removal.settle();
-    if (m.type === 'programs.update') return programs.update(tellStatus);
+    if (m.type === 'programs.update') return programs.update(tellStatus, log);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { closeSync, constants, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { closeSync, constants, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { isRootUser, type JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
@@ -275,8 +275,25 @@ export function runInstaller(options: Pick<SpawnOptions, 'bin' | 'args' | 'timeo
   return withTrustedInstall((env, cwd) => runProgram({ ...options, env, cwd }));
 }
 
+/* npm moves the program's folder aside under a name that never changes while it puts the new one in, and removes it at
+   the end. An installation cut off half way, when the machine slept or shut down, leaves it there, and every later one
+   ends with ENOTEMPTY when npm moves the program aside again. A node's installations of a program never overlap, so one
+   found before npm starts is such a leftover. */
+function clearSetAside(tools: string, pkg: string): void {
+  const dir = join(tools, 'lib', 'node_modules', dirname(pkg));
+  const aside = new RegExp(`^\\.${basename(pkg).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[A-Za-z0-9]{8}$`);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) if (aside.test(name)) rmSync(join(dir, name), { recursive: true, force: true });
+}
+
 /* Installs an agent program into tools with npm; a failure carries the last lines npm printed. */
 export async function installPackage(tools: string, pkg: string): Promise<void> {
+  clearSetAside(tools, pkg);
   const done = await runInstaller({ bin: 'npm', args: ['install', '-g', '--prefix', tools, `${pkg}@latest`], timeoutMs: 10 * 60_000 });
   if (done.code === 0) return;
   const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
