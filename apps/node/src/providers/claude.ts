@@ -147,7 +147,8 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       if (mcpFile && input.tools) {
         const server = { type: 'http', url: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
         writePrivate(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
-        args.push('--mcp-config', mcpFile, '--strict-mcp-config');
+        /* Added to the agent's own MCP servers, not in their place: the agent keeps every tool it was given. */
+        args.push('--mcp-config', mcpFile);
       }
       if (input.model) args.push('--model', input.model);
       if (input.effort) args.push('--effort', input.effort);

@@ -74,7 +74,6 @@ export const claudeProgram: TermProgram = {
       bin,
       '--dangerously-skip-permissions',
       ...(sessionId ? ['--resume', sessionId] : ['--session-id', id]),
-      '--strict-mcp-config',
       '--mcp-config',
       JSON.stringify({ mcpServers: { hornhoof: { type: 'http', url: urls.mcpUrl } } }),
       '--settings',

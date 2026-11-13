@@ -947,7 +947,8 @@ describe('Hornhoof tools and instructions', () => {
     const { events, run } = withTools('claude');
     await run();
     const { argv, mcpConfig } = lastRun();
-    expect(argv).toEqual(expect.arrayContaining(['--append-system-prompt-file', join(work, '.hh-instructions.md'), '--mcp-config', mcpConfig!.path, '--strict-mcp-config']));
+    expect(argv).toEqual(expect.arrayContaining(['--append-system-prompt-file', join(work, '.hh-instructions.md'), '--mcp-config', mcpConfig!.path]));
+    expect(argv).not.toContain('--strict-mcp-config');
     expect(argv.indexOf('--')).toBe(argv.length - 2);
     expect(argv.join(' ')).not.toContain(TOOLS.token);
     expect(mcpConfig!.json).toEqual({ mcpServers: { hornhoof: { type: 'http', url: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });
