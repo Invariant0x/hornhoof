@@ -21,7 +21,6 @@ function skinName(t: Messages, id: string, custom: readonly CustomSkin[]): strin
   return custom.find(entry => entry.id === id)?.skin.name ?? t.skins.names[id as BuiltinSkinId];
 }
 
-
 /* The tokens of a skin on its own preview only, so each card shows its theme in the same drawing. */
 const previewStyle = (look: SkinLook) => Object.fromEntries(declarations(look).filter(([property]) => property.startsWith('--'))) as CSSProperties;
 

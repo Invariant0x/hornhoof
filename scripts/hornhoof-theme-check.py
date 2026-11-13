@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Checks every theme sheet in hornhoof-themes.md: no empty slot, and contrast by section 6.
-Usage: hornhoof-theme-check.py [THEMES.md [theme.css]]
-With theme.css, also compares the active theme's colours with the code. Exit 1 on any problem.
+Usage: hornhoof-theme-check.py [THEMES.md [registry.ts]]
+With registry.ts, also compares the active theme's colours with the Light and Cyberpunk skins of the code. Exit 1 on any problem.
 Pairs that fail in the active theme are listed in KNOWN: each one is a GAP in the style book or in the file itself."""
-import re, sys
-args = sys.argv[1:] or ['docs/hornhoof-themes.md', 'apps/web/src/theme.css']
+import json, os, re, subprocess, sys
+args = sys.argv[1:] or ['docs/hornhoof-themes.md', 'apps/web/src/skins/registry.ts']
 ROLES = 'bg surface surface2 line line2 ink muted accent accent_ink warning warning_ink attention attention_ink success danger on_danger idle dot glow button on_button hud shadow provider_claude provider_kimi provider_glm provider_antigravity on_attention scrim scrollbar_thumb scrollbar_track color_scheme'.split()
 TOP = 'id name version status owner character modes default_mode colors fonts shape decor motion terminal mark'.split()
 CUT = 'compact_button button secondary_button chip frame panel window'.split()
@@ -139,12 +139,17 @@ for t in sheets:
     ma = t.get('mark') or {}
     for k in ('shape', 'dome', 'base', 'dot', 'logo_dome', 'favicon'):
         if not ma.get(k): problems.append(f'{i}: empty mark slot {k}')
+def skin_tokens(registry):
+    """The tokens each built-in skin sets on the page, read from the registry the app takes them from."""
+    code = ("const [r, s] = await Promise.all([import(process.argv[1]), import(process.argv[1].replace('registry.ts', 'roles.ts'))]);"
+            "console.log(JSON.stringify(Object.fromEntries(r.BUILTIN_SKINS.map(k => [k.id, Object.fromEntries(s.declarations(k))]))));")
+    out = subprocess.run(['node', '--no-warnings', '--input-type=module', '-e', code, os.path.abspath(registry)], capture_output=True, text=True, check=True).stdout
+    return {skin: {name: value for name, value in tokens.items() if name.startswith('--')} for skin, tokens in json.loads(out).items()}
+
 checked = 0
 if len(args) > 1:
-    css = open(args[1], encoding='utf-8').read()
-    def block(pat):
-        return dict(re.findall(r'(--[a-z0-9-]+):\s*([^;]+);', re.search(pat + r'\s*\{(.*?)\}', css, re.S).group(1)))
-    code = {'light': block(r'(?m)^:root'), 'dark': block(r':root\[data-theme="dark"\]')}
+    skins = skin_tokens(args[1])
+    code = {'light': skins['light'], 'dark': skins['cyberpunk']}
     active = [t for t in sheets if t.get('status') == 'active']
     if len(active) != 1: problems.append(f'active themes: {len(active)}')
     for t in active:

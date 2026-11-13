@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Usage: hornhoof-style-book-check.py [BOOK.md [THEME.css [REPO [REF]]]].
-Compares every token name and value in the book with theme.css in both themes, and the book's own rules.
+Compares every token name and value in the book with the Light and Cyberpunk skins of apps/web/src/skins/registry.ts,
+the book's own rules, and the classes it names with theme.css.
 With a repository it also checks that every source file the book names exists. Exit 1 on any mismatch."""
-import re, subprocess, sys
+import json, os, re, subprocess, sys
 
 args = sys.argv[1:] or ['docs/style-book.md', 'apps/web/src/theme.css', '.', 'HEAD']
 book = open(args[0], encoding='utf8').read()
@@ -10,18 +11,17 @@ theme = re.sub(r'/\*.*?\*/', '', open(args[1], encoding='utf8').read(), flags=re
 problems = []
 
 
-def declarations(selector):
-    start = theme.index(selector)
-    open_at = theme.index('{', start)
-    close_at = theme.index('}', open_at)
-    return {name: ' '.join(value.split()) for name, value in re.findall(r'(--[\w-]+)\s*:\s*([^;]+);', theme[open_at + 1:close_at])}
+def skin_tokens(registry):
+    """The tokens each built-in skin sets on the page, read from the registry the app takes them from."""
+    code = ("const [r, s] = await Promise.all([import(process.argv[1]), import(process.argv[1].replace('registry.ts', 'roles.ts'))]);"
+            "console.log(JSON.stringify(Object.fromEntries(r.BUILTIN_SKINS.map(k => [k.id, Object.fromEntries(s.declarations(k))]))));")
+    out = subprocess.run(['node', '--no-warnings', '--input-type=module', '-e', code, os.path.abspath(registry)], capture_output=True, text=True, check=True).stdout
+    return {skin: {name: value for name, value in tokens.items() if name.startswith('--')} for skin, tokens in json.loads(out).items()}
 
 
-light = declarations(':root {')
-dark = declarations(':root[data-theme="dark"]')
-system_dark = declarations(':root:not([data-theme="light"])')
-if dark != system_dark:
-    problems.append('theme: the two dark blocks differ')
+skins = skin_tokens(os.path.join(args[2] if len(args) > 2 else '.', 'apps/web/src/skins/registry.ts'))
+light = skins['light']
+dark = {name: value for name, value in skins['cyberpunk'].items() if name in light and not name.startswith('--f-') and name != '--cut-k'}
 
 section = book[book.index('## 1. Colours'):book.index('### Contrast of text')]
 book_colours = {m[0]: (m[1], m[2]) for m in re.findall(r'^\| `(--[\w-]+)` \| `([^`]+)` \| `([^`]+)` \|', section, flags=re.M)}
@@ -33,14 +33,14 @@ expected_fonts = {name: value for name, value in light.items() if name not in da
 for name in expected_colours.keys() - book_colours.keys():
     problems.append(f'missing from the book: {name}')
 for name in book_colours.keys() - expected_colours.keys():
-    problems.append(f'not in theme.css: {name}')
+    problems.append(f'not in the skins: {name}')
 for name in expected_colours.keys() & book_colours.keys():
     if expected_colours[name] != book_colours[name]:
         problems.append(f'value differs: {name} book {book_colours[name]} theme {expected_colours[name]}')
 for name in expected_fonts.keys() - book_fonts.keys():
     problems.append(f'missing from the book: {name}')
 for name in book_fonts.keys() - expected_fonts.keys():
-    problems.append(f'not in theme.css: {name}')
+    problems.append(f'not in the skins: {name}')
 for name in expected_fonts.keys() & book_fonts.keys():
     if expected_fonts[name] != book_fonts[name]:
         problems.append(f'value differs: {name} book {book_fonts[name]} theme {expected_fonts[name]}')
