@@ -21,12 +21,21 @@ import { registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 
+/* Why a turn failed as Hornhoof recorded it, beside the end of its output, which a program that never wrote leaves empty. */
+const failureReason = (failure: { kind: string; text: string } | null, result: string | null): string | null =>
+  (failure?.text ? `${failure.kind}: ${failure.text}` : result?.trim() || null)?.slice(0, TAIL) ?? null;
+
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 type Agent = typeof agents.$inferSelect;
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
 export const TURN_NUDGES = 10;
 const TAIL = 400;
+/* The end of what a holder said when it stopped: a long report ends with its concerns and its next step. */
+const WHY_TAIL = 500;
+/* Queued turns Hornhoof ended unsent on purpose, as their task went to another holder or waits for the tasks before it: no
+   program ran, so there is nothing to find. */
+const ENDED_UNSENT = ['handed_on', 'waiting'];
 const FAILED_MAX = 50;
 /* Tool calls and results read for where agents stumbled, the newest first. */
 const STUMBLES_MAX = 1000;
@@ -187,8 +196,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'failures',
       {
         description:
-          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now, ' +
-          'with what their holder said when it stopped and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the reason Hornhoof recorded, the end of its output and the task, and the tasks blocked now, ' +
+          'with the start of what their holder said when it stopped, its end in whyTail when it is longer, and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
@@ -197,11 +206,11 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       async ({ hours }) => {
         const names = await deptNames();
         const failed = await db
-          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, task: tasks.number, interruption: jobs.interruption })
+          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption })
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE)), gte(jobs.finishedAt, hoursAgo(hours))))
+          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
@@ -229,7 +238,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             : [];
           /* A turn that went out inside another one ended as that one did. */
           const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
-          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, lastTurn: lastTurn ?? null });
+          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, whyTail: said && said.text.length > TAIL ? said.text.slice(-WHY_TAIL) : null, lastTurn: lastTurn ?? null });
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>
@@ -264,7 +273,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           stops.push({ ...stop, lastTurn: last ? (last.result?.trim() || last.tail).slice(-TAIL) : null });
         }
         return json({
-          failed: failed.map(({ departmentId, tail, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL) })),
+          failed: failed.map(({ departmentId, tail, failure, result, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL), reason: failureReason(failure, result) })),
           blocked,
           missing: missing.map(({ value, ...m }) => ({ ...value, ...m })),
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip unused tally example field
