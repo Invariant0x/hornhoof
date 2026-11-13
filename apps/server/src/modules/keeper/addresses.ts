@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { hostOsOf, type HostOs } from '../network/ids.js';
 
 /* What the updater found on the machine's own network interfaces, which the keeper's container cannot see. at: seconds. */
 export const ADDRESSES_FILE = 'addresses.json';
@@ -9,6 +10,23 @@ const FRESH_MS = 5 * 60_000;
 const MOST = 8;
 
 const Found = z.object({ at: z.number(), addresses: z.array(z.string()) });
+
+/* What the updater learned of the machine from its Docker engine, where no installer run on the computer itself wrote
+   it down: its system and its name. */
+export const HOST_FILE = 'host.json';
+const HOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+const Host = z.object({ os: z.string(), hostname: z.string() });
+
+/* Nothing where the updater wrote nothing, or something this keeper cannot take for a system or a name. */
+export function hostFound(controlDir: string): { os: HostOs | null; hostname: string | null } {
+  try {
+    const file = Host.parse(JSON.parse(readFileSync(join(controlDir, HOST_FILE), 'utf8')));
+    const os = hostOsOf(file.os);
+    return { os, hostname: os && HOST_NAME.test(file.hostname) ? file.hostname : null };
+  } catch {
+    return { os: null, hostname: null };
+  }
+}
 
 /* The private networks, and the ranges kept for documentation, which only tests use. */
 const PRIVATE = [/^10\./, /^172\.(?:1[6-9]|2\d|3[01])\./, /^192\.168\./, /^192\.0\.2\./, /^198\.51\.100\./, /^203\.0\.113\./];

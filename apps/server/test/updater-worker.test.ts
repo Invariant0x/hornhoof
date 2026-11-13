@@ -172,4 +172,30 @@ describe('the updater of a worker', () => {
     expect(m.calls.some(c => c.includes('--entrypoint ip'))).toBe(false);
     expect(existsSync(join(mac.control, 'addresses.json'))).toBe(false);
   });
+
+  it('learns from a plain Linux engine what the machine is, where no installer on the computer said', async () => {
+    const interfaces = '2: eth0    inet 192.0.2.4/24 brd 192.0.2.255 scope global eth0\\       valid_lft forever preferred_lft forever';
+    const hostOf = (control: string) => (existsSync(join(control, 'host.json')) ? (JSON.parse(readFileSync(join(control, 'host.json'), 'utf8')) as object) : null);
+    /* A server that came to this build by Update: its .env names no system, and the engine is the computer's own. */
+    const s = stand();
+    const r = await runOnce(s, null, { STUB_INFO: 'Debian GNU/Linux 12 (bookworm)|a-host', STUB_IP: interfaces });
+    expect(r.code).toBe(0);
+    expect(hostOf(s.control)).toEqual({ os: 'linux', hostname: 'a-host' });
+    expect((JSON.parse(readFileSync(join(s.control, 'addresses.json'), 'utf8')) as { addresses: string[] }).addresses).toEqual(['192.0.2.4']);
+    /* An engine in a machine of its own says nothing of the computer, and neither does one that does not answer. */
+    for (const info of ['Docker Desktop|docker-desktop', 'OrbStack|orbstack', 'fail', '']) {
+      const other = stand();
+      const ran = await runOnce(other, null, { STUB_INFO: info, STUB_IP: interfaces });
+      expect([info, ran.code, hostOf(other.control), existsSync(join(other.control, 'addresses.json'))]).toEqual([info, 0, null, false]);
+      expect(ran.calls.some(c => c.includes('--entrypoint ip')), info).toBe(false);
+    }
+    /* A name that is no host's name is left out, and the system still counts. */
+    const odd = stand();
+    await runOnce(odd, null, { STUB_INFO: 'Ubuntu 24.04|not a name; rm -rf', STUB_IP: interfaces });
+    expect(hostOf(odd.control)).toEqual({ os: 'linux', hostname: '' });
+    /* What the installer wrote stands, and the engine is not asked. */
+    const told = stand();
+    const t = await runOnce(told, null, { HORNHOOF_HOST_OS: 'darwin', STUB_INFO: 'Ubuntu 24.04|a-host', STUB_IP: interfaces });
+    expect([hostOf(told.control), t.calls.some(c => c.startsWith('docker info'))]).toEqual([null, false]);
+  });
 });

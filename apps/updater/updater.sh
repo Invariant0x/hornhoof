@@ -2421,8 +2421,31 @@ start_nodes() {
 # dial this one. A container sees only Docker's own network, so one on the host's network reads them, on Linux alone;
 # the interfaces Docker and its bridges made are left out. Written whole and then moved, and a look that failed leaves
 # what was there.
+# What the machine is, where no installer run on the computer itself has said: asked of the Docker engine, once it
+# answers. A server that came to this build by Update from a release from before machines had names has no such line
+# in its .env, and this container is not the computer. An engine that runs in a machine of its own (Docker Desktop,
+# OrbStack) says nothing of the computer it runs on, so only another engine is believed: its system is Linux and its
+# name is the computer's. Written as host.json {os, hostname} for the keeper to report; a name that is no host's name
+# is left empty.
+HOST_ASKED=''
+learn_host() {
+  local said system name
+  [ -z "$HOST_OS" ] && [ -z "$HOST_ASKED" ] || return 0
+  said=$(docker info --format '{{.OperatingSystem}}|{{.Name}}' 2> /dev/null) || return 0
+  [ -n "$said" ] || return 0
+  HOST_ASKED=1
+  system=${said%%|*}
+  name=${said#*|}
+  case "$system" in '' | *'Docker Desktop'* | *OrbStack*) return 0 ;; esac
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$ ]] || name=''
+  jq -cn --arg hostname "$name" '{os: "linux", hostname: $hostname}' > "$CONTROL/host.json.new" 2> /dev/null || return 0
+  mv "$CONTROL/host.json.new" "$CONTROL/host.json"
+  HOST_OS=linux
+}
+
 write_addresses() {
   local now out list
+  learn_host
   [ "$HOST_OS" = linux ] || return 0
   now=$(date +%s)
   [ "$now" -ge "$ADDRESSES_AT" ] || return 0

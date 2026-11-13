@@ -31,6 +31,8 @@ export type IdentityOptions = {
   hostname?: string | null;
   /* The computer's system, when known, and the key of its owner that this keeper holds, when it holds one. */
   os?: HostOs | null;
+  /* What the machine's updater learned of its system and its name, asked where the settings give neither. */
+  found?: () => { os: HostOs | null; hostname: string | null };
   ownerKey?: string | null;
   /* What a test's keeper reports as its place in place of its own. */
   reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
@@ -137,8 +139,10 @@ export class MachineIdentity {
     try {
       const { web, peer } = this.opts.published;
       const place = this.opts.reportAs?.() ?? { addresses: this.opts.addresses?.() ?? [], ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
-      const told = { ...(this.opts.os ? { os: this.opts.os } : {}), pin: this.opts.ownerKey ? keyPrint(this.opts.ownerKey) : null };
-      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...told, ...place };
+      const found = this.opts.os && this.opts.hostname ? null : (this.opts.found?.() ?? null);
+      const [os, hostname] = [this.opts.os ?? found?.os ?? null, this.opts.hostname || found?.hostname || null];
+      const told = { ...(os ? { os } : {}), pin: this.opts.ownerKey ? keyPrint(this.opts.ownerKey) : null };
+      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(hostname ?? '') ? { hostname } : {}), ...told, ...place };
       /* What only a newer app takes: the machine's key for backups with what it holds, and its way to the internet. */
       const network = this.measures.network();
       const backups = this.opts.backups?.() ?? null;

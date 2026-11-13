@@ -13,7 +13,7 @@ import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
 import { servedCertificate } from '../tls/store.js';
 import { certInfo } from '../tls/x509.js';
 import type { Term } from '../../db/net.js';
-import { ownAddresses } from './addresses.js';
+import { hostFound, ownAddresses } from './addresses.js';
 import type { HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { MachineIdentity, type Published } from './identity.js';
@@ -451,6 +451,7 @@ export class Keeper {
           hostname: opts.hostname,
           reportAs: opts.reportAs,
           os: opts.config.hostOs,
+          found: () => hostFound(opts.config.controlDir),
           ownerKey: opts.config.ownerKey,
           backups: () => (this.backups ? { ageKey: this.backups.ageRecipient(), heldBackups: this.backups.reported() } : null),
         })

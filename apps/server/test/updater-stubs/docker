@@ -335,6 +335,10 @@ case "$1 $2" in
           rm -f "$STUB_STATE/computer-removed" "$STUB_STATE/computer-runs"
         fi
         exit "${STUB_COMPUTER_EXIT:-0}" ;;
+      # What the engine says of itself, its system and its name: STUB_INFO, or a failure with STUB_INFO=fail.
+      info)
+        [ "${STUB_INFO:-}" != fail ] || exit 1
+        printf '%s\n' "${STUB_INFO:-}" ;;
       # The host's own interfaces, as a container on the host's network reads them: STUB_IP, or a failure with STUB_IP=fail.
       run)
         case " $* " in

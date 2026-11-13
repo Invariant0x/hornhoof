@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { ADDRESSES_FILE, isPrivate, ownAddresses } from '../src/modules/keeper/addresses.js';
+import { ADDRESSES_FILE, HOST_FILE, hostFound, isPrivate, ownAddresses } from '../src/modules/keeper/addresses.js';
 
 function control(found?: { at: number; addresses: unknown }): string {
   const dir = mkdtempSync(join(tmpdir(), 'hh-addresses-'));
@@ -37,5 +37,25 @@ describe("a machine's own addresses", () => {
     expect(ownAddresses({ controlDir: dir, env: ['127.0.0.1', ' 192.168.1.5 ', ''], seen: ['203.0.113.80'], now: NOW })).toEqual(['192.168.1.5', '203.0.113.80']);
     const many = Array.from({ length: 12 }, (_, i) => `10.0.0.${i + 1}`);
     expect(ownAddresses({ controlDir: control(), env: many, seen: [], now: NOW })).toEqual(many.slice(0, 8));
+  });
+});
+
+describe('what the updater learned of the machine', () => {
+  const dirWith = (text: string | null): string => {
+    const dir = control();
+    if (text !== null) writeFileSync(join(dir, HOST_FILE), text);
+    return dir;
+  };
+
+  it('is its system and its name, as the updater wrote them', () => {
+    expect(hostFound(dirWith(JSON.stringify({ os: 'linux', hostname: 'a-host' })))).toEqual({ os: 'linux', hostname: 'a-host' });
+    /* A name it left empty is no name. */
+    expect(hostFound(dirWith(JSON.stringify({ os: 'linux', hostname: '' })))).toEqual({ os: 'linux', hostname: null });
+  });
+
+  it('is nothing without the file, or with one that says something else', () => {
+    for (const text of [null, 'not json', JSON.stringify({ os: 'plan9', hostname: 'a-host' }), JSON.stringify({ hostname: 'a-host' }), JSON.stringify({ os: 'linux', hostname: 'a host; rm' })]) {
+      expect(hostFound(dirWith(text)), String(text)).toEqual(text?.includes('a host;') ? { os: 'linux', hostname: null } : { os: null, hostname: null });
+    }
   });
 });

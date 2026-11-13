@@ -655,6 +655,14 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await until(async () => (await c.serverRow())?.hostname === 'deb');
     expect(await c.serverRow()).toMatchObject({ hostname: 'deb', addresses: ['192.0.2.4'] });
   });
+  it("reports what its updater learned of the machine where the installer wrote neither name nor system", async () => {
+    /* A server that came to this build by Update: its settings name no host, and its updater asked the engine. */
+    const c = await company({ addresses: [], hostname: null, reportAs: undefined });
+    writeFileSync(join(c.control, 'host.json'), JSON.stringify({ os: 'linux', hostname: 'a-host' }));
+    writeFileSync(join(c.control, 'addresses.json'), JSON.stringify({ at: Math.floor(Date.now() / 1000), addresses: ['192.0.2.4'] }));
+    await until(async () => (await c.serverRow())?.hostname === 'a-host');
+    expect(await c.serverRow()).toMatchObject({ hostname: 'a-host', os: 'linux', addresses: ['192.0.2.4'] });
+  });
   it('reports its round trip and the internet', async () => {
     const c = await company();
     const w = await worker(c, { internet: { start: () => undefined, stop: () => undefined, snapshot: () => ({ internetRttMs: 48, internetMbps: 84 }) } });
