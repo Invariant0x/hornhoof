@@ -4,7 +4,7 @@ import { onTestFinished } from 'vitest';
 import { listenAt } from '../../../test-support/ports.mjs';
 
 export type TelegramUser = { id: number; is_bot?: boolean; first_name: string; username?: string; language_code?: string };
-export type TelegramUpdate = { update_id: number; message?: { message_id: number; from?: TelegramUser; chat: { id: number; type: string }; date: number; text?: string } };
+export type TelegramUpdate = { update_id: number; message?: { message_id: number; from?: TelegramUser; chat: { id: number; type: string }; date: number; text?: string } & Record<string, unknown> };
 export type Sent = { token: string; chat_id: number; text: string; parse_mode?: string };
 
 export type FakeTelegram = {
@@ -28,6 +28,10 @@ export type FakeTelegram = {
   calls: string[];
   /* A message a person writes to the bot. */
   write(token: string, from: TelegramUser, text: string | undefined, chat?: { id: number; type: string }): number;
+  /* A message of any other kind a person sends the bot, as Telegram puts it: a document, a photo, a voice message. */
+  send(token: string, from: TelegramUser, message: Record<string, unknown>): number;
+  /* Files the bot may get with getFile, by their id. */
+  files: Map<string, Buffer>;
   /* How many getUpdates of this bot wait for news right now. */
   polling(token: string): number;
   /* Goes away: every waiting getUpdates ends with nothing, and every call after answers 502 until down is false again. */
@@ -54,8 +58,12 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     broken: new Set(),
     webhooks: new Set(),
     calls: [],
+    files: new Map(),
     write(token, from, text, chat = { id: from.id, type: 'private' }) {
-      const update: TelegramUpdate = { update_id: nextUpdate++, message: { message_id: nextMessage++, from, chat, date: Math.floor(Date.now() / 1000), ...(text === undefined ? {} : { text }) } };
+      return tg.send(token, from, { chat, ...(text === undefined ? {} : { text }) });
+    },
+    send(token, from, message) {
+      const update: TelegramUpdate = { update_id: nextUpdate++, message: { message_id: nextMessage++, from, chat: { id: from.id, type: 'private' }, date: Math.floor(Date.now() / 1000), ...message } };
       pending.set(token, [...(pending.get(token) ?? []), update]);
       for (const wake of waiters.get(token) ?? []) wake(pending.get(token)!);
       waiters.get(token)?.clear();
@@ -73,6 +81,12 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     const method = req.url.split('/').pop()!.split('?')[0]!;
     tg.calls.push(method);
     if (tg.down || tg.broken.has(method)) return reply.code(502).send('Bad Gateway');
+  });
+  /* A file lies at the path getFile named, for the bot's token alone. */
+  app.get<{ Params: { bot: string; '*': string } }>('/file/:bot/*', async (req, reply) => {
+    const bytes = tg.bots.has(req.params.bot.replace(/^bot/, '')) ? tg.files.get(req.params['*'].replace(/^files\//, '')) : undefined;
+    if (!bytes) return reply.code(404).send('Not Found');
+    return reply.type('application/octet-stream').send(bytes);
   });
   app.post<{ Params: { bot: string; method: string }; Body: Record<string, unknown> | undefined }>('/:bot/:method', async (req, reply) => {
     const token = req.params.bot.replace(/^bot/, '');
@@ -106,6 +120,13 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
           reply.raw.once('close', () => wake([]));
         });
         return { ok: true, result: updates };
+      }
+      case 'getFile': {
+        const id = String(body.file_id ?? '');
+        const bytes = tg.files.get(id);
+        if (!bytes) return reply.code(400).send(refuse(400, 'Bad Request: invalid file_id'));
+        if (bytes.length > 20 * 1024 * 1024) return reply.code(400).send(refuse(400, 'Bad Request: file is too big'));
+        return { ok: true, result: { file_id: id, file_size: bytes.length, file_path: `files/${id}` } };
       }
       case 'sendMessage': {
         const chatId = Number(body.chat_id);

@@ -328,8 +328,8 @@ describe('improvements', () => {
     const feedback = screen.getByRole('button', { name: 'Feedback' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
-    /* Before Improvements: the four themes, the custom template window, the two languages and Outbound. */
-    for (let i = 0; i < 9; i += 1) await user.tab();
+    /* Before Improvements: the row to the themes, the two languages and Outbound. */
+    for (let i = 0; i < 5; i += 1) await user.tab();
     expect(improvements).toHaveFocus();
     await user.tab();
     expect(versions).toHaveFocus();
@@ -348,7 +348,7 @@ describe('improvements', () => {
     expect(account).toHaveFocus();
     await user.keyboard('{Enter}');
     await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
-    for (let i = 0; i < 9; i += 1) await user.tab();
+    for (let i = 0; i < 5; i += 1) await user.tab();
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('heading', { level: 1, name: 'Improvements' })).toBeInTheDocument();
   });

@@ -5,9 +5,9 @@ import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { departmentsHad, requireDepartmentHad, runsDepartment } from '../../auth/departments.js';
-import { ownsPlace, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
+import { accessOf, canReach } from '../../auth/access.js';
+import { runsDepartment } from '../../auth/departments.js';
+import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, TURN_MODES, turns } from '../../db/schema.js';
@@ -18,7 +18,7 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -26,11 +26,12 @@ import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
-import { detailFor, factsFor, linesFor, seesTask } from './sight.js';
+import { actsOnTask, detailFor, factsFor, linesFor, seesTask } from './sight.js';
 import { acknowledgeCard, waitCards } from './wait-cards.js';
 import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
 import { editTurn, settle, tell, turnRows, type Turn } from './turns.js';
+import { openTurnOf } from './turn-department.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 
@@ -63,14 +64,13 @@ const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
 const TurnParams = z.object({ number: z.coerce.number().int().positive() });
 const TurnPatch = z.strictObject({ mode: z.enum(TURN_MODES) });
+const CurrentTurnQuery = z.object({ department: z.uuid().optional() });
 export const AnswerBody = z.union([
   z.object({ answer: Text.trim().min(1) }).strict(),
   z.object({ approve: z.boolean(), answer: Text.optional() }).strict(),
   z.object({ retry: z.literal(true) }).strict(),
   z.object({ pick: z.number().int().min(0).max(9), answer: Text.trim().optional() }).strict(),
 ]);
-
-const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
 
 /* A person's answer to an open request, given on their screen, by the orchestrator for them or by their assistant. */
 export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.infer<typeof AnswerBody>) {
@@ -198,8 +198,19 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
   return task && seesTask(viewer, task) ? task.id : null;
 }
 
-/* Turns belong to the whole company. The words they were laid out from only reach people with the full view. */
-async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
+type ModeChanger = (departmentId: string | null) => boolean;
+
+/* Who picks how a planned turn runs: a person with the whole company, the CEO or the CEO delegate, or the owner of the
+   turn's department. */
+async function modeChanger(db: Db, me: Person): Promise<ModeChanger> {
+  if (me.scopeKind === 'company' || actsAsCeo(me)) return () => true;
+  const { owns } = await accessOf(db, me);
+  return id => id !== null && owns?.has(id) === true;
+}
+
+/* Turns show to the whole company, each with the department it belongs to. The words they were laid out from only reach
+   people with the full view. */
+async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer, changesMode: ModeChanger) {
   if (!turn) return null;
   return {
     id: turn.id,
@@ -208,6 +219,8 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
     goal: turn.goal,
     status: turn.status,
     mode: turn.mode,
+    departmentId: turn.departmentId,
+    canChangeMode: changesMode(turn.departmentId),
     messages: viewer.full ? turn.messages.map(({ by, text, at }) => ({ by, text, at })) : [],
     taskId: await turnTask(db, turn, viewer),
     startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
@@ -217,35 +230,44 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
   };
 }
 
-/* Tasks, what waits for people, and turns, as each person may see them: the work of the agents they see, in places they
-   reach (sight.ts). */
+/* Tasks, what waits for people, and turns, as each person may see them: every task of the company, changed by whoever acts
+   on its work (sight.ts). */
 export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
-  /* A task of the company this person sees: 404 for one that is not there, 403 for one they do not see. */
+  /* A task of the company this person sees: 404 for one that is not there, 403 for the work of another person's own
+     assistant. */
   async function shown(me: Person, id: string): Promise<Task> {
     const [task] = await db.select().from(tasks).where(and(eq(tasks.id, id), eq(tasks.companyId, me.companyId)));
     if (!task) throw refuse(404, 'task_unknown', 'This task does not exist.');
-    if (!seesTask(await viewerOf(db, me), task)) throw refuse(403, 'task_hidden', 'This task is not work of an employee you see.');
+    if (!seesTask(await viewerOf(db, me), task)) throw refuse(403, 'task_hidden', "This task is the work of another person's own assistant.");
+    return task;
+  }
+
+  /* The same, for a person who changes it: the work of an agent they open, or one they gave. */
+  async function changed(me: Person, id: string): Promise<Task> {
+    const task = await shown(me, id);
+    if (!actsOnTask(await viewerOf(db, me), task)) throw refuse(403, 'task_not_yours', 'This task is not work of an employee you open, nor one you gave.');
     return task;
   }
 
   /* The task as this person reads it. */
   const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId) });
 
-  /* The departments whose tasks this person reads, for the Tasks screen to choose from. */
+  /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. */
   app.get('/api/task-departments', async req => {
     const me = await requirePerson(req, db);
-    const had = await departmentsHad(db, me);
-    return { whole: (await accessOf(db, me)).whole, departments: had.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
+    const all = await db.select().from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
+    return { whole: (await accessOf(db, me)).whole, departments: all.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
   });
 
-  /* One department's tasks, as this person sees them. Another department's are refused, not just left out. */
+  /* One department's tasks, as this person sees them: any department's. The work given to the orchestrator itself is his,
+     whom only people with the whole company open. */
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
     if (q.department === 'none' && !(await accessOf(db, me)).whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
-    if (q.department !== 'none') await requireDepartmentHad(db, me, q.department);
+    if (q.department !== 'none' && !(await departmentOf(db, me.companyId, q.department))) throw refuse(404, 'department_unknown', 'This department does not exist.');
     const viewer = await viewerOf(db, me);
     const place = q.department === 'none' ? isNull(tasks.departmentId) : eq(tasks.departmentId, q.department);
     const page = (state: SQL) =>
@@ -323,7 +345,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = ReplanBody.parse(req.body);
     const [seen] = await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
     if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
-    const task = await shown(me, seen.taskId);
+    const task = await changed(me, seen.taskId);
     const viewer = await viewerOf(db, me);
     const wait = await db.transaction(tx => replanWait(tx, { waitId: id, ...body, actor: actorOf(me) }));
     ctx.bus.publish(me.companyId, { type: 'task', id: task.id, spot: taskSpot(task) });
@@ -349,7 +371,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { text } = z.object({ text: Text.trim().min(1) }).parse(req.body);
-    const moved = await comment(ctx, actorOf(me), (await shown(me, id)).id, text);
+    const moved = await comment(ctx, actorOf(me), (await changed(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
@@ -359,7 +381,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { urgent } = z.object({ urgent: z.boolean() }).strict().parse(req.body);
-    const moved = await setUrgent(ctx, actorOf(me), (await shown(me, id)).id, urgent);
+    const moved = await setUrgent(ctx, actorOf(me), (await changed(me, id)).id, urgent);
     return { task: await detail(me, moved.task) };
   });
 
@@ -368,7 +390,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { paused, reason } = z.object({ paused: z.boolean(), reason: z.string().max(1000).default('') }).strict().parse(req.body);
-    const moved = await setPaused(ctx, actorOf(me), (await shown(me, id)).id, paused, reason);
+    const moved = await setPaused(ctx, actorOf(me), (await changed(me, id)).id, paused, reason);
     if (paused) await stopTurns(ctx, moved.tree);
     await wakeAll(ctx, moved.wakes);
     return { task: await detail(me, moved.task) };
@@ -378,7 +400,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
-    const moved = await cancel(ctx, actorOf(me), (await shown(me, id)).id, why);
+    const moved = await cancel(ctx, actorOf(me), (await changed(me, id)).id, why);
     await stopTurns(ctx, moved.closed);
     const settled = await settle(ctx, moved.task);
     await wakeAll(ctx, tell(moved.wakes, settled, (await orchestratorOf(ctx, me.companyId))?.id ?? null, moved.task.id));
@@ -438,23 +460,32 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/turns', async req => {
     const me = await requirePerson(req, db);
     const viewer = await viewerOf(db, me);
-    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer))) };
+    const changesMode = await modeChanger(db, me);
+    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(db, t, viewer, changesMode))) };
   });
 
-  /* A person who sees the whole company picks how a planned turn runs; a turn that has started keeps its mode. */
+  /* A person who sees the whole company or owns the turn's department picks how a planned turn runs; a turn that has
+     started keeps its mode. */
   app.patch('/api/turns/:number', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { number } = TurnParams.parse(req.params);
     const { mode } = TurnPatch.parse(req.body);
+    const changesMode = await modeChanger(db, me);
+    const [named] = await db.select({ departmentId: turns.departmentId }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.number, number)));
+    if (named && !changesMode(named.departmentId)) throw new ApiError(403, 'forbidden', "Only people with the whole company and the owner of the turn's department pick how it runs.", 'not_owner');
     const turn = await editTurn(ctx, me.companyId, number, { mode });
-    return { turn: await turnView(db, turn, await viewerOf(db, me)) };
+    return { turn: await turnView(db, turn, await viewerOf(db, me), changesMode) };
   });
 
+  /* The running turn of a department, a product or a sub-department naming the department it is in; with none named, the
+     earliest of the departments' running turns. */
   app.get('/api/turns/current', async req => {
     const me = await requirePerson(req, db);
-    const [turn] = await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
-    return { turn: await turnView(db, turn, await viewerOf(db, me)) };
+    const { department } = CurrentTurnQuery.parse(req.query);
+    const turn = department
+      ? await openTurnOf(db, me.companyId, department)
+      : (await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open'))).orderBy(asc(turns.number)).limit(1))[0];
+    return { turn: await turnView(db, turn ?? undefined, await viewerOf(db, me), await modeChanger(db, me)) };
   });
 
   app.get('/api/departments/:id/tree', async req => {
@@ -463,27 +494,18 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept) throw refuse(404, 'department_unknown', 'This department does not exist.');
     const viewer = await viewerOf(db, me);
-    if (!canReach(viewer.access, { departmentId: dept.id, parentId: null })) {
-      const spots = await db
-        .selectDistinct({ departmentId: tasks.departmentId, productId: tasks.productId })
-        .from(tasks)
-        .where(and(eq(tasks.companyId, me.companyId), eq(tasks.departmentId, dept.id)));
-      if (!spots.some(t => reaches(viewer.access, t))) throw refuse(403, 'not_your_department', 'This department is not one you have.');
-    }
     const facts = await treeFacts(db, me.companyId, dept.id, t => seesTask(viewer, t));
     return { tree: workTree(factsFor(viewer, facts, dept.id), new Date()) };
   });
 
-  /* The numbers add up all of a department, its agents' work whoever's plan they are on, so they go only with the full view
-     and to the department's owner, who sees all of them. */
+  /* The numbers add up all of a department, its agents' work whoever's plan they are on, and belong to its screen, which
+     everyone of the company reads. */
   app.get('/api/departments/:id/pipeline', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { turn } = PipelineQuery.parse(req.query);
     const dept = await departmentOf(db, me.companyId, id);
     if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
-    const viewer = await viewerOf(db, me);
-    if (!viewer.full && !ownsPlace(viewer, { departmentId: dept.id })) throw refuse(403, 'ceo_view_only', 'Only the CEO, the CEO delegate and the department\'s owner read the numbers of a whole department.');
     return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
   });
 }

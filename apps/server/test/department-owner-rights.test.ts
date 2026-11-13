@@ -85,6 +85,16 @@ describe('a department owner on the screen', () => {
     ]) expect((await send(c, c.danaToken, 'POST', '/api/departments/build', payload)).statusCode, JSON.stringify(payload)).toBe(403);
   });
 
+  it('removes a product of their own department, and of no other', async () => {
+    const c = await owned();
+    const [stand] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Stand', roleCode: 'SAL', parentId: c.sales.id, position: 4 }).returning();
+    expect((await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: stand!.id, remove: true }] })).statusCode).toBe(403);
+    const removed = await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.product.id, remove: true }] });
+    expect(removed.statusCode, removed.body).toBe(201);
+    expect(await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).toEqual([]);
+    expect(await c.db.select({ id: departments.id }).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
+  });
+
   it('removes an employee of their department, which someone who sees the whole company but has no department may not', async () => {
     const c = await company();
     const ira = await onHerPlan(c, 'Ira');
@@ -134,7 +144,8 @@ describe('what a department owner sees', () => {
     /* The numbers of the whole department open to her; there are none before a turn. */
     expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.dev.id}/pipeline`)).json().error.reason).toBe('turn_unknown');
     expect((await send(c, c.danaToken, 'GET', `/api/agents/${c.seller.id}`)).json().error.reason).toBe('agent_hidden');
-    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.sales.id}/pipeline`)).json().error.reason).toBe('ceo_view_only');
+    /* Another department's numbers are the company's, which everyone reads. */
+    expect((await send(c, c.danaToken, 'GET', `/api/departments/${c.sales.id}/pipeline`)).json().error.reason).toBe('turn_unknown');
   });
 
   it('sees the work of an employee placed in a sub-unit of their department itself', async () => {

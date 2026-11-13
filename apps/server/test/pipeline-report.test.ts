@@ -39,8 +39,8 @@ async function company() {
   const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
 
   let n = 0;
-  const turn = async (number: number, status: 'open' | 'closed' | 'planned', from: number | null, to: number | null, title = `Turn ${number}`) =>
-    (await db.insert(turns).values({ companyId, number, title, goal: title, status, createdAt: at(from ?? 0), openedAt: from === null ? null : at(from), closedAt: to === null ? null : at(to) }).returning())[0]!;
+  const turn = async (number: number, status: 'open' | 'closed' | 'planned', from: number | null, to: number | null, title = `Turn ${number}`, departmentId = dev!.id) =>
+    (await db.insert(turns).values({ companyId, departmentId, number, title, goal: title, status, createdAt: at(from ?? 0), openedAt: from === null ? null : at(from), closedAt: to === null ? null : at(to) }).returning())[0]!;
   const task = async (turnId: string, number: number, over: Partial<typeof tasks.$inferInsert> = {}) => {
     const closed = ['done', 'cancelled'].includes(over.status ?? 'done');
     const [row] = await db.insert(tasks).values({ companyId, number, turnId, title: `Task ${number}`, departmentId: dev!.id, executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'done', createdAt: at(0), closedAt: at(30), updatedAt: at(30), ...over, ...(closed ? { assigneeAgentId: null } : {}) }).returning();
@@ -370,6 +370,33 @@ describe('the report', () => {
     expect(await c.db.select({ turnId: turnSnapshots.turnId }).from(turnSnapshots).where(eq(turnSnapshots.turnId, open.id))).toEqual([]);
   });
 
+  it('compares a turn with the turns of its own department only', async () => {
+    const c = await company();
+    await turnsOf(c, { 7: 100, 8: 50 });
+    const launch = await c.turn(9, 'closed', 0, 70, 'Launch', c.sales.id);
+    await c.task(launch.id, 109, { departmentId: c.sales.id, executorAgentId: c.sam.id, closedAt: at(70) });
+    await turnsOf(c, { 10: 40 });
+    const report = await pipelineReport(c.db, c.companyId, 10);
+    expect(report.previous?.number).toBe(8);
+    expect(report.baseline?.number).toBe(7);
+    expect(report.turns).toEqual([10, 8, 7]);
+    const sales = await pipelineReport(c.db, c.companyId, 9);
+    expect(sales.previous).toBeNull();
+    expect(sales.baseline).toBeNull();
+    expect(sales.turns).toEqual([9]);
+  });
+
+  it("reads a department's own running turn by default", async () => {
+    const c = await company();
+    const payments = await c.turn(1, 'open', 0, null);
+    await c.task(payments.id, 101, { status: 'working', closedAt: null });
+    const launch = await c.turn(2, 'open', 0, null, 'Launch', c.sales.id);
+    await c.task(launch.id, 102, { departmentId: c.sales.id, executorAgentId: c.sam.id, status: 'working', closedAt: null });
+    expect((await departmentPipeline(c.db, c.companyId, c.sales.id)).turn.number).toBe(2);
+    expect((await departmentPipeline(c.db, c.companyId, c.dev.id)).turn.number).toBe(1);
+    expect((await pipelineReport(c.db, c.companyId, undefined, c.sales.id)).turn.number).toBe(2);
+  });
+
   it('reads the last closed turn by default when none is open, and refuses one that has not run', async () => {
     const c = await company();
     await turnsOf(c, { 7: 100 });
@@ -436,28 +463,23 @@ describe('who reads the report', () => {
     expect(res.json().report.turn.number).toBe(7);
   });
 
-  it('gives the numbers of a whole department to the CEO, the delegate and its own people, and to no one else, whatever they reach', async () => {
-    const c = await company();
-    await closedTurn(c);
-    const token = await invitePerson(c.app, c.ceoToken, { name: 'Lena', email: 'lena@acme.example', access: { departments: [c.sales.id] } });
-    const own = await get(c, token, c.sales.id, '?turn=7');
-    expect(own.statusCode).toBe(200);
-    expect(own.json().report.department.department.id).toBe(c.sales.id);
-    const other = await get(c, token, c.dev.id, '?turn=7');
-    expect([other.statusCode, other.json().error.reason]).toEqual([403, 'ceo_view_only']);
-    const whole = await invitePerson(c.app, c.ceoToken, { name: 'Zed', email: 'zed@acme.example', access: { whole: true } });
-    for (const id of [c.sales.id, c.dev.id]) {
-      const res = await get(c, whole, id, '?turn=7');
-      expect([res.statusCode, res.json().error.reason]).toEqual([403, 'ceo_view_only']);
-    }
-  });
-
-  it('gives no one who reaches only a product of the department its whole numbers', async () => {
+  it('gives the numbers of a whole department to everyone of the company, as the CEO reads them, whatever they reach', async () => {
     const c = await company();
     await closedTurn(c);
     const [product] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Shop', parentId: c.dev.id, roleCode: 'DEV', position: 1 }).returning();
-    const token = await invitePerson(c.app, c.ceoToken, { name: 'Pia', email: 'pia@acme.example', access: { departments: [product!.id] } });
-    expect((await get(c, token, c.dev.id, '?turn=7')).statusCode).toBe(403);
+    const people = [
+      await invitePerson(c.app, c.ceoToken, { name: 'Lena', email: 'lena@acme.example', access: { departments: [c.sales.id] } }),
+      await invitePerson(c.app, c.ceoToken, { name: 'Zed', email: 'zed@acme.example', access: { whole: true } }),
+      await invitePerson(c.app, c.ceoToken, { name: 'Pia', email: 'pia@acme.example', access: { departments: [product!.id] } }),
+    ];
+    for (const id of [c.sales.id, c.dev.id]) {
+      const ceo = (await get(c, c.ceoToken, id, '?turn=7')).json();
+      for (const token of people) {
+        const res = await get(c, token, id, '?turn=7');
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual(ceo);
+      }
+    }
   });
 
   it('refuses an unknown department, a bad turn, and no sign-in', async () => {

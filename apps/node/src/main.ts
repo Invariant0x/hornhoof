@@ -40,6 +40,7 @@ import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
+import { nodeLog } from './node-log.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -206,6 +207,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const known = new Set(hidden);
   const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
   const log = life.log;
+  /* For a program's own words, which may hold what Hornhoof must not keep: the machine's output only, secrets hidden,
+     never the log the node gives Hornhoof. */
+  const onMachine = (line: string) => writeLog(nodeLog(line, [...known]));
   removeOldParts(dir, log);
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
@@ -230,18 +234,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
   const checks = startCheckClient(dir, terminal, () => send);
-  /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
-     it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
+  /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it, empty when
+     Hornhoof gave it none: until it changes, the node stays signed out, so turns do not go round on a sign-in that no
+     longer works, each in a terminal, while the program itself still says it is signed in. */
   const planProvider = builtin ? null : (state as NodeState).provider;
   const credKind: CredKind | null = holdsSignIn && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
+  const signInNow = (): string => {
+    const held = credKind ? heldCredential(credHome, credKind) : null;
+    return held ? digestOf(held) : '';
+  };
   let refused: string | null = null;
   const signedInHere = async (): Promise<boolean> => {
     if (!single) return true;
     /* Only a Codex plan's machines are told they are spare. */
     if (isSpare(dir)) return false;
     if (refused !== null) {
-      const held = credKind ? heldCredential(credHome, credKind) : null;
-      if (held && digestOf(held) === refused) return false;
+      if (signInNow() === refused) return false;
       refused = null;
     }
     return single.loggedIn();
@@ -292,6 +300,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           secrets: () => [...known],
           signedIn: () => signedInNow(),
           install,
+          log: onMachine,
         })
       : null;
   /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
@@ -370,7 +379,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
-  void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+  void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
     if (isProgramControl(m)) return applyProgramControl(m, checks, host);
@@ -392,7 +401,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       return;
     }
     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
-    if (m.type === 'programs.update') return programs.update(tellStatus);
+    if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
@@ -555,7 +564,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery, freshPrompt: m.freshPrompt });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
@@ -581,10 +590,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     await status();
     emit(done);
     await renewedCodex().catch(() => {});
-    if (done.error === 'not_logged_in') {
+    /* The program may end on the sign-in or fail on it: either way its provider refused it. */
+    if (done.error === 'not_logged_in' || done.failure?.kind === 'auth') {
       loggedIn = false;
-      const held = credKind ? heldCredential(credHome, credKind) : null;
-      if (held) refused = digestOf(held);
+      if (credKind) refused = signInNow();
       void status();
     }
   }

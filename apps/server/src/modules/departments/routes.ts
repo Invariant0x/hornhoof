@@ -1,6 +1,6 @@
 import { notificationMessage } from '../events/notifications.js';
 import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, max, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, max, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -11,7 +11,7 @@ import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
@@ -110,12 +110,19 @@ function staffedNote(click: string, department: string, hired: Hired[], present:
 
 const CARD: DecisionSubject = { source: 'proposal' };
 
-/* A structure change that only adds products and changes sub-units of departments that are there, and leaves the company's
-   brief, is a decision of those departments; making or removing one, or a card, is the CEO's. */
-function structureSubject(body: z.infer<typeof BuildBody>): DecisionSubject {
+/* A structure change that only adds and removes products and changes sub-units of departments that are there, and leaves
+   the company's brief, is a decision of those departments: a product's is the department's that holds it. Making or
+   removing a department, or a card, is the CEO's. */
+async function structureSubject(db: Db, companyId: string, body: z.infer<typeof BuildBody>): Promise<DecisionSubject> {
   if (body.proposalId || body.brief !== undefined) return CARD;
-  const changed = body.items.map(item => (isNew(item) || item.remove ? null : item.department));
-  return changed.every((id): id is string => id !== null) ? { source: 'proposal', departments: changed } : CARD;
+  const changed: string[] = [];
+  for (const item of body.items) {
+    if (isNew(item)) return CARD;
+    const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
+    if (item.remove && !dept?.parentId) return CARD;
+    changed.push(dept?.parentId ?? item.department);
+  }
+  return { source: 'proposal', departments: changed };
 }
 
 /* Checks that a sub-unit belongs to this department of this company before changing or removing it. */
@@ -234,7 +241,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     /* Who may ask is checked before what was asked, so a body that does not parse is the CEO's card to refuse. */
     const asked = BuildBody.safeParse(req.body);
-    const subject = asked.success ? structureSubject(asked.data) : CARD;
+    const subject = asked.success ? await structureSubject(db, me.companyId, asked.data) : CARD;
     const on = await cardDecision(me, subject);
     const body = BuildBody.parse(req.body);
 
@@ -316,6 +323,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
+          /* Its turns end with it and stay in the history without it: one that ran as it ran, a planned one never started. */
+          await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.departmentId, dept.id), ne(turns.status, 'closed')));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));
           removed.push({ id: dept.id, template: dept.templateKey, name: dept.name });

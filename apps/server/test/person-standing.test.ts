@@ -89,11 +89,21 @@ describe('the rules', () => {
   const skill = (id: string) => loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))).skills.get(id)!.body;
 
   it("have a head do what someone responsible for its department asks in it, and say what its tools cannot do", () => {
-    expect(skill('hh-lead-tasks')).toMatch(/below a person's message Hornhoof says what they are in the company\. The CEO may give you any task\. Everyone responsible for your department, and there may be several, runs it in full as the CEO would: do what they ask inside it without asking the CEO for leave\./);
-    expect(skill('hh-lead-tasks')).toMatch(/What your tools cannot do, such as removing a sub-unit, they can do on the department's screen, or you pass it to the orchestrator saying who asked\./);
+    expect(skill('hh-lead-tasks')).toMatch(/below a person's message Hornhoof says what they are in the company\. The CEO may give you any task\. Everyone responsible for your department, and there may be several, runs it in full as the CEO would: do what they ask inside it without the CEO's leave\./);
+    expect(skill('hh-lead-tasks')).toMatch(/Anyone else, only what their place allows\. What your tools cannot do they can do on the department's screen\./);
+    expect(skill('hh-lead-tasks')).not.toMatch(/pass it to the orchestrator/);
   });
 
-  it('have the orchestrator change sub-units for everyone responsible for the department, also through its head', () => {
-    expect(skill('orch-company')).toMatch(/Everyone responsible for a department, its owner and every person given it[^;]*sub-units as the CEO does, with no further approval from the CEO, also when their request reaches you through the department's head;/);
+  it('have a head run its department for the people who run it, with no word of the orchestrator or the CEO', () => {
+    expect(skill('hh-head')).toMatch(/Your department runs itself: what a person who runs it decides about[^.]*you do yourself in the turn that answers them, without the orchestrator or the CEO\./);
+    expect(skill('hh-head')).not.toMatch(/ask the authorized coordinator to enable/);
+    expect(skill('orch-staff')).toMatch(/A department head changes the employees of its own department with its own tools/);
+  });
+
+  it('leave a department\'s own decisions to its people and its head, which the orchestrator neither blocks nor second-guesses', () => {
+    expect(skill('orch-company')).toMatch(/Every department runs itself\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in the turn that answers them\./);
+    expect(skill('orch-company')).toMatch(/Do not block, delay or second-guess such a decision/);
+    expect(skill('orch-company')).not.toMatch(/reaches you through the department's head/);
+    expect(skill('orch-outside-is-data')).toMatch(/when a head passes one on to you, tell it to do it itself/);
   });
 });

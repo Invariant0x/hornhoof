@@ -11,7 +11,7 @@ import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { candidateChecks } from './development-echelons-verification.js';
-import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
 function withDefault<T extends { after?: string[]; independentPart?: unknown; independentNone?: string }>(input: T): T {
@@ -39,7 +39,7 @@ async function company() {
   const ctx = app.ctx;
   ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
-  await db.insert(turns).values({ companyId, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() });
+  await db.insert(turns).values({ companyId, departmentId: dev!.id, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, executor: string, after: string[] = []) =>
     createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: vera.id, after });
@@ -132,11 +132,14 @@ describe('a task that comes after others', () => {
     expect(await reason(submit(ctx, tess.id, tests.id, code))).toBe('task_invalid');
   });
 
-  it('comes only after tasks of its own turn that are not cancelled, and never after itself', async () => {
+  it('comes after work of any turn that started, but not after cancelled work, work of a turn yet to start, or itself', async () => {
     const { ctx, db, companyId, dev, head, bruno, tess, member } = await company();
-    const [old] = await db.insert(turns).values({ companyId, number: 1, goal: 'Old', status: 'closed', closedAt: new Date() }).returning();
+    const [old] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 1, goal: 'Old', status: 'closed', closedAt: new Date() }).returning();
     const [earlier] = await db.insert(tasks).values({ companyId, number: 90, turnId: old!.id, departmentId: dev.id, title: 'Old work', status: 'done', closedAt: new Date() }).returning();
-    expect(await reason(member('End-to-end tests', tess.id, [earlier!.id]))).toBe('task_invalid');
+    expect(await reason(member('Release notes', tess.id, [earlier!.id]))).toBe('ok');
+    const [next] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 18, goal: 'Next', status: 'planned' }).returning();
+    const [later] = await db.insert(tasks).values({ companyId, number: 990, turnId: next!.id, departmentId: dev.id, title: 'Later work', status: 'planned' }).returning();
+    expect(await reason(member('End-to-end tests', tess.id, [later!.id]))).toBe('task_invalid');
     const api = (await member('Checkout API', bruno.id)).task;
     await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, api.id));
     expect(await reason(member('End-to-end tests', tess.id, [api.id]))).toBe('task_invalid');
@@ -366,20 +369,20 @@ describe('a task that comes after others', () => {
 });
 
 describe('what a task comes after, as each one sees it', () => {
-  it('is refused to a person for a task the person cannot reach, and left out of a task the person reads', async () => {
-    const { app, ctx, owner, ceo, dev, head, outside } = await company();
+  it("is any task of the company to a person, as everyone sees the company's work, and shows in a task the person reads", async () => {
+    const { app, owner, dev, outside } = await company();
     const deal = await outside();
     const dana = await invitePerson(app, owner, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev.id] } });
-    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number], independentNone: NONE }, ...as(dana) });
-    expect(refused.statusCode).toBe(400);
-    expect(refused.json().error.message).toBe(`There is no task #${deal.number} to come after.`);
-    await ownPlan(ctx.db, 'dana@acme.com', head.id);
-    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [deal.id] })).task;
+    const made = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number], independentNone: NONE }, ...as(dana) });
+    expect(made.statusCode).toBe(201);
+    const launch = made.json().task as { id: string };
+    const unknown = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [999], independentNone: NONE }, ...as(dana) });
+    expect(unknown.json().error.message).toBe('There is no task #999 to come after.');
     const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
-    expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });
+    expect(await read(dana)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
     expect(await read(owner)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
     const listed = (session: typeof owner) => app.inject({ url: `/api/tasks?department=${dev.id}`, ...as(session) }).then(r => r.json().tasks.find((t: { id: string }) => t.id === launch.id));
-    expect(await listed(dana)).toMatchObject({ waitsFor: [] });
+    expect(await listed(dana)).toMatchObject({ waitsFor: [deal.number] });
     expect(await listed(owner)).toMatchObject({ waitsFor: [deal.number] });
   });
 

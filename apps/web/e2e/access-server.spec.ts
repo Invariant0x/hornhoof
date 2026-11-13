@@ -136,19 +136,20 @@ async function openAgent(page: Page, name: string) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [375, 1440]) {
-      test(`real server hides closed URLs and their payload: ${lang} ${theme} ${width}`, async ({ browser, server }, info) => {
+      test(`real server opens the company's work to everyone, with no refusal: ${lang} ${theme} ${width}`, async ({ browser, server }, info) => {
         try {
           const page = await signedIn(browser, server, 'ann', lang, theme, width);
           const heading = lang === 'en' ? 'Insufficient permissions' : 'Недостаточно прав';
           await page.goto(`/tasks/${server.hiddenTask.id}`);
-          await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-          await expect(page.locator('body')).not.toContainText('Hidden work');
-          await page.screenshot({ path: info.outputPath(`real-closed-task-${lang}-${theme}-${width}.png`) });
+          await expect(page.locator('body')).toContainText('Hidden work');
+          await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
+          await page.screenshot({ path: info.outputPath(`real-open-task-${lang}-${theme}-${width}.png`) });
           await page.goto(`/departments/${server.sales.id}`);
-          await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-          await expect(page.locator('body')).not.toContainText('Awa');
+          await expect(page.locator('.dcanvas')).toContainText('Awa');
+          await expect(page.getByRole('heading', { name: heading })).toHaveCount(0);
           await page.goto(`/agents/${server.crew.other.id}`);
           await expect(page.locator('body')).not.toContainText('Otto');
+          await expect(page.getByRole('complementary')).toHaveCount(0);
           expect(errorsOf(page)).toEqual([]);
         } finally {
           await server.closePages();
@@ -158,23 +159,24 @@ for (const lang of ['en', 'ru'] as const) {
   }
 }
 
-test('real server applies both plan and department to map, schema, tree and lists', async ({ browser, server }) => {
+test('real server shows everyone the whole department and its work, and opens only the agents of the person', async ({ browser, server }) => {
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     await ann.goto('/');
+    /* Each department's card says what it works on now, its newest open task: Own work in Development, Away work in Sales. */
     await expect(ann.locator('.map')).toContainText('Own work');
-    await expect(ann.locator('.map')).not.toContainText('Hidden work');
-    await expect(ann.locator('.map')).not.toContainText('Away work');
+    await expect(ann.locator('.map')).toContainText('Away work');
     await ann.getByRole('button', { name: /^Development/ }).click();
-    await expect(ann.locator('.dcanvas .dept-chip')).toHaveCount(1);
-    await expect(ann.locator('.dcanvas')).toContainText('Mina');
-    for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);
+    for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).toContainText(name);
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
-    await expect(ann.locator('.tv-labs .dept-chip')).toHaveCount(1);
-    await expect(ann.locator('.tv-in')).not.toContainText('Hidden work');
+    for (const name of ['Mina', 'Otto']) await expect(ann.locator('.tv-labs')).toContainText(name);
+    await expect(ann.locator('.tv-in')).toContainText('Hidden work');
     await ann.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
     await expect(ann.locator('.tasks')).toContainText('Own work');
-    await expect(ann.locator('.tasks')).not.toContainText('Hidden work');
+    await expect(ann.locator('.tasks')).toContainText('Hidden work');
+    const closed = await openAgent(ann, 'Otto');
+    await expect(ann.getByText('Otto: everyone sees the work, and only the people of this department open the window.').first()).toBeVisible();
+    await expect(closed).toHaveCount(0);
     const window = await openAgent(ann, 'Mina');
     await expect(window).toBeVisible();
     expect(errorsOf(ann)).toEqual([]);

@@ -1,9 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
-import { themeBoot } from './theme-boot.config.js';
+import { skinsBoot } from './skins-boot.config.js';
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), ...themeBoot()],
+  plugins: [react(), ...skinsBoot()],
   /* ws: the agent terminal is a WebSocket under /api too. */
   server: {
     proxy: { '/api': { target: 'http://localhost:8080', ws: true } },

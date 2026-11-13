@@ -54,6 +54,13 @@ describe('orchestratorStatus', () => {
     expect(orchestratorStatus(en, SUBS[3]!, '14:30')).toBe('Waiting for the limit to reset at 14:30');
     expect(orchestratorStatus(en, { ...claude, online: false }, '14:30')).toBe("Ivan's machine is offline");
   });
+
+  it('says he has a plan to a person who is not shown which one, and still when its limit resets', () => {
+    expect(orchestratorStatus(en, null, null, true)).toBe('Has a subscription to work on');
+    expect(orchestratorStatus(ru, null, null, true)).toBe('Подписка для работы есть');
+    expect(orchestratorStatus(en, null, '14:30', true)).toBe('Waiting for the limit to reset at 14:30');
+    expect(orchestratorStatus(en, null, null, false)).toBe('Needs a subscription to start');
+  });
 });
 
 describe('Map', () => {
@@ -68,6 +75,38 @@ describe('Map', () => {
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
+  });
+
+  it('does not tell a person of part of the company that the orchestrator needs a plan when his plan is only hidden from them', async () => {
+    const listed = { ...ME, person: { ...ME.person, id: 'p3', scopeKind: 'listed' as const, isOwner: false } };
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null, machine: null, opens: false, planned: true } }] });
+    const { container } = render(<MapScreen {...PROPS} me={listed} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorHas a subscription to work on');
+    expect(container.querySelector('.ticker')).not.toHaveTextContent('Needs a subscription to start');
+  });
+
+  it("lights the orchestrator's dot alike for everyone while his program works, from what everyone is shown", async () => {
+    const listed = { ...ME, person: { ...ME.person, id: 'p3', scopeKind: 'listed' as const, isOwner: false } };
+    const hidden = { subscription: null, machine: null, opens: false, planned: true };
+    const now = Date.now();
+    const thinking = { state: 'thinking' as const, since: now, tool: null, screenAt: now, signAt: null, retry: null, reportedAt: now };
+    const cases = [
+      [null, null, false],
+      [thinking, null, true],
+      [{ ...thinking, state: 'asking' as const }, null, true],
+      [{ ...thinking, state: 'gone' as const }, null, false],
+      [thinking, { reason: 'program_stalled' as const, since: now }, false],
+    ] as const;
+    for (const [program, alarm, works] of cases) {
+      for (const [me, shown] of [[ME, {}], [listed, hidden]] as const) {
+        mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, planned: true, ...shown, program, alarm } }] });
+        const { container, unmount } = render(<MapScreen {...PROPS} me={me} />);
+        await screen.findByText('Ivan');
+        expect([me.person.id, program?.state ?? null, alarm?.reason ?? null, container.querySelector('.ticker .live')!.classList.contains('off')]).toEqual([me.person.id, program?.state ?? null, alarm?.reason ?? null, !works]);
+        unmount();
+      }
+    }
   });
 
   it("shows how full the orchestrator's context is in the line at the bottom, and follows it live", async () => {
@@ -463,6 +502,146 @@ describe('Map', () => {
     expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
     fireEvent.keyDown(grip, { key: 'ArrowLeft', shiftKey: true });
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not save where you moved it. Move it again to try once more.');
+  });
+
+  it('puts a bend where a click on a line lands, keeps it, and puts none where the hand drags the map', async () => {
+    const calls = mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'PATCH /api/map/layout': (b: unknown) => [200, b] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const trace = () => container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d');
+    const before = trace();
+    const line = container.querySelector<SVGPathElement>('.wires .hit[data-line="dept:d1"]')!;
+    expect(line).toHaveTextContent('Click to put a bend in this line');
+    fireEvent.pointerDown(line, { clientX: 519, clientY: 260, pointerId: 1, button: 0 });
+    fireEvent.pointerUp(line, { clientX: 519, clientY: 260, pointerId: 1 });
+    fireEvent.click(line, { clientX: 519, clientY: 260 });
+    /* The bend sits on the line, which runs on as it did, with a dot like the one where a trace turns. */
+    const bend = screen.getByRole('button', { name: 'Bend in the line: Orchestrator and Marketing. Drag it or use the arrow keys to move it, click it to remove it' });
+    expect([parseFloat(bend.style.left), parseFloat(bend.style.top)]).toEqual([516, 260]);
+    expect(trace()).toBe(before);
+    expect([...container.querySelectorAll('.wires .via')].map(c => `${c.getAttribute('cx')}:${c.getAttribute('cy')}`)).toContain('516:260');
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[516, 260]] } } }));
+    expect(screen.getByRole('button', { name: 'Put back as it was' })).toBeInTheDocument();
+    /* A drag that starts on a line moves the map and puts nothing. */
+    const world = container.querySelector<HTMLElement>('.world')!, view = world.style.transform;
+    fireEvent.pointerDown(line, { clientX: 516, clientY: 330, pointerId: 2, button: 0 });
+    fireEvent.pointerMove(line, { clientX: 546, clientY: 330, pointerId: 2 });
+    fireEvent.pointerUp(line, { clientX: 546, clientY: 330, pointerId: 2 });
+    fireEvent.click(line, { clientX: 546, clientY: 330 });
+    expect(world.style.transform).not.toBe(view);
+    expect(screen.getAllByRole('button', { name: /^Bend in the line/ })).toHaveLength(1);
+    expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('moves a bend by hand and by the arrow keys, the line and its messages running through it at right angles', async () => {
+    const stream = fakeStream();
+    const calls = mockApi({
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'GET /api/map/layout': [200, { blocks: {}, anchors: { 'dept:d1': [[516, 260]] } }],
+      'PATCH /api/map/layout': (b: unknown) => [200, b],
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const trace = () => container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d');
+    const view = container.querySelector<HTMLElement>('.world')!.style.transform;
+    const bend = await screen.findByRole('button', { name: /^Bend in the line: Orchestrator and Marketing/ });
+    fireEvent.pointerDown(bend, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(bend, { clientX: 80, clientY: 120, pointerId: 1 });
+    fireEvent.pointerMove(bend, { clientX: 64, clientY: 140, pointerId: 1 });
+    /* The line follows the hand before it lets go, and nothing is kept yet. */
+    expect(trace()).toBe('M 600 420 L 480 420 L 480 200 L 390 200');
+    expect(calls.filter(c => c.method === 'PATCH')).toEqual([]);
+    fireEvent.pointerUp(bend, { clientX: 64, clientY: 140, pointerId: 1 });
+    /* The click the browser sends as the hand lets go keeps it there. */
+    fireEvent.click(bend, { clientX: 64, clientY: 140, detail: 1 });
+    expect(bend.isConnected).toBe(true);
+    expect(container.querySelector<HTMLElement>('.world')!.style.transform).toBe(view);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[480, 300]] } } }));
+    fireEvent.keyDown(bend, { key: 'ArrowLeft' });
+    expect(trace()).toBe('M 600 420 L 470 420 L 470 200 L 390 200');
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[470, 300]] } } }));
+    stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+    expect(shots(container, 'c').map(s => s.querySelector('animateMotion')!.getAttribute('path'))).toEqual(['M 600 420 L 470 420 L 470 200 L 390 200']);
+  });
+
+  it('lines a bend up with the next stop of its line as the hand brings it near', async () => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': [200, { blocks: {}, anchors: { 'dept:d1': [[480, 300]] } }], 'PATCH /api/map/layout': (b: unknown) => [200, b] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const bend = await screen.findByRole('button', { name: /^Bend in the line: Orchestrator and Marketing/ });
+    fireEvent.pointerDown(bend, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(bend, { clientX: 100, clientY: 214, pointerId: 1 });
+    /* 6 above the hub's middle line, where the line leaves the hub, the bend comes level with it and the line runs straight out. */
+    expect(parseFloat(bend.style.top)).toBe(420);
+    expect(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d')).toBe('M 600 420 L 480 420 L 480 200 L 390 200');
+  });
+
+  it('tells the lines how far the map is zoomed, so a line takes a click as wide on the screen at any zoom', async () => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(container.querySelector<HTMLElement>('.world')!.style.transform)![1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    await waitFor(() => expect(scale()).toBeLessThan(1));
+    expect(Number(container.querySelector<SVGElement>('.wires')!.style.getPropertyValue('--k'))).toBe(scale());
+  });
+
+  it('takes a bend away with a press that does not move it, or from the keyboard, and the line runs its own way again', async () => {
+    const calls = mockApi({
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'GET /api/map/layout': [200, { blocks: {}, anchors: { 'dept:d1': [[480, 300]], 'dept:d2': [[720, 300], [760, 200]] } }],
+      'PATCH /api/map/layout': (b: unknown) => [200, b],
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const trace = (id: string) => container.querySelector(`.wires [data-wire="${id}"]`)!.getAttribute('d');
+    const home = deptLayout(2).map(s => `M ${s.path.map(p => p.join(' ')).join(' L ')}`);
+    const bend = await screen.findByRole('button', { name: /^Bend in the line: Orchestrator and Marketing/ });
+    fireEvent.pointerDown(bend, { clientX: 100, clientY: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(bend, { clientX: 101, clientY: 101, pointerId: 1 });
+    fireEvent.pointerUp(bend, { clientX: 101, clientY: 101, pointerId: 1 });
+    /* It goes with the click that follows, which a finger's tap sends to what is under it then: the bend, not the line. */
+    expect(bend.isConnected).toBe(true);
+    fireEvent.click(bend, { clientX: 101, clientY: 101, detail: 1 });
+    expect(bend.isConnected).toBe(false);
+    expect(trace('d1')).toBe(home[0]);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': null } } }));
+    const development = () => screen.queryAllByRole('button', { name: /^Bend in the line: Orchestrator and Development/ });
+    expect(development()).toHaveLength(2);
+    fireEvent.keyDown(development()[1]!, { key: 'Delete' });
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d2': [[720, 300]] } } }));
+    /* Enter or Space on a bend is a click on it, also after a finger moved it, which sends no click as it lets go. */
+    fireEvent.pointerDown(development()[0]!, { clientX: 100, clientY: 100, pointerId: 2, button: 0, pointerType: 'touch' });
+    fireEvent.pointerMove(development()[0]!, { clientX: 100, clientY: 140, pointerId: 2, pointerType: 'touch' });
+    fireEvent.pointerUp(development()[0]!, { clientX: 100, clientY: 140, pointerId: 2, pointerType: 'touch' });
+    fireEvent.keyDown(development()[0]!, { key: 'Enter' });
+    fireEvent.click(development()[0]!);
+    expect(development()).toEqual([]);
+    expect(trace('d2')).toBe(home[1]);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d2': null } } }));
+  });
+
+  it('puts the bends back with the blocks', async () => {
+    const calls = mockApi({
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'GET /api/map/layout': [200, { blocks: {}, anchors: { 'dept:d1': [[480, 300]] } }],
+      'DELETE /api/map/layout': [204, undefined],
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByRole('button', { name: /^Bend in the line/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Put back as it was' }));
+    expect(screen.queryByRole('button', { name: /^Bend in the line/ })).toBeNull();
+    expect(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d')).toBe(`M ${deptLayout(2)[0]!.path.map(p => p.join(' ')).join(' L ')}`);
+    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/api/map/layout', body: undefined }));
+  });
+
+  it("names each bend and what a line offers in the person's language", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS], 'GET /api/map/layout': [200, { blocks: {}, anchors: { 'dept:d1': [[480, 300]], people: [[600, 150]] } }] });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    expect(await screen.findByRole('button', { name: 'Изгиб линии: Оркестратор и Marketing. Перетащите его или двигайте стрелками, нажмите, чтобы убрать' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Изгиб линии: Оркестратор и Руководство компании\./ })).toBeInTheDocument();
+    expect(container.querySelector('.wires .hit[data-line="people"]')).toHaveTextContent('Нажмите, чтобы поставить изгиб на этой линии');
   });
 
   it('sends no pulses while nobody exchanges messages', async () => {
@@ -914,6 +1093,20 @@ describe('Map', () => {
     expect(hub).toHaveClass('has-tag');
     fireEvent.mouseEnter(card('Operations'));
     expect(hubTag(container)).toHaveTextContent(/^Turn 3$/);
+  });
+
+  it("shows each department's own turn on its card, and on the hub the turn of the department pointed at", async () => {
+    const org = turnOrg({ Development: [3, 17], Sales: [1, 4] });
+    org.departments[1] = { ...org.departments[1]!, turnProgress: { turnNumber: 5, done: 1, total: 4 } };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    expect(strip('Development')!.querySelector('.dt-turn')).toHaveTextContent('Turn 3');
+    expect(strip('Sales')!.querySelector('.dt-turn')).toHaveTextContent('Turn 5');
+    /* The hub holds every running turn together, a sector for each. */
+    expect(container.querySelectorAll('.hub .turn-sec')).toHaveLength(2);
+    fireEvent.mouseEnter(card('Sales'));
+    expect(hubTag(container)).toHaveTextContent(/^SAL · Turn 5$/);
   });
 
   it('gives each working department a sector of its own, lit when its card is pointed at or focused', async () => {

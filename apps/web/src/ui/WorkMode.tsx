@@ -12,7 +12,7 @@ type Props = {
   workMode?: DepartmentWorkMode;
 };
 
-/* Whether a department works in the company's turns, its tasks counted on the map, or all the time. Whoever the server lets
+/* Whether a department works in turns of its own, its tasks counted on the map, or all the time. Whoever the server lets
    change it picks one, saved as it is picked; anyone else reads it in words. */
 export function WorkMode({ departmentId, workMode }: Props) {
   const tt = useT();

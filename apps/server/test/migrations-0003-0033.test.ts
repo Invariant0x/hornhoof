@@ -94,7 +94,7 @@ describe('migration 0005', () => {
 describe('migration 0007', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
-  it('adds tasks to an older install and keeps one open turn per company', async () => {
+  it('adds tasks to an older install and keeps one open turn per department', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
@@ -105,10 +105,11 @@ describe('migration 0007', () => {
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    await db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 1, 'Payments', '00000000-0000-4000-8000-000000000002')`);
-    await expect(db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 2, 'More', '00000000-0000-4000-8000-000000000002')`)).rejects.toThrow();
+    await db.execute(sql`insert into departments (id, company_id, role_code) values ('00000000-0000-4000-8000-000000000003', ${C}, 'DEV')`);
+    await db.execute(sql`insert into turns (company_id, department_id, number, goal, started_by) values (${C}, '00000000-0000-4000-8000-000000000003', 1, 'Payments', '00000000-0000-4000-8000-000000000002')`);
+    await expect(db.execute(sql`insert into turns (company_id, department_id, number, goal, started_by) values (${C}, '00000000-0000-4000-8000-000000000003', 2, 'More', '00000000-0000-4000-8000-000000000002')`)).rejects.toThrow();
     await db.execute(sql`update turns set status = 'closed'`);
-    await db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 2, 'More', '00000000-0000-4000-8000-000000000002')`);
+    await db.execute(sql`insert into turns (company_id, department_id, number, goal, started_by) values (${C}, '00000000-0000-4000-8000-000000000003', 2, 'More', '00000000-0000-4000-8000-000000000002')`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
     await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
     const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);

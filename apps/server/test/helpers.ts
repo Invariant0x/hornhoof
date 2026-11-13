@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance } from 'fastify';
@@ -86,10 +86,16 @@ export async function approvalAsked(app: FastifyInstance) {
 }
 
 /* Moves these agents onto a new plan of this person's own: to see an agent one must own its plan and reach its department. */
-/* Echelons exist only in a turn started in echelons, so work a test sends through them is given while this turn runs. */
+/* Echelons exist only in a turn started in echelons, so work a test sends through them is given while such a turn runs: one
+   for each top-level department of the company that runs none, numbered on in the order of the departments. Gives the
+   first. */
 export async function echelonsTurn(db: Db, companyId: string): Promise<typeof schema.turns.$inferSelect> {
   const [last] = await db.select({ number: schema.turns.number }).from(schema.turns).where(eq(schema.turns.companyId, companyId)).orderBy(desc(schema.turns.number)).limit(1);
-  return (await db.insert(schema.turns).values({ companyId, number: (last?.number ?? 0) + 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() }).returning())[0]!;
+  const running = new Set((await db.select({ id: schema.turns.departmentId }).from(schema.turns).where(and(eq(schema.turns.companyId, companyId), eq(schema.turns.status, 'open')))).map(t => t.id));
+  const tops = (await db.select().from(schema.departments).where(and(eq(schema.departments.companyId, companyId), isNull(schema.departments.parentId))).orderBy(asc(schema.departments.position), asc(schema.departments.createdAt), asc(schema.departments.id))).filter(d => !running.has(d.id));
+  if (!tops.length) throw new Error('A turn belongs to a top-level department: make one before opening a turn.');
+  const opened = await db.insert(schema.turns).values(tops.map((d, i) => ({ companyId, departmentId: d.id, number: (last?.number ?? 0) + 1 + i, goal: 'Checked work', status: 'open' as const, mode: 'echelons' as const, openedAt: new Date() }))).returning();
+  return opened.sort((a, b) => a.number - b.number)[0]!;
 }
 
 export async function ownPlan(db: Db, email: string, ...agentIds: string[]): Promise<string> {

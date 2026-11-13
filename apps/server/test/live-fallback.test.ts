@@ -18,7 +18,7 @@ describe('messages a busy program could not take live', () => {
     const first = await enqueueTurn(c.ctx, turn('Original work.'));
     if (newRound) {
       await c.db.update(jobs).set({ startedAt: new Date(Date.now() - 60_000) }).where(eq(jobs.id, first));
-      await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Continue the work.', status: 'open', openedAt: new Date() });
+      await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Continue the work.', status: 'open', openedAt: new Date() });
     }
     const texts = ['Two paragraphs.\n\nKeep working.', 'Task #226 needs an answer.', 'Here is the answer.\nUse it now.'].slice(0, count);
     const waiting: string[] = [];

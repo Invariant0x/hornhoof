@@ -55,18 +55,6 @@ function splitMembers(d: Department) {
   return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
 }
 
-/* Direct lines from the head's left edge into sub-unit and observer frames, with no stage bus or pipeline connection. */
-function addTeamLines(lines: Line[], vias: Point[], teamFrames: Frame[], hx: number) {
-  for (const [i, tf] of teamFrames.entries()) {
-    const y = HH / 2 - i * 20;
-    const end = tf.members.length ? tf.members[tf.members.length - 1]!.cy : FT + 40;
-    lines.push({ cls: 'tr', pts: [[hx - HW / 2, y], [tf.x + 10, y], [tf.x + 10, FT]], arrow: true });
-    lines.push({ cls: 'tr', pts: [[tf.x + 10, FT], [tf.x + 10, end]] });
-    for (const m of tf.members) lines.push({ cls: 'tick', pts: [[tf.x + 10, m.cy], [m.x, m.cy]] });
-    vias.push([tf.x + 10, FT]);
-  }
-}
-
 type Group = { role: DeptRole | null; key: string }[];
 
 /* Role metadata decides the pipeline, in the order of the development stages: design, ordinary work, each check in its order,
@@ -91,7 +79,7 @@ function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[])
 /* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
 export const leadsStage = (e: Employee): boolean => Boolean(e.task && isStaged(e.task.echelons.resultKind) && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
 
-/* Observers sit beside the pipeline and connect directly to the head, like sub-unit frames. */
+/* Observers sit beside the pipeline, like sub-unit frames, and hang on the head's bus as every frame does. */
 function observerFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {
   return [...known.values()].filter(r => r.schema === 'observer').map((role, i) => {
     const x = startX + i * (FW + GS);
@@ -139,11 +127,11 @@ export function schemaLayout(d: Department, people: number): Schema {
   const frames = [...teamFrames, ...observers, ...stageFrames];
   const w = ends.length ? ends[ends.length - 1]! : outsideEnd;
   const h = FT + Math.max(0, ...frames.map(f => f.h));
-  const hx = Math.max(outsideEnd + HW / 2, w / 2);
+  /* Over the middle of all the frames, sub-units and observers included; a narrow department keeps the head whole. */
+  const hx = Math.max(HW / 2, w / 2);
 
   const lines: Line[] = [];
   const vias: Point[] = [];
-  addTeamLines(lines, vias, [...teamFrames, ...observers], hx);
   /* Between stages, a dotted divider; on the pipeline, a numbered diamond before every check. */
   const gates: Schema['gates'] = [];
   for (let k = 1; k < stages.length; k++) {
@@ -151,11 +139,12 @@ export function schemaLayout(d: Department, people: number): Schema {
     lines.push({ cls: 'gate', pts: [[sx, RY + 16], [sx, h]] });
     if (k >= firstCheck) gates.push({ x: sx, n: gates.length + 1 });
   }
-  /* The head leads every stage frame: down to the bus, along it, and down each frame's spine to its chips. */
-  if (stageFrames.length) {
+  /* The head leads every frame, a sub-unit's and an observer's too: down to the bus, along it, and down each frame's spine
+     to its chips. */
+  if (frames.length) {
     lines.push({ cls: 'tr', pts: [[hx, HH], [hx, BUS]] });
-    lines.push({ cls: 'tr', pts: [[Math.min(hx, stageFrames[0]!.x + 10), BUS], [Math.max(hx, stageFrames[stageFrames.length - 1]!.x + 10), BUS]] });
-    for (const f of stageFrames) {
+    lines.push({ cls: 'tr', pts: [[Math.min(hx, frames[0]!.x + 10), BUS], [Math.max(hx, frames[frames.length - 1]!.x + 10), BUS]] });
+    for (const f of frames) {
       const end = f.members.length ? f.members[f.members.length - 1]!.cy : FT + 40;
       lines.push({ cls: 'tr', pts: [[f.x + 10, BUS], [f.x + 10, end]] });
       for (const m of f.members) lines.push({ cls: 'tick', pts: [[f.x + 10, m.cy], [m.x, m.cy]] });
@@ -178,13 +167,16 @@ export function schemaLayout(d: Department, people: number): Schema {
     for (const f of b) lines.push({ cls: 'pl', pts: [[inX(f), CY], [inX(f), FT]], arrow: true });
   }
 
-  /* The report: from the last stage frame up and over into the head, or straight up when the head sits above it. */
+  /* The report: from the last stage frame up and over into the head, or straight up when the head sits above it. Over, it
+     comes into the head's right edge under the last person's chip there, or under the head when the chips reach below it. */
   let report: Schema['report'] = null;
   const last = stageFrames[stageFrames.length - 1];
   if (head && last) {
-    const ox = outX(last);
-    const pts: Point[] = ox <= hx + HW / 2 ? [[ox, FT], [ox, HH]] : [[ox, FT], [ox, REP], [hx + HW / 2, REP]];
-    report = { pts, label: pts.length === 3 ? [(ox + hx + HW / 2) / 2, REP] : [ox, (FT + HH) / 2] };
+    const ox = outX(last), edge = hx + HW / 2;
+    const ry = REP + Math.max(0, people - 1) * PEOPLE_STEP, under = (HH + BUS) / 2;
+    if (ox <= edge) report = { pts: [[ox, FT], [ox, HH]], label: [ox, (FT + HH) / 2] };
+    else if (ry < HH) report = { pts: [[ox, FT], [ox, ry], [edge, ry]], label: [(ox + edge) / 2, ry] };
+    else report = { pts: [[ox, FT], [ox, under], [edge - 30, under], [edge - 30, HH]], label: [ox, (FT + under) / 2] };
   }
 
   const peopleAt: Point[] = Array.from({ length: people }, (_, k) => [px, PEOPLE_Y + k * PEOPLE_STEP]);
@@ -194,13 +186,10 @@ export function schemaLayout(d: Department, people: number): Schema {
 
 type Spot = { f: Frame; m: Placed };
 
+/* From the head down to the bus, along it to the frame's spine and down that to the employee, in any frame. */
 function memberDown(s: Schema, at: Spot | null): Point[] | null {
   if (!at) return null;
   const sx = at.f.x + 10;
-  if (at.f.stage < 0) {
-    const y = HH / 2 - s.frames.filter(f => f.stage < 0).indexOf(at.f) * 20;
-    return [[s.hx - HW / 2 + 14, y], [sx, y], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
-  }
   return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
 }
 

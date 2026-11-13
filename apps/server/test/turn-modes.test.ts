@@ -37,7 +37,7 @@ describe('a turn runs in the mode it was started in', () => {
     expect(await modes(c)).toEqual([[1, 'turnkey', 'open']]);
   });
 
-  it('changes the mode only while the turn is planned, by the orchestrator or a person', async () => {
+  it('changes the mode only while the turn is planned, by the orchestrator, a person with the whole company or the owner of its department', async () => {
     const c = await withTurnkeyTeam();
     const boss = await c.tools(c.orchestrator);
     await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', mode: 'echelons', tasks: [work(c.dev.id, 'Checkout')] });
@@ -49,8 +49,11 @@ describe('a turn runs in the mode it was started in', () => {
     expect(text(fixed)).toMatch(/started/);
 
     const patch = (number: number, mode: string, token = c.ceoToken) => c.app.inject({ method: 'PATCH', url: `/api/turns/${number}`, payload: { mode }, headers: { cookie: `hh_session=${token}` } });
+    /* A person listed for the whole of a department owns it; one of another department does not. */
     const dora = await invitePerson(c.app, c.ceoToken, { name: 'Dora', email: 'dora@acme.com', access: { departments: [c.dev.id] } });
-    expect((await patch(2, 'echelons', dora)).statusCode).toBe(403);
+    const sam = await invitePerson(c.app, c.ceoToken, { name: 'Sam', email: 'sam@acme.com', access: { departments: [c.sales.id] } });
+    expect((await patch(2, 'echelons', sam)).statusCode).toBe(403);
+    expect((await patch(2, 'echelons', dora)).statusCode).toBe(200);
     expect((await patch(2, 'echelons')).statusCode).toBe(200);
     const refused = await patch(1, 'turnkey');
     expect(refused.statusCode).toBe(409);

@@ -174,10 +174,12 @@ async function comparedOf(db: Reader, turn: Turn | null | undefined): Promise<{ 
   return { view: turnView(turn, kept.source), facts: kept.facts };
 }
 
-async function readReport(db: Reader, companyId: string, number: number | undefined): Promise<Read> {
+/* A turn is compared with the turns of its own department, the one it belongs to. With no number, the department's running
+   turn is read, else its last that ran; with no department either, the earliest running turn, else the last that ran. */
+async function readReport(db: Reader, companyId: string, number: number | undefined, departmentId?: string): Promise<Read> {
   const rows = await db.select().from(turns).where(eq(turns.companyId, companyId)).orderBy(asc(turns.number));
-  const turn = pickTurn(rows, number);
-  const running = rows.filter(ran);
+  const turn = pickTurn(departmentId && number === undefined ? rows.filter(t => t.departmentId === departmentId) : rows, number);
+  const running = rows.filter(t => ran(t) && t.departmentId === turn.departmentId);
   const now = await liveOrKept(db, turn);
   const previous = await comparedOf(db, running.filter(t => t.number < turn.number).at(-1));
   const baseline = await comparedOf(db, baselineOf(running, turn));
@@ -221,9 +223,10 @@ async function aboutOf(db: Reader, companyId: string): Promise<Map<string, strin
   return new Map(rows.map(d => [d.id, d.about]));
 }
 
-/* The report of a turn for the whole company, by default the open one or else the last that ran. */
-export async function pipelineReport(db: Reader, companyId: string, number?: number): Promise<PipelineReport> {
-  const read = await readReport(db, companyId, number);
+/* The report of a turn with all its departments' parts, by default a running one or else the last that ran, of the
+   department named. */
+export async function pipelineReport(db: Reader, companyId: string, number?: number, departmentId?: string): Promise<PipelineReport> {
+  const read = await readReport(db, companyId, number, departmentId);
   const bugs = await earliestBugs(db, companyId, read);
   const about = await aboutOf(db, companyId);
   return {
@@ -235,7 +238,7 @@ export async function pipelineReport(db: Reader, companyId: string, number?: num
 
 /* What one department's screen reads: only that department's numbers. */
 export async function departmentPipeline(db: Reader, companyId: string, departmentId: string, number?: number): Promise<DepartmentPipeline> {
-  const read = await readReport(db, companyId, number);
+  const read = await readReport(db, companyId, number, departmentId);
   const facts = read.now.departments.find(d => d.department.id === departmentId);
   if (!facts) return { ...read.head, department: null };
   return { ...read.head, department: departmentReport(facts, read, await earliestBugs(db, companyId, read), await aboutOf(db, companyId)) };

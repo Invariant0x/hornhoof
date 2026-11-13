@@ -36,12 +36,11 @@ async function fixture() {
 }
 
 describe('employee assignment authority', () => {
-  it('lets a head change only the assignment of its own worker and records the change', async () => {
+  it('lets a head change the assignment of its own worker on its own and records the change', async () => {
     const { db, head, worker, connect } = await fixture();
     const client = await connect(head.id);
     const names = (await client.listTools()).tools.map(t => t.name);
     expect(names).toContain('set_employee_assignment');
-    expect(names).not.toContain('change_employee');
     const assignment = 'Close named orders end to end.\nKeep explicit deadlines.';
     const result = await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment } });
     expect(result.isError).toBeFalsy();

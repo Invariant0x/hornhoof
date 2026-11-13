@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
-import { appendEvent } from '../src/modules/events/store.js';
+import { appendEvent, publishEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -45,6 +45,21 @@ describe('GET /api/stream', () => {
     const hidden = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]';
     expect(event.data).toEqual({ text: `Run: ${hidden}`, nested: [{ line: hidden }] });
     expect(JSON.stringify((await db.select({ data: agentEvents.data }).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
+  });
+
+  it("keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream", async () => {
+    const { app, db, ceo, orchestrator, companyId } = await company();
+    const stream = await openStream(app, ceo);
+    const whole = 'Max: the whole private conversation';
+    const [row] = await db.insert(agentEvents).values({ companyId, agentId: orchestrator.id, kind: 'message', data: { text: 'Hi', _fresh: whole } }).returning();
+    await publishEvent(app.ctx, companyId, orchestrator.id, row!.id);
+    await until(() => stream.messages.some(m => m.type === 'agent_event'));
+    expect(stream.messages.find(m => m.type === 'agent_event')).toMatchObject({ event: { seq: row!.seq, kind: 'message', data: { text: 'Hi' } } });
+    const shown = (await app.inject({ url: `/api/agents/${orchestrator.id}/events`, ...as(ceo) })).json().events as { seq: number; data: unknown }[];
+    expect(shown.find(e => e.seq === row!.seq)?.data).toEqual({ text: 'Hi' });
+    expect(JSON.stringify(shown)).not.toContain(whole);
+    expect(JSON.stringify(stream.messages)).not.toContain(whole);
+    stream.close();
   });
 
   it('keeps the conversation from a department head but tells them the org changed', async () => {

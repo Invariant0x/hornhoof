@@ -33,8 +33,9 @@ An assistant may have an agent of its own in Hornhoof that thinks for it. A prog
 * Only the owner picks the plan the agent thinks on, on the assistant's card in People, and only one of the owner's own personal plans. The first plan picked makes the agent; another plan moves it there. With "No plan" it stays without one and cannot answer.
 * Only the owner sees the agent and writes to it, in its window or through the assistant. Nobody else does, the CEO included, and the orchestrator does not change it. It is not an employee: it has no department or role, takes no tasks and is not counted on the map.
 * Its card in Hornhoof cannot be edited, reset or removed (`409 assistant_agent_card`). Its plan changes on the assistant's card.
-* It reads a message exactly as the program sends it, with nothing added. So each message carries all the agent needs: the persona, the facts about the owner and the words to answer. It keeps its conversation from one message to the next.
+* It reads a message exactly as the program sends it, with nothing added. It keeps its conversation from one message to the next, so `text` need carry only the new words. With each message the program may also send `freshText`, its whole conversation: the persona, the facts about the owner and everything said so far. The agent reads `freshText` in place of `text` only when its turn starts a new session, for example its first turn, after it moved to another plan or machine, or after its owner cleared its conversation in its window; otherwise Hornhoof leaves it aside. A machine whose Hornhoof node is older than the server does not tell a cleared conversation, and its agent reads `text` then. Its window shows `text`.
 * Its answer is the text for the owner, in the `reply` and `reply_end` events of the message, as for any agent.
+* Its owner may also write to it in its window, and its answer to that stays in the window. When the owner asks there to be written to in their chat, the agent sends those words with the tool `tell_owner` (`text`, 1 to 50000 characters): Hornhoof keeps each call's words as one `reply` with `messageId` `null` and no `reply_end`, and wakes the program as for any event. The program shows these words to the owner, and never sends them back as a turn.
 * In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. It asks the program for the program's own skills with `persona_call`: see "Skills".
 
 ## Calls
@@ -89,10 +90,12 @@ Who the assistant is, whom it acts for, and what that person is in the company n
     "responsibleFor": [{ "id": "…", "name": "Development" }],
     "telegram": { "username": "olga_k", "id": 5550001 }
   },
-  "company": { "name": "Acme" }
+  "company": { "name": "Acme" },
+  "contract": 2
 }
 ```
 
+* `contract` is the version of this API the server keeps. 2 takes `freshText` and up to 50000 characters of `text` in a message. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
@@ -119,11 +122,13 @@ The agents the assistant may write to now, in the order they were hired.
 Writes to an agent for the owner, as the owner would in the agent's window.
 
 ```json
-{ "agentId": "…", "text": "How are the leads this week?" }
+{ "agentId": "…", "text": "How are the leads this week?", "freshText": "…" }
 ```
 
 * `agentId`: the agent to write to. Without it, the message goes to the assistant's own agent; while there is none, the call answers `409 agent_not_ready`.
-* `text`: 1 to 20000 characters after spaces at both ends are trimmed. No other field is allowed.
+* `text`: 1 to 50000 characters after spaces at both ends are trimmed.
+* `freshText`, optional: 1 to 200000 characters after the same trimming. The whole conversation for the assistant's own agent, which reads it instead of `text` when its turn starts a new session: see "The assistant's own agent". Hornhoof leaves it aside for any other agent. No other field is allowed.
+* Characters are counted as JavaScript counts a string's length, in UTF-16 code units. Hornhoof never cuts a text: a longer one answers `400`. The whole body may be up to 2 MiB, so both texts fit even when every letter is written as a `\uXXXX` escape; a bigger body answers `413`.
 * Answers `202` with the message's id. The agent's answer comes later, as events with that id.
 
 ```json
@@ -163,6 +168,8 @@ The kinds of event and their `data`:
 | `reply_end` | `{ messageId, agent: { id, name, kind }, answered, failed }` | The answer to the message is over. `answered` is false when the agent said nothing; `failed` is true when its turn failed. |
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
+
+`messageId` is `null` in a `reply` only when it holds words the assistant's own agent (`data.agent.id` is the `agentId` of `GET /api/assistant/me`) sends its owner on its own, with `tell_owner`, and answers no message of the program. No `reply_end` follows it. Show every such reply to the owner as it is, and never send it back to the agent as a message.
 
 #### When the answer to a message is over
 
@@ -240,7 +247,7 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 | --- | --- | --- |
 | `who_am_i` | none | `GET /api/assistant/me` |
 | `list_agents` | none | `GET /api/assistant/agents` |
-| `send_message` | `agentId`, `text` | `POST /api/assistant/messages` |
+| `send_message` | `agentId`, `text`, `freshText` optional | `POST /api/assistant/messages` |
 | `read_events` | `after`, `wait`, both optional | `GET /api/assistant/events` |
 | `list_requests` | none | `GET /api/assistant/requests` |
 | `answer_request` | `requestId`, and `answer`, `pick`, `approve` or `retry` as in the call's body | `POST /api/assistant/requests/:id/answer` |
@@ -249,7 +256,7 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 * `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
 * A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
 * `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
-* The assistant's own agent has these tools inside Hornhoof, with one more, `persona_call` (`name`, `arguments`): see "Skills". The address `/api/assistant/mcp` does not offer it.
+* The assistant's own agent has these tools inside Hornhoof, with two more: `persona_call` (`name`, `arguments`), see "Skills", and `tell_owner` (`text`), see "The assistant's own agent". The address `/api/assistant/mcp` offers neither.
 
 ## Skills
 
@@ -414,7 +421,9 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 
 | What | Limit |
 | --- | --- |
-| Message text | 1 to 20000 characters |
+| Message text | 1 to 50000 characters |
+| A message's `freshText` | up to 200000 characters |
+| A message's body | 2 MiB |
 | Long poll wait | 0 to 50 seconds |
 | Events in one answer | 100 |
 | Events kept | 30 days |

@@ -13,11 +13,12 @@ async function lastSeq(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<number> {
 }
 
 /* The assistant's words to an agent, as its owner's, through the same way a person's words from the window go. What the
-   agent says from that message on, in the turn it went into, is collected for the assistant. Returns the message's id. */
-export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: string): Promise<string> {
+   agent says from that message on, in the turn it went into, is collected for the assistant. fresh: the program's whole
+   conversation, for its own agent. Returns the message's id. */
+export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: string, fresh?: string): Promise<string> {
   const messageId = randomUUID();
   const before = await lastSeq(ctx, agent.id);
-  const jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], assistant: { message: messageId, own: agent.kind === 'assistant' } });
+  const jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], assistant: { message: messageId, own: agent.kind === 'assistant', ...(fresh ? { fresh } : {}) } });
   const [said] = await ctx.db
     .select({ seq: agentEvents.seq })
     .from(agentEvents)

@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agents, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, assistantEvents, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
@@ -56,7 +56,7 @@ const ownAgent = async (c: Company, assistantId: string) => {
   return row!;
 };
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; instructions: string | null; toolToken: string | null };
+type Run = { type: 'job.run'; jobId: string; prompt: string; freshPrompt?: string; sessionId: string | null; instructions: string | null; toolToken: string | null };
 
 /* The turn the node gets with these words in it, past any other. */
 async function runWith(node: FakeNode, words: string): Promise<Run> {
@@ -143,7 +143,7 @@ describe("an assistant's own agent", () => {
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
   });
 });
 
@@ -321,5 +321,180 @@ describe('persona_call', () => {
     const broken = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
     expect(broken.isError).toBe(true);
     expect(broken.content[0]!.text).toContain("The assistant's program stopped in the middle of its answer.");
+  });
+});
+
+describe('tell_owner', () => {
+  type Event = { seq: number; kind: string; data: Record<string, unknown> };
+  const said = (result: unknown) => result as { content: { text: string }[]; isError?: boolean };
+  const eventsOf = async (c: Company, key: string, after = 0): Promise<Event[]> => (await c.app.inject({ url: `/api/assistant/events?after=${after}`, ...bearer(key) })).json().events;
+
+  /* The CEO's assistant on his plan, and the turn of its own agent the CEO started in its window with these words. */
+  async function fromWindow(c: Company, words: string) {
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    expect((await pick(c, c.ceo, ava.id, c.plan)).statusCode).toBe(200);
+    await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
+    const agent = await ownAgent(c, ava.id);
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${agent.id}/messages`, payload: { text: words }, ...as(c.ceo) })).statusCode).toBe(202);
+    return { ava, agent, run: await runWith(c.node, words) };
+  }
+
+  /* The assistant's events address, which keeps every wake. */
+  async function eventsAddress() {
+    const wakes: string[] = [];
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => (body += chunk));
+      req.on('end', () => {
+        wakes.push(body);
+        res.writeHead(200).end();
+      });
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    onTestFinished(() => new Promise<void>(done => server.close(() => done())));
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hornhoof`, wakes };
+  }
+
+  it("passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program", async () => {
+    const c = await company();
+    const { ava, agent, run } = await fromWindow(c, 'Write to me in my chat: 7');
+    const address = await eventsAddress();
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { eventsUrl: address.url }, ...as(c.ceo) })).statusCode).toBe(200);
+    expect(await eventsOf(c, ava.key)).toEqual([]);
+    const waiting = c.app.inject({ url: '/api/assistant/events?after=0&wait=50', ...bearer(ava.key) });
+    const client = await mcp(c.app, run.toolToken!);
+    const result = said(await client.callTool({ name: 'tell_owner', arguments: { text: '  7  ' } }));
+    expect(result.isError).toBeFalsy();
+    const from = { id: agent.id, name: 'Ava', kind: 'assistant' };
+    const [heard] = (await waiting).json().events as Event[];
+    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, text: '7' } });
+    expect(heard!.data.agent).toMatchObject({ id: (await me(c, ava.key)).assistant.agentId });
+    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, text: '7' }]]);
+    await until(() => address.wakes.length > 0);
+    expect(JSON.parse(address.wakes[0]!)).toEqual({ type: 'wake', after: heard!.seq - 1 });
+  });
+
+  it("wakes OpenClaw's model for them at once, as words its owner waits for", async () => {
+    const c = await company();
+    const { ava, run } = await fromWindow(c, 'Write to me in my chat: done');
+    const address = await eventsAddress();
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { program: 'openclaw', eventsUrl: address.url }, ...as(c.ceo) })).statusCode).toBe(200);
+    const client = await mcp(c.app, run.toolToken!);
+    expect(said(await client.callTool({ name: 'tell_owner', arguments: { text: 'Done.' } })).isError).toBeFalsy();
+    await until(() => address.wakes.length > 0);
+    expect(JSON.parse(address.wakes[0]!)).toMatchObject({ mode: 'now' });
+  });
+
+  it('passes on no empty words, and nothing of an assistant that is switched off', async () => {
+    const c = await company();
+    const { ava, run } = await fromWindow(c, 'Write to me in my chat later');
+    const client = await mcp(c.app, run.toolToken!);
+    expect(said(await client.callTool({ name: 'tell_owner', arguments: { text: '   ' } })).isError).toBe(true);
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, ava.id));
+    const off = said(await client.callTool({ name: 'tell_owner', arguments: { text: 'Hello' } }));
+    expect(off.isError).toBe(true);
+    expect(off.content[0]!.text).toContain('assistant_not_allowed');
+    expect(await c.db.select().from(assistantEvents).where(eq(assistantEvents.assistantId, ava.id))).toEqual([]);
+  });
+});
+
+describe('freshText', () => {
+  /* The CEO's assistant on his plan, its own agent ready to answer. */
+  async function ready(c: Company) {
+    const ava = await assistantOf(c, c.ceo, c.owner.id);
+    expect((await pick(c, c.ceo, ava.id, c.plan)).statusCode).toBe(200);
+    await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
+    return { ava, agent: await ownAgent(c, ava.id) };
+  }
+  /* The node ends the turn, in this session. */
+  const finish = (c: Company, run: Run, sessionId: string | null) => {
+    c.node.send({ type: 'job.started', jobId: run.jobId });
+    c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: '', tail: '', error: null });
+  };
+  const idle = (c: Company, agentId: string) => until(async () => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agentId))).every(j => j.status === 'done'));
+
+  it('takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused', async () => {
+    const c = await company();
+    const { ava } = await ready(c);
+    expect((await write(c, ava.key, { text: ` ${'a'.repeat(50_000)} ` })).statusCode).toBe(202);
+    const long = await write(c, ava.key, { text: 'a'.repeat(50_001) });
+    expect(long.statusCode).toBe(400);
+    expect((await write(c, ava.key, { text: 'Hi', freshText: ` ${'f'.repeat(200_000)} ` })).statusCode).toBe(202);
+    expect((await write(c, ava.key, { text: 'Hi', freshText: 'f'.repeat(200_001) })).statusCode).toBe(400);
+  });
+
+  it('takes a body near 2 MiB, as a program that escapes every letter in its JSON sends it, and refuses a bigger one', async () => {
+    const c = await company();
+    const { ava } = await ready(c);
+    /* Each Cyrillic letter as \uXXXX: six bytes for one character. */
+    const escaped = (n: number) => '\\u044f'.repeat(n);
+    const body = (pad: number) => `{"text":"${escaped(50_000)}","freshText":"${escaped(200_000)}"}${' '.repeat(pad)}`;
+    const near = body(2 * 1024 * 1024 - 1_520_000);
+    expect(Buffer.byteLength(near)).toBeGreaterThan(2 * 1024 * 1024 - 50_000);
+    const sent = (payload: string) => c.app.inject({ method: 'POST', url: '/api/assistant/messages', payload, headers: { ...bearer(ava.key).headers, 'content-type': 'application/json' } });
+    expect((await sent(near)).statusCode).toBe(202);
+    expect((await sent(body(2 * 1024 * 1024))).statusCode).toBe(413);
+  });
+
+  it("goes in place of the text and of Hornhoof's catch-up when the own agent's turn starts a new session, and the window shows only the text", async () => {
+    const c = await company();
+    const { ava, agent } = await ready(c);
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${agent.id}/messages`, payload: { text: 'Earlier words in the window' }, ...as(c.ceo) })).statusCode).toBe(202);
+    finish(c, await runWith(c.node, 'Earlier words in the window'), null);
+    await idle(c, agent.id);
+    /* Without freshText a new session reads Hornhoof's catch-up of the conversation before the words. */
+    expect((await write(c, ava.key, { text: 'Words with no frame' })).statusCode).toBe(202);
+    const caught = await runWith(c.node, 'Words with no frame');
+    expect(caught.sessionId).toBeNull();
+    expect(caught.prompt).toContain('Earlier words in the window');
+    finish(c, caught, null);
+    await idle(c, agent.id);
+    expect((await write(c, ava.key, { text: 'New words', freshText: 'The frame and the whole conversation' })).statusCode).toBe(202);
+    const run = await runWith(c.node, 'The frame and the whole conversation');
+    expect(run.sessionId).toBeNull();
+    expect(run.prompt).toBe('The frame and the whole conversation');
+    expect(run.freshPrompt).toBeUndefined();
+    expect(run.prompt).not.toContain('Earlier words in the window');
+    const shown = (await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.ceo) })).json().events as { kind: string; data: { text?: string } }[];
+    expect(shown.filter(e => e.kind === 'message').map(e => e.data.text)).toContain('New words');
+    expect(JSON.stringify(shown)).not.toContain('The frame and the whole conversation');
+    const kept = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.jobId, run.jobId), eq(agentEvents.kind, 'message')));
+    expect(JSON.stringify(kept)).not.toContain('The frame and the whole conversation');
+  });
+
+  it('goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew', async () => {
+    const c = await company();
+    const { ava, agent } = await ready(c);
+    expect((await write(c, ava.key, { text: 'First words', freshText: 'First frame' })).statusCode).toBe(202);
+    finish(c, await runWith(c.node, 'First frame'), 's1');
+    await idle(c, agent.id);
+    expect((await write(c, ava.key, { text: 'Second words', freshText: 'Second frame' })).statusCode).toBe(202);
+    const run = await runWith(c.node, 'Second words');
+    expect(run.sessionId).toBe('s1');
+    expect(run.prompt).toBe('Second words');
+    expect(run.freshPrompt).toBe('Second frame');
+    finish(c, run, 's1');
+    await idle(c, agent.id);
+    expect((await write(c, ava.key, { text: 'Third words' })).statusCode).toBe(202);
+    const plain = await runWith(c.node, 'Third words');
+    expect(plain).toMatchObject({ sessionId: 's1', prompt: 'Third words' });
+    expect(plain.freshPrompt).toBeUndefined();
+  });
+
+  it("is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session", async () => {
+    const c = await company();
+    const { ava } = await ready(c);
+    const [sales] = await c.db.insert(departments).values({ companyId: c.owner.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    const [wendy] = await c.db.insert(agents).values({ companyId: c.owner.companyId, subscriptionId: c.plan, model: '', kind: 'worker', name: 'Wendy', roleKey: 'SAL-SDR', departmentId: sales!.id }).returning();
+    const bo = await assistantOf(c, c.ceo, c.owner.id, 'Bo');
+    expect((await pick(c, c.ceo, bo.id, c.plan)).statusCode).toBe(200);
+    for (const [agentId, words] of [[wendy!.id, 'Find leads'], [(await ownAgent(c, bo.id)).id, 'Plan the week']] as const) {
+      expect((await write(c, ava.key, { agentId, text: words, freshText: 'A frame for my own agent' })).statusCode).toBe(202);
+      const run = await runWith(c.node, words);
+      expect(run.sessionId).toBeNull();
+      expect(run.prompt).not.toContain('A frame for my own agent');
+      expect(run.freshPrompt).toBeUndefined();
+    }
+    expect(JSON.stringify(await c.db.select({ data: agentEvents.data }).from(agentEvents))).not.toContain('A frame for my own agent');
   });
 });

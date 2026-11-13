@@ -2,20 +2,30 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
-import { sampleOf, templateText, THEMES } from '../src/theme-template';
+import { collectionText } from '../src/skins/collection';
+import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
+import type { Skin } from '../src/skins/roles';
+import { builtinFile } from '../src/skins/validate';
 import type { FeedbackShown, Improvement, InboxCard } from '../src/types';
 import { serveApi } from './api';
 
 /* The feedback window, a finding about Hornhoof itself on its card and the inbox of Hornhoof's developers, as a person
-   meets them: in each built-in theme and a custom template every block stands in the same place with the same size, text
+   meets them: in each built-in skin and one of a person's own, every block stands in the same place with the same size
+   among skins written in the same fonts, text
    stays readable and whole, controls keep their heights and nothing runs off the screen, in every shipped language, at a
    phone's width and a desktop's. What each engine measured is kept in a file, so the engines can be compared. */
 test.describe.configure({ timeout: 0 });
 
-const CHOICES = [...THEMES, 'custom'] as const;
-type Choice = (typeof CHOICES)[number];
-/* A template that changes only colours, so its layout must match the built-in themes exactly. */
-const CUSTOM = { ...sampleOf('dark'), name: 'Neon', colors: { ...sampleOf('dark').colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
+/* A skin of a person's own that changes only colours, so its layout must match Cyberpunk's exactly. */
+const SAMPLE = builtinFile(builtinSkin('cyberpunk')!, { ru: 'Сумерки', en: 'Dusk' });
+const OWN: Skin = { ...SAMPLE, colors: { ...SAMPLE.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00', scrollbar_track: '#1A0440' } };
+const CHOICES: string[] = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'];
+type Choice = string;
+/* Skins whose headings and text start with the same font lay out the same. */
+const fontsOf = (choice: Choice) => {
+  const { fonts } = builtinSkin(choice) ?? OWN;
+  return `${fonts.display[0]} ${fonts.body[0]}`;
+};
 const WIDTHS = [1440, 375];
 
 const TITLE = 'The agent terminal froze after the update and the whole department waited for an hour';
@@ -77,11 +87,11 @@ function watchProblems(page: Page): string[] {
 }
 
 async function setLook(page: Page, choice: Choice, language: Language) {
-  await page.evaluate(({ choice, custom, language }) => {
-    if (choice === 'custom') localStorage.setItem('hh-theme-custom', custom);
+  await page.evaluate(({ choice, collection, language }) => {
+    localStorage.setItem('hh-skins', collection);
     localStorage.setItem('hh-theme', choice);
     localStorage.setItem('hh-lang', language);
-  }, { choice, custom: templateText(CUSTOM), language });
+  }, { choice, collection: collectionText([{ id: 'custom-1', skin: OWN }]), language });
 }
 
 type Scene = { name: string; inbox: boolean; open: (page: Page, words: Messages) => Promise<Locator> };
@@ -242,15 +252,15 @@ test('the feedback window, a finding about Hornhoof itself and the inbox keep th
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
     for (const scene of SCENES) {
       inbox.value = scene.inbox;
-      let first: Record<string, unknown>[] | null = null;
+      const first = new Map<string, Record<string, unknown>[]>();
       for (const choice of CHOICES) {
         await setLook(page, choice, language);
         const found = await openScene(page, scene, words);
-        await expect(page.locator('html')).toHaveAttribute('data-theme', choice === 'custom' ? CUSTOM.base : choice);
+        await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
         const now = await geometry(found);
-        if (first) expect(now, `${language} ${width} ${scene.name} in ${choice}`).toEqual(first);
-        else (report.geometry as Record<string, unknown>)[`${language}-${width}-${scene.name}`] = now;
-        first ??= now;
+        const same = first.get(fontsOf(choice));
+        if (same) expect(now, `${language} ${width} ${scene.name} in ${choice}`).toEqual(same);
+        else { (report.geometry as Record<string, unknown>)[`${language}-${width}-${scene.name}-${fontsOf(choice)}`] = now; first.set(fontsOf(choice), now); }
         const lowest = await lowestContrast(found);
         (report.contrast as Record<string, unknown>)[`${language}-${width}-${scene.name}-${choice}`] = lowest;
         expect(lowest.ratio, `${language} ${width} ${scene.name} ${choice} ${lowest.what}`).toBeGreaterThanOrEqual(4.5);

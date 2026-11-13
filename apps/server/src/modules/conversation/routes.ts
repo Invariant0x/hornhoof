@@ -29,15 +29,15 @@ const MessageBody = z
    back to and the update it was. */
 export type TelegramOrigin = { bot: string; chat: number; update: number };
 /* The message of the person's assistant this is, by the id the assistant was given for it. own: to the assistant's own
-   agent, which thinks for it. */
-export type AssistantOrigin = { message: string; own?: boolean };
+   agent, which thinks for it. fresh: what that agent reads instead when its turn starts a new session. */
+export type AssistantOrigin = { message: string; own?: boolean; fresh?: string };
 
 /* The words of the person's assistant, which the agent takes as the person's own and answers in its window for the
    assistant to read. The assistant's own agent takes them as they are: its rules say what they carry. */
 function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, origin: AssistantOrigin, standing: Standing) {
   const assistant = { id: me.assistant.id, name: me.assistant.name, message: origin.message };
   const prompt = origin.own ? text : `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`;
-  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
+  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, ...(origin.own && origin.fresh ? { fresh: origin.fresh } : {}), message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
 }
 
 type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing };
@@ -49,7 +49,10 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   };
   if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, assistant, standing);
   if (telegram && standing) {
-    return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, text)}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram } } };
+    return {
+      actor: { personId: me.id },
+      turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerInTelegram(me, standing)}`, createdBy: me.id, message: { personId: me.id, text, channel: 'telegram' as const, telegram, ...(pictures.length ? { pictures } : {}) } },
+    };
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
   const who = standing && standing.department !== null ? `\n\n${whoIs(me, standing)}` : '';

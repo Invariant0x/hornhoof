@@ -40,6 +40,7 @@ import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 import { stuckRecipient } from './stuck-route.js';
+import { topDepartment } from './turn-department.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -118,8 +119,10 @@ function checkAfterPlans(after: string[], plans: AfterPlans | undefined): void {
   if (Object.keys(plans ?? {}).some(id => !after.includes(id))) throw refuse(400, 'task_invalid', 'A plan names a task this one does not come after.');
 }
 
-/* What a task comes after: tasks of the company in its own turn, each once and none cancelled. hold: they stay as read
-   until the transaction ends, so none is done meanwhile unseen. */
+/* What a task comes after: tasks of the company, each once and none cancelled. One of another turn, or of none, has
+   started already: a planned task waits for its turn to open, and work waiting on it would hold its own turn open as long,
+   as a turn of one department may wait for another's. hold: they stay as read until the transaction ends, so none is done
+   meanwhile unseen. */
 async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null, ids: string[], hold = false): Promise<Task[]> {
   if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A task it comes after is listed twice.');
   const read = db.select().from(tasks).where(inArray(tasks.id, ids));
@@ -127,7 +130,7 @@ async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null,
   for (const id of ids) {
     const t = rows.find(r => r.id === id);
     if (!t || t.companyId !== companyId) throw refuse(400, 'task_invalid', `There is no task ${id} to come after.`);
-    if (t.turnId !== turnId) throw refuse(400, 'task_invalid', `#${t.number} is in another turn. A task comes only after tasks of its own turn.`);
+    if (t.turnId !== turnId && t.status === 'planned') throw refuse(400, 'task_invalid', `#${t.number} waits for its turn to start. A task comes after a task of another turn only once that one has started.`);
     if (t.status === 'cancelled') throw refuse(400, 'task_invalid', `#${t.number} is cancelled, so nothing can come after it.`);
   }
   return rows;
@@ -165,19 +168,12 @@ async function refuseBelow(db: Db | Tx, task: Task, ids: string[]): Promise<void
   }
 }
 
-/* The tasks of these turns; a null among them stands for the tasks of no turn. */
-function inTurns(turnIds: (string | null)[]) {
-  const known = [...new Set(turnIds.filter((id): id is string => id !== null))];
-  return or(known.length ? inArray(tasks.turnId, known) : undefined, turnIds.includes(null) ? isNull(tasks.turnId) : undefined);
-}
-
 /* JSON lists of ids that hold any of these. */
 const holdsAny = (list: typeof tasks.after, ids: string[]) => sql`${list} ?| array[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::text[]`;
 
-/* The open tasks of these tasks' turns that wait as said. A task comes only after tasks of its own turn, and a merge of
-   turns moves the open tasks with the work under them, so only these turns are looked at: with an index on the turn, the
-   rest of the company's history is not read. */
-const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.companyId), inTurns(of.map(t => t.turnId)), waits, notInArray(tasks.status, [...CLOSED]));
+/* The open tasks of the company that wait as said, in any turn or none, as a task may come after one of another
+   department's turn: the index on what tasks come after finds them, so the rest of the company's history is not read. */
+const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.companyId), waits, notInArray(tasks.status, [...CLOSED]));
 
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
@@ -501,11 +497,14 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTa
 
 type CreatedTask = Moved & { independent: Task | null };
 
-/* The turn a new task belongs to: its parent's, or else the turn running now, if any. */
-export async function turnForNewTask(tx: Db | Tx, companyId: string, parent: Task | null): Promise<string | null> {
-  const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
-  const turnId = parent ? parent.turnId : (turn?.id ?? null);
-  return turnId;
+/* The turn a new task belongs to: its parent's, or else the turn its department runs now, if any. A department that works
+   all the time keeps its new work outside turns. */
+export async function turnForNewTask(tx: Db | Tx, companyId: string, parent: Task | null, departmentId: string | null): Promise<string | null> {
+  if (parent) return parent.turnId;
+  const top = await topDepartment(tx, departmentId);
+  if (!top || top.companyId !== companyId || top.workMode === 'continuous') return null;
+  const [turn] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, top.id), eq(turns.status, 'open')));
+  return turn?.id ?? null;
 }
 
 async function afterForNewTask(tx: Tx, companyId: string, turnId: string | null, parent: Task | null, input: NewTask): Promise<Task[]> {
@@ -525,7 +524,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
   const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent, input.departmentId);
   const last = await lastTaskNumber(tx, assignee.companyId);
-  const turnId = await turnForNewTask(tx, assignee.companyId, parent);
+  const turnId = await turnForNewTask(tx, assignee.companyId, parent, input.departmentId ?? null);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
      whether it waits: that one is done after the task is made, and starts it. */
   const after = await afterForNewTask(tx, assignee.companyId, turnId, parent, input);
@@ -562,7 +561,7 @@ async function handsInDocument(ctx: Ctx, input: NewTask): Promise<boolean> {
   const author = await workingAgent(ctx.db, null, input.assigneeAgentId);
   if (!(await hasChecker(ctx.db, author, check))) return false;
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
-  return wouldGoThroughEchelons(ctx.db, { companyId: author.companyId, turnId: await turnForNewTask(ctx.db, author.companyId, parent), holderId: author.id });
+  return wouldGoThroughEchelons(ctx.db, { companyId: author.companyId, turnId: await turnForNewTask(ctx.db, author.companyId, parent, input.departmentId ?? null), holderId: author.id });
 }
 
 async function executorResult(ctx: Ctx, input: NewTask): Promise<NonNullable<NewTask['resultKind']>> {

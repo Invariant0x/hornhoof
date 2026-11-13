@@ -177,8 +177,7 @@ for (const lang of CHECKED_LOCALES) {
     for (const width of [375, 1440]) {
       test(`independent part wraps without sideways scroll: ${lang}/${theme}/${width}`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 900 });
-        await page.emulateMedia({ colorScheme: theme });
-        await page.addInitScript(language => localStorage.setItem('hh-lang', language), lang);
+        await page.addInitScript(({ language, skin }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', skin); }, { language: lang, skin: theme === 'light' ? 'light' : 'cyberpunk' });
         await serveApi(page);
         const base = TASKS[0]!;
         await page.route('**/api/tasks/t1', route => route.fulfill({

@@ -72,8 +72,8 @@ async function company() {
   return { app, db, ctx: app.ctx, companyId, ceoToken, ceo: ceo!, CEO, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, simon, quick: quick!, tools, root, under, read, elsewhere };
 }
 
-const makeTurn = (db: Awaited<ReturnType<typeof company>>['db'], companyId: string) =>
-  db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
+const makeTurn = (db: Awaited<ReturnType<typeof company>>['db'], companyId: string, departmentId: string) =>
+  db.insert(turns).values({ companyId, departmentId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
 
 describe('a new task', () => {
   it('is not urgent unless someone who may says so, whatever its title says', async () => {
@@ -107,7 +107,7 @@ describe('a new task', () => {
     const [rita] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Rita', roleKey: 'DEV-REV', departmentId: c.dev.id, model: 'claude-opus-5-5', subscriptionId: c.bruno.subscriptionId, skills: c.ctx.templates.roles.get('DEV-REV')!.skills.filter(s => s.on).map(s => s.id) }).returning();
     c.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
     c.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
-    await makeTurn(c.db, c.companyId);
+    await makeTurn(c.db, c.companyId, c.dev.id);
     const top = await c.root({ urgent: true, riskClass: 'access' });
     const code = await c.under(top.id, { small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita!.id });
     const moved = await submit(c.ctx, c.bruno.id, code.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
@@ -187,15 +187,16 @@ describe('the orchestrator', () => {
     expect(text(await call(woken, 'add_tasks', { turn: 1, tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_DEPARTMENT_OWNER);
   });
 
-  it('alone has set_urgent and set_team_urgent_only', async () => {
+  it('alone has set_urgent, and set_team_urgent_only beside heads, who mark their own sub-units', async () => {
     const c = await company();
     const names = async (agent: { id: string }) => (await (await c.tools(agent)).listTools()).tools.map(t => t.name);
     expect(await names(c.orchestrator)).toEqual(expect.arrayContaining(['set_urgent', 'set_team_urgent_only']));
-    for (const agent of [c.head, c.bruno]) {
-      const has = await names(agent);
-      expect(has).not.toContain('set_urgent');
-      expect(has).not.toContain('set_team_urgent_only');
-    }
+    const head = await names(c.head);
+    expect(head).not.toContain('set_urgent');
+    expect(head).toContain('set_team_urgent_only');
+    const worker = await names(c.bruno);
+    expect(worker).not.toContain('set_urgent');
+    expect(worker).not.toContain('set_team_urgent_only');
   });
 
   it('sets a task urgent, only in a turn that answers the CEO or the department\'s owner, with all that is under it', async () => {
@@ -656,7 +657,7 @@ describe('work for someone in a team that takes only urgent work', () => {
 
     it('when their team took only urgent work after they got it', async () => {
       const c = await company();
-      await makeTurn(c.db, c.companyId);
+      await makeTurn(c.db, c.companyId, c.dev.id);
       const held = await c.under((await c.root()).id, toSimon(c));
       await c.db.update(teams).set({ urgentOnly: true }).where(eq(teams.id, c.quick.id));
       await updateTask(c.ctx, c.head.id, held.id, { body: 'Now this.' });

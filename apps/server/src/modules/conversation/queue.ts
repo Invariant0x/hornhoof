@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns, type AgentKind } from '../../db/schema.js';
+import { agentEvents, agents, jobs, nodes, subscriptions, tasks, type AgentKind } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
@@ -27,6 +27,7 @@ import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgr
 import { workStarts } from '../org/map-state.js';
 import { agentFailureState, notifyFailure, type FailureState } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
+import { openTurnOf } from '../tasks/turn-department.js';
 import { addressed, preface } from './prompt.js';
 import { originalPromptOf } from './requested-prompt.js';
 import { effortOfTurn } from './turn-effort.js';
@@ -199,7 +200,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -367,7 +368,10 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, li
   const message = shownOf(t);
   if (!message) return;
   const { personId, ...data } = message;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...keptWithMessage(t, message, live) }, personId }, alsoKept(t.withMessage, kept));
+  /* The program's whole conversation waits with a turn of its own for whether that turn starts a new session; words that went
+     into a running turn go on in its session. */
+  const fresh = t.fresh && !live ? { _fresh: t.fresh } : {};
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...keptWithMessage(t, message, live), ...fresh }, personId }, alsoKept(t.withMessage, kept));
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
@@ -560,7 +564,7 @@ function keepsSessionAcrossTurns(kind: string): boolean {
   return kind === 'orchestrator' || kind === 'head' || kind === 'assistant';
 }
 
-type Agent = { id: string; companyId: string; kind: string; name: string };
+type Agent = { id: string; companyId: string; departmentId: string | null; kind: string; name: string };
 type On = { subscriptionId: string; nodeId: string | null };
 type Session = { sessionId: string | null; catchUp: string | null };
 /* The original prompt goes along when the continuation cannot resume the session that holds it. */
@@ -625,8 +629,8 @@ function matchingSession(last: SavedSession | undefined, on: On, instructionsHas
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
    session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
-   session whole; one that broke, or was called off before it ran, leaves the session before it. Members start each company
-   turn in a clean session with no catch-up, after the words already waiting during their work. The orchestrator and
+   session whole; one that broke, or was called off before it ran, leaves the session before it. Members start each turn of
+   their department in a clean session with no catch-up, after the words already waiting during their work. The orchestrator and
    department heads keep their session across turns and compact it when it fills. */
 async function lastSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, job: SessionJob): Promise<Session> {
   const repeated = await unheardSession(ctx, agent.id, job.id, on, instructionsHash);
@@ -643,18 +647,28 @@ async function lastSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: str
   return { sessionId: null, catchUp: await catchUpFor(ctx, agent) };
 }
 
-/* Whether the agent is a member whose last session started before the company's turn that is open now. */
+/* Whether the agent is a member whose last session started before the turn its department runs now. */
 async function startsClean(ctx: Ctx, agent: Agent, last: SavedSession | undefined, job: SessionJob): Promise<boolean> {
-  const [turn] = await ctx.db
-    .select({ openedAt: sql<Date>`coalesce(${turns.openedAt}, ${turns.createdAt})` })
-    .from(turns)
-    .where(and(eq(turns.companyId, agent.companyId), eq(turns.status, 'open')));
-  return companySessionStarts(agent, last, turn, job, await sessionStarted(ctx, agent.id, last));
+  const turn = await openTurnOf(ctx.db, agent.companyId, agent.departmentId);
+  return companySessionStarts(agent, last, turn ? { openedAt: turn.openedAt ?? turn.createdAt } : undefined, job, await sessionStarted(ctx, agent.id, last));
 }
 
 async function catchUpFor(ctx: Ctx, agent: Agent): Promise<string | null> {
   const talk = await earlierTalk(ctx.db, agent.id);
   return talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null;
+}
+
+/* The whole conversation an assistant's program sent with the message of this turn, for a new session. */
+async function freshConversation(ctx: Ctx, jobId: string): Promise<string | null> {
+  const [row] = await ctx.db.select({ fresh: sql<string | null>`${agentEvents.data}->>'_fresh'` }).from(agentEvents)
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data} ? '_fresh'`)).orderBy(desc(agentEvents.seq)).limit(1);
+  return row?.fresh ?? null;
+}
+
+/* Once the turn is out, its session holds what it read: the conversation is not kept with the message. */
+async function forgetFresh(ctx: Ctx, jobId: string): Promise<void> {
+  await ctx.db.update(agentEvents).set({ data: sql`${agentEvents.data} - '_fresh'` })
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data} ? '_fresh'`));
 }
 
 /* Unheard words follow the original conversation without using its crash continuation. */
@@ -984,8 +998,12 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
      instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
-  /* An assistant's own agent reads its program's message as the program built it: its rules say who it is from. */
-  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
+  /* An assistant's own agent reads its program's message as the program built it: its rules say who it is from. A new
+     session reads the program's whole conversation, when the program sent it, in place of the new words and the catch-up.
+     A session that goes on may have begun anew on its machine, which only the node sees: the conversation goes beside the
+     words, for the node to type in their place then. */
+  const fresh = agent.kind === 'assistant' && job.prompt ? await freshConversation(ctx, job.id) : null;
+  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? (sessionId === null ? fresh : null) ?? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
@@ -1005,6 +1023,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       role: agent.roleKey,
       leader: isLeader(agent),
       prompt,
+      freshPrompt: sessionId === null ? null : fresh,
       sessionId,
       model,
       effort,
@@ -1026,6 +1045,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   }
   if (sent) {
     turnSent(ctx, place.node, agentId);
+    if (agent.kind === 'assistant') await forgetFresh(ctx, job.id);
     return wentOut(ctx, job, along, taken.lines);
   }
   if (operatorDelivery) await cancelUnsentDelivery(db, operatorDelivery);

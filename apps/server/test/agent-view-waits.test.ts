@@ -86,13 +86,12 @@ describe('wait routes use real role and personal-card authority', () => {
     expect((await c.db.select().from(waitNotices).where(eq(waitNotices.id, own.id)))[0]).toMatchObject({ acknowledgedByPersonId: c.ids[viewer], acknowledgedAt: expect.any(Date) as Date });
   });
 
-  it('does not let a department owner read or replan hidden-agent work of another department, or change its policy', async () => {
+  it("lets a department owner read the waits of another department's work, as everyone does, but not replan them or change its policy", async () => {
     const c = await aclCompany(), { task, wait } = await waiting(c, 'far');
-    expect((await c.get(`/api/tasks/${task.id}/waits`, c.tokens.olga)).statusCode).toBe(403);
+    expect((await c.get(`/api/tasks/${task.id}/waits`, c.tokens.olga)).statusCode).toBe(200);
     const result = await c.app.inject({ method: 'POST', url: `/api/waits/${wait.id}/replan`,
       payload: { expectedGeneration: 1, plan: plan(c), reason: 'Not a visibility grant.' }, ...as(c.tokens.olga) });
-    expect(result.statusCode).toBe(403);
-    expect(leaks(result, [c.crew.far, { id: task.id, name: task.title }])).toEqual([]);
+    expect([result.statusCode, result.json().error.reason]).toEqual([403, 'task_not_yours']);
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.sales.id}/wait-policy/after`, payload: DATES, ...as(c.tokens.olga) })).statusCode).toBe(403);
     expect((await c.db.select().from(taskWaits))[0]!.generation).toBe(1);
     expect(await c.db.select().from(waitPolicies)).toEqual([]);

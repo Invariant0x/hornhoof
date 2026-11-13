@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type Route =
-  | { kind: 'map' | 'subscriptions' | 'improvements' | 'inbox' | 'outbound' | 'versions' | 'profile' | 'settings' | 'about' | 'theme' | 'feedback' | 'unavailable' }
+  | { kind: 'map' | 'subscriptions' | 'improvements' | 'inbox' | 'outbound' | 'versions' | 'profile' | 'settings' | 'about' | 'themes' | 'feedback' | 'unavailable' }
   | { kind: 'tasks'; id?: string; personId?: string }
   | { kind: 'people' | 'machines'; id?: string }
   | { kind: 'department'; id: string }
@@ -10,7 +10,7 @@ export type Route =
 const PATHS = {
   map: '', tasks: 'tasks', people: 'people', department: 'departments', subscriptions: 'subscriptions',
   machines: 'machines', improvements: 'improvements', inbox: 'inbox', outbound: 'outbound', versions: 'versions', profile: 'profile',
-  settings: 'settings', about: 'about', theme: 'theme', feedback: 'feedback', invite: 'invite', unavailable: 'not-found',
+  settings: 'settings', about: 'about', themes: 'themes', feedback: 'feedback', invite: 'invite', unavailable: 'not-found',
 } as const;
 const validId = (id: string): boolean => /^[A-Za-z0-9_-]+$/.test(id);
 const unavailable = (): Route => ({ kind: 'unavailable' });
@@ -85,10 +85,15 @@ export function useRoute() {
     pushRoute(next, background ? [background, ...rest] : []);
     setEntry(currentEntry());
   }, []);
+  /* Another section of the same window: its address takes the place of the current one and keeps what lies under it. */
+  const switchOverlay = useCallback((next: Route) => {
+    history.replaceState(history.state, '', routePath(next));
+    setEntry(currentEntry());
+  }, []);
   const closeOverlay = useCallback(() => {
     const { backgrounds } = currentEntry();
     pushRoute(backgrounds[0]!, backgrounds.slice(1));
     setEntry(currentEntry());
   }, []);
-  return { ...entry, navigate, closeOverlay };
+  return { ...entry, navigate, switchOverlay, closeOverlay };
 }

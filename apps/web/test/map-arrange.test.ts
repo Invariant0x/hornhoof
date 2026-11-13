@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangedBounds, arrangeMap, deptKey, deptLayout, HUB_KEY, personKey, type MapArrangement } from '../src/map-arrange';
+import { arrangedBounds, arrangeMap, bendAt, deptKey, deptLayout, HUB_KEY, PEOPLE_LINE, personKey, routeKey, type MapArrangement } from '../src/map-arrange';
 import { peopleLayout } from '../src/map-people';
 import { ROAD } from '../src/map-roads';
 import { departmentPeople } from '../src/org';
@@ -251,5 +251,113 @@ describe('a block moved on the map', () => {
     expect(pulsePath({ kind: 'department', id: D1 }, { kind: 'orchestrator' }, ORG4, arr)).toEqual([...trace].reverse());
     const route = arr.people.routes.find(r => r.personId === OLEG && r.deptId === D1)!.pts;
     expect(pulsePath({ kind: 'department', id: D1 }, { kind: 'person', id: OLEG }, ORG4, arr)).toEqual(route);
+  });
+});
+
+/* Whether a line passes through p. */
+const passes = (pts: Point[], p: Point) => segments(pts).some(([a, b]) =>
+  (a[0] === b[0] && p[0] === a[0] && p[1] >= Math.min(a[1], b[1]) && p[1] <= Math.max(a[1], b[1])) ||
+  (a[1] === b[1] && p[1] === a[1] && p[0] >= Math.min(a[0], b[0]) && p[0] <= Math.max(a[0], b[0])));
+const salesTrace = (arr: MapArrangement) => arr.depts.find(d => d.id === D1)!.path;
+
+describe('a line a person bent', () => {
+  it('keeps the way a line is drawn where its bends stand on it, and its dots', () => {
+    const before = arrangeMap(ORG4);
+    expect(salesTrace(before)).toEqual([[600, 420], [516, 420], [516, 200], [390, 200]]);
+    const oleg = before.people.routes.find(r => r.personId === OLEG && r.deptId === D1)!.pts;
+    const bends = {
+      [deptKey(D1)]: [[516, 300], [450, 200]] as Point[],
+      [routeKey(OLEG, D1)]: [oleg[1]!, oleg[2]!],
+      [routeKey(DAN, D1)]: [[90, 200]] as Point[],
+      [PEOPLE_LINE]: [[600, 200]] as Point[],
+    };
+    const arr = arrangeMap(ORG4, {}, bends);
+    expect(arr.depts).toEqual(before.depts);
+    expect(arr.people).toEqual(before.people);
+    expect([arr.top, arr.bus, arr.forks]).toEqual([before.top, before.bus, before.forks]);
+  });
+
+  it('names every line a person may bend, with what it joins and its points as drawn', () => {
+    const arr = arrangeMap(ORG4, { [personKey('p2')]: { x: 940, y: 20 } });
+    const keys = arr.lines.map(l => l.key);
+    expect(keys).toEqual(expect.arrayContaining([deptKey(D1), deptKey(D4), personKey('p2'), PEOPLE_LINE, routeKey(DAN, D1), routeKey(OLEG, D4)]));
+    expect(keys).not.toContain(personKey('p1'));
+    expect(arr.lines.find(l => l.key === deptKey(D1))).toEqual({ key: deptKey(D1), pts: salesTrace(arr), ends: [HUB_KEY, deptKey(D1)] });
+    expect(arr.lines.find(l => l.key === PEOPLE_LINE)).toEqual({ key: PEOPLE_LINE, pts: arr.bus!.drop, ends: [HUB_KEY, PEOPLE_LINE] });
+    expect(arr.lines.find(l => l.key === routeKey(DAN, D1))!.ends).toEqual([deptKey(D1), personKey(DAN)]);
+    /* The traces of departments come last, so a click on a road they share with others bends the trace. */
+    expect(keys.slice(-4)).toEqual([D1, D2, D3, D4].map(deptKey));
+  });
+
+  it('runs a line through a bend moved off its way at right angles, turning at the bend', () => {
+    const arr = arrangeMap(ORG4, {}, { [deptKey(D1)]: [[480, 300]] });
+    expect(salesTrace(arr)).toEqual([[600, 420], [480, 420], [480, 200], [390, 200]]);
+    /* The dot where the trace turned into its card goes with the way the map drew. */
+    expect(arr.depts.find(d => d.id === D1)!.via).toBeNull();
+    expect(pulsePath({ kind: 'department', id: D1 }, { kind: 'orchestrator' }, ORG4, arr)).toEqual([...salesTrace(arr)].reverse());
+  });
+
+  it('keeps a bend where it stands when its block moves, the line still turning there', () => {
+    const arr = arrangeMap(ORG4, { [deptKey(D1)]: { x: 50, y: 120 } }, { [deptKey(D1)]: [[516, 200]] });
+    expect(salesTrace(arr)).toEqual([[600, 420], [516, 420], [516, 200], [330, 200]]);
+  });
+
+  it("runs a department person's line through its bends to wherever their card is put", () => {
+    const bend: Point = [300, 860];
+    const arr = arrangeMap(ORG4, { [personKey(OLEG)]: { x: 520, y: 720 } }, { [routeKey(OLEG, D1)]: [bend] });
+    const route = arr.people.routes.find(r => r.personId === OLEG && r.deptId === D1)!.pts;
+    expect(square(route)).toBe(true);
+    expect(passes(route, bend), JSON.stringify(route)).toBe(true);
+    expect(onEdge(route[0]!, blockOf(arr, deptKey(D1)))).toBe(true);
+    expect(onEdge(route[route.length - 1]!, blockOf(arr, personKey(OLEG)))).toBe(true);
+    expect(pulsePath({ kind: 'department', id: D1 }, { kind: 'person', id: OLEG }, ORG4, arr)).toEqual(route);
+  });
+
+  it("brings the people's row down to the hub through its bends, and Ivan's way with it", () => {
+    const arr = arrangeMap(ORG4, {}, { [PEOPLE_LINE]: [[520, 200]] });
+    expect(passes(arr.bus!.drop, [520, 200])).toBe(true);
+    expect(square(arr.bus!.drop)).toBe(true);
+    expect(arr.bus!.drop[arr.bus!.drop.length - 1]).toEqual([600, 420]);
+    const ivan = arr.top.find(t => t.id === 'p1')!.path;
+    expect(passes(ivan, [520, 200])).toBe(true);
+    expect(pulsePath({ kind: 'orchestrator' }, { kind: 'person', id: 'p1' }, ORG4, arr)).toEqual(ivan);
+  });
+
+  it('changes nothing for the bends of a line that is not on the map', () => {
+    expect(arrangeMap(ORG4, {}, { [deptKey(ID(9))]: [[10, 10]], [personKey('p1')]: [[20, 20]] })).toEqual(arrangeMap(ORG4));
+  });
+
+  it('draws every bent line across and down and through its bends, wherever anything was put', () => {
+    let s = 11;
+    const next = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const keys = [HUB_KEY, ...[D1, D2, D3, D4].map(deptKey), ...['p1', 'p2', DAN, OLEG].map(personKey)];
+    const at = (): Point => [Math.round(next() * 1600) - 300, Math.round(next() * 1200) - 200];
+    for (let run = 0; run < 30; run++) {
+      const placed = Object.fromEntries(keys.filter(() => next() < 0.3).map(k => [k, { x: at()[0], y: at()[1] }]));
+      const bends = Object.fromEntries(arrangeMap(ORG4, placed).lines.filter(() => next() < 0.4).map(l => [l.key, Array.from({ length: 1 + Math.floor(next() * 3) }, at)]));
+      const arr = arrangeMap(ORG4, placed, bends);
+      for (const l of arr.lines) {
+        const where = `${JSON.stringify({ placed, bends: bends[l.key] })}: ${JSON.stringify(l.pts)}`;
+        expect(square(l.pts), where).toBe(true);
+        for (const b of bends[l.key] ?? []) expect(passes(l.pts, b), where).toBe(true);
+      }
+      for (const pts of lines(arr)) expect(square(pts)).toBe(true);
+    }
+  });
+});
+
+describe('a click on a line', () => {
+  const trace: Point[] = [[600, 420], [516, 420], [516, 200], [390, 200]];
+
+  it('puts a bend on the nearest point of the line, or on its corner when the click is that near it', () => {
+    expect(bendAt(trace, [], [520.4, 300.6], 4)).toEqual([[516, 301]]);
+    expect(bendAt(trace, [], [519, 204], 6)).toEqual([[516, 200]]);
+    expect(bendAt(trace, [], [519, 204], 3)).toEqual([[516, 204]]);
+  });
+
+  it('puts the new bend in its place among the others along the line', () => {
+    expect(bendAt(trace, [[516, 301]], [450, 198], 4)).toEqual([[516, 301], [450, 200]]);
+    expect(bendAt(trace, [[450, 200]], [516, 350], 4)).toEqual([[516, 350], [450, 200]]);
+    expect(bendAt(trace, [[516, 380], [450, 200]], [513, 300], 4)).toEqual([[516, 380], [516, 300], [450, 200]]);
   });
 });

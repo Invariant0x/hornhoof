@@ -71,6 +71,13 @@ export class CutAtToken {
   }
 }
 
+/* How a sign-in's program ended, with its last lines, for the machine's output. Once a token's start is among them, none go. */
+function endedEarly(code: number | null, text: string): string {
+  const plain = plainOutput(text);
+  const last = plain.includes(TOKEN_START) ? [] : plain.split('\n').map(l => l.trim()).filter(Boolean).slice(-6);
+  return `The sign-in program ended with code ${code ?? 'unknown'}${last.length ? `: ${last.join(' | ')}` : '.'}`;
+}
+
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
 type View = { child: ChildProcess; write: boolean };
 
@@ -86,6 +93,8 @@ type Options = {
   signedIn(): Promise<void>;
   /* Installs the program when it is missing, before its sign-in starts. */
   install?: () => Promise<void>;
+  /* The machine's own output, for how a sign-in's program ended when it ended with an error. */
+  log?: (line: string) => void;
   pollMs?: number;
 };
 
@@ -218,6 +227,7 @@ export class LoginTerminal {
       const screen = await this.tmux.screen(SESSION, 2000);
       if (run !== this.run) return;
       const code = snapshot?.programOutput?.code ?? null;
+      if (code !== 0) this.opts.log?.(endedEarly(code, snapshot?.programOutput?.text || screen));
       error = code !== 0 ? UNFINISHED : await this.keep(run, snapshot?.programOutput?.text ?? '', screen);
     } catch {
       error = BROKE;

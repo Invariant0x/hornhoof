@@ -24,7 +24,7 @@ async function pendingQuiet() {
   const c = await waitCompany({ turn: false });
   const now = new Date();
   const since = new Date(now.getTime() - 900_000);
-  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Deliver', openedAt: since }).returning();
+  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Deliver', openedAt: since }).returning();
   const task = await c.task();
   await c.db.update(tasks).set({ turnId: turn!.id, updatedAt: since, externalWait: null }).where(eq(tasks.id, task.id));
   const observation = (await quietDepartment(c.ctx, turn!.id, c.dev.id, now))!;

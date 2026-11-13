@@ -11,7 +11,7 @@ async function modeFixture(mode: 'echelons' | 'turnkey' | null) {
   const player = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
   const other = await f.hire('Other player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
   for (const member of [player, other]) await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, member.id));
-  if (mode) await f.db.insert(turns).values({ companyId: f.task.companyId, number: 1, goal: 'Totals', status: 'open', mode, openedAt: new Date() });
+  if (mode) await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 1, goal: 'Totals', status: 'open', mode, openedAt: new Date() });
   return { ...f, player, other };
 }
 

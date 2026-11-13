@@ -25,6 +25,12 @@ services:
       # What machines share of products' test harnesses: its folder here, and how many MB it may take; 20480 when empty.
       HARNESS_DIR: /harness
       HARNESS_MB: ${HARNESS_MB:-}
+      # Speech recognition for voice messages that come through the heads' Telegram bots: any service that answers as
+      # OpenAI's /v1/audio/transcriptions does, its key and model (whisper-1 when empty). Without it a voice message
+      # reaches the agent as its recording alone.
+      TRANSCRIBE_URL: ${TRANSCRIBE_URL:-}
+      TRANSCRIBE_KEY: ${TRANSCRIBE_KEY:-}
+      TRANSCRIBE_MODEL: ${TRANSCRIBE_MODEL:-}
       # Parts of runs allowed on one physical computer at once; 1 when empty.
       MAX_RUNS_PER_HOST: ${MAX_RUNS_PER_HOST:-}
       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh

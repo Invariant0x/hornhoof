@@ -289,6 +289,8 @@ export const TURN: TurnView = {
   goal: 'Take card payments in the shop.',
   status: 'open',
   mode: 'echelons',
+  departmentId: 'd2',
+  canChangeMode: true,
   messages: [{ by: 'Ivan', text: 'We need card payments.\nStripe is fine.', at: '2026-10-30T06:50:00.000Z' }],
   taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z',

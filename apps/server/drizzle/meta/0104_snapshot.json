@@ -1,5 +1,5 @@
 {
-  "id": "c63528b5-33c2-41c4-9dbf-d80b5a32fcba",
+  "id": "c13d8c91-53d0-4e58-8ea7-479dfa1ed9b9",
   "prevId": "fcdd6a84-33b0-4be1-b998-68a7e7e3f1ee",
   "version": "7",
   "dialect": "postgresql",
@@ -2166,212 +2166,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.feedback_inbox": {
-      "name": "feedback_inbox",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "versions": {
-          "name": "versions",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "platforms": {
-          "name": "platforms",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "issue_number": {
-          "name": "issue_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "issue_url": {
-          "name": "issue_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "issued_by": {
-          "name": "issued_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "feedback_inbox_company_id_companies_id_fk": {
-          "name": "feedback_inbox_company_id_companies_id_fk",
-          "tableFrom": "feedback_inbox",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "feedback_inbox_issued_by_people_id_fk": {
-          "name": "feedback_inbox_issued_by_people_id_fk",
-          "tableFrom": "feedback_inbox",
-          "tableTo": "people",
-          "columnsFrom": [
-            "issued_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "feedback_inbox_fingerprint": {
-          "name": "feedback_inbox_fingerprint",
-          "nullsNotDistinct": false,
-          "columns": [
-            "company_id",
-            "fingerprint"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.feedback_signals": {
-      "name": "feedback_signals",
-      "schema": "",
-      "columns": {
-        "card_id": {
-          "name": "card_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "installation": {
-          "name": "installation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "signals": {
-          "name": "signals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "feedback_signals_card_id_feedback_inbox_id_fk": {
-          "name": "feedback_signals_card_id_feedback_inbox_id_fk",
-          "tableFrom": "feedback_signals",
-          "tableTo": "feedback_inbox",
-          "columnsFrom": [
-            "card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "feedback_signals_card_id_installation_pk": {
-          "name": "feedback_signals_card_id_installation_pk",
-          "columns": [
-            "card_id",
-            "installation"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.harness_builds": {
       "name": "harness_builds",
       "schema": "",
@@ -2713,19 +2507,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'open'"
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'company'"
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "decided_by": {
           "name": "decided_by",
@@ -3447,6 +3228,13 @@
         },
         "blocks": {
           "name": "blocks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "anchors": {
+          "name": "anchors",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
