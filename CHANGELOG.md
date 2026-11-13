@@ -5,6 +5,21 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.4] - 2026-11-13
+
+Every employee pushes each commit and branch at once, and the head of the department decides what goes into the main
+branch.
+
+### Changed
+
+- Every employee pushes each commit and each branch to the repository as soon as it is made, finished or not, so no work
+  stays only on one machine. A push brings nothing into the main branch: which pushed branches go there and when, and
+  how the repository is laid out, the head of the department decides.
+
+### Fixed
+
+- A server that stops no longer waits up to a minute for a connection that never asked anything.
+
 ## [0.23.3] - 2026-11-13
 
 A person's assistant can write to its owner in their chat when asked in its window, and an assistant's program can hand
