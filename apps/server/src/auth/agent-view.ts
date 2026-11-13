@@ -6,11 +6,10 @@ import type { MessageEnvelope, MessageParty } from '../modules/events/parties.js
 import type { EventView } from '../modules/events/store.js';
 import { accessOf, agentSpot, canReach, type Access, type Spot } from './access.js';
 import { actsAsCeo } from './decisions.js';
-import type { Person } from './session.js';
+import { type Person, viaOrchestrator } from './session.js';
 
-/* Which agents a person sees. The CEO and the CEO's delegate see all of them, and so does the orchestrator's call from
-   inside, whose rights its own tools set; a head's call for a person sees what that person sees. The owner of a department
-   sees every agent of it, its products and its sub-units, on whoever's plan:
+/* Which agents a person sees. The CEO and the CEO's delegate see all of them, and so does a call from inside, whose rights
+   its own tools set. The owner of a department sees every agent of it, its products and its sub-units, on whoever's plan:
    the owner of the company gave them that department to run as their own, and nobody runs people they cannot see. Two
    things stay with each plan's owner even there: typing into an agent's terminal, which works with that owner's sign-in on
    their machine, and the plan's secrets (keys, sign-ins, codes), which no view of an agent carries. Anyone else, and the
@@ -68,7 +67,8 @@ async function assistantAgentsOf(db: Db, me: Person): Promise<{ own: Set<string>
 export async function viewerOf(db: Db, me: Person): Promise<AgentViewer> {
   const access = await accessOf(db, me);
   const { own, apart } = await assistantAgentsOf(db, me);
-  if ((me.via && !me.viaHead) || actsAsCeo(me)) return { full: true, personId: me.id, access, plans: new Set(), agents: own, own, apart };
+  /* Only the orchestrator's call sees all; a head's call for a person sees what that person sees. */
+  if (viaOrchestrator(me) || actsAsCeo(me)) return { full: true, personId: me.id, access, plans: new Set(), agents: own, own, apart };
   const plans = new Set(
     (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.companyId, me.companyId), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)))).map(p => p.id),
   );
