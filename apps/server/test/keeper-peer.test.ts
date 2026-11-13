@@ -16,7 +16,7 @@ import { bundleRows } from '../src/modules/backups/records.js';
 import { AGE_KEY_FILE } from '../src/modules/keeper/age-key.js';
 import { BUNDLES_DIR } from '../src/modules/keeper/backups.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
-import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
+import { Keeper, type HandingParts, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, type MachineKey } from '../src/modules/keeper/machine-keys.js';
 import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
 import { saveLink } from '../src/modules/link/link.js';
@@ -584,6 +584,26 @@ describe('the peer link in the keeper', () => {
     expect(takes()[0]!.args[3]).toEqual({ number: 1, machine: MACHINE_ID, split: false });
     await until(() => keeper.mode() === 'lead');
     expect([keeper.linkWanted(), p.did]).toEqual([true, []]);
+  });
+
+  it('holds no name on the word of an earlier way in, once a switch took the name away', async () => {
+    const c = await company();
+    const now = fastClock();
+    const said = { needed: true, link: 'silent' as 'self' | 'other' | 'silent', name: { state: 'empty', client: OWN_CLIENT, generation: 7 } as Name };
+    const p = proving(now, said);
+    let parts: HandingParts | undefined;
+    const handing = (given: HandingParts) => ((parts = given), { start: async () => undefined, stop: async () => undefined, holds: () => false });
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease: fakeLease(), now, proofs: p.proofs, handing });
+    /* The way back in takes the name, with no lease standing yet. */
+    await until(() => keeper.linkWanted());
+    expect(keeper.mode()).toBe('read');
+    /* A planned switch stops the link, and the server stays after all: the link may run again, and the way back in
+       takes the name anew by itself. */
+    await parts!.tunnel.stop();
+    expect(keeper.linkWanted()).toBe(false);
+    parts!.tunnel.start();
+    expect(keeper.linkWanted()).toBe(false);
+    await until(() => keeper.linkWanted());
   });
 
   it('holds no name before it knows whether its lease takes a proof', async () => {
