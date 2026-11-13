@@ -341,15 +341,18 @@ describe('tools a skill grants', () => {
 
   it("keeps credentials and private paths of another department's blocked task out of what a failure collector reads, at its start and its end", async () => {
     const { app, bruno, task } = await company(['ops-failure-review']);
-    /* The second token sits where a cut made before cleaning would leave only its end. */
+    /* The second token sits where the last 500 characters of the words as written begin 12 characters before its end, so a
+       cut made before cleaning would leave that end, which no longer looks like a token. */
     const second = 'ghp_' + 'secondWatchToken0123'.repeat(3);
-    const reason = `Status: BLOCKED. Could not read ${HOME} with Authorization: Bearer ${GITHUB_TOKEN}. ` + 'x'.repeat(900) + ` ${second}` + 'y'.repeat(480) + `\nNext: token=${GITHUB_TOKEN} path=${HOME} or C:\\Users\\fixture\\.ssh\\id_rsa or /Users/fixture/keys.`;
+    const next = `\nNext: token=${GITHUB_TOKEN} path=${HOME} or C:\\Users\\fixture\\.ssh\\id_rsa or /Users/fixture/keys.`;
+    const reason = `Status: BLOCKED. Could not read ${HOME} with ${GITHUB_TOKEN}. ` + 'x'.repeat(900) + ` ${second} ` + 'y'.repeat(500 - next.length - 1 - 12) + next;
+    expect(reason.slice(-500).startsWith(second.slice(-12))).toBe(true);
     await blocked(app.ctx, bruno.id, task.id, reason);
     const client = await mcp(app, TOKEN);
     expect((await call(client, 'task', { task: task.number })).isError).toBe(true);
     const [held] = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text).blocked as { why: string; whyTail: string }[];
     for (const words of [held!.why, held!.whyTail]) {
-      for (const secret of [GITHUB_TOKEN, second.slice(-20), HOME, 'fixture805', 'C:\\Users\\fixture', '/Users/fixture']) expect(words).not.toContain(secret);
+      for (const secret of [GITHUB_TOKEN, second.slice(-12), HOME, 'fixture805', 'C:\\Users\\fixture', '/Users/fixture']) expect(words).not.toContain(secret);
     }
     expect(held!.why.length).toBeLessThanOrEqual(400);
     expect(held!.whyTail.length).toBeLessThanOrEqual(500);
