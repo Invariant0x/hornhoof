@@ -2,23 +2,36 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { writeFileSync } from 'node:fs';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
-import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
-import { COLOR_TOKENS, lookOnly, type Skin } from '../src/skins/roles';
-import { parseSkin, skinText } from '../src/skins/validate';
+import { BUILTIN_SKINS, builtinSkin, type BuiltinSkinId } from '../src/skins/registry';
+import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
+import { builtinFile, parseSkin, skinText } from '../src/skins/validate';
 import { serveApi } from './api';
 
-/* The Themes section of a person's settings and its row in the account menu, in every built-in theme and one of a
-   person's own: what each looks like, that switching moves nothing among themes written in the same fonts, that text
-   stays readable, that nothing runs off the screen, also mirrored right to left, and that the chosen theme is on the
-   page before the app starts. Its files load, are refused in plain words, download as samples and are deleted. */
-const CYBERPUNK = lookOnly(builtinSkin('cyberpunk')!);
-const OWN: Skin = { ...CYBERPUNK, name: 'Dusk', colors: { ...CYBERPUNK.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' }, cut: 1.5 };
+/* The Themes section of a person's settings and its row in the account menu, in every built-in skin and one of a
+   person's own: what each looks like, that switching moves no block among skins written in the same fonts, that text
+   stays readable, that nothing runs off the screen, also mirrored right to left, and that the chosen skin is on the page
+   before the app starts. Its files are added, refused in plain words, downloaded as samples, removed and put back. */
+const CYBERPUNK = builtinSkin('cyberpunk')!;
+const SAMPLE = builtinFile(CYBERPUNK, { ru: 'Сумерки', en: 'Dusk' });
+const OWN: Skin = {
+  ...SAMPLE,
+  colors: { ...SAMPLE.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00', scrollbar_track: '#1A0440' },
+  cut: 1.5,
+};
+/* Each skin is applied by a click, from the one on before it: the first page starts in Pixel. */
 const CHOICES = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'];
 const RTL = /^(?:ar|he|fa|ur|ps|sd|ug|yi)(?:-|$)/;
 /* A colour of a skin as the browser gives it back. */
 const rgb = (hex: string) => `rgb(${[1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
 const WIDTHS = [1440, 375];
-const fontsOf = (choice: string) => JSON.stringify((builtinSkin(choice) ?? OWN).fonts);
+/* Skins whose headings and text start with the same font lay out the same; Onest and Tektur are carried, so the rest of a
+   stack never shows. */
+const fontsOf = (choice: string) => {
+  const { fonts } = builtinSkin(choice) ?? OWN;
+  return `${fonts.display[0]} ${fonts.body[0]}`;
+};
+const nameOf = (words: Messages, language: Language, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : OWN.name[language]);
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function messagesFor(locale: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
@@ -60,9 +73,9 @@ function watchProblems(page: Page): string[] {
 
 async function openThemes(page: Page, words: Messages): Promise<Locator> {
   await page.getByRole('button', { name: words.shell.account, exact: true }).click();
-  await page.getByRole('button', { name: new RegExp(`^${words.skins.title}: `) }).click();
+  await page.getByRole('button', { name: new RegExp(`^${escape(words.skins.go(''))}`) }).click();
   const dialog = page.getByRole('dialog', { name: words.profile.title });
-  await expect(dialog.getByRole('list', { name: words.skins.builtins })).toBeVisible();
+  await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   return dialog;
 }
@@ -101,13 +114,13 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
   return [...new Set([ranked[0]!.id, ranked.at(-1)!.id, ...rtl.slice(0, 1)])];
 }
 
-/* Where every block and control of the menu and the window stands, with its padding, margin and font, the window scrolled
-   to its top: a click scrolls to the card it presses. */
+/* Where every block of the window stands, with its padding, margin and font, the window scrolled to its top: a click
+   scrolls to the card it presses. The actions inside a card are left out: the current card says Applied, not Apply. */
 async function geometry(page: Page): Promise<unknown[]> {
   return page.evaluate(() => {
     for (const scrolled of document.querySelectorAll('.dialog')) scrolled.scrollTop = 0;
-    const selectors = ['.account-menu', '.account-menu > *', '.dialog', '.dialog > *', '.skins > *', '.skins-part > *', '.skin-card', '.skin-card > *', '.skin-swatch > *', '.dialog button', '.dialog a', '.dialog label', '.skins-guide > *'];
-    /* Named by place, not by text: the line that says which theme is on changes its words with the theme. */
+    const selectors = ['.dialog', '.dialog > *', '.settings-body > *', '.settings-nav > *', '.skins > *', '.skins-head > *', '.skins-add .btn', '.skins-catalog > *', '.skin-cards > *', '.skin-card > *', '.skin-preview > *', '.skins-guide > *'];
+    /* Named by place, not by text: the line that says which skin is on changes its words with the skin. */
     return [...new Set(selectors.flatMap(selector => [...document.querySelectorAll<HTMLElement>(selector)]))].map((element, at) => {
       const box = element.getBoundingClientRect();
       const style = getComputedStyle(element);
@@ -158,16 +171,17 @@ async function shot(page: Page, info: TestInfo, name: string) {
   if (room > size.height) await page.setViewportSize(size);
 }
 
-async function pick(page: Page, dialog: Locator, words: Messages, choice: string) {
-  const name = builtinSkin(choice) ? words.skins.names[choice as keyof Messages['skins']['names']] : OWN.name;
-  await dialog.getByRole('button', { name, exact: true }).click();
+/* Applies a skin with a click on its card and waits until the page and the line under the heading say so. */
+async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
+  const name = nameOf(words, language, choice);
+  await dialog.getByRole('button', { name: `${words.skins.apply}: ${name}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
-  await expect(dialog.getByText(words.skins.now(name), { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: `${words.skins.applied}: ${name}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.getByRole('status')).toHaveText(words.skins.nowOn(name));
   await page.evaluate(async () => { await document.fonts.ready; });
-  return name;
 }
 
-test('the Themes section and its menu row keep every block in place in each theme, on the longest and the shortest language and right to left', async ({ page, browserName }, info) => {
+test('the Themes section and its menu row keep every block in place in each skin, on the longest and the shortest language and right to left', async ({ page, browserName }, info) => {
   test.setTimeout(0);
   const problems = watchProblems(page);
   await prepare(page, 'en', null);
@@ -180,13 +194,13 @@ test('the Themes section and its menu row keep every block in place in each them
     const words = await messagesFor(language);
     const label = `${language}-${dir}-${width}`;
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
-    await page.evaluate(lang => { localStorage.setItem('hh-lang', lang); localStorage.setItem('hh-theme', 'cyberpunk'); }, language);
+    await page.evaluate(lang => { localStorage.setItem('hh-lang', lang); localStorage.setItem('hh-theme', 'pixel'); }, language);
     await page.goto('/');
     await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
     const dialog = await openThemes(page, words);
     const section = new Map<string, unknown[]>();
     for (const choice of CHOICES) {
-      await pick(page, dialog, words, choice);
+      await pick(page, dialog, words, language, choice);
       const now = await geometry(page);
       const same = section.get(fontsOf(choice));
       if (same) expect(now, `${label} section in ${choice}`).toEqual(same);
@@ -199,19 +213,19 @@ test('the Themes section and its menu row keep every block in place in each them
     }
     await dialog.getByRole('button', { name: words.common.done, exact: true }).click();
     await page.getByRole('button', { name: words.shell.account, exact: true }).click();
-    await expect(page.getByRole('button', { name: words.skins.menu(OWN.name), exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: words.skins.go(OWN.name[language]), exact: true })).toBeVisible();
     const lowest = await lowestContrast(page);
     (report.contrast as Record<string, unknown>)[`${label}-menu`] = lowest;
     expect(lowest.ratio, `${label} menu ${lowest.what}`).toBeGreaterThanOrEqual(4.5);
     expect(await noSideScroll(page), `${label} menu: no sideways scroll`).toBe(true);
     await shot(page, info, `${browserName}-${label}-menu`);
-    report[`${label}-groups`] = [...section.keys()].length;
+    report[`${label}-groups`] = [...section.keys()];
   }
   writeFileSync(info.outputPath('themes-report.json'), JSON.stringify(report, null, 2));
   expect(problems).toEqual([]);
 });
 
-test('the chosen theme of the collection is on the page before the app starts, and a switch is whole in the next frame', async ({ page }) => {
+test('the chosen skin of the collection is on the page before the app starts, and a switch is whole in the next frame', async ({ page }) => {
   const problems = watchProblems(page);
   await prepare(page, 'en', 'custom-1');
   let release: () => void = () => {};
@@ -219,19 +233,20 @@ test('the chosen theme of the collection is on the page before the app starts, a
   await page.route('**/src/main.tsx', async route => { await held; await route.continue(); });
   await page.goto('/', { waitUntil: 'commit' });
   await page.waitForFunction(() => document.readyState !== 'loading');
-  /* The page has been read, the app has not run: the plain script at the top of the head has already set the theme. */
+  /* The page has been read, the app has not run: the plain script at the top of the head has already set the skin. */
   const early = await page.evaluate(() => {
     const head = [...document.head.children];
     const boot = head.findIndex(element => element.matches('script[src="/skins-boot.js"]:not([type])'));
     const later = head.findIndex(element => element.matches('link[rel="stylesheet"], style, script[src*="main.tsx"]'));
-    return { before: boot >= 0 && (later < 0 || boot < later), theme: document.documentElement.dataset.theme, bg: document.documentElement.style.getPropertyValue('--bg'), app: document.getElementById('root')?.childElementCount };
+    const root = document.documentElement;
+    return { before: boot >= 0 && (later < 0 || boot < later), theme: root.dataset.theme, cut: root.dataset.cut, bg: root.style.getPropertyValue('--bg'), app: document.getElementById('root')?.childElementCount };
   });
-  expect(early).toEqual({ before: true, theme: 'custom-1', bg: OWN.colors.bg, app: 0 });
+  expect(early).toEqual({ before: true, theme: 'custom-1', cut: 'bevel', bg: OWN.colors.bg, app: 0 });
   release();
   const words = await messagesFor('en');
   const dialog = await openThemes(page, words);
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(OWN.colors.bg));
-  /* The colour of the page in each of the next frames after a click: the new theme from the first one, never a mix. */
+  /* The colour of the page in each of the next frames after a click: the new skin from the first one, never a mix. */
   for (const choice of ['matrix', 'light', 'pixel'] as const) {
     await page.evaluate(() => {
       const seen: string[] = [];
@@ -242,14 +257,14 @@ test('the chosen theme of the collection is on the page before the app starts, a
       });
       document.addEventListener('click', () => look(3), { once: true, capture: true });
     });
-    await dialog.getByRole('button', { name: words.skins.names[choice], exact: true }).click();
+    await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names[choice]}`, exact: true }).click();
     await page.waitForFunction(() => (window as unknown as { seen: string[] }).seen.length === 3);
     expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(Array(3).fill(rgb(builtinSkin(choice)!.colors.bg)));
   }
   expect(problems).toEqual([]);
 });
 
-test('Pixel writes in its own pixel font, served by Hornhoof itself, in Latin and Cyrillic', async ({ page }) => {
+test('Pixel writes headings and buttons in Handjet, served by Hornhoof itself in Latin and Cyrillic, text in Onest, and cuts corners in steps', async ({ page }) => {
   const problems = watchProblems(page);
   const fonts: string[] = [];
   page.on('request', request => { if (/\.woff2(\?|$)/.test(request.url())) fonts.push(new URL(request.url()).pathname); });
@@ -257,42 +272,48 @@ test('Pixel writes in its own pixel font, served by Hornhoof itself, in Latin an
   await page.goto('/');
   const words = await messagesFor('ru');
   const dialog = await openThemes(page, words);
-  expect(await dialog.getByRole('heading', { name: words.skins.names.pixel, exact: true }).evaluate(element => getComputedStyle(element).fontFamily)).toMatch(/^"?Pixelify Sans"?,/);
-  expect(await page.evaluate(() => ['Pixelify Sans', 'Пиксель'].map(text => document.fonts.check(`16px "Pixelify Sans"`, text)))).toEqual([true, true]);
-  expect(fonts.filter(path => path.includes('pixelify-sans-cyrillic'))).not.toEqual([]);
-  expect(fonts.filter(path => path.includes('pixelify-sans-latin'))).not.toEqual([]);
+  const family = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).fontFamily);
+  expect(await family(dialog.getByRole('heading', { name: words.skins.names.pixel, exact: true }))).toMatch(/^"?Handjet"?,/);
+  expect(await family(dialog.getByText(words.skins.desc, { exact: true }))).toMatch(/^"?Onest"?,/);
+  expect(await page.evaluate(() => ['Pixel', 'Пиксель'].map(text => document.fonts.check('600 16px "Handjet"', text)))).toEqual([true, true]);
+  expect(fonts.filter(path => path.includes('handjet-cyrillic-600'))).not.toEqual([]);
+  expect(fonts.filter(path => path.includes('handjet-latin-600'))).not.toEqual([]);
+  /* Twelve corners of two steps against the six of a slant; a ghost button is square. */
+  const points = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).clipPath.split(',').length);
+  expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(12);
+  expect(await dialog.getByRole('button', { name: `${words.skins.download}: ${words.skins.names.pixel}`, exact: true }).evaluate(element => getComputedStyle(element).clipPath)).toBe('none');
+  await dialog.getByRole('button', { name: `${words.skins.apply}: ${words.skins.names.light}`, exact: true }).click();
+  expect(await points(dialog.getByRole('button', { name: words.skins.add, exact: true }))).toBe(6);
   expect(problems).toEqual([]);
 });
 
-test('theme files load beside each other, a bad one is refused in plain words, any theme downloads as a sample, and a deleted one gives way to Cyberpunk', async ({ page }) => {
+test('a skin file is added beside the others, a bad one is refused in plain words, any skin downloads as a sample, and a removed one can be put back', async ({ page }) => {
   const problems = watchProblems(page);
   await prepare(page, 'en', 'matrix', false);
   await page.goto('/');
   const words = await messagesFor('en');
   const dialog = await openThemes(page, words);
   const download = page.waitForEvent('download');
-  await dialog.getByRole('link', { name: 'Download Matrix', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Download: Matrix', exact: true }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe('hornhoof-skin-matrix.json');
   const chunks: Buffer[] = [];
   for await (const chunk of (await file.createReadStream())!) chunks.push(chunk as Buffer);
-  expect(parseSkin(Buffer.concat(chunks).toString('utf8'))).toEqual({ ok: true, skin: { ...lookOnly(builtinSkin('matrix')!), name: 'Matrix' } });
-  const load = dialog.getByLabel('Load themes', { exact: true });
+  expect(parseSkin(Buffer.concat(chunks).toString('utf8'))).toEqual({ ok: true, skin: builtinFile(builtinSkin('matrix')!, { ru: 'Матрица', en: 'Matrix' }) });
+  const add = (name: string, text: string) => dialog.locator('input[type="file"]').setInputFiles({ name, mimeType: 'application/json', buffer: Buffer.from(text) });
   const bad = { ...JSON.parse(skinText(OWN)), colors: { ...OWN.colors, bg: 'url(https://example.com/x.png)' } };
-  await load.setInputFiles([
-    { name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bad)) },
-    { name: 'proto.json', mimeType: 'application/json', buffer: Buffer.from(skinText(OWN).replace('{', '{"__proto__": {"polluted": true},')) },
-    { name: 'dusk.json', mimeType: 'application/json', buffer: Buffer.from(skinText(OWN)) },
-    { name: 'dawn.json', mimeType: 'application/json', buffer: Buffer.from(skinText({ ...OWN, name: 'Dawn' })) },
-  ]);
-  await expect(dialog.getByRole('alert').getByRole('listitem')).toHaveText([
-    'bad.json: colors.bg: this looks like code. Links such as url(), expressions, tags and control or direction characters are not allowed.',
-    'proto.json: __proto__: this name is not allowed in a theme file, because code could use it to change how Hornhoof works.',
-  ]);
-  await expect(dialog.getByRole('status')).toHaveText('Added: Dusk, Dawn.');
+  await add('bad.json', JSON.stringify(bad));
+  await expect(dialog.getByRole('alert')).toHaveText(`${words.skins.addFailed}${words.skins.errors.unsafe('colors.bg', '')}`);
+  await add('proto.json', skinText(OWN).replace('{', '{"__proto__": {"polluted": true},'));
+  await expect(dialog.getByRole('alert')).toHaveText(`${words.skins.addFailed}${words.skins.errors.forbidden_key('__proto__', '')}`);
+  await expect(dialog.getByRole('button', { name: words.skins.add, exact: true })).toBeFocused();
+  await add('dusk.json', skinText(OWN));
+  await expect(dialog.getByRole('status')).toHaveText(words.skins.added('Dusk'));
+  await add('dawn.json', skinText({ ...OWN, name: { ru: 'Рассвет', en: 'Dawn' } }));
+  await expect(dialog.getByRole('status')).toHaveText(words.skins.added('Dawn'));
   expect(await page.evaluate(() => ({} as Record<string, unknown>).polluted)).toBeUndefined();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'matrix');
-  await dialog.getByRole('button', { name: 'Dawn', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Apply: Dawn', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
   const tokens = await page.evaluate(names => names.map(name => getComputedStyle(document.documentElement).getPropertyValue(name).trim()), Object.values(COLOR_TOKENS));
   expect(tokens).toEqual(Object.keys(COLOR_TOKENS).map(role => OWN.colors[role as keyof typeof COLOR_TOKENS]));
@@ -300,11 +321,14 @@ test('theme files load beside each other, a bad one is refused in plain words, a
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
   const again = page.getByRole('dialog', { name: words.profile.title });
-  await again.getByRole('button', { name: 'Delete Dawn', exact: true }).click();
-  await again.getByRole('button', { name: 'Delete', exact: true }).click();
+  await again.getByRole('button', { name: 'Remove: Dawn', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cyberpunk');
-  await expect(again.getByRole('button', { name: 'Cyberpunk', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(again.getByRole('list', { name: 'Your themes' }).getByRole('listitem')).toHaveCount(1);
+  await expect(again.getByRole('button', { name: 'Applied: Cyberpunk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(again.getByRole('status')).toHaveText(`${words.skins.removed('Dawn')} ${words.skins.nowOn('Cyberpunk')}${words.skins.undo}`);
+  await expect(again.getByRole('button', { name: 'Apply: Dusk', exact: true })).toBeFocused();
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(CYBERPUNK.colors.bg));
+  await again.getByRole('button', { name: words.skins.undo, exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
+  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 5 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
   expect(problems).toEqual([]);
 });

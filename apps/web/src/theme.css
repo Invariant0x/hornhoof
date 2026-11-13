@@ -1,10 +1,11 @@
 /* Tokens from prototype v4. Their values come from the skin on the page: src/skins/registry.ts for the built-in skins
    and a person's own skins, set on the root by the script at the top of index.html before the page draws. A skin sets
-   only colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut). Sizes and gaps stay the same in
-   every skin, so this file keeps them and no value of a skin. */
+   only colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut), and on the root data-cut, the
+   shape of the cut. Sizes and gaps stay the same in every skin, so this file keeps them and no value of a skin. */
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+html { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
 body {
   margin: 0;
   background: var(--bg);
@@ -237,7 +238,7 @@ select:disabled { opacity: .55; }
 }
 .update-banner > span { font-size: 13px; }
 .update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
-.dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: rgba(10, 20, 30, .35); }
+.dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: var(--scrim); }
 .dialog {
   display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; scrollbar-gutter: stable; padding: 18px;
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
@@ -309,63 +310,86 @@ select:disabled { opacity: .55; }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* The Themes row of the account menu: the section's name and the theme on now, one 44 px target. */
+/* The Themes row of the account menu: the section's name, the theme on now and an arrow, one 44 px target that grows
+   with a long name rather than cut it. */
 .menu-link {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 12px;
   min-height: 44px; margin: 0; padding: 8px 12px; cursor: pointer; text-align: start;
   border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; font-size: 13px;
 }
-.menu-link > span { color: var(--muted); }
-.menu-link > b { font-weight: 600; color: var(--cyan-ink); overflow-wrap: anywhere; }
-.menu-link:hover { border-color: var(--cyan); }
+.menu-link .menu-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.menu-link .menu-arrow { display: inline-block; }
+[dir='rtl'] .menu-link .menu-arrow { transform: scaleX(-1); }
+.menu-link:hover { border-color: var(--cyan-ink); }
 .menu-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* The sections of a person's settings, a 44 px target each; the open one is marked as a pressed choice is. */
-.settings-nav button { min-height: 44px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
-.settings-nav button[aria-current='page'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
-/* Themes: the theme on now, a card for each built-in theme and each of a person's own, loading files and the guide. */
-.skins { display: grid; gap: 16px; min-width: 0; }
-.skins p { margin: 0; }
-.skins h3 { margin: 0; font-size: 15px; }
-.skins h4 { margin: 0; font-size: 14px; }
-.skins-now { font-weight: 600; }
-.skins-part { display: grid; gap: 10px; min-width: 0; }
-.skin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.skin-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; align-content: start; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--line2); background: var(--surface2); }
-.skin-card:has(.skin-pick[aria-pressed='true']) { border-color: var(--cyan); box-shadow: inset 0 0 0 1px var(--cyan); }
-.skin-pick { display: block; width: 100%; min-height: 44px; margin: 0; padding: 0; border: 0; background: none; cursor: pointer; }
-/* The whole card picks its theme; its actions stand above that. */
-.skin-pick::after { content: ''; position: absolute; inset: 0; }
-.skin-pick:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.skin-name { font-family: var(--f-display); overflow-wrap: anywhere; }
-.skin-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.skin-card .entry-actions { position: relative; z-index: 1; flex-wrap: wrap; justify-content: flex-start; }
-.skin-card a.btn { text-decoration: none; }
-.skin-ask { position: relative; z-index: 1; display: grid; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
-/* A preview in the card's own tokens: its page, a panel with text and the accent, four status colours and its button. */
-.skin-swatch {
-  --cut: 8px;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 6px;
-  height: 64px; padding: 8px; background: var(--bg); border: 1px solid var(--line);
+/* A person's settings: the sections at the start, 180 px, and the open one beside them; above it when narrow. */
+.dialog.user-settings { width: min(1240px, 100%); }
+.settings-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; align-items: start; }
+.settings-nav { display: flex; flex-direction: column; gap: 8px; }
+.settings-nav .btn { justify-content: flex-start; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.settings-nav .btn[aria-current='page'] { border-inline-start: 4px solid var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); }
+.settings-main { min-width: 0; }
+@media (max-width: 760px) {
+  .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; }
+  .settings-nav .btn { flex: 1 1 auto; }
 }
-.skin-panel { grid-row: 1 / -1; display: grid; gap: 4px; align-content: center; height: 100%; padding: 4px 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line2); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
-.skin-aa { color: var(--ink); font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1; }
-.skin-bar { height: 3px; background: var(--cyan); }
-.skin-dots { display: flex; justify-content: flex-end; gap: 4px; }
-.skin-dots i { width: 8px; height: 8px; border-radius: 50%; }
-.skin-dots .accent { background: var(--cyan); }
-.skin-dots .success { background: var(--ok); }
-.skin-dots .warning { background: var(--amber); }
-.skin-dots .attention { background: var(--pink); }
-.skin-btn { --cut: 5px; justify-self: end; width: 28px; height: 12px; background: var(--btn); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
-.skins-load { justify-content: flex-start; }
-.skins-load > label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.skins-added { color: var(--ok); font-size: 13px; }
-.skins-problems { display: grid; gap: 4px; margin: 0; padding-inline-start: 16px; overflow-wrap: anywhere; }
-.skins-empty { color: var(--muted); font-size: 13px; }
-.skins-guide { display: grid; gap: 8px; padding-block-start: 12px; border-block-start: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
-.skins-guide h4 { margin-block-start: 4px; }
-.skins-guide :is(ol, ul) { display: grid; gap: 4px; margin: 0; padding-inline-start: 18px; }
-.skins-prompt { padding: 8px 12px; border-inline-start: 3px solid var(--cyan); background: var(--surface2); font-family: var(--f-mono); font-size: 12.5px; }
+/* Themes, after the reference of Design (#787): the heading with Add from file at its end, the line of what was done,
+   the catalog of cards and the guide. Its buttons are 44 px targets that grow with their words. */
+.skins { display: grid; gap: 24px; min-width: 0; }
+.skins :is(p, h3, h4, h5) { margin: 0; overflow-wrap: anywhere; }
+.skins h3 { font-size: 26px; line-height: 1.4; }
+.skins :is(h4, h5) { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.4; }
+.skins .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; text-align: center; overflow-wrap: anywhere; }
+.skins .btn.danger { color: var(--pink-ink); }
+.skins-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; }
+.skins-intro { display: grid; gap: 4px; flex: 1 1 320px; min-width: 0; }
+.skins-intro p { max-width: 65ch; }
+.skins-add { margin-inline-start: auto; max-width: 100%; }
+.skins-add .btn { width: 180px; max-width: 100%; }
+.swap-label { display: grid; }
+.swap-label > span { grid-area: 1 / 1; }
+.swap-label > .sizer { visibility: hidden; }
+.skins-notice { display: grid; gap: 4px; padding: 16px; border-inline-start: 4px solid var(--line2); background: var(--surface2); }
+.skins-notice[data-tone='status'] { border-inline-start-color: var(--ok); }
+.skins-notice[data-tone='busy'] { border-inline-start-color: var(--cyan-ink); }
+.skins-notice[data-tone='alert'] { border-inline-start-color: var(--pink-ink); color: var(--pink-ink); }
+.skins-notice-title { font-weight: 600; }
+.skins-notice .entry-actions { margin-block-start: 4px; justify-content: flex-start; }
+.skins-catalog { display: grid; gap: 12px; min-width: 0; }
+.skins-catalog-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.skin-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); align-items: start; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.skin-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--line); background: var(--surface); }
+.skin-card[data-current] { border-color: var(--cyan-ink); }
+.skin-card-text { display: grid; gap: 4px; min-width: 0; }
+.skin-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 8px; }
+.skin-name { flex: 1 1 120px; min-width: 0; }
+.skin-current { max-width: 100%; padding: 2px 8px; border: 1px solid var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.45; }
+.skin-meta { color: var(--muted); }
+.skin-actions { margin-block-start: 8px; }
+/* The same small task card in each skin's own tokens: no action, hidden from a screen reader, the card names it all. */
+.skin-preview { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line2); background: var(--bg); color: var(--ink); font-family: var(--f-body); pointer-events: none; }
+.sp-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.sp-label { font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.sp-status { color: var(--ok); font-weight: 600; }
+.skins .sp-note { color: var(--muted); }
+.sp-line { height: 4px; background: var(--idle); }
+.sp-line::before { content: ''; display: block; width: 65%; height: 100%; background: var(--cyan); }
+.sp-btn {
+  --cut: 7px;
+  padding: 6px 10px; background: var(--btn); color: var(--on-btn); font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4;
+  clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k)));
+}
+.skins-empty { display: grid; gap: 4px; padding: 16px; border: 1px dashed var(--line2); background: var(--surface); }
+.skins-empty-title { font-weight: 600; }
+.skins-guide { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); background: var(--surface); }
+.skins-guide ol { display: grid; gap: 8px; max-width: 560px; margin: 0; padding-inline-start: 24px; }
+.skins-guide > .entry-actions { justify-content: flex-end; }
+.skins-note { max-width: 75ch; padding-block-start: 12px; border-block-start: 1px solid var(--line); color: var(--muted); }
+@media (max-width: 760px) {
+  .skins-add { width: 100%; display: flex; justify-content: flex-end; }
+  .skins-guide { padding: 16px; }
+}
 .body { position: absolute; inset: 0; overflow: auto; }
 /* A page scrolls under the floating header, so a band in the page's own color stays at the top of what scrolls, as tall
    as the header and the gap above it: text never shows around the glass blocks. It takes no room from the page. */
@@ -1230,7 +1254,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 
 /* The tracker: what waits for people, then the turns with their tasks. */
 .tasks { max-width: 1040px; margin: 0 auto; padding: 84px 16px 48px; display: grid; gap: 22px; }
-.nav-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; box-sizing: border-box; background: var(--pink); color: #fff; font-family: var(--f-body); font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.nav-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; box-sizing: border-box; background: var(--pink); color: var(--on-pink); font-family: var(--f-body); font-size: 11px; font-weight: 700; vertical-align: 1px; }
 .linkish { padding: 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; text-align: left; cursor: pointer; }
 .linkish:hover { text-decoration: underline; }
 .linkish.pname:hover, .linkish.name-link:hover { color: var(--pink-ink); text-decoration: none; }
@@ -2023,4 +2047,20 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
   .shell:has(.agent-strip) .orch { --strip-room: 24px; }
   .shell:has(.agent-strip) .orch.fullscreen { --strip-room: 32px; }
   .shell:has(.agent-strip) .orch.term:not(.fullscreen) { width: min(calc(980px - var(--strip-room)), calc(100vw - var(--edge) - var(--inset))); }
+}
+
+/* A skin of pixels cuts every corner in two square steps of 2 px, times its cut, whatever the usual cut of the part.
+   Last in the file and as specific as the rule of each part, so a part that drops its cut, a ghost button or a focused
+   one, keeps doing so. */
+:where(:root[data-cut='steps']) .edge,
+:where(:root[data-cut='steps']) .btn,
+:where(:root[data-cut='steps']) .tview .lchip,
+:where(:root[data-cut='steps']) .tview .tv-card-edge,
+.skin-preview[data-cut='steps'] .sp-btn {
+  --step: calc(2px * var(--cut-k));
+  clip-path: polygon(
+    0 0, calc(100% - 2 * var(--step)) 0, calc(100% - 2 * var(--step)) var(--step), calc(100% - var(--step)) var(--step),
+    calc(100% - var(--step)) calc(2 * var(--step)), 100% calc(2 * var(--step)), 100% 100%, calc(2 * var(--step)) 100%,
+    calc(2 * var(--step)) calc(100% - var(--step)), var(--step) calc(100% - var(--step)), var(--step) calc(100% - 2 * var(--step)), 0 calc(100% - 2 * var(--step))
+  );
 }

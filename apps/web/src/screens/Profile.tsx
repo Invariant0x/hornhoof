@@ -11,14 +11,15 @@ export type SettingsSection = (typeof SECTIONS)[number];
 
 type SectionProps = { section: SettingsSection; onSection?: (section: SettingsSection) => void };
 
-/* The switch between the sections; the one open is the current page. */
+/* The switch between the sections, at the start of the window and above the section when it is narrow; the one open is
+   the current page. */
 function SettingsNav({ section, onSection }: SectionProps) {
   const t = useT();
   const label: Record<SettingsSection, string> = { profile: t.profile.profile, themes: t.skins.title };
   return (
-    <nav className="seg settings-nav" aria-label={t.profile.sections}>
+    <nav className="settings-nav" aria-label={t.profile.sections}>
       {SECTIONS.map(id => (
-        <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => onSection?.(id)}>
+        <button key={id} className="btn small ghost" type="button" aria-current={section === id ? 'page' : undefined} onClick={() => onSection?.(id)}>
           {label[id]}
         </button>
       ))}
@@ -73,7 +74,8 @@ export function Profile({ me, section = 'profile', onSection, onRenamed, onClose
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    box.current?.focus();
+    /* A section can name where a person starts: Themes opened from the menu starts at its heading. */
+    (box.current?.querySelector<HTMLElement>('[data-autofocus]') ?? box.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (!takeEscape(e)) return;
       onClose();
@@ -89,8 +91,10 @@ export function Profile({ me, section = 'profile', onSection, onRenamed, onClose
           <h2 id="profile-title">{t.profile.title}</h2>
           <button className="btn small ghost" type="button" onClick={onClose}>{t.common.done}</button>
         </header>
-        <SettingsNav section={section} onSection={onSection} />
-        {section === 'themes' ? <Themes /> : <NameForm me={me} onRenamed={onRenamed} />}
+        <div className="settings-body">
+          <SettingsNav section={section} onSection={onSection} />
+          <div className="settings-main">{section === 'themes' ? <Themes /> : <NameForm me={me} onRenamed={onRenamed} />}</div>
+        </div>
       </div>
     </div>
   );

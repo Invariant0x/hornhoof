@@ -101,7 +101,7 @@ describe('Shell', () => {
     renderShell();
     expect(screen.queryByRole('button', { name: /theme/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Themes: Cyberpunk' }));
+    await user.click(screen.getByRole('button', { name: 'Go to themes. Current: Cyberpunk' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
     expect(location.pathname).toBe('/themes');
   });

@@ -1,7 +1,7 @@
-import type { Skin } from './roles';
+import type { Skin, SkinNames } from './roles';
 import { parseSkin, skinObject } from './validate';
 
-/* The skins a person loaded, as a list kept in their browser. Each has a number of its own, so two files of the same
+/* The skins a person added, as a list kept in their browser. Each has a number of its own, so two files of the same
    name never take each other's place, and a new skin always gets a number above every one kept. */
 
 export type CustomSkin = { id: string; skin: Skin };
@@ -10,17 +10,33 @@ const ID = /^custom-[1-9][0-9]{0,5}$/;
 
 export const isCustomId = (id: string) => ID.test(id);
 const numberOf = (id: string) => Number(id.slice('custom-'.length));
+const nextId = (list: readonly CustomSkin[]) => `custom-${list.reduce((top, entry) => Math.max(top, numberOf(entry.id)), 0) + 1}`;
 const isEntry = (value: unknown): value is { id: string; skin?: unknown } => typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string';
 
-/* The list with the skins added after the ones kept, as many as there is room for; over counts those left out. */
-export function withAdded(list: readonly CustomSkin[], skins: readonly Skin[]): { list: CustomSkin[]; added: CustomSkin[]; over: number } {
-  const room = Math.max(0, COLLECTION_LIMIT - list.length);
-  let last = list.reduce((top, entry) => Math.max(top, numberOf(entry.id)), 0);
-  const added = skins.slice(0, room).map(skin => ({ id: `custom-${(last += 1)}`, skin }));
-  return { list: [...list, ...added], added, over: skins.length - added.length };
+/* The list with the skin added after the ones kept; null when the list is full. */
+export function withAdded(list: readonly CustomSkin[], skin: Skin): { list: CustomSkin[]; entry: CustomSkin } | null {
+  if (list.length >= COLLECTION_LIMIT) return null;
+  const entry = { id: nextId(list), skin };
+  return { list: [...list, entry], entry };
 }
 
 export const without = (list: readonly CustomSkin[], id: string): CustomSkin[] => list.filter(entry => entry.id !== id);
+
+/* A deleted skin back at its place. Its number goes to a skin added since, if one took it; it then gets a new one. */
+export function withRestored(list: readonly CustomSkin[], entry: CustomSkin, at: number): { list: CustomSkin[]; entry: CustomSkin } {
+  const back = list.some(kept => kept.id === entry.id) ? { ...entry, id: nextId(list) } : entry;
+  return { list: [...list.slice(0, at), back, ...list.slice(at)], entry: back };
+}
+
+/* Names that a card already shows get a number, (2), (3) and on, in both languages at once, so every card can be told
+   apart. */
+export function uniqueName(name: SkinNames, taken: readonly SkinNames[]): SkinNames {
+  const used = new Set(taken.flatMap(other => [other.ru, other.en]));
+  for (let n = 1; ; n += 1) {
+    const next = n === 1 ? name : { ru: `${name.ru} (${n})`, en: `${name.en} (${n})` };
+    if (!used.has(next.ru) && !used.has(next.en)) return next;
+  }
+}
 
 export const collectionText = (list: readonly CustomSkin[]): string => JSON.stringify(list.map(({ id, skin }) => ({ id, skin: skinObject(skin) })));
 

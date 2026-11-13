@@ -4,7 +4,8 @@ import { dirname } from 'node:path';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { collectionText } from '../src/skins/collection';
 import { BUILTIN_SKINS, builtinSkin } from '../src/skins/registry';
-import { lookOnly, type Skin } from '../src/skins/roles';
+import type { Skin } from '../src/skins/roles';
+import { builtinFile } from '../src/skins/validate';
 import type { Decisions, PersonView, ProposalDecision, Roster, SubView } from '../src/types';
 import { serveApi } from './api';
 
@@ -17,12 +18,17 @@ import { serveApi } from './api';
 test.describe.configure({ timeout: 0 });
 
 /* A theme of a person's own that changes only colours of Cyberpunk, so its layout must match Cyberpunk's exactly. */
-const CYBERPUNK = lookOnly(builtinSkin('cyberpunk')!);
-const CUSTOM: Skin = { ...CYBERPUNK, name: 'Dusk', colors: { ...CYBERPUNK.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
+const SAMPLE = builtinFile(builtinSkin('cyberpunk')!, { ru: 'Сумерки', en: 'Dusk' });
+const CUSTOM: Skin = { ...SAMPLE, colors: { ...SAMPLE.colors, bg: '#10002B', surface: '#1A0440', surface2: '#240A52', accent: '#FF9E00', accent_ink: '#FFC266', button: '#FF9E00', on_button: '#1A0E00' } };
 const CHOICES = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'] as const;
 type Choice = (typeof CHOICES)[number];
 /* The fonts of a theme: blocks stand in the same place in every theme written in the same fonts. */
-const fontsOf = (choice: Choice) => JSON.stringify((builtinSkin(choice) ?? CUSTOM).fonts);
+/* Skins whose headings and text start with the same font lay out the same; Onest and Tektur are carried, so the rest of a
+   stack never shows. */
+const fontsOf = (choice: Choice) => {
+  const { fonts } = builtinSkin(choice) ?? CUSTOM;
+  return `${fonts.display[0]} ${fonts.body[0]}`;
+};
 const RTL = /^(?:ar|he|fa|ur|ps|sd|ug|yi)(?:-|$)/;
 const WIDTHS = [1440, 375];
 
