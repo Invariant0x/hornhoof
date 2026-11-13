@@ -128,7 +128,7 @@ app.post('/__e2e/scenario', async req => {
   /* A failing verdict keeps the work with Review, which repairs it itself, so the one who holds it asks. */
   const choiceReq = (await ask(app.ctx, fx.reviewer.id, mainTask.id, {
     kind: 'choice',
-    topic: body.withPickTask ? 'release' : 'task',
+    topic: body.withPickTask ? 'people' : 'task',
     text: body.lang === 'ru'
       ? 'Какой вариант отображения длинного отчета и файлов задачи удобнее?'
       : 'Which layout for reading long reports and task files works better?',
@@ -261,7 +261,7 @@ const worker = await hire('Bruno', 'worker', 'DEV-BE');
 const reviewer = await hire('Rita', 'worker', 'DEV-REV');
 const designer = await hire('Interface Designer', 'worker', 'DEV-FE');
 /* Echelons exist only in a turn started in echelons, so the work Review checks is given while this turn runs. */
-await db.insert(schema.turns).values({ companyId: acme.id, number: 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() });
+await db.insert(schema.turns).values({ companyId: acme.id, departmentId: dev.id, number: 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() });
 fx = { acme, ceo, dev, head, worker, reviewer, designer };
 
 const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
