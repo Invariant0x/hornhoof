@@ -96,9 +96,18 @@ export function messageData(data: unknown, message: MessageEnvelope): unknown {
 
 export function readMessage(data: unknown): { data: unknown; message?: MessageEnvelope } {
   const parsed = MessageEnvelopeSchema.safeParse(field(data, '_message'));
-  if (!parsed.success) return { data };
-  /* The envelope, and the conversation an assistant's program sent for a new session, are not the message's payload. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the envelope and the fresh conversation from the payload
-  const { _message, _fresh, ...body } = data as Record<string, unknown>;
+  if (!parsed.success) return { data: withoutFresh(data) };
+  /* The envelope is not the message's payload. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the envelope from the payload
+  const { _message, ...body } = withoutFresh(data) as Record<string, unknown>;
   return { data: body, message: parsed.data };
+}
+
+/* The conversation an assistant's program sent for a new session waits for its turn only: whatever reads the message, with
+   or without its envelope, never gets it. */
+function withoutFresh(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !('_fresh' in data)) return data;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the fresh conversation from the payload
+  const { _fresh, ...body } = data as Record<string, unknown>;
+  return body;
 }
