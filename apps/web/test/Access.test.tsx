@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
@@ -60,6 +60,20 @@ describe('restricted access screens', () => {
     render(<Windows org={org} />);
     expect(await screen.findByText(SECRET)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
+  });
+
+  it("keeps a person's own assistant window open, not built again, while the company refreshes", async () => {
+    const calls = mockApi({ ...allowed, 'GET /api/agents/b1': [200, { ...CARD, kind: 'assistant', department: null, role: null }] });
+    const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.filter(e => e.id !== 'b1') })) };
+    const { rerender } = render(<Windows org={org} />);
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    for (let i = 0; i < 3; i++) {
+      rerender(<Windows org={{ ...org }} />);
+      expect(screen.getByText(SECRET)).toBeInTheDocument();
+      await waitFor(() => expect(calls.filter(c => c.path === '/api/agents/b1').length).toBeGreaterThan(i + 1));
+    }
+    expect(screen.getByText(SECRET)).toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/agents/b1/events?after=0')).toHaveLength(1);
   });
 
   it('drops an open agent journal as soon as a new org removes the agent', async () => {
