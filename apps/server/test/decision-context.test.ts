@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
@@ -5,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents } from '../src/db/schema.js';
-import { ceoPrincipal, computerPrincipal, decisionPrincipal, withInputLock } from '../src/modules/conversation/decision-context.js';
+import { ceoPrincipal, computerPrincipal, decisionPrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { personParty } from '../src/modules/events/parties.js';
@@ -123,6 +124,29 @@ describe('the person an orchestrator turn answers', () => {
       .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', createdBy: c.ids.ivan })
       .returning();
     expect(await decisionPrincipal(c.db, workerTurn!.id)).toBeNull();
+  });
+});
+
+describe("the person a department head's turn answers", () => {
+  it("is found as for the orchestrator's: the last person who wrote or typed into it, through their assistant too, never an agent or a notice", async () => {
+    const c = await company();
+    const [turn] = await c.db
+      .insert(jobs)
+      .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', createdBy: c.ids.dan })
+      .returning();
+    const wrote = async (personId: string | null, text: string, extra: Record<string, unknown> = {}) =>
+      (await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.hana.id, jobId: turn!.id, kind: 'message', data: { text, ...extra }, personId })).seq;
+    expect(await decisionPrincipal(c.db, turn!.id)).toEqual({ personId: c.ids.dan, sourceSeq: null });
+    const dans = await wrote(c.ids.dan, 'Make a Mobile sub-unit.');
+    await wrote(null, 'Please approve my commit.', { from: 'agent', name: 'Bruno', by: c.bruno.id });
+    await wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
+    expect(await decisionPrincipal(c.db, turn!.id)).toEqual({ personId: c.ids.dan, sourceSeq: dans });
+    const ivans = await wrote(c.ids.ivan, 'Hire two developers.', { channel: 'assistant', assistant: { id: randomUUID(), name: 'Ava', message: randomUUID() } });
+    expect(await decisionPrincipal(c.db, turn!.id)).toEqual({ personId: c.ids.ivan, sourceSeq: ivans });
+    await typedWentIn(c.ctx, c.hana.id, c.ids.dan);
+    expect((await decisionPrincipal(c.db, turn!.id))?.personId).toBe(c.ids.dan);
+    await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, turn!.id));
+    expect(await decisionPrincipal(c.db, turn!.id)).toBeNull();
   });
 });
 

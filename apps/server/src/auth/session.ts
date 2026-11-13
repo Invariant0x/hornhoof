@@ -2,7 +2,7 @@ import { and, eq, gt, lte } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
-import { people, sessions, type ScopeKind } from '../db/schema.js';
+import { agents, people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
@@ -33,8 +33,12 @@ export type Person = {
   scopeKind: ScopeKind;
   isOwner: boolean;
   isCeoDelegate: boolean;
-  /* The orchestrator acting as this person, the owner: what it changes is its own. */
+  /* The orchestrator acting as this person, the owner: what it changes is its own. Also a department's head carrying out
+     a decision of this person inside its department. */
   via?: string;
+  /* via is a department's head, not the orchestrator: what it changes is this person's decision, kept as theirs, and it sees
+     what this person sees. */
+  viaHead?: true;
   /* The orchestrator takes a decision for this person, whom its turn answers: the turn and the message that says so. */
   decision?: { jobId: string; sourceSeq: number | null };
   /* The person's own assistant acting for them with its key, under their rights as they are now: what it does is recorded as
@@ -82,8 +86,9 @@ const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue
 /* The person who did it, or null when the orchestrator did it for the owner. */
 export const personOf = (me: Person): string | null => (me.via ? null : me.id);
 
-/* Who a change is by: the person, or the orchestrator when it acts for the owner. */
-export const changedBy = (me: Person) => ({ personId: personOf(me), byOrchestrator: !!me.via });
+/* Who a change is by: the person, or the orchestrator when it acts for the owner. A head carries out the decision of the
+   person its turn answers, so what it changes is that person's. */
+export const changedBy = (me: Person) => (me.via && !me.viaHead ? { personId: null, byOrchestrator: true } : { personId: me.id, byOrchestrator: false });
 
 /* Who acts on a task: the person, or the orchestrator when it acts for the owner. */
 export const actorOf = (me: Person): { personId: string } | { agentId: string } => (me.via ? { agentId: me.via } : { personId: me.id });
@@ -93,7 +98,8 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
   if (inside) {
     const [owner] = await db.select(personColumns).from(people).where(eq(people.id, inside.personId));
     if (!owner || owner.status !== 'active') throw notSignedIn();
-    return { ...owner, via: inside.agentId, ...(inside.decision ? { decision: inside.decision } : {}) };
+    const [agent] = await db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, inside.agentId));
+    return { ...owner, via: inside.agentId, ...(agent?.kind === 'head' ? { viaHead: true as const } : {}), ...(inside.decision ? { decision: inside.decision } : {}) };
   }
   const token = req.cookies[SESSION_COOKIE];
   if (!token) throw notSignedIn();
