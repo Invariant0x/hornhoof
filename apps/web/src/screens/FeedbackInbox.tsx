@@ -72,6 +72,7 @@ function Card({ card }: { card: InboxCard }) {
         <p className="imp-meta">
           <span className="badge fb-kind">{t.feedback.kinds[card.kind]}</span>
           <span className="badge fb-priority">{t.inbox.priority[card.priority]}</span>
+          <span>{t.inbox.number(card.number)}</span>
           <span>{t.inbox.signals(card.signals, card.installations)}</span>
         </p>
       </header>

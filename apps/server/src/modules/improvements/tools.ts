@@ -96,7 +96,8 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
         'Puts something you found to improve in how the company works under Improvements, where the CEO takes it into work and the orchestrator does it: a program to install on the nodes ahead, words to add to an instruction, ' +
         'something to write down, a role to move to another subscription. Write it as a short case in the CEO\'s language and plain words, keeping names, commands and packages as they are: ' +
         'the title, what is wrong, the facts with where each comes from, apart from what you only guess, why it matters, the exact change and what it gives. ' +
-        'Say with scope whether the company can change it itself, or whether Hornhoof itself is at fault: on an installation of another company a platform finding goes to Hornhoof developers once the CEO sends it. ' +
+        'Say with scope whether the company can change it itself, or whether Hornhoof itself is at fault: on an installation of another company a platform finding goes to Hornhoof developers once the CEO sends it, ' +
+        'and one they have already is counted once more on its card instead of a new one. ' +
         `With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
       inputSchema: { ...Case, improvement: Id.optional() },
     },

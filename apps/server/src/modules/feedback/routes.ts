@@ -52,8 +52,9 @@ async function findingFor(ctx: Pick<Ctx, 'db' | 'config'>, me: Person, id: strin
 const issueColumns = (issue: IssueLink | null) => (issue ? { issueNumber: issue.number, issueUrl: issue.url } : {});
 
 /* Tells Hornhoof's developers how many more rounds found a finding sent to them: the same report, word for word, with that
-   count. Their inbox counts them as signals of it and answers with its issue, if there is one now. Nothing else goes. */
-export async function reportRepeats(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'links'>, companyId: string, id: string): Promise<void> {
+   count, only ever on a person's press. Their inbox counts them as signals of it and answers with its issue, if there is
+   one now. Nothing else goes. */
+async function reportRepeats(ctx: Pick<Ctx, 'db' | 'bus' | 'config' | 'links'>, companyId: string, id: string): Promise<void> {
   const [found] = await ctx.db.select().from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, companyId)));
   if (!found) throw new ApiError(404, 'not_found', 'There is no such improvement.', 'improvement_unknown');
   if (found.status !== 'sent' || !found.sentReport || found.reportedSeen === null || ctx.config.feedbackInbox) throw new ApiError(409, 'conflict', "This finding was not sent to Hornhoof's developers.", 'feedback_not_sent');

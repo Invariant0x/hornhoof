@@ -31,7 +31,8 @@ A report, version 1:
   "kind": "bug | improvement | idea",
   "title": "1 to 200 characters",
   "text": "up to 5000 characters",
-  "facts": { "version": "0.18.11", "platform": ["linux x64"], "errorCode": "terminal_lost or null" }
+  "facts": { "version": "0.18.11", "platform": ["linux x64"], "errorCode": "terminal_lost or null" },
+  "repeats": "1 to 100, only when the report is sent again to tell of its repeats"
 }
 ```
 
@@ -58,7 +59,7 @@ What the inbox answers:
 
 | Status | When |
 | --- | --- |
-| 202 `{ "received": true }` | Taken |
+| 202 `{ "received": true, "number": 7, "issue": { "number": 1347, "url": "https://github.com/invariant0x/hornhoof/issues/1347" } }` | Taken: the number of its card in the inbox, and its issue, or `null` while it has none |
 | 400 | Not a report of version 1, or a field out of its limits |
 | 413 | A body over 16 KB |
 | 429 with `Retry-After` | Over 10 reports in an hour from one installation, or over 200 new cards in an hour from all |
@@ -72,4 +73,31 @@ machines they named. Priority: high for a bug from 3 or more installations, norm
 or more installations, low for the rest. People who see the whole company read the inbox from the account menu and turn a
 card into an issue in `invariant0x/hornhoof` with one press. The key is the GitHub key the company saved for
 `invariant0x`, its own first, then a department's; it needs Issues: Read and write. Everything that came from installations
-goes into the issue inside code blocks, so nothing in it links, mentions or runs.
+goes into the issue inside code blocks, so nothing in it links, mentions or runs. Every card has a number, in the order
+cards were opened; an installation calls its report by it.
+
+## What becomes of a finding once it is sent
+
+A finding about Hornhoof itself that a person sent from its card leaves what waits there. Its card says when it went,
+its number in the inbox and, once the inbox gives one, its issue. The installation keeps what the inbox answered: the
+number and the issue, but the issue only as the exact page `https://github.com/invariant0x/hornhoof/issues/N` of its own
+number, whatever else the answer says.
+
+**Found again.** When an agent of the same installation files the same finding again, with the same fingerprint the inbox
+tells repeats by (`fingerprintOfReport` in `inbox.ts`), no new card opens: the sent one counts one more round. Its card
+then offers "Report repeats (N)". A person's press sends the same report word for word with `"repeats": N`, and the inbox
+adds that many signals to the card from this installation; the answer brings the issue, if there is one now. Repeats only
+ever go on a person's press (the CEO's decision on #779): counting one sends nothing. A finding found again after its fix
+is a new one.
+
+**Fixed.** `apps/server/src/modules/feedback/released.ts` lists what releases say about reports: its number, its issue and
+the version that fixed it. Whoever prepares a release adds the reports it fixes, read off the inbox:
+
+```ts
+export const RELEASED: readonly Released[] = [
+  { report: 7, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' }, fixedIn: '0.24.0' },
+];
+```
+
+A new version brings the list with it. An installation that runs it, or a newer one, shows "Fixed in version 0.24.0" on
+the card of report 7, and its issue from the list when the inbox had none yet. No service is asked and no timer runs.

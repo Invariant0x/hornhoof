@@ -474,7 +474,13 @@ export type Improvement = {
   tasks?: { id: string; number: number; title: string }[];
   /* null for one filed as one text; an older server sends none. */
   parts?: ImprovementParts | null;
+  /* What became of one sent to Hornhoof's developers, null for any other; an older server sends none. */
+  sent?: SentFate | null;
 };
+
+/* When it went, its number in the inbox of Hornhoof's developers once it gave one, its issue there, the version that fixed
+   it once this Hornhoof runs it, and how many more rounds found it since they last heard of it. */
+export type SentFate = { at: string; number: number | null; issue: { number: number; url: string } | null; fixedIn: string | null; repeats: number };
 
 export type FeedbackKind = 'bug' | 'improvement' | 'idea';
 /* What goes to Hornhoof's developers, as the server cleaned it, with the technical data beside it, how much it hid of each
@@ -487,6 +493,8 @@ export type FeedbackShown = {
 /* A card of the inbox on Hornhoof's own installation: one report and its repeats, from how many installations. */
 export type InboxCard = {
   id: string;
+  /* What an installation calls the report by. */
+  number: number;
   kind: FeedbackKind;
   title: string;
   text: string;

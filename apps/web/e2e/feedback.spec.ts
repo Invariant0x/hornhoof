@@ -36,14 +36,21 @@ const FINDING: Improvement = {
   result: null, at: '2026-11-12T08:00:00.000Z', updatedAt: '2026-11-12T09:00:00.000Z', agent: { id: 'b1', name: 'Bruno' }, department: { id: 'd2', name: 'Development' }, decidedBy: null, tasks: [],
   parts: { problem: 'The terminal closes after an update.', facts: [{ text: 'It closed 4 times this week.', source: 'failures, 5 to 11 November' }], guesses: [], why: 'Work stops until someone opens it.', change: 'Keep the terminal through an update.', gain: null },
 };
+/* The same finding once sent: when it went, its number in the inbox of Hornhoof's developers, its issue and the repeats
+   to report; and another the version it runs now fixed. */
+const SENT: Improvement = {
+  ...FINDING, id: 'i10', title: 'The queue of an agent stops after a restart of its machine and every turn waits for a person', status: 'sent', seen: 4, decidedBy: 'Maximiliana Wolkenstein-Rodenegg',
+  sent: { at: '2026-11-13T09:00:00.000Z', number: 1347, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' }, fixedIn: null, repeats: 3 },
+};
+const FIXED: Improvement = { ...SENT, id: 'i11', title: 'Terminalverbindungsunterbrechungswiederherstellungsfehler after an update', seen: 2, sent: { ...SENT.sent!, number: 1288, issue: null, fixedIn: '0.24.0', repeats: 1 } };
 const card = (over: Partial<InboxCard>): InboxCard => ({
-  id: 'f1', kind: 'bug', title: TITLE, text: 'The agent terminal stayed black.', errorCode: null, versions: ['0.18.12'], platforms: ['linux x64'], signals: 1, installations: 1, priority: 'normal',
+  id: 'f1', number: 1, kind: 'bug', title: TITLE, text: 'The agent terminal stayed black.', errorCode: null, versions: ['0.18.12'], platforms: ['linux x64'], signals: 1, installations: 1, priority: 'normal',
   firstAt: '2026-11-12T08:00:00.000Z', lastAt: '2026-11-12T09:00:00.000Z', issue: null, ...over,
 });
 const CARDS: InboxCard[] = [
   card({ id: 'f1', priority: 'high', signals: 12, installations: 5, errorCode: 'terminal_lost_after_update_on_a_long_running_node', versions: ['0.18.11', '0.18.12', '0.18.9'], platforms: ['darwin arm64', 'linux arm64', 'linux x64'], text: TEXT }),
-  card({ id: 'f2', kind: 'idea', title: 'Click [here](javascript:alert(1)) <b>now</b>', text: '**stars** and https://evil.example/a/very/long/address/that/goes/on/and/on/without/a/single/space', priority: 'low' }),
-  card({ id: 'f3', kind: 'improvement', title: 'Show the queue of turns on the map', priority: 'normal', signals: 3, installations: 3, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' } }),
+  card({ id: 'f2', number: 2, kind: 'idea', title: 'Click [here](javascript:alert(1)) <b>now</b>', text: '**stars** and https://evil.example/a/very/long/address/that/goes/on/and/on/without/a/single/space', priority: 'low' }),
+  card({ id: 'f3', number: 1347, kind: 'improvement', title: 'Show the queue of turns on the map', priority: 'normal', signals: 3, installations: 3, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' } }),
 ];
 
 async function messagesFor(locale: Language): Promise<Messages> {
@@ -58,7 +65,7 @@ async function prepare(page: Page, inbox: { value: boolean }) {
   await page.route('**/api/feedback', route => route.fulfill({ json: { inbox: inbox.value } }));
   await page.route('**/api/feedback/preview', route => route.fulfill({ json: SHOWN }));
   await page.route('**/api/feedback/inbox', route => route.fulfill({ json: { cards: CARDS } }));
-  await page.route('**/api/improvements', route => route.fulfill({ json: { improvements: [FINDING] } }));
+  await page.route('**/api/improvements', route => route.fulfill({ json: { improvements: [FINDING, SENT, FIXED] } }));
 }
 
 /* Errors of the page, and any file of the app it could not load. */
@@ -108,6 +115,14 @@ const SCENES: Scene[] = [
     await page.goto('/improvements');
     return page.getByRole('article', { name: FINDING.title, exact: true });
   } },
+  { name: 'sent-card', inbox: false, open: async page => {
+    await page.goto('/improvements');
+    return page.getByRole('article', { name: SENT.title, exact: true });
+  } },
+  { name: 'fixed-card', inbox: false, open: async page => {
+    await page.goto('/improvements');
+    return page.getByRole('article', { name: FIXED.title, exact: true });
+  } },
   { name: 'inbox', inbox: true, open: async (page, words) => {
     await page.goto('/inbox');
     await expect(page.getByRole('heading', { level: 1, name: words.inbox.title, exact: true })).toBeVisible();
@@ -125,7 +140,7 @@ async function openScene(page: Page, scene: Scene, words: Messages): Promise<Loc
 /* Where every block and control of the place stands, with its padding, margin, border and font. */
 async function geometry(place: Locator): Promise<Record<string, unknown>[]> {
   return place.evaluate(root => {
-    const selectors = [':scope', 'header', 'h2', 'h3', '.field', '.field > label', '.field > .label', '.field-control', 'input', 'textarea', '.fb-kinds button', '.fb-note', '.fb-check', 'dt', 'dd', '.fb-hidden', '.form-foot', '.form-foot > *', '.imp', '.imp-meta', '.badge', '.fb-text', '.entry-actions > *', '.fb-issue', '.req-actions > *', '.imp-case'];
+    const selectors = [':scope', 'header', 'h2', 'h3', '.field', '.field > label', '.field > .label', '.field-control', 'input', 'textarea', '.fb-kinds button', '.fb-note', '.fb-check', 'dt', 'dd', '.fb-hidden', '.form-foot', '.form-foot > *', '.imp', '.imp-meta', '.badge', '.fb-text', '.entry-actions > *', '.fb-issue', '.req-actions > *', '.imp-case', '.imp-fate', '.imp-fate a', '.imp-fixed'];
     const seen = new Set<Element>();
     const out: Record<string, unknown>[] = [];
     const origin = root.getBoundingClientRect();
@@ -273,8 +288,22 @@ test('mirrors the feedback window and the inbox for a language written right to 
     expect(await whole(page, box)).toEqual([]);
     await box.screenshot({ path: info.outputPath(`${browserName}/rtl-${width}-feedback-write.png`), animations: 'disabled' });
 
+    const fixed = await openScene(page, SCENES.find(s => s.name === 'fixed-card')!, words);
+    await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    expect(await fixed.locator('.imp-fixed').evaluate(e => [getComputedStyle(e).borderRightWidth, getComputedStyle(e).borderLeftWidth]), 'the line of the fix is on the start side, the right').toEqual(['3px', '0px']);
+    expect(await whole(page, fixed)).toEqual([]);
+    await shoot(page, fixed, info.outputPath(`${browserName}/rtl-${width}-fixed-card.png`));
+
+    const sent = await openScene(page, SCENES.find(s => s.name === 'sent-card')!, words);
+    await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+    const press = (await sent.getByRole('button', { name: words.improvements.reportRepeats(3), exact: true }).boundingBox())!;
+    const sentBox = (await sent.boundingBox())!;
+    expect(press.x + press.width - sentBox.x, 'the press starts on the right').toBeGreaterThan(sentBox.width / 2);
+    expect(await whole(page, sent)).toEqual([]);
+    await shoot(page, sent, info.outputPath(`${browserName}/rtl-${width}-sent-card.png`));
+
     inbox.value = true;
-    const list = await openScene(page, SCENES[3]!, words);
+    const list = await openScene(page, SCENES.find(s => s.name === 'inbox')!, words);
     await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
     const first = list.locator('.fb-card').first();
     expect(await first.evaluate(e => [getComputedStyle(e).borderRightWidth, getComputedStyle(e).borderLeftWidth]), 'the priority line is on the start side, the right').toEqual(['3px', '1px']);
