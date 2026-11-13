@@ -39,7 +39,7 @@ function fakeClock() {
 }
 
 type Navigation = 'answer' | 'busy' | 'hang' | 'through-proxy';
-type FakeOptions = { navigation?: Navigation; finalUrl?: string; status?: number; sample?: PageSample; collect?: 'hang'; launch?: 'fail'; close?: 'hang'; target?: string };
+type FakeOptions = { navigation?: Navigation; finalUrl?: string; status?: number; sample?: PageSample; collect?: 'hang'; launch?: 'fail'; close?: 'hang'; target?: string; asks?: string[] };
 
 /* Playwright's Chromium as hh-browse drives it: what it was asked, in order, and the answers of a recorded page. */
 function fakeBrowser(o: FakeOptions = {}) {
@@ -54,6 +54,8 @@ function fakeBrowser(o: FakeOptions = {}) {
   const reached = new Promise<void>(resolve => { navigated = resolve; });
   let entered!: () => void;
   const started = new Promise<void>(resolve => { entered = resolve; });
+  let reading!: () => void;
+  const collecting = new Promise<void>(resolve => { reading = resolve; });
   let options!: LaunchOptions;
   const page: BrowserPage = {
     url: () => o.finalUrl ?? 'https://shop.example/catalogue',
@@ -71,6 +73,7 @@ function fakeBrowser(o: FakeOptions = {}) {
         emit('requestfailed', doc);
         throw new Error('page.goto: net::ERR_TUNNEL_CONNECTION_FAILED');
       }
+      for (const asked of o.asks ?? []) await askProxyFor(options, asked);
       emit('requestfinished', doc);
       if (o.navigation === 'busy') emit('request', api);
       navigated();
@@ -80,6 +83,7 @@ function fakeBrowser(o: FakeOptions = {}) {
       if (fn === afterTwoFrames) { calls.push('frames'); return undefined; }
       if (fn === collectPage) {
         calls.push(`collect ${JSON.stringify(arg)}`);
+        reading();
         if (o.collect === 'hang') return new Promise(() => {});
         return o.sample ?? sample('rendered');
       }
@@ -95,7 +99,7 @@ function fakeBrowser(o: FakeOptions = {}) {
     close: () => { calls.push('close'); return o.close === 'hang' ? new Promise(() => {}) : Promise.resolve(); },
   };
   return {
-    calls, launches, reached, started,
+    calls, launches, reached, started, collecting,
     finishApi: () => { calls.push('api finished'); emit('requestfinished', api); },
     launcher: {
       launchPersistentContext: async (dir: string, given: LaunchOptions) => {
@@ -121,6 +125,17 @@ function askProxy(options: LaunchOptions, target: string) {
   });
 }
 
+/* A script of the page asking for an address over plain http: the browser sends the whole address to the proxy. */
+function askProxyFor(options: LaunchOptions, address: string) {
+  const server = new URL(options.proxy.server);
+  const auth = `Basic ${Buffer.from(`${options.proxy.username}:${options.proxy.password}`).toString('base64')}`;
+  return new Promise<void>(resolve => {
+    const r = request({ host: server.hostname, port: Number(server.port), method: 'GET', path: address, headers: { host: new URL(address).host, 'proxy-authorization': auth } }, res => { res.resume(); res.on('end', () => resolve()); });
+    r.on('error', () => resolve());
+    r.end();
+  });
+}
+
 function setUp(o: FakeOptions = {}, extra: Partial<BrowseDeps> = {}) {
   const browser = fakeBrowser(o);
   const clock = fakeClock();
@@ -139,7 +154,7 @@ function setUp(o: FakeOptions = {}, extra: Partial<BrowseDeps> = {}) {
     pid: 700,
     table,
     folders,
-    makeDir: prefix => { const dir = `${prefix}run1`; made.push(dir); return dir; },
+    makeDir: prefix => { made.push(prefix); return `${prefix}run1`; },
     removeDir: path => { removed.push(path); },
     writeFile: (path, bytes) => { written.set(path, bytes); },
     secret: () => 'run-secret',
@@ -206,7 +221,7 @@ describe('hh-browse reading one address in a browser on the node', () => {
     for (const navigation of ['busy', 'hang'] as const) {
       const { browser, clock, deps } = setUp({ navigation });
       const done = browse(asked('https://shop.example/catalogue'), deps);
-      await clock.until(2);
+      await (navigation === 'busy' ? browser.reached : browser.started);
       clock.advance(SETTLE);
       const result = await done;
       expect(result.status, navigation).toBe('ok');
@@ -218,7 +233,7 @@ describe('hh-browse reading one address in a browser on the node', () => {
   it('gives up at the time limit when the page cannot even be read, and still cleans up', async () => {
     const { browser, clock, removed, deps } = setUp({ collect: 'hang' });
     const done = browse(asked('https://shop.example/catalogue'), deps);
-    await clock.until(2);
+    await browser.collecting;
     clock.advance(LIMITS.timeoutMs);
     const result = await done;
     expect(result).toMatchObject({ status: 'failed', reason: expect.stringMatching(/time limit of 30 seconds/) });
@@ -231,6 +246,13 @@ describe('hh-browse reading one address in a browser on the node', () => {
     const result = await browse(asked('https://shop.example/go'), deps);
     expect(result).toMatchObject({ status: 'refused', reason: expect.stringMatching(/inside\.example[^.]*private/) });
     expect(browser.calls.at(-1)).toBe('close');
+  });
+
+  it('reads the page and says which addresses its scripts asked for that the browser never opened', async () => {
+    const { deps } = setUp({ asks: ['http://169.254.169.254/latest/meta-data/', 'http://localhost:8080/admin', 'http://10.0.0.5/'] });
+    const result = await browse(asked('https://shop.example/catalogue'), deps);
+    expect(result.status).toBe('ok');
+    expect(result.notes).toEqual(['The page asked for 3 addresses that are not public, such as 169.254.169.254, localhost and 10.0.0.5; the browser opened none of them.']);
   });
 
   it('says why a browser that cannot start failed, and removes what the run made', async () => {

@@ -131,7 +131,7 @@ describe('the proxy every page request of hh-browse goes through', () => {
     const parts: Buffer[] = [];
     open.socket.on('data', chunk => parts.push(chunk));
     await once(open.socket, 'end');
-    expect(Buffer.concat(parts).toString()).toMatch(/^HTTP\/1\.1 200[\s\S]*from the stand$/);
+    expect(Buffer.concat(parts).toString()).toMatch(/^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\n[\s\S]*from the stand/);
     for (const target of ['[::1]:443', 'localhost:443', 'inside.example:443', '169.254.169.254:80', '[fd00:ec2::254]:80']) {
       const shut = await tunnel(proxy.port, target);
       expect(shut.status, target).toBe(403);
