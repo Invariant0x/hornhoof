@@ -290,9 +290,16 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const w = await worker(c);
     await until(async () => (await c.rowOf(w.machine)).linkRttMs !== null);
     older = true;
-    await until(() => seen.length >= 4);
-    /* Refused with the measures, each report goes again at once with everything else it had to say. */
-    expect(seen.slice(0, 4)).toEqual([{ measures: true, backups: true }, { measures: false, backups: true }, { measures: true, backups: true }, { measures: false, backups: true }]);
+    await until(() => seen.filter(report => !report.measures).length >= 2);
+    /* Refused with the measures, each report goes again at once with everything else it had to say. On a loaded
+       machine two reports may be on their way at once, so each one without the measures has a refused one before it. */
+    const said = [...seen];
+    expect(said.every(report => report.backups)).toBe(true);
+    let refused = 0;
+    for (const report of said) {
+      refused += report.measures ? 1 : -1;
+      expect(refused, JSON.stringify(said)).toBeGreaterThanOrEqual(0);
+    }
     expect(w.lines.filter(line => line.includes('Could not report'))).toEqual([]);
   });
 
