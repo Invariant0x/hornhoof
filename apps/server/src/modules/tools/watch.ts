@@ -36,6 +36,11 @@ const WHY_TAIL = 500;
 /* Queued turns Hornhoof ended unsent on purpose, as their task went to another holder or waits for the tasks before it: no
    program ran, so there is nothing to find. */
 const ENDED_UNSENT = ['handed_on', 'waiting'];
+/* The start of what a holder said when it stopped, and its end when it says more than the start holds. */
+const heldWords = (said: { text: string } | undefined) => ({
+  why: said ? said.text.slice(0, TAIL) : null,
+  whyTail: said && said.text.length > TAIL ? said.text.slice(-WHY_TAIL) : null,
+});
 const FAILED_MAX = 50;
 /* Tool calls and results read for where agents stumbled, the newest first. */
 const STUMBLES_MAX = 1000;
@@ -238,7 +243,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             : [];
           /* A turn that went out inside another one ended as that one did. */
           const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
-          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, whyTail: said && said.text.length > TAIL ? said.text.slice(-WHY_TAIL) : null, lastTurn: lastTurn ?? null });
+          blocked.push({ ...task, ...heldWords(said), lastTurn: lastTurn ?? null });
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>

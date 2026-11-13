@@ -237,8 +237,7 @@ export class Bridge {
       if (typeof v === 'string') headers[h] = v;
     }
     const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
-    const reads = kind === 'attach' ? req.method === 'GET' : onlyReads(body);
-    const up = await this.forward(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) }, reads);
+    const up = await this.forward(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) }, onlyReading(kind, req.method, body));
     const out: Record<string, string> = {};
     for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
       const v = up.headers.get(h);
@@ -364,8 +363,10 @@ function only(body: Buffer, methods: Set<string>): boolean {
   return all.length > 0 && all.every(m => typeof m?.method === 'string' && methods.has(m.method));
 }
 
-/* Whether a JSON-RPC message, or every message of a batch, calls a tool that only reads. */
-function onlyReads(body: Buffer): boolean {
+/* Whether a call only reads: a task's file asked for, or a JSON-RPC message, or every message of a batch, that calls a tool
+   that only reads. */
+function onlyReading(kind: string, method: string | undefined, body: Buffer): boolean {
+  if (kind === 'attach') return method === 'GET';
   const all = messages(body) as { method?: unknown; params?: { name?: unknown } }[];
   return all.length > 0 && all.every(m => m?.method === 'tools/call' && typeof m.params?.name === 'string' && READS.has(m.params.name));
 }
