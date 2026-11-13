@@ -17,7 +17,8 @@ its whole conversation to a new session.
 - An assistant's program can send, beside the new words, its whole conversation with the owner (`freshText`, up to
   200000 characters). The assistant's agent reads it in place of the new words when its session starts anew: a first
   session, a change of plan, machine or instructions, or a conversation the owner cleared in the terminal. A session
-  that goes on reads only the new words.
+  that goes on reads only the new words. The assistant's `/me` now says `contract: 2`, so a program sends `freshText`
+  only to a server that takes it.
 
 ### Changed
 
