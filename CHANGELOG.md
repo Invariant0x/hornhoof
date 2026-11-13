@@ -39,6 +39,11 @@ Telegram bots take files, and a machine whose sign-in was refused stops starting
   terminal. It now stays signed out until the sign-in changes, also when the program reported the refusal as a failure
   or the sign-in was made in the program itself.
 - The window of a person's own assistant no longer closes and opens again every time the company's picture refreshes.
+- When two people wrote to one head's Telegram bot, the second person's words went into the turn that answered the
+  first, and from then on every word of that turn went to both chats: one person got the answer to the other's
+  question. A person's words now wait for a turn of their own when the running turn answers someone else in Telegram,
+  or when they come from Telegram and the running turn is another person's. The head is also told that its answer goes
+  to the writer alone.
 
 ## [0.23.1] - 2026-11-13
 
