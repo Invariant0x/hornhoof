@@ -15,6 +15,7 @@ const SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 const LAUNCH_TIMEOUT_MS = 90_000;
 const STARTUP_TOOLS: { bin: string; args: string[] }[] = [
   { bin: 'unzip', args: ['-v'] },
+  { bin: 'zip', args: ['-v'] },
   ...['gh', 'shellcheck', '/usr/bin/time', 'strings', 'patch', 'ss', 'objdump'].map(bin => ({ bin, args: ['--version'] })),
 ];
 const MAX_REASON_LENGTH = 240;
