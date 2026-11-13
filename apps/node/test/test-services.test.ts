@@ -815,3 +815,132 @@ describe('generated protocol inputs in prepared PGlite templates', () => {
     `);
   });
 });
+
+function servicePidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+  } catch {
+    return true;
+  }
+}
+
+describe('service test cleanup on failure or abort', () => {
+  const leakedPids = new Set<number>();
+  const leakedPaths = new Set<string>();
+
+  afterEach(() => {
+    for (const pid of leakedPids) {
+      if (!Number.isInteger(pid) || pid <= 1) continue;
+      for (const target of [-pid, pid]) {
+        try {
+          process.kill(target, 'SIGKILL');
+        } catch {
+          /* Process or group is already gone. */
+        }
+      }
+    }
+    leakedPids.clear();
+    for (const path of leakedPaths) rmSync(path, { recursive: true, force: true });
+    leakedPaths.clear();
+  });
+
+  it.each(['afterEach', 'exit', 'sigterm'] as const)('stops fake postgres from runs/one/state/pg when a test ends by %s', async mode => {
+    const checkout = fileURLToPath(new URL('../../..', import.meta.url));
+    const recordFile = join(root, `abort-${mode}.json`);
+    const probeConfig = join(root, `vitest.probe.${mode}.config.mjs`);
+    writeFileSync(
+      probeConfig,
+      [
+        'export default {',
+        `  root: ${JSON.stringify(checkout)},`,
+        "  test: { pool: 'forks', maxWorkers: 1, reporters: ['default'], include: ['apps/node/test/test-services.test.ts'] },",
+        '};',
+        '',
+      ].join('\n'),
+    );
+    const child = spawn(
+      process.execPath,
+      [join(checkout, 'node_modules/vitest/vitest.mjs'), 'run', '--config', probeConfig, 'apps/node/test/test-services.test.ts', '-t', 'service postgres abort probe'],
+      {
+        cwd: checkout,
+        env: {
+          ...process.env,
+          VITEST: '',
+          VITEST_WORKER_ID: '',
+          VITEST_POOL_ID: '',
+          HH_TEST_REPORT: '',
+          HH_TEST_PART: '',
+          HH_TEST_FILES: '',
+          HH_SERVICES_ABORT_MODE: mode,
+          HH_SERVICES_ABORT_FILE: recordFile,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let childOut = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { childOut += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { childOut += chunk; });
+    try {
+      await once(child, 'exit');
+    } finally {
+      if (existsSync(recordFile)) {
+        const saved = JSON.parse(readFileSync(recordFile, 'utf8')) as { pid: number; root: string; socket: string };
+        if (saved.pid > 1) leakedPids.add(saved.pid);
+        if (saved.root) leakedPaths.add(saved.root);
+        if (saved.socket) leakedPaths.add(saved.socket);
+      }
+    }
+    if (!existsSync(recordFile)) throw new Error(`Probe wrote no record:\n${childOut}`);
+    const observed = JSON.parse(readFileSync(recordFile, 'utf8')) as {
+      pid: number; root: string; socket: string; aliveAfterEach?: boolean; rootAfterEach?: boolean;
+    };
+    if (observed.pid <= 1) throw new Error(`Probe recorded no postgres pid:\n${childOut}`);
+    if (mode === 'afterEach') {
+      expect(observed.aliveAfterEach).toBe(false);
+      expect(observed.rootAfterEach).toBe(false);
+      return;
+    }
+    await eventually(() => !servicePidAlive(observed.pid));
+    expect(existsSync(observed.root)).toBe(false);
+    expect(existsSync(observed.socket)).toBe(false);
+  });
+});
+
+if (process.env.HH_SERVICES_ABORT_MODE && process.env.HH_SERVICES_ABORT_FILE) {
+  describe('service postgres abort probe', () => {
+    const mode = process.env.HH_SERVICES_ABORT_MODE;
+    const recordFile = process.env.HH_SERVICES_ABORT_FILE!;
+    let saved = { pid: 0, root: '', socket: '' };
+
+    it('opens fake postgres in runs/one/state/pg and aborts without closing it', async () => {
+      hourLongPostgres();
+      const env = { STOP_MS: String(HOUR), STOP_MARKER: join(root, 'stop-marker'), STOP_RELEASE: join(root, 'stop-release'), PG_CTL_CALLS: join(root, 'pg_ctl') };
+      writeFileSync(env.STOP_RELEASE, '');
+      const artifacts = await prepareServiceArtifacts(definitions, root, { ...context, env, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
+      rmSync(env.STOP_RELEASE);
+      const opened = await openServices(definitions, artifacts, { ...part('one'), env });
+      const pid = Number(readFileSync(join(root, 'runs', 'one', 'state', 'pg', 'postmaster.pid'), 'utf8').trim());
+      saved = { pid, root, socket: opened.env.PGHOST! };
+      writeFileSync(recordFile, JSON.stringify(saved));
+      if (mode === 'exit') process.exit(1);
+      if (mode === 'sigterm') {
+        process.kill(process.pid, 'SIGTERM');
+        await new Promise(() => {});
+      }
+      throw new Error('simulated failure after opening postgres');
+    });
+
+    if (mode === 'afterEach') {
+      it('observes cleanup right after afterEach in the same worker', () => {
+        writeFileSync(recordFile, JSON.stringify({ ...saved, aliveAfterEach: servicePidAlive(saved.pid), rootAfterEach: existsSync(saved.root) }));
+        expect(saved.pid).toBeGreaterThan(1);
+      });
+    }
+  });
+}

@@ -1,7 +1,54 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { APP, runOnce, type Stand, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+
+const SLEEP_STUB = fileURLToPath(new URL('./updater-stubs/sleep', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+  } catch {
+    return true;
+  }
+}
+
+function treePids(rootPid: number): number[] {
+  const out = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
+  const children = new Map<number, number[]>();
+  for (const line of out.split('\n')) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (pid && ppid) children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+  }
+  const all = [rootPid];
+  for (let i = 0; i < all.length; i++) {
+    for (const child of children.get(all[i]!) ?? []) all.push(child);
+  }
+  return all;
+}
+
+function forceKillPid(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 1) return;
+  for (const target of [-pid, pid]) {
+    try {
+      process.kill(target, 'SIGKILL');
+    } catch {
+      /* Process or group is already gone. */
+    }
+  }
+}
 
 /* The orchestrator's commands on the server's computer, while the CEO keeps access to it open. */
 describe('updater, the computer', () => {
@@ -102,4 +149,201 @@ describe('updater, the computer', () => {
     command(s, 'c5;x', 'uname -a');
     expect((await runOnce(s, null, env)).calls.filter(c => c.startsWith('docker'))).toEqual([]);
   });
+
+  describe('watch stub and process group cleanup', () => {
+    const leakedPids = new Set<number>();
+    const tempDirs: string[] = [];
+
+    afterEach(() => {
+      for (const pid of leakedPids) forceKillPid(pid);
+      leakedPids.clear();
+      for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+
+    function readHoldPids(file: string): { dockerPid: number; updaterPid: number } | null {
+      if (!existsSync(file)) return null;
+      const line = readFileSync(file, 'utf8');
+      if (!line.includes('\n')) return null;
+      const [dockerPid, updaterPid] = line.trim().split(/\s+/).map(Number);
+      if (!dockerPid || !updaterPid) return null;
+      return { dockerPid, updaterPid };
+    }
+
+    it('yields the processor between watch checks with fractional /bin/sleep', () => {
+      expect(readFileSync(SLEEP_STUB, 'utf8')).toMatch(/(?:^|\s)\/bin\/sleep\s+0\.\d+/m);
+    });
+
+    it.each(['state', 'tmp'] as const)('exits the watch sleep stub when its %s directory disappears', async missing => {
+      const root = mkdtempSync(join(tmpdir(), 'hh-sleep-stub-'));
+      tempDirs.push(root);
+      const stateDir = join(root, 'state');
+      const tmpDir = join(root, 'tmp');
+      mkdirSync(stateDir);
+      mkdirSync(tmpDir);
+      const child = spawn('/bin/sh', ['-c', 'printf "ready\\n"; exec "$1" 1', '--', SLEEP_STUB], {
+        env: { PATH: '/usr/bin:/bin', STUB_WATCH: '1', STUB_STATE: stateDir, TMPDIR: tmpDir },
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (child.pid) leakedPids.add(child.pid);
+      await once(child.stdout, 'data');
+      rmSync(missing === 'state' ? stateDir : tmpDir, { recursive: true, force: true });
+      await once(child, 'exit');
+      expect(child.pid ? pidAlive(child.pid) : false).toBe(false);
+    });
+
+    it('exits the watch sleep stub when its parent process exits', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'hh-sleep-parent-'));
+      tempDirs.push(root);
+      const stateDir = join(root, 'state');
+      const tmpDir = join(root, 'tmp');
+      mkdirSync(stateDir);
+      mkdirSync(tmpDir);
+      const parent = spawn('/bin/sh', ['-c', '"$1" 1 & printf "%s\\n" "$!"; wait', '--', SLEEP_STUB], {
+        env: { PATH: '/usr/bin:/bin', STUB_WATCH: '1', STUB_STATE: stateDir, TMPDIR: tmpDir },
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (parent.pid) leakedPids.add(parent.pid);
+      const [chunk] = (await once(parent.stdout, 'data')) as [Buffer];
+      const sleepPid = Number(chunk.toString('utf8').trim());
+      leakedPids.add(sleepPid);
+      expect(pidAlive(sleepPid)).toBe(true);
+      parent.kill('SIGKILL');
+      await once(parent, 'exit');
+      await eventually(() => !pidAlive(sleepPid));
+    });
+
+    it('stops remaining processes of updater.sh when updater.sh exits mid-command', async () => {
+      const s = stand();
+      tempDirs.push(s.dir);
+      const holdFile = join(s.dir, 'computer-hold');
+      access(s, later());
+      command(s, 'cabort', 'sleep 600', 600);
+      const running = runOnce(s, null, { ...env, STUB_COMPUTER_HOLD: holdFile });
+      void running.catch(() => {});
+      let pids: { dockerPid: number; updaterPid: number } | null = null;
+      await eventually(() => {
+        pids = readHoldPids(holdFile);
+        return pids !== null;
+      });
+      const { dockerPid, updaterPid } = pids!;
+      const groupPids = [...new Set([dockerPid, ...treePids(updaterPid)])];
+      for (const pid of groupPids) leakedPids.add(pid);
+      process.kill(updaterPid, 'SIGKILL');
+      await running;
+      expect(groupPids.filter(pidAlive)).toEqual([]);
+    });
+
+    it.each(['afterEach', 'exit', 'sigterm'] as const)('stops the updater.sh process group when a test ends by %s', async mode => {
+      const work = mkdtempSync(join(tmpdir(), 'hh-updater-abort-'));
+      tempDirs.push(work);
+      const recordFile = join(work, 'record.json');
+      const holdFile = join(work, 'hold');
+      if (mode === 'afterEach') {
+        const probeConfig = join(work, 'vitest.probe.config.mjs');
+        writeFileSync(
+          probeConfig,
+          `export default { root: ${JSON.stringify(REPO_ROOT)}, test: { pool: 'forks', reporters: ['default'], include: ['apps/server/test/updater-computer.test.ts'] } };\n`,
+        );
+        const runner = spawn(
+          process.execPath,
+          [join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'run', '--config', probeConfig, 'apps/server/test/updater-computer.test.ts', '-t', 'updater computer abort probe'],
+          {
+            cwd: REPO_ROOT,
+            env: {
+              ...process.env,
+              VITEST: '',
+              VITEST_WORKER_ID: '',
+              VITEST_POOL_ID: '',
+              HH_TEST_REPORT: '',
+              HH_TEST_PART: '',
+              HH_TEST_FILES: '',
+              HH_UPDATER_ABORT_HOLD: holdFile,
+              HH_UPDATER_ABORT_RECORD: recordFile,
+            },
+            stdio: 'ignore',
+          },
+        );
+        await once(runner, 'exit');
+        const observed = JSON.parse(readFileSync(recordFile, 'utf8')) as {
+          dir: string; pids: number[]; aliveAfterEach: number[]; dirExistsAfterEach: boolean;
+        };
+        for (const pid of observed.pids) leakedPids.add(pid);
+        tempDirs.push(observed.dir);
+        expect(observed.aliveAfterEach).toEqual([]);
+        expect(observed.dirExistsAfterEach).toBe(false);
+        return;
+      }
+      const fixtureUrl = new URL('./updater-fixture.ts', import.meta.url).href;
+      const eventuallyUrl = new URL('../../../test-support/eventually.mjs', import.meta.url).href;
+      const script = [
+        `import { spawnSync } from 'node:child_process';`,
+        `import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';`,
+        `import { join } from 'node:path';`,
+        `import { eventually } from ${JSON.stringify(eventuallyUrl)};`,
+        `import { APP, runOnce, stand, UPDATER_DIGESTS } from ${JSON.stringify(fixtureUrl)};`,
+        `function tree(root) {`,
+        `  const out = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' }).stdout;`,
+        `  const map = new Map();`,
+        `  for (const l of out.split('\\n')) { const [p, pp] = l.trim().split(/\\s+/).map(Number); if (p && pp) map.set(pp, [...(map.get(pp) ?? []), p]); }`,
+        `  const all = [root]; for (let i = 0; i < all.length; i++) for (const c of map.get(all[i]) ?? []) all.push(c); return all;`,
+        `}`,
+        `const s = stand();`,
+        `const holdFile = ${JSON.stringify(holdFile)};`,
+        `const untilSec = Math.floor(Date.now() / 1000) + 3600;`,
+        `writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));`,
+        `mkdirSync(join(s.control, 'computer'), { recursive: true });`,
+        `writeFileSync(join(s.control, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));`,
+        `void runOnce(s, null, { HORNHOOF_COMPUTER_IMAGE: APP + '-updater@' + UPDATER_DIGESTS['0.4.0'], STUB_WATCH: '1', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});`,
+        `await eventually(() => existsSync(holdFile) && readFileSync(holdFile, 'utf8').includes('\\n'));`,
+        `const [dockerPid, updaterPid] = readFileSync(holdFile, 'utf8').trim().split(/\\s+/).map(Number);`,
+        `const pids = [...new Set([dockerPid, ...tree(updaterPid)])];`,
+        `writeFileSync(${JSON.stringify(recordFile)}, JSON.stringify({ dir: s.dir, pids }));`,
+        mode === 'exit' ? 'process.exit(1);' : "process.kill(process.pid, 'SIGTERM');",
+      ].join('\n');
+      const runner = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: REPO_ROOT, stdio: 'ignore' });
+      await once(runner, 'exit');
+      const recorded = JSON.parse(readFileSync(recordFile, 'utf8')) as { dir: string; pids: number[] };
+      for (const pid of recorded.pids) leakedPids.add(pid);
+      tempDirs.push(recorded.dir);
+      await eventually(() => recorded.pids.every(pid => !pidAlive(pid)));
+      expect(existsSync(recorded.dir)).toBe(false);
+    });
+  });
 });
+
+const abortHold = process.env.HH_UPDATER_ABORT_HOLD;
+const abortRecord = process.env.HH_UPDATER_ABORT_RECORD;
+if (abortHold && abortRecord) {
+  describe('updater computer abort probe', () => {
+    const holdFile = abortHold;
+    const recordFile = abortRecord;
+    let saved = { dir: '', pids: [] as number[] };
+
+    it('fails while updater.sh and its watch run', async () => {
+      const s = stand();
+      const untilSec = Math.floor(Date.now() / 1000) + 3600;
+      writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
+      mkdirSync(join(s.control, 'computer'), { recursive: true });
+      writeFileSync(join(s.control, 'computer', 'c1.json'), JSON.stringify({ id: 'c1', command: 'sleep 600', timeout: 600 }));
+      void runOnce(s, null, { HORNHOOF_COMPUTER_IMAGE: `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`, STUB_WATCH: '1', STUB_COMPUTER_HOLD: holdFile }).catch(() => {});
+      await eventually(() => existsSync(holdFile) && readFileSync(holdFile, 'utf8').includes('\n'));
+      const [dockerPid, updaterPid] = readFileSync(holdFile, 'utf8').trim().split(/\s+/).map(Number);
+      const pids = [...new Set([dockerPid!, ...treePids(updaterPid!)])];
+      saved = { dir: s.dir, pids };
+      writeFileSync(recordFile, JSON.stringify({ ...saved, aliveAfterEach: pids, dirExistsAfterEach: true }));
+      throw new Error('simulated failure');
+    });
+
+    it('observes cleanup right after afterEach in the same worker', () => {
+      writeFileSync(
+        recordFile,
+        JSON.stringify({
+          ...saved,
+          aliveAfterEach: saved.pids.filter(pidAlive),
+          dirExistsAfterEach: existsSync(saved.dir),
+        }),
+      );
+      expect(saved.pids.length).toBeGreaterThan(1);
+    });
+  });
+}
