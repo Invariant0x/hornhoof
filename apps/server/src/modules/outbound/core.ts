@@ -9,7 +9,7 @@ import { publicUrl } from '../link/link.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import { CLOSED, type Task, type Tx } from '../tasks/engine.js';
 import { taskByRef } from '../tasks/views.js';
-import { approvalNeed, approvalState, askApproval, authorityFingerprint, deciderOf, rulesFor, sendingChannel, type ApprovalState, type Bound, type Need, type Shared } from './approvals.js';
+import { approvalNeed, approvalState, askApproval, authorityFingerprint, deciderOf, rulesFor, sendingChannel, type ApprovalState, type Bound, type Need, type Shared, withdrawAskedBefore } from './approvals.js';
 import { catalogValue, currentRevision, digestOf, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
 import { recipientDigest, unsubscribeUrl } from './contacts.js';
 import { currentPolicy, dayOf, lockBuckets, releaseAttempt, reviewCheck, selectedForReview, stopChannel, usedWithin, type Channel, type CurrentPolicy } from './policies.js';
@@ -276,6 +276,7 @@ async function approvalGate(tx: Tx, a: ToApprove): Promise<Asked> {
   const need = a.restored ? 'message' : approvalNeed(rules, { audience: a.channel.audience, money: a.money, escalated: a.escalated, hasSegment: a.segmentId !== null });
   if (need === 'none') return { need, state: 'approved', bound: null };
   const bound = boundFor(a, need);
+  if (a.restored) await withdrawAskedBefore(tx, a.channel.companyId, bound, a.restored, new Date());
   return { need, state: await approvalState(tx, a.channel.companyId, bound, a.restored ?? null), bound, restored: Boolean(a.restored) };
 }
 

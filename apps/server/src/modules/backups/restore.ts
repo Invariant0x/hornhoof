@@ -332,7 +332,7 @@ export class Restores {
       if (swapped && status.attempt === carried.attempt && carried.carry) await applyCarry(this.ctx, carried.carry);
       rmSync(join(dir, RESTORE_CARRY), { force: true });
     }
-    if (swapped && status.dumpedAt) await this.mark(status);
+    if (swapped) await this.mark(status);
     this.carried = false;
     this.applied = true;
     /* The database the restore set aside is found once its updater has said which one it is. */
@@ -341,8 +341,10 @@ export class Restores {
 
   /* The mark a restore leaves in the database it restored, once per attempt: from which bundle and from when it is.
      The order is gone by now and the restored database rarely holds its own bundle's record, so the updater's status
-     says it. A source that lacks this restore is compared row by row, as its journal proves nothing of these rows. */
+     says it. A source that lacks this restore is compared row by row, as its journal proves nothing of these rows. An
+     updater from before merges says no time of the dump: its restore is marked all the same, with the time its status
+     was written, since what waited to go outside is told from what was written since by the mark alone. */
   private async mark(status: RestoreStatus): Promise<void> {
-    await this.ctx.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (${status.attempt}, ${status.id}, ${status.dumpedAt!}::timestamptz, ${status.kept}) ON CONFLICT (attempt) DO NOTHING`);
+    await this.ctx.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (${status.attempt}, ${status.id}, ${status.dumpedAt ?? status.at}::timestamptz, ${status.kept}) ON CONFLICT (attempt) DO NOTHING`);
   }
 }

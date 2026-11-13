@@ -390,13 +390,22 @@ describe('a restore from a backup', () => {
       await s.app.ctx.restores.afterSwap();
       expect(await marks(s)).toHaveLength(1);
     }
-    /* An updater from before merges says no time, and a restore that failed left nothing to mark. */
-    for (const status of [{ state: 'done', step: 'start' }, { state: 'failed', step: 'start', dumpedAt }, { state: 'running', step: 'swap', dumpedAt }] as const) {
+    /* A restore that failed, or did not swap the databases yet, left nothing to mark. */
+    for (const status of [{ state: 'failed', step: 'start', dumpedAt }, { state: 'running', step: 'swap', dumpedAt }] as const) {
       const s = await stand();
       s.says({ attempt: randomUUID(), ...status });
       await s.app.ctx.restores.afterSwap();
       expect(await marks(s), JSON.stringify(status)).toEqual([]);
     }
+    /* An updater from before merges says no time of the dump: its restore is marked all the same, with the time of its
+       word, so what waited to go outside when it ran is still told from what was written since. */
+    const old = await stand();
+    const attempt = randomUUID();
+    old.says({ attempt, state: 'done', step: 'start' });
+    await old.app.ctx.restores.afterSwap();
+    const [mark] = await marks(old);
+    expect(mark).toMatchObject({ attempt, backup: old.made.id, kept: null });
+    expect(Number.isNaN(new Date(mark!.dumped_at).getTime())).toBe(false);
   });
 
   it('serves nobody on a restored database before the carry is applied', async () => {

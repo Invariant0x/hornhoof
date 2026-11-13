@@ -24,6 +24,8 @@ export type BoundMessageApproval = {
   channel: { id: string; name: string; adapter: string; purpose: string; audience: 'direct' | 'public' };
   account: { id: string; label: string; senderDomain: string; bindingGeneration: number };
   messageId: string;
+  /* It came back with a restored database. A server from before this says nothing of it. */
+  restored?: boolean;
   revision: number;
   locale: string;
   contentDigest: string;
@@ -145,6 +147,7 @@ function MessageSnapshotBody({ item }: { item: BoundMessageApproval }) {
   const t = useT();
   return (
     <div className="imp-case">
+      {item.restored && <p className="alert" role="status">{t.outbound.restoredHold}</p>}
       <p className="imp-meta">
         <span>{`${t.outbound.exactContent} · ${item.channel.name} · ${item.account.label} (${item.account.senderDomain}, ${t.outbound.generation(item.account.bindingGeneration)}) · ${item.locale}`}</span>
       </p>
