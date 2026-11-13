@@ -675,6 +675,10 @@ describe('PeerServer', () => {
     const stranger = u.put(randomUUID(), 1024, u.stand.data);
     stranger.end(Buffer.alloc(1024));
     expect(await within(5000, statusOf(stranger))).toBe(403);
+    /* One that is still sending is told so too: the answer leaves before its stream is cut. */
+    const sending = u.put(randomUUID(), 2048, u.stand.data);
+    sending.write(Buffer.alloc(1024));
+    expect(await within(5000, statusOf(sending))).toBe(403);
     expect(u.files()).toEqual([]);
     expect(existsSync(join(u.controlDir, LOAD_FILE))).toBe(false);
     /* The machine owes nothing any more. */

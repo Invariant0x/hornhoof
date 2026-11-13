@@ -57,6 +57,8 @@ type Waiting = { port: number; kind: Kind; host: string; resolve: (port: number)
 
 const SWEEP_MS = 5000;
 const SWITCH_BODY_BYTES = 64 * 1024;
+/* How often an answer the socket has not taken yet is looked at again. */
+const ANSWER_LEAVES_MS = 10;
 const MINUTE_MS = 60_000;
 const ANY_ADDRESS = '0.0.0.0';
 const CERT_REVOKED = 'CERT_REVOKED';
@@ -150,6 +152,15 @@ function isGone(stream: ServerHttp2Stream): boolean {
 
 function answerEmpty(stream: ServerHttp2Stream, status: number): void {
   if (!isGone(stream)) stream.respond({ ':status': status }, { endStream: true });
+}
+
+/* A stream that was answered is closed with whatever the peer still sends, once the answer has left: a reset sent ahead
+   of an answer still waiting to be written takes the answer with it, and the peer would see its stream end unanswered. */
+function cutOnceAnswered(stream: ServerHttp2Stream, first = true): void {
+  if (stream.readableEnded || isGone(stream)) return;
+  if (stream.state.localClose) return void stream.close(http2.constants.NGHTTP2_NO_ERROR);
+  if (first) setImmediate(() => cutOnceAnswered(stream, false));
+  else setTimeout(() => cutOnceAnswered(stream, false), ANSWER_LEAVES_MS).unref();
 }
 
 /* Plain pipes and not pipeline, which breaks the stream as soon as the far socket has left, while the peer's flow control
@@ -382,7 +393,7 @@ export class PeerServer {
       } catch {
         answerEmpty(stream, 400);
         /* Whatever the peer still sends is not read. */
-        if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+        cutOnceAnswered(stream);
         return;
       }
     }
@@ -420,7 +431,7 @@ export class PeerServer {
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);
-    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+    cutOnceAnswered(stream);
   }
 
   /* The bundle of a database that led, taken as the bundle above is; the answer is how its record went. */
@@ -433,7 +444,7 @@ export class PeerServer {
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);
-    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+    cutOnceAnswered(stream);
   }
 
   /* What a machine held when it stopped holding the company's data comes here. It is taken as the bundle above is: what
@@ -448,7 +459,7 @@ export class PeerServer {
     stream.unpipe(body);
     body.destroy();
     answerEmpty(stream, status);
-    if (!stream.readableEnded && !isGone(stream)) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+    cutOnceAnswered(stream);
   }
 
   private sayHello(stream: ServerHttp2Stream, peer: Peer): void {
