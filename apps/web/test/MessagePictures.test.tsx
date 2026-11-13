@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +8,8 @@ import { ru } from '../src/i18n/ru';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import { AgentWindows, useAgentWindows } from '../src/screens/AgentWindows';
 import type { EventView } from '../src/types';
-import { CARD, ME, mockApi, ORG } from './api-mock';
+import { usePictureDrop } from '../src/ui/MessagePictures';
+import { CARD, DEV_ORG, ME, mockApi, ORG } from './api-mock';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
 vi.mock('../src/ui/AgentTerminal', () => ({
@@ -51,6 +53,28 @@ function open(routes: Record<string, unknown> = {}, state: object = READY, event
 function HeldWindow() {
   const windows = useAgentWindows('orchestrator');
   return <AgentWindows windows={windows} onOpen={windows.open} me={ME} org={ORG} staff={null} requests={[]} onRequestsChanged={vi.fn()} />;
+}
+
+function TwoWindows() {
+  const windows = useAgentWindows('orchestrator');
+  return (
+    <>
+      <button type="button" onClick={() => windows.open('b1')}>Open Bruno</button>
+      <AgentWindows windows={windows} onOpen={windows.open} me={ME} org={DEV_ORG} staff={null} requests={[]} onRequestsChanged={vi.fn()} />
+    </>
+  );
+}
+
+function ExclusiveDrop({ onInner, onOuter }: { onInner(files: File[]): void; onOuter(files: File[]): void }) {
+  const outer = useRef<HTMLElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  usePictureDrop(outer, true, true, onOuter);
+  usePictureDrop(inner, true, true, onInner, true);
+  return (
+    <section ref={outer} aria-label="Window">
+      <div ref={inner} role="region" aria-label="Terminal" />
+    </section>
+  );
 }
 
 const windowBox = () => screen.getByRole('complementary');
@@ -193,6 +217,49 @@ describe('a picture dragged into the window', () => {
     expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument();
     expect(uploads()).toEqual([]);
   });
+
+  it('still cancels dragover and drop in the chat and on the page after another agent window closes', async () => {
+    const user = userEvent.setup();
+    open(
+      {
+        'GET /api/agents/b1': [200, CARD],
+        'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }],
+        [`POST ${AGENT}/pictures?name=screen.png`]: uploaded('pic1'),
+      },
+      READY,
+      [],
+      <TwoWindows />,
+    );
+    await line();
+    await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
+    await screen.findByRole('textbox', { name: en.window.writeTo('Bruno') });
+    await user.click(screen.getByRole('button', { name: en.window.close }));
+    await user.click(screen.getByRole('button', { name: en.window.restoreAgent(en.window.title) }));
+
+    expect(fireEvent.dragEnter(windowBox(), dragged())).toBe(false);
+    expect(screen.getByText(en.window.dropPictures)).toBeInTheDocument();
+    const over = dragged();
+    expect(fireEvent.dragOver(windowBox(), over)).toBe(false);
+    expect(over.dataTransfer.dropEffect).toBe('copy');
+    expect(fireEvent.drop(windowBox(), dragged(png()))).toBe(false);
+    expect(await preview()).toBeInTheDocument();
+    expect(fireEvent.dragOver(document.body, dragged())).toBe(false);
+    expect(fireEvent.drop(document.body, dragged(png('missed.png')))).toBe(false);
+  });
+
+  it('cancels dragenter, dragover and drop on an exclusive box without letting the outer box see them', () => {
+    const onInner = vi.fn();
+    const onOuter = vi.fn();
+    render(<ExclusiveDrop onInner={onInner} onOuter={onOuter} />);
+    const terminal = screen.getByRole('region', { name: 'Terminal' });
+    expect(fireEvent.dragEnter(terminal, dragged())).toBe(false);
+    const over = dragged();
+    expect(fireEvent.dragOver(terminal, over)).toBe(false);
+    expect(over.dataTransfer.dropEffect).toBe('copy');
+    expect(fireEvent.drop(terminal, dragged(png()))).toBe(false);
+    expect(onInner).toHaveBeenCalledWith([expect.objectContaining({ name: 'screen.png' })]);
+    expect(onOuter).not.toHaveBeenCalled();
+  });
 });
 
 describe('a picture pasted into the window', () => {
@@ -237,6 +304,9 @@ describe('a picture pasted into the window', () => {
     const card = document.querySelector('.agent-conversation')!.appendChild(document.createElement('input'));
     expect(fireEvent.paste(card, copied([png()]))).toBe(true);
     fireEvent.dragEnter(comment, dragged());
+    expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
+    const words = panel.appendChild(document.createTextNode('Note'));
+    fireEvent.dragEnter(words, dragged());
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
     const over = dragged();
     fireEvent.dragOver(comment, over);
