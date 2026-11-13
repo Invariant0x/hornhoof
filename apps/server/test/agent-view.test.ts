@@ -155,8 +155,11 @@ describe('the company map', () => {
     for (const id of [c.dev.id, c.sales.id]) expect(shown(dept(ann, id))).toEqual(shown(dept(ceo, id)));
     expect((dept(ann, c.dev.id).current as { id: string }).id).toBe(work.id);
     expect(dept(ann, c.dev.id).live).toHaveLength(1);
-    expect(ann.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: false, subscription: null, machine: null });
-    expect(ceo.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: true });
+    expect(ann.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: false, subscription: null, machine: null, planned: true });
+    expect(ceo.orchestrator).toMatchObject({ id: c.orchestrator.id, opens: true, planned: true });
+    /* Whether he has a plan at all is the company's to know; without one he needs it, for everyone. */
+    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.orchestrator.id));
+    for (const viewer of ['ann', 'ceo'] as const) expect((await c.get('/api/org', c.tokens[viewer])).json().orchestrator).toMatchObject({ subscription: null, planned: false });
   });
 
   it('shows the work of an own agent in the department it works in', async () => {

@@ -72,8 +72,10 @@ function planWaits(t: Messages, sub: SubView): string {
   return sub.status === 'needs_setup' ? t.map.waitingSetup(PROVIDER_NAMES[sub.provider]) : t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
 }
 
-/* limitAt: the time his plan's limit resets, while it is at it. */
-export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null): string {
+/* limitAt: the time his plan's limit resets, while it is at it. planned: whether he has a plan, for a person who is not
+   shown which one. */
+export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null, planned = false): string {
+  if (!sub && planned) return limitAt ? t.map.waitingLimit(limitAt) : t.map.hasSubscription;
   if (!sub) return t.map.needsSubscription;
   if (sub.kind !== 'api_key') {
     if (sub.status !== 'ready') return planWaits(t, sub);
@@ -268,7 +270,10 @@ function deptClass(d: Department, flashing: boolean): string {
    with-turn: this department works in it. */
 const turnClass = (tall: boolean, works: boolean) => (works ? ' tall with-turn' : tall ? ' tall' : '');
 
-const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
+/* Whether the orchestrator works now, alike for everyone: from whether he has a plan and what his program does, which
+   everyone is shown, and not from his plan itself, which only those who open him see. */
+const orchestratorWorks = (o: NonNullable<Org['orchestrator']>, limitAt: string | null) =>
+  !!o.planned && !limitAt && !o.alarm && !!o.program && o.program.state !== 'gone';
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string; speed: number };
 
@@ -702,7 +707,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
   const sub = org.orchestrator?.subscription ?? null;
   const limitUntil = org.orchestrator?.limitUntil ?? null;
   const limitAt = limitUntil && Date.parse(limitUntil) > Date.now() ? clock(language, limitUntil) : null;
-  const status = orchestratorStatus(t, sub, limitAt);
+  const status = orchestratorStatus(t, sub, limitAt, org.orchestrator?.planned);
   const spots = arr.depts, placed = arr.people, { hub } = arr;
   const mx = hub.x + HUB, my = hub.y + HUB;
   const allPeople = mapPeople(org);
@@ -938,7 +943,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
       {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
       {!windowOpen && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
-          <span className={`live${orchestratorReady(sub) && !limitAt ? '' : ' off'}`} />
+          <span className={`live${org.orchestrator && orchestratorWorks(org.orchestrator, limitAt) ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
           <AgentState agent={org.orchestrator} serverNow={org.serverNow} />
           <span className="tx" title={status}>{status}</span>

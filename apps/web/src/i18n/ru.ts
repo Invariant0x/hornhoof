@@ -250,6 +250,7 @@ export const ru: Messages = {
     bend: (from, to) => `Изгиб линии: ${from} и ${to}. Перетащите его или двигайте стрелками, нажмите, чтобы убрать`,
     addBend: 'Нажмите, чтобы поставить изгиб на этой линии',
     needsSubscription: 'Чтобы начать, нужна подписка',
+    hasSubscription: 'Подписка для работы есть',
     runsOnKey: (provider, last4) => `На связи, ключ ${provider}, последние символы ${last4}`,
     waitingMachine: owner => `Ждет машину, владелец ${owner}`,
     waitingLogin: provider => `Ждет входа в ${provider}`,

@@ -219,6 +219,8 @@ export const en = {
     bend: (from: string, to: string) => `Bend in the line: ${from} and ${to}. Drag it or use the arrow keys to move it, click it to remove it`,
     addBend: 'Click to put a bend in this line',
     needsSubscription: 'Needs a subscription to start',
+    /* For a person who is not shown which subscription the orchestrator works on. */
+    hasSubscription: 'Has a subscription to work on',
     runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,

@@ -54,6 +54,13 @@ describe('orchestratorStatus', () => {
     expect(orchestratorStatus(en, SUBS[3]!, '14:30')).toBe('Waiting for the limit to reset at 14:30');
     expect(orchestratorStatus(en, { ...claude, online: false }, '14:30')).toBe("Ivan's machine is offline");
   });
+
+  it('says he has a plan to a person who is not shown which one, and still when its limit resets', () => {
+    expect(orchestratorStatus(en, null, null, true)).toBe('Has a subscription to work on');
+    expect(orchestratorStatus(ru, null, null, true)).toBe('Подписка для работы есть');
+    expect(orchestratorStatus(en, null, '14:30', true)).toBe('Waiting for the limit to reset at 14:30');
+    expect(orchestratorStatus(en, null, null, false)).toBe('Needs a subscription to start');
+  });
 });
 
 describe('Map', () => {
@@ -68,6 +75,38 @@ describe('Map', () => {
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
+  });
+
+  it('does not tell a person of part of the company that the orchestrator needs a plan when his plan is only hidden from them', async () => {
+    const listed = { ...ME, person: { ...ME.person, id: 'p3', scopeKind: 'listed' as const, isOwner: false } };
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null, machine: null, opens: false, planned: true } }] });
+    const { container } = render(<MapScreen {...PROPS} me={listed} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorHas a subscription to work on');
+    expect(container.querySelector('.ticker')).not.toHaveTextContent('Needs a subscription to start');
+  });
+
+  it("lights the orchestrator's dot alike for everyone while his program works, from what everyone is shown", async () => {
+    const listed = { ...ME, person: { ...ME.person, id: 'p3', scopeKind: 'listed' as const, isOwner: false } };
+    const hidden = { subscription: null, machine: null, opens: false, planned: true };
+    const now = Date.now();
+    const thinking = { state: 'thinking' as const, since: now, tool: null, screenAt: now, signAt: null, retry: null, reportedAt: now };
+    const cases = [
+      [null, null, false],
+      [thinking, null, true],
+      [{ ...thinking, state: 'asking' as const }, null, true],
+      [{ ...thinking, state: 'gone' as const }, null, false],
+      [thinking, { reason: 'program_stalled' as const, since: now }, false],
+    ] as const;
+    for (const [program, alarm, works] of cases) {
+      for (const [me, shown] of [[ME, {}], [listed, hidden]] as const) {
+        mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, planned: true, ...shown, program, alarm } }] });
+        const { container, unmount } = render(<MapScreen {...PROPS} me={me} />);
+        await screen.findByText('Ivan');
+        expect([me.person.id, program?.state ?? null, alarm?.reason ?? null, container.querySelector('.ticker .live')!.classList.contains('off')]).toEqual([me.person.id, program?.state ?? null, alarm?.reason ?? null, !works]);
+        unmount();
+      }
+    }
   });
 
   it("shows how full the orchestrator's context is in the line at the bottom, and follows it live", async () => {

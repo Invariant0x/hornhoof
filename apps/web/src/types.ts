@@ -237,7 +237,7 @@ export type Briefing = {
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null; opens?: boolean; planned?: boolean } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
