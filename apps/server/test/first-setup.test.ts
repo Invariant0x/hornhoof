@@ -83,4 +83,14 @@ describe("a program's first setup that only the plan's owner passes", () => {
     await expireStaleNodes(c.db, now);
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_login', 'needs_login']);
   });
+
+  it('updates lastSeenAt when a live node reports its load without sending a new status', async () => {
+    const c = await planOnMachine();
+    const oldSeen = new Date('2026-11-13T18:07:00.000Z');
+    const loadSeen = new Date('2026-11-13T21:06:00.000Z');
+    await c.db.update(nodes).set({ lastSeenAt: oldSeen }).where(eq(nodes.id, c.node.id));
+    await handleNodeMessage(c.ctx, c.id, { type: 'load', cpus: 8, load: 1.2, memFree: 4096, memTotal: 8192, tests: 0, jobs: 0 }, loadSeen);
+    const [after] = await c.db.select().from(nodes).where(eq(nodes.id, c.node.id));
+    expect(after!.lastSeenAt?.toISOString()).toBe(loadSeen.toISOString());
+  });
 });

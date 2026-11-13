@@ -283,4 +283,50 @@ describe('live program metadata in the hub', () => {
     expect(hub.browserHoldOf(node)).toBeNull();
     expect(hub.loadOf(node)).toBeNull();
   });
+
+  it('drops a node that sends no messages for three minutes even when pong frames keep arriving, and keeps one sending load', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-13T18:07:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const ends: { nodeId: string; cause: string }[] = [];
+    const hub = new NodeHub({
+      pingMs: 20_000,
+      onClose: async () => {},
+      onMessage: async () => {},
+      onDisconnected: async (id, end) => {
+        if (id.kind === 'node') ends.push({ nodeId: id.nodeId, cause: end.cause });
+      },
+    });
+    onTestFinished(() => hub.stop());
+    const makeSocket = () => {
+      const sock = Object.assign(new EventEmitter(), {
+        readyState: 1,
+        close() { sock.readyState = 3; sock.emit('close', 1000); },
+        ping() { sock.emit('pong'); },
+        terminate() { sock.readyState = 3; sock.emit('close', 1006); },
+      });
+      return sock;
+    };
+    const silent = { kind: 'node' as const, nodeId: 'marselle-node' };
+    const active = { kind: 'node' as const, nodeId: 'macbook-node' };
+    const silentSock = makeSocket();
+    const activeSock = makeSocket();
+    hub.attach(silent, silentSock as unknown as WebSocket);
+    hub.attach(active, activeSock as unknown as WebSocket);
+    hub.greet(silent, true);
+    hub.greet(active, true);
+    expect([hub.isReady(silent), hub.isReady(active)]).toEqual([true, true]);
+
+    for (let step = 0; step < 8; step++) {
+      await vi.advanceTimersByTimeAsync(20_000);
+      activeSock.emit('message', JSON.stringify({ type: 'load', cpus: 8, load: 1, memFree: 4000, memTotal: 8000, tests: 0, jobs: 0 }));
+    }
+    expect([hub.isReady(silent), hub.isReady(active)]).toEqual([true, true]);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(hub.isOnline(silent)).toBe(false);
+    expect(hub.isReady(silent)).toBe(false);
+    expect(hub.isReady(active)).toBe(true);
+    expect(ends).toEqual([{ nodeId: 'marselle-node', cause: 'missed_pongs' }]);
+  });
 });

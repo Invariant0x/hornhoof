@@ -1133,7 +1133,7 @@ describe('live events', () => {
 describe('helpers', () => {
   it('maps Claude rate limit statuses and clamps utilization', () => {
     expect(limitsFrom({ status: 'allowed_warning', unifiedWindows: { seven_day: { utilization: 1.4 } } })).toEqual({
-      status: 'warning', windows: [{ name: 'seven_day', utilization: 1, resetsAt: null }],
+      status: 'warning', windows: [{ name: 'seven_day', utilization: 1, resetsAt: null }], complete: true,
     });
     expect(limitsFrom({ status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1793307000 })).toEqual({
       status: 'rejected', windows: [{ name: 'five_hour', utilization: null, resetsAt: new Date(1793307000 * 1000).toISOString() }],
