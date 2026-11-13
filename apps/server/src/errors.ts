@@ -207,7 +207,8 @@ export type ErrorReason =
   | 'assistant_plan_invalid'
   | 'assistant_agent_card'
   | 'assistant_not_allowed'
-  | 'assistant_agent_refused';
+  | 'assistant_agent_refused'
+  | 'assistant_switched_off';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';
 /* A change counts as sent once any commit of it is listed. One that failed between two commits is listed too, so the

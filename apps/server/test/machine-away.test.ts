@@ -205,6 +205,17 @@ describe('a machine with agents that has gone away', () => {
     expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
   });
 
+  it("counts no assistant's own agent: it is its owner's, and no work of the company", async () => {
+    const c = await world();
+    const own = async (name: string) => (await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', model: '', name }).returning())[0]!;
+    const alone = await aMachine(c, c.ids.bob, 'Spare', [await own('Ava')]);
+    const shared = await aMachine(c, c.ids.bob, 'Air', [c.crew.other, await own('Max')]);
+    await drops(c, alone.node, after(0));
+    await drops(c, shared.node, after(0));
+    at(after(20 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ hostname: 'Air', agents: 1 }]);
+  });
+
   it('counts from when it was last heard of once its history has aged away', async () => {
     const c = await world();
     const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);

@@ -711,8 +711,9 @@ type Placement = { node: NodeIdentity; nodeId: string | null; builtinMachine: st
 
 type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtinMachine: string | null; roleKey: string | null };
 
-/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
-const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
+/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. An
+   assistant's own agent works for its owner alone, so it waits as a worker does. */
+const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
 /* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
    else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while

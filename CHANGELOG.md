@@ -5,6 +5,26 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.16] - 2026-11-12
+
+An assistant's own agent now stays out of everyone else's sight, and lets go of its owner's plan when the assistant is
+switched off.
+
+### Fixed
+
+- The CEO, the CEO delegate and the orchestrator no longer get another person's assistant's own agent on their live
+  screens: not its words, its activity or how full it is, nor its name in other employees' messages.
+- The number of employees at work on the map no longer counts an assistant's own agent, and neither does the card of a
+  machine that went away.
+- Switching an assistant off takes its own agent off its owner's plan. After switching it on, its owner picks a plan
+  again.
+- Picking a plan for an assistant from two screens at the same moment makes one agent for it, not two.
+- While an update waits on a machine, an assistant's own agent waits as the workers do, and does not go in past the
+  limit as the orchestrator and the heads do.
+- When the assistant's program breaks off or stalls in the middle of a skill's answer, its agent reads a plain reason
+  instead of a failed call.
+- The refusals about an assistant's plan and its agent's card now show in Russian too.
+
 ## [0.18.15] - 2026-11-12
 
 Moving the map no longer selects the words on it.

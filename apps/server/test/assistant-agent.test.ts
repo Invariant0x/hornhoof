@@ -3,13 +3,15 @@ import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { canViewAgent } from '../src/auth/agent-view.js';
+import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agents, people, subscriptions } from '../src/db/schema.js';
+import { agents, jobs, people, subscriptions } from '../src/db/schema.js';
+import { putOnPlan } from '../src/modules/assistants/setup.js';
+import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
 import { liveAgent } from '../src/modules/tasks/engine.js';
 import { checkedWaitTarget } from '../src/modules/tasks/wait-target.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, type FakeNode, type StreamReader } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
@@ -171,6 +173,82 @@ describe("an assistant's own agent, for the company", () => {
   });
 });
 
+describe("an assistant's own agent, out of everyone else's sight", () => {
+  /* Olga's assistant with its own agent on her plan. */
+  async function olgasAgent(c: Company) {
+    const ava = await assistantOf(c, c.olgaSession, c.olga.id);
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    return { ava, agent: await ownAgent(c, ava.id) };
+  }
+
+  /* A message that says the rest has gone by: everything comes in the order it was published. */
+  async function flush(c: Company, stream: StreamReader) {
+    const before = stream.messages.filter(m => m.type === 'org').length;
+    c.app.ctx.bus.publish(c.owner.companyId, { type: 'org' });
+    await until(() => stream.messages.filter(m => m.type === 'org').length > before);
+  }
+
+  it("says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's", async () => {
+    const c = await company();
+    const { agent } = await olgasAgent(c);
+    const ceo = await openStream(c.app, c.ceo);
+    const olga = await openStream(c.app, c.olgaSession);
+    await appendEvent(c.app.ctx, { companyId: c.owner.companyId, agentId: agent.id, kind: 'text', data: { text: 'Only for Olga' } });
+    c.app.ctx.bus.publish(c.owner.companyId, { type: 'pulse', from: { kind: 'person', id: c.olga.id }, to: { kind: 'agent', id: agent.id, departmentId: '' } });
+    c.app.ctx.bus.publish(c.owner.companyId, { type: 'context', agentId: agent.id, used: 42 });
+    await flush(c, ceo);
+    await flush(c, olga);
+    expect(JSON.stringify(ceo.messages)).not.toContain(agent.id);
+    expect(olga.messages.map(m => m.type)).toEqual(expect.arrayContaining(['agent_event', 'pulse', 'context']));
+  });
+
+  it('is nobody at the other end of a message for the CEO and the orchestrator, as an agent they do not see', async () => {
+    const c = await company();
+    const { agent } = await olgasAgent(c);
+    const ava = { kind: 'agent' as const, id: agent.id, name: 'Ava', role: null, department: null, agentKind: 'assistant' as const };
+    const head = { kind: 'agent' as const, id: c.orchestrator.id, name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' as const };
+    const message = { direction: 'in' as const, from: ava, to: head, senders: [ava] };
+    for (const who of [c.owner, { ...c.owner, via: c.orchestrator.id }]) {
+      const masked = maskEnvelope(await viewerOf(c.db, who), message);
+      expect(masked.from).toMatchObject({ id: null, name: 'Employee' });
+      expect(masked.senders![0]).toMatchObject({ id: null, name: 'Employee' });
+      expect(masked.to.id).toBe(c.orchestrator.id);
+    }
+    expect(maskEnvelope(await viewerOf(c.db, c.olga), message).from.id).toBe(agent.id);
+  });
+
+  it("counts none of its turns among the employees at work, on the map or on the live stream", async () => {
+    const c = await company();
+    const { agent } = await olgasAgent(c);
+    await c.db.insert(jobs).values({ companyId: c.owner.companyId, subscriptionId: c.olgaPlan, agentId: agent.id, kind: 'conversation', prompt: 'Hi', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 });
+    for (const session of [c.ceo, c.olgaSession]) expect((await c.app.inject({ url: '/api/org', ...as(session) })).json().agents.working).toBe(0);
+    const stream = await openStream(c.app, c.ceo);
+    await publishWorking(c.app.ctx, c.owner.companyId);
+    await until(() => stream.messages.some(m => m.type === 'working'));
+    expect(stream.messages.find(m => m.type === 'working')).toEqual({ type: 'working', working: 0 });
+  });
+
+  it('lets go of its plan when the assistant is switched off, and takes none until it is on again', async () => {
+    const c = await company();
+    const { ava } = await olgasAgent(c);
+    const status = (to: string) => c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}`, payload: { status: to }, ...as(c.ceo) });
+    expect((await status('disabled')).statusCode).toBe(200);
+    expect((await ownAgent(c, ava.id)).subscriptionId).toBeNull();
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).json().error.reason).toBe('assistant_switched_off');
+    expect((await status('active')).statusCode).toBe(200);
+    expect((await pick(c, c.olgaSession, ava.id, c.olgaPlan)).statusCode).toBe(200);
+    expect((await ownAgent(c, ava.id)).subscriptionId).toBe(c.olgaPlan);
+  });
+
+  it('is made once when its owner picks a plan from several screens at the same moment', async () => {
+    const c = await company();
+    const ava = await assistantOf(c, c.olgaSession, c.olga.id);
+    const [assistant] = await c.db.select({ ...personColumns, assistantOf: people.assistantOf }).from(people).where(eq(people.id, ava.id));
+    await Promise.all([1, 2, 3, 4].map(() => putOnPlan(c.app.ctx, c.olga, assistant!, c.olgaPlan)));
+    expect(await c.db.select().from(agents).where(eq(agents.kind, 'assistant'))).toHaveLength(1);
+  });
+});
+
 describe('persona_call', () => {
   /* The assistant's program at a local address, which answers each call with this. */
   async function program(answer: object, status = 200) {
@@ -223,5 +301,25 @@ describe('persona_call', () => {
     const moving = await program({}, 302);
     await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { skillsUrl: moving.url }, ...as(c.ceo) });
     expect(said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } })).isError).toBe(true);
+  });
+
+  it('says so when the program breaks off in the middle of its answer', async () => {
+    const c = await company();
+    const { ava, run } = await talking(c);
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{"ok":true,"te', () => res.destroy());
+      });
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    onTestFinished(() => new Promise<void>(done => server.close(() => done())));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/skills`;
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${ava.id}/assistant`, payload: { skillsUrl: url }, ...as(c.ceo) });
+    const client = await mcp(c.app, run.toolToken!);
+    const broken = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
+    expect(broken.isError).toBe(true);
+    expect(broken.content[0]!.text).toContain("The assistant's program stopped in the middle of its answer.");
   });
 });

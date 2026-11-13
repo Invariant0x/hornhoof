@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, teams } from '../src/db/schema.js';
+import { agents, companies, departments, people, teams } from '../src/db/schema.js';
 import { companyView } from '../src/modules/tools/company.js';
 import { loadTemplates } from '../src/modules/templates/load.js';
 import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, takePlan, testApp, until } from './helpers.js';
@@ -70,6 +70,18 @@ describe('the company tool', () => {
     const view = await companyView(c.db, c.app.ctx.templates, c.companyId);
     expect(view.people).toEqual([{ name: 'Ivan', title: 'CEO' }, { name: 'Lea', title: '', runs: ['Sales'] }]);
     expect(JSON.stringify(view.people)).not.toContain('@');
+  });
+
+  it('names a named owner by what they still have access to, and nobody for a department they lost', async () => {
+    const c = await company();
+    const [sales] = await c.db.select().from(departments).where(eq(departments.templateKey, 'sales'));
+    const [shop] = await c.db.select().from(departments).where(eq(departments.name, 'Shop'));
+    const [kim] = await c.db.select().from(people).where(eq(people.email, 'kim@acme.com'));
+    const [tom] = await c.db.select().from(people).where(eq(people.email, 'tom@acme.com'));
+    await c.db.update(departments).set({ ownerPersonId: kim!.id }).where(eq(departments.id, shop!.id));
+    await c.db.update(departments).set({ ownerPersonId: tom!.id }).where(eq(departments.id, sales!.id));
+    const view = await companyView(c.db, c.app.ctx.templates, c.companyId);
+    expect(view.people).toEqual([{ name: 'Ivan', title: 'CEO' }, { name: 'Lea', title: '', runs: ['Sales'] }, { name: 'Kim', title: '', runs: ['Shop'] }]);
   });
 });
 
