@@ -61,15 +61,16 @@ const approachIs = (b: ExactApproach) => [eq(outboundApprovals.channelId, b.chan
 
 export type ApprovalState = 'approved' | 'waiting' | 'declined' | 'missing';
 
-/* What people said of exactly this. One yes is enough; a later change is another tuple and finds nothing. */
-export async function approvalState(db: Pick<Db, 'select'>, companyId: string, bound: Bound): Promise<ApprovalState> {
+/* What people said of exactly this. One yes is enough; a later change is another tuple and finds nothing. since: a yes
+   counts only when it was given after this moment, as for a message that came back with a restored database. */
+export async function approvalState(db: Pick<Db, 'select'>, companyId: string, bound: Bound, since: Date | null = null): Promise<ApprovalState> {
   const exact = bound.kind === 'message' ? messageIs(bound) : approachIs(bound);
   const rows = await db
-    .select({ status: requests.status })
+    .select({ status: requests.status, answeredAt: requests.answeredAt })
     .from(outboundApprovals)
     .innerJoin(requests, eq(requests.id, outboundApprovals.requestId))
     .where(and(eq(outboundApprovals.companyId, companyId), eq(outboundApprovals.kind, bound.kind), eq(outboundApprovals.policyDigest, bound.policyDigest), eq(outboundApprovals.sourceRevisionsDigest, bound.sourceRevisionsDigest), eq(outboundApprovals.authorityFingerprint, bound.authorityFingerprint), ...exact));
-  const said = rows.map(r => r.status);
+  const said = rows.filter(r => r.status !== 'approved' || !since || (r.answeredAt !== null && r.answeredAt > since)).map(r => r.status);
   if (said.includes('approved')) return 'approved';
   if (said.includes('open')) return 'waiting';
   return said.includes('declined') ? 'declined' : 'missing';

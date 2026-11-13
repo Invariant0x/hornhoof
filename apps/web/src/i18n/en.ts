@@ -1916,6 +1916,7 @@ export const en = {
     approvalsEmpty: 'No outbound messages or approaches wait for approval right now.',
     unknownHeading: 'Unknown delivery outcome',
     unknownAction: 'Do not resend automatically. Quota and account remain held: check the receiving side before clearing or sending again.',
+    restoredHold: 'Held after a restore from a backup. It may have gone out before the restore: check before you let it go.',
     messagesHeading: 'Recent outbound messages',
     escalationsHeading: 'Support escalations',
     channelsHeading: 'Channels and accounts',

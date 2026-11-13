@@ -273,6 +273,7 @@ function OutboundMessageRow({ item, onOpenTask }: { item: OutboundMessageItem; o
           {`${t.outbound.unknownHeading} (${item.unknownRecovery.safeCode}): ${t.outbound.unknownAction}`}
         </p>
       )}
+      {item.reasonCodes.includes('restored') && <p className="alert" role="status">{t.outbound.restoredHold}</p>}
       <div className="req-actions">
         <button className="btn small ghost" type="button" onClick={() => onOpenTask(item.taskId)}>
           {t.outbound.openTask}

@@ -250,6 +250,26 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
+  it.each([
+    ['en', 'Held after a restore from a backup. It may have gone out before the restore: check before you let it go.'],
+    ['ru', 'Удержано после восстановления из резервной копии. Оно могло уйти до восстановления: проверьте, прежде чем отпускать.'],
+  ])('says in %s why a message that came back with a restored database waits', async (language, line) => {
+    localStorage.setItem('hh-lang', language);
+    const held = { ...OVERVIEW.messages[0]!, id: '77777777-7777-4777-8777-777777777777', status: 'waiting_approval' as const, reasonCodes: ['approval_required', 'restored'], unknownRecovery: null };
+    mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [held], approvals: [], escalations: [] }] });
+    render(<LanguageProvider><Outbound onOpenTask={() => {}} /></LanguageProvider>);
+    expect(await screen.findByText(line)).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it('says nothing of a restore for a message that waits for another reason', async () => {
+    const waiting = { ...OVERVIEW.messages[0]!, status: 'waiting_approval' as const, reasonCodes: ['approval_required'], unknownRecovery: null };
+    mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [waiting], approvals: [], escalations: [] }] });
+    render(<Outbound onOpenTask={() => {}} />);
+    expect(await screen.findByText(/waiting for approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/restore from a backup/)).not.toBeInTheDocument();
+  });
+
   it('handles empty state, server errors, forbidden access, decline notes, and missing snapshots cleanly', async () => {
     const user = userEvent.setup();
     let wentHome = 0;
