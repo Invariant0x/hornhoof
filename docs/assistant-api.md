@@ -90,10 +90,12 @@ Who the assistant is, whom it acts for, and what that person is in the company n
     "responsibleFor": [{ "id": "…", "name": "Development" }],
     "telegram": { "username": "olga_k", "id": 5550001 }
   },
-  "company": { "name": "Acme" }
+  "company": { "name": "Acme" },
+  "contract": 2
 }
 ```
 
+* `contract` is the version of this API the server keeps. 2 takes `freshText` and up to 50000 characters of `text` in a message. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
