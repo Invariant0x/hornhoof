@@ -110,7 +110,9 @@ for (const lang of ['en', 'ru'] as const) {
       await page.route('**/api/**', async route => {
         const url = new URL(route.request().url());
         if (url.pathname === '/api/stream') return;
-        await route.fulfill({ response: await route.fetch({ url: `${server.origin}${url.pathname}${url.search}` }) });
+        /* The page goes on asking where the company runs after the test's server has stopped: such a call ends unanswered. */
+        const response = await route.fetch({ url: `${server.origin}${url.pathname}${url.search}` }).catch(() => null);
+        await (response ? route.fulfill({ response }) : route.abort()).catch(() => undefined);
       });
       await page.goto('/people');
       return page;

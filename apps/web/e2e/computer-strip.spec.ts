@@ -111,7 +111,7 @@ for (const s of SETTINGS) {
 test('many machines scroll inside the strip, and the terminal stays', async ({ page }) => {
   const { words, window, errors } = await openWindow(page, { lang: 'en', theme: 'dark', width: 375 }, OPEN, MANY);
   await window.getByRole('button', { name: new RegExp(`^Other machines with access: ${MANY.length}$`) }).click();
-  const last = window.getByRole('region', { name: `Access to ${MANY.at(-1)!.machine}`, exact: true });
+  const last = window.getByRole('region', { name: `Access to ${MANY.at(-1)!.machine.name}`, exact: true });
   await last.scrollIntoViewIfNeeded();
   await expect(last.getByRole('button', { name: words.close, exact: true })).toBeInViewport();
   const [all, whole] = [await box(strip(window)), await box(window)];
