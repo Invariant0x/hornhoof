@@ -114,9 +114,10 @@ export async function withNamedKeys(q: Query, rows: (Row | null)[]): Promise<voi
    it writes, and the check of what a written row points at. A merge writes its units with it, and so does a pick of a
    conflict later. */
 export class UnitWriter {
-  /* The turn open here when a pass begins, and the source's turns that are added closed because of it. */
-  private openTurn: string | null = null;
-  private closing = new Set<string>();
+  /* The turns open here when a pass begins, each by its department, and the source's turns that are added closed because
+     their department has one open here, each with that one: a department runs one turn at a time. */
+  private openTurns = new Map<string, string>();
+  private closing = new Map<string, string>();
   /* The jobs a node said something of while their rows were away, each with the node it runs on: these stay running. */
   private running = new Map<string, ParkedNode>();
   /* The jobs this pass added closed that the source held open: what a node says of one meanwhile opens it again. */
@@ -143,9 +144,10 @@ export class UnitWriter {
   async begin(writes: Unit[], running: Map<string, ParkedNode> = new Map()): Promise<void> {
     this.running = running;
     this.closedJobs.clear();
-    const [open] = await this.q<{ id: string }>("SELECT id FROM public.turns WHERE status = 'open' LIMIT 1");
-    this.openTurn = open?.id ?? null;
-    this.closing = new Set(writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && this.openTurn && unit.x!.status === 'open').map(unit => String(unit.x!.id)));
+    const open = await this.q<{ id: string; department: string | null }>("SELECT id, department_id::text AS department FROM public.turns WHERE status = 'open'");
+    this.openTurns = new Map(open.map(turn => [String(turn.department), turn.id]));
+    const opened = writes.filter(unit => unit.table === 'turns' && unit.op === 'insert' && !unit.refused && unit.x!.status === 'open' && this.openTurns.has(String(unit.x!.department_id)));
+    this.closing = new Map(opened.map(unit => [String(unit.x!.id), this.openTurns.get(String(unit.x!.department_id))!]));
   }
 
   /* Why a row the source left running did not end here. */
@@ -211,7 +213,7 @@ export class UnitWriter {
       put('status', 'closed');
       put('closed_at', this.opts.now);
     }
-    if (t.name === 'tasks' && row.turn_id && this.closing.has(String(row.turn_id)) && !ENDED_TASKS.includes(String(row.status))) put('turn_id', this.openTurn);
+    if (t.name === 'tasks' && row.turn_id && this.closing.has(String(row.turn_id)) && !ENDED_TASKS.includes(String(row.status))) put('turn_id', this.closing.get(String(row.turn_id)));
     if (t.name === 'agents' && !row.removed_at && (row.kind === 'head' || row.kind === 'orchestrator')) {
       const where = row.kind === 'head' ? 'department_id = $1::uuid' : 'company_id = $1::uuid';
       const [live] = await q(`SELECT 1 AS found FROM public.agents WHERE kind = $2 AND removed_at IS NULL AND id <> $3::uuid AND ${where} LIMIT 1`, [row.kind === 'head' ? row.department_id : row.company_id, row.kind, row.id]);

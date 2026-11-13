@@ -34,7 +34,7 @@ export async function mergeApp(env: NodeJS.ProcessEnv = {}) {
   const [dev] = await db.insert(departments).values({ ...on, name: 'Development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/app' }).returning();
   const [hana] = await db.insert(agents).values({ ...staff, kind: 'head', name: 'Hana', departmentId: dev!.id }).returning();
   const [ana] = await db.insert(agents).values({ ...staff, kind: 'worker', name: 'Ana', departmentId: dev!.id }).returning();
-  const [turn] = await db.insert(turns).values({ ...on, number: 1, goal: 'Ship', status: 'open' }).returning();
+  const [turn] = await db.insert(turns).values({ ...on, departmentId: dev!.id, number: 1, goal: 'Ship', status: 'open' }).returning();
   const task = async (side: Db, number: number, title: string, over: Partial<typeof tasks.$inferInsert> = {}) =>
     (await side.insert(tasks).values({ ...on, number, title, departmentId: dev!.id, turnId: turn!.id, createdByPersonId: owner!.id, ...over }).returning())[0]!;
   const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];

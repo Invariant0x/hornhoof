@@ -36,7 +36,7 @@ async function stand() {
   const [head] = await db.insert(agents).values({ ...staff, kind: 'head', name: 'Hana', departmentId: dev!.id }).returning();
   const [ana] = await db.insert(agents).values({ ...staff, kind: 'worker', name: 'Ana', departmentId: dev!.id }).returning();
   const [ben] = await db.insert(agents).values({ ...staff, kind: 'worker', name: 'Ben', departmentId: dev!.id }).returning();
-  const [turn] = await db.insert(turns).values({ ...on, number: 1, goal: 'Ship', status: 'open' }).returning();
+  const [turn] = await db.insert(turns).values({ ...on, departmentId: dev!.id, number: 1, goal: 'Ship', status: 'open' }).returning();
   const task = async (side: Db, number: number, title: string, over: Partial<typeof tasks.$inferInsert> = {}) =>
     (await side.insert(tasks).values({ ...on, number, title, departmentId: dev!.id, turnId: turn!.id, createdByPersonId: owner!.id, ...over }).returning())[0]!;
   const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];
@@ -210,7 +210,7 @@ describe('a merge applied', () => {
     const fork = await s.sides.fork();
     /* Each side opens its own turn with a task of that turn, which point at each other. */
     const open = async (side: Db, number: number) => {
-      const [turn] = await side.insert(turns).values({ ...s.on, number: 2, goal: `Goal ${number}`, status: 'open' }).returning();
+      const [turn] = await side.insert(turns).values({ ...s.on, departmentId: s.dev.id, number: 2, goal: `Goal ${number}`, status: 'open' }).returning();
       const task = await s.task(side, number, `Of turn ${number}`, { turnId: turn!.id });
       await side.update(turns).set({ taskId: task.id }).where(eq(turns.id, turn!.id));
       return { turn: turn!, task };
@@ -228,6 +228,21 @@ describe('a merge applied', () => {
     expect(written.map(row => [row.tbl, row.how, [...row.cols].sort()])).toEqual([['tasks', 'rewritten', ['turn_id']], ['turns', 'rewritten', ['closed_at', 'number', 'status']]]);
     expect(written.find(row => row.tbl === 'turns')!.was).toMatchObject({ status: 'open', number: 2, closed_at: null });
     expect(result.counts.rewritten).toBe(2);
+    expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('adds an open turn of another department open, beside the one that is open here', async () => {
+    const s = await stand();
+    const [sales] = await s.db.insert(departments).values({ ...s.on, name: 'Sales', roleCode: 'SAL' }).returning();
+    const fork = await s.sides.fork();
+    /* Each department runs turns of its own: Development's is open here, and Sales opened one there. */
+    const [there] = await fork.db.insert(turns).values({ ...s.on, departmentId: sales!.id, number: 2, goal: 'Sell', status: 'open' }).returning();
+    const task = await s.task(fork.db, 3, 'A sale', { departmentId: sales!.id, turnId: there!.id });
+    const { id, result } = await s.merge(fork);
+    expect(result.counts).toMatchObject({ added: 2, conflicts: 0 });
+    expect((await s.db.select().from(turns).where(eq(turns.id, there!.id)))[0]).toMatchObject({ status: 'open', departmentId: sales!.id, closedAt: null });
+    expect((await s.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ turnId: there!.id });
+    expect((await s.db.select().from(turns).where(eq(turns.status, 'open'))).map(found => found.id).sort()).toEqual([s.turn.id, there!.id].sort());
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
   });
 
@@ -708,8 +723,8 @@ describe('a merge applied', () => {
     const fork = await s.sides.fork();
     await s.task(fork.db, 3, 'Three there', { turnId: null });
     await s.task(s.db, 3, 'Three here', { turnId: null });
-    await fork.db.insert(turns).values({ ...s.on, number: 2, goal: 'There', status: 'open' });
-    await s.db.insert(turns).values({ ...s.on, number: 2, goal: 'Here', status: 'open' });
+    await fork.db.insert(turns).values({ ...s.on, departmentId: s.dev.id, number: 2, goal: 'There', status: 'open' });
+    await s.db.insert(turns).values({ ...s.on, departmentId: s.dev.id, number: 2, goal: 'Here', status: 'open' });
     await fork.db.insert(jobs).values({ ...s.on, subscriptionId: s.plan.id, prompt: 'Work', timeoutMs: 60_000, status: 'running' });
     const { id } = await s.merge(fork);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });

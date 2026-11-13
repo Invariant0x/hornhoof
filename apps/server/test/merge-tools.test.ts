@@ -166,7 +166,7 @@ describe("the orchestrator's tools for what a merge could not prove", () => {
     /* A department the leader removed, which the source changed and put a planned turn with its task under. */
     await s.db.delete(departments).where(eq(departments.id, parent!.id));
     await fork.db.update(departments).set({ about: 'Still used there' }).where(eq(departments.id, parent!.id));
-    const [turn] = await fork.db.insert(turns).values({ ...s.on, number: 2, goal: 'Later', status: 'planned' }).returning();
+    const [turn] = await fork.db.insert(turns).values({ ...s.on, departmentId: s.dev.id, number: 2, goal: 'Later', status: 'planned' }).returning();
     const inTurn = await s.task(fork.db, 3, 'Of the later turn', { departmentId: parent!.id, turnId: turn!.id });
     await fork.db.update(turns).set({ taskId: inTurn.id }).where(eq(turns.id, turn!.id));
     const { id } = await s.merge(fork);
