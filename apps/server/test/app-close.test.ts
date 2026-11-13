@@ -12,10 +12,24 @@ describe('closing the app', () => {
     onTestFinished(() => void quiet.destroy());
     await once(quiet, 'connect');
     const gone = once(quiet, 'close');
-    const from = Date.now();
+    /* Without this the close takes Node's minute for a first request, well past the limit of a test. */
     await app.close();
     await gone;
-    expect(Date.now() - from).toBeLessThan(5000);
+  });
+
+  it('does not wait for one that comes while it closes either', async () => {
+    const { app } = await testApp();
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const { port } = app.server.address() as AddressInfo;
+    const closed = app.close();
+    /* The server still takes connections while the app's own parts stop. */
+    const late = net.connect(port, '127.0.0.1');
+    onTestFinished(() => void late.destroy());
+    /* Taken or turned away, it is gone by the time the app has closed, and the close does not wait for it. */
+    late.on('error', () => undefined);
+    const gone = new Promise<void>(resolve => late.once('close', () => resolve()));
+    await closed;
+    await gone;
   });
 
   it('still answers on a connection that has asked something', async () => {
