@@ -28,13 +28,17 @@ export function App() {
   );
 }
 
+/* Whoever signs in next on this tab sees nothing of the company the one before saw. The company is forgotten as the person
+   leaves, before the next one's screens ask for theirs. */
+function useForgetOnLeave(screen: Screen) {
+  const person = screen.kind === 'shell' ? screen.me.person.id : null;
+  useEffect(() => () => forgetOrg(), [person]);
+}
+
 function Screens() {
   const t = useT();
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
-  /* Whoever signs in next on this tab sees nothing of the company the one before saw. The company is forgotten as the
-     person leaves, before the next one's screens ask for theirs. */
-  const person = screen.kind === 'shell' ? screen.me.person.id : null;
-  useEffect(() => () => forgetOrg(), [person]);
+  useForgetOnLeave(screen);
 
   const decide = useCallback(async (welcome = false) => {
     const route = parseRoute(window.location.pathname);

@@ -28,14 +28,15 @@ function serve(...answers: (Org | null)[]) {
 }
 
 describe('the company every screen shows', () => {
-  it('is on a screen that opens again at once, while that screen asks for it again', async () => {
+  it('is on a screen that opens again from its first drawing, while that screen asks for it again', async () => {
     fakeStream();
     serve(working(1), null);
     const first = renderHook(() => useOrg());
     await waitFor(() => expect(first.result.current.org).toEqual(working(1)));
     first.unmount();
-    const again = renderHook(() => useOrg());
-    expect(again.result.current.org).toEqual(working(1));
+    const drawn: (Org | null)[] = [];
+    renderHook(() => drawn.push(useOrg().org));
+    expect(drawn[0]).toEqual(working(1));
   });
 
   it('comes to a screen that does not ask for it yet, once another screen has it', async () => {
