@@ -8,12 +8,18 @@ import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
+import { ApiError } from '../../errors.js';
+import { guardTools, invocationOf } from './calls.js';
+import { callName, CUT_OFF, cutOff, PAUSED, READ_TOOLS } from './read-tools.js';
+import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
+import { readKeeperState } from '../keeper/state.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
 import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
 import { registerControlTools } from './control.js';
 import { registerDepartmentControlTools } from './department-control.js';
 import { registerComputerTools } from '../computer/tools.js';
+import { registerMergeTools } from '../merge/tools.js';
 import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
@@ -49,8 +55,13 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
    and gets the tools its skills grant, a head keeps its department notebook, changes its department as the people who run
    it decide, tells the orchestrator and puts what to improve under Improvements, and the orchestrator also proposes cards
    and does whatever the CEO can do in the screens. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
+function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
+  /* Before any tool is registered, so that every one of them is covered. */
+  guardTools(server, ctx, job, invocation);
+  /* On a machine that only reads, no tool that changes something runs, however the call came: cut off, it tells the
+     agent to wrap up; else, that the call did not run. */
+  if (reading) cutOff(server, { text: reading.cut ? CUT_OFF : PAUSED });
   server.registerTool(
     'company',
     { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
@@ -150,17 +161,36 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
      its recovery hold, as Operations do. */
   registerProgramAccessTools(server, ctx, job);
   registerReleaseTool(server, ctx, job);
-  registerDatabaseTool(server, ctx, job, 'write');
+  /* On a machine that only reads, the orchestrator reads the database as a head does. */
+  registerDatabaseTool(server, ctx, job, reading ? 'read' : 'write');
   registerOrchestratorImprovementTools(server, ctx, job);
+  registerMergeTools(server, ctx, job);
   return server;
 }
 
 /* Streamable HTTP without sessions: every POST gets its own server and transport. */
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/mcp', async (req, reply) => {
-    const job = await jobOf(ctx, req);
-    /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's. */
-    const server = job.agentKind === 'assistant' ? assistantAgentTools(ctx, job) : toolsFor(ctx, app, job);
+    /* On a machine that only reads: a tool that changes something is turned away before any tool runs while the
+       machine has the internet, since it then only waits for the leader or for the CEO, and the front door tries the
+       call again; without the internet the tool itself tells the agent to wrap up. A call there runs as one with no
+       id, so nothing is written of it. Several calls in one request are not taken there, as the front door takes
+       none: each call is judged by itself. */
+    const reading = ctx.mode.current() === 'read' ? { cut: readKeeperState(ctx.config.controlDir)?.internet === false } : null;
+    const paused = () => new ApiError(503, 'unavailable', READ_ONLY_MESSAGE, 'read_only');
+    if (reading && Array.isArray(req.body)) throw new ApiError(400, 'validation', 'Hornhoof takes one call per request.');
+    const name = reading && !reading.cut ? callName(req.body) : null;
+    if (name !== null && !READ_TOOLS.has(name)) throw paused();
+    /* A copy may not hold yet that this turn runs: on a machine that only reads, a token it does not know is one to
+       try again, not one that is wrong. */
+    const bears = /^Bearer \S+$/.test(req.headers.authorization ?? '');
+    const job = await jobOf(ctx, req).catch((err: unknown) => {
+      throw reading && bears && err instanceof ApiError && err.reason === 'tool_token_invalid' ? paused() : err;
+    });
+    /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
+       machine that only reads it waits, as its tools keep what they do. */
+    if (reading && job.agentKind === 'assistant') throw paused();
+    const server = job.agentKind === 'assistant' ? assistantAgentTools(ctx, job) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

@@ -4,18 +4,112 @@
 # how many the database has now. STUB_DIGESTS words are "tag=digest": the build each tag points at in the registry,
 # which also keeps every build by its digest. STUB_RUNNING_IMAGES words are "service=image": the image each service
 # runs now, as Docker keeps it by digest. STUB_PLAN_NODES words are "name=plan=image": the other nodes on this computer,
-# with the plan on their label and the image they run.
+# with the plan on their label and the image they run. STUB_BUILD_SERVICES words are "tag=service,service": the services the compose
+# file of that build names; STUB_SERVICES answers for any other file. STUB_PROJECT_CONTAINERS words are "id=service":
+# the containers of the compose project.
+# The databases are files in STUB_STATE that hold how many migrations each has: migrations for hornhoof, restored for
+# hornhoof_restore, db-<name> for any other; closed-<name> is there while a database takes no connections, and
+# oid-<name> holds the number the server knows it by, which it keeps under every name. STUB_FOLDS: the server keeps the
+# name of a database in capitals, as a real one keeps it in small letters, whatever it was asked.
+# STUB_TABLES and STUB_COLUMNS: the tables and the columns of the company's three schemas, as "schema.table" and
+# "schema.table.column". STUB_LED words name the databases that once led the company. STUB_STATE/volume-gone is there
+# once the database's volume is removed. STUB_STATE/slots holds the replication slots of the database, one a line; a
+# drop empties it unless STUB_SLOTS_STAY is set.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
-commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
-digest_of() { for w in ${STUB_DIGESTS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+word() {
+  local key=$1 w
+  shift
+  for w in "$@"; do [ "${w%%=*}" = "$key" ] && { printf '%s' "${w#*=}"; return; }; done
+}
+commit_of() { word "$1" ${STUB_COMMITS:-}; }
+digest_of() { word "$1" ${STUB_DIGESTS:-}; }
+running_image() { word "$1" ${STUB_RUNNING_IMAGES:-}; }
+build_services() { word "$1" ${STUB_BUILD_SERVICES:-}; }
+project_service() { word "$1" ${STUB_PROJECT_CONTAINERS:-}; }
+db_file() {
+  case "$1" in
+    hornhoof) printf '%s/migrations' "$STUB_STATE" ;;
+    hornhoof_restore) printf '%s/restored' "$STUB_STATE" ;;
+    *) printf '%s/db-%s' "$STUB_STATE" "$1" ;;
+  esac
+}
+# The database a command names after -d.
+db_named() {
+  while [ $# -gt 1 ]; do
+    [ "$1" = -d ] && { printf '%s' "$2"; return; }
+    shift
+  done
+  printf 'hornhoof'
+}
+# The number of a database that is there, given when it is first asked for.
+oid_of() {
+  local next
+  [ -f "$(db_file "$1")" ] || return 1
+  if [ ! -f "$STUB_STATE/oid-$1" ]; then
+    next=$(($(cat "$STUB_STATE/oids" 2> /dev/null || echo 1000) + 1))
+    printf '%s' "$next" > "$STUB_STATE/oids"
+    printf '%s' "$next" > "$STUB_STATE/oid-$1"
+  fi
+  cat "$STUB_STATE/oid-$1"
+}
+# One statement psql was given with -c, as the database server takes it; it fails as that one would.
+statement() {
+  local from to
+  case "$1" in
+    # The database an upload is loaded into, which is there from then on.
+    'CREATE DATABASE hornhoof_uploading_'*)
+      from=${1#CREATE DATABASE }
+      [ ! -f "$(db_file "$from")" ] || return 1
+      printf '0' > "$(db_file "$from")" ;;
+    'DROP DATABASE IF EXISTS '* | 'DROP DATABASE '*)
+      from=${1#DROP DATABASE }; from=${from#IF EXISTS }; from=${from%% *}
+      rm -f "$(db_file "$from")" "$STUB_STATE/closed-$from" "$STUB_STATE/oid-$from" ;;
+    'ALTER DATABASE '*' RENAME TO '*)
+      from=${1#ALTER DATABASE }; from=${from%% *}; to=${1##* RENAME TO }
+      # STUB_RENAME=fail: the loaded database cannot take the place of the one in use.
+      [ "${STUB_RENAME:-ok}" = fail ] && [ "$from" = hornhoof_restore ] && return 1
+      [ -z "${STUB_FOLDS:-}" ] || [ "$to" = hornhoof ] || to=$(printf '%s' "$to" | tr 'a-z' 'A-Z')
+      [ -f "$(db_file "$from")" ] && [ ! -f "$(db_file "$to")" ] || return 1
+      oid_of "$from" > /dev/null
+      mv "$(db_file "$from")" "$(db_file "$to")"
+      mv "$STUB_STATE/oid-$from" "$STUB_STATE/oid-$to"
+      [ ! -f "$STUB_STATE/closed-$from" ] || mv "$STUB_STATE/closed-$from" "$STUB_STATE/closed-$to" ;;
+    'ALTER DATABASE '*' WITH ALLOW_CONNECTIONS false')
+      from=${1#ALTER DATABASE }; from=${from%% *}
+      [ -f "$(db_file "$from")" ] || return 1
+      touch "$STUB_STATE/closed-$from" ;;
+    # STUB_BACK=fail: the database server does not let the old database open again.
+    'ALTER DATABASE '*' WITH ALLOW_CONNECTIONS true')
+      from=${1#ALTER DATABASE }; from=${from%% *}; from=${from#\"}; from=${from%\"}
+      [ "${STUB_BACK:-ok}" != fail ] && [ -f "$(db_file "$from")" ] || return 1
+      rm -f "$STUB_STATE/closed-$from" ;;
+  esac
+}
 tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' "${w%%=*}"; return; }; done; }
 # An image by digest or by tag: what tag it is a build of, and the id of the build it is.
 ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
 ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
-running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 image_by_id() {
   for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done
   for w in ${STUB_PLAN_NODES:-}; do [ "$(ref_id "${w##*=}")" = "$1" ] && { printf '%s' "${w##*=}"; return; }; done
+}
+# The compose file a command reads: the one it names, else the one in the folder it runs in.
+compose_file() {
+  while [ $# -gt 0 ]; do
+    [ "$1" = -f ] && { printf '%s' "$2"; return; }
+    shift
+  done
+  printf 'compose.yaml'
+}
+# The services a compose file names, by the build unpacking wrote into it.
+services_in() {
+  local names service
+  names=$(build_services "$(sed -n 's/^# build //p' "$1" 2> /dev/null)")
+  if [ -n "$names" ]; then
+    printf '%s\n' "$names" | tr ',' '\n'
+    return
+  fi
+  for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done
 }
 case "$1 $2" in
   # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server.
@@ -27,20 +121,144 @@ case "$1 $2" in
   # STUB_NODES_UPDATERS: the containers of the updater of a server's nodes there are now, and STUB_NODES_UPDATER_IMAGE the
   # image the one of its name runs.
   'ps -aq') for w in ${STUB_NODES_UPDATERS:-}; do echo "$w"; done ;;
+  # The containers of the compose project, by id and service, or the other nodes on this computer, by name and plan.
   'ps -a')
-    for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
+    case "$*" in
+      *com.docker.compose.project*) for w in ${STUB_PROJECT_CONTAINERS:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
+      *) for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
+    esac ;;
   'compose ps')
-    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' keeper '*) echo keepercid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+  # The container of front holds the web port until it goes. STUB_RM_FAILS names containers that cannot be removed.
+  # A command that runs on the computer ends as its container goes.
+  'rm -f')
+    [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed"
+    [ "$(project_service "$3")" = front ] && rm -f "$STUB_STATE/port-holder"
+    case " ${STUB_RM_FAILS:-} " in *" $3 "*) exit 1 ;; esac ;;
   'exec dbcid')
     case "$*" in
-      *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
-      *'FROM drizzle.__drizzle_migrations'*) cat "$STUB_STATE/migrations" ;;
-      *'RENAME TO hornhoof'*) mv "$STUB_STATE/restored" "$STUB_STATE/migrations" ;;
+      # Each copy says which one it is. STUB_DUMP=fail: the database cannot be saved.
+      # Of the database named after -d; one whose connections are off cannot be dumped.
+      # The copies' slots: how many there are, and their going.
+      *'count(*) FROM pg_replication_slots'*) if [ -f "$STUB_STATE/slots" ]; then grep -c . "$STUB_STATE/slots" || true; else echo 0; fi ;;
+      *pg_drop_replication_slot*) [ -n "${STUB_SLOTS_STAY:-}" ] || : > "$STUB_STATE/slots" ;;
+      *'pg_terminate_backend(active_pid)'*) ;;
+      *pg_dump*)
+        [ "${STUB_DUMP:-ok}" = fail ] && { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
+        # STUB_STOP_IN=backup stops the updater at its first dump, once: the dump runs in a shell of the updater's.
+        if [ "${STUB_STOP_IN:-}" = backup ] && [ ! -f "$STUB_STATE/stopped" ]; then
+          touch "$STUB_STATE/stopped"
+          kill -9 "$(ps -o ppid= -p "$PPID" | tr -d ' ')" "$PPID"
+          exit 1
+        fi
+        of=$(db_named "$@")
+        [ -f "$(db_file "$of")" ] && [ ! -f "$STUB_STATE/closed-$of" ] || { echo 'pg_dump: error: database is not accepting connections' >&2; exit 1; }
+        copy=$(($(cat "$STUB_STATE/copies" 2> /dev/null || echo 0) + 1))
+        printf '%s' "$copy" > "$STUB_STATE/copies"
+        printf -- '-- a dump of the %s database\n-- migrations %s\n-- copy %s\n' "$of" "$(cat "$(db_file "$of")")" "$copy" ;;
+      # The tables and the columns a database has, one a line.
+      *'FROM information_schema.tables'*) for w in ${STUB_TABLES:-net.journal net_local.state public.agents public.tasks}; do echo "$w"; done ;;
+      *'FROM information_schema.columns'*)
+        for w in ${STUB_COLUMNS:-net.journal.id net.journal.tbl net_local.state.machine public.agents.id public.tasks.id public.tasks.title}; do echo "$w"; done ;;
+      # The rows of one table, as CSV with its header. STUB_COPY_OUT=fail: the table cannot be read.
+      *' TO STDOUT '*)
+        [ "${STUB_COPY_OUT:-ok}" != fail ] || { echo 'ERROR:  could not read block' >&2; exit 3; }
+        printf 'id,title\n1,a row\n' ;;
+      # Whether a database has the table that tells of a term it held, and whether that holds a row.
+      # STUB_STATE_ASK=fail: the database does not say.
+      *"relname = 'state'"*) [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2; echo 1 ;;
+      *'FROM net_local.state'*)
+        [ "${STUB_STATE_ASK:-ok}" != fail ] || exit 2
+        # STUB_HANDED: the databases whose time as the leader ended in a handover, which a question that asks of
+        # that does not count.
+        case "$*" in *handed_lsn*) case " ${STUB_HANDED:-} " in *" $(db_named "$@") "*) echo 0; exit 0 ;; esac ;; esac
+        case " ${STUB_LED:-} " in *" $(db_named "$@") "*) echo 1 ;; *) echo 0 ;; esac ;;
+      # What the updater had said by the time it first asked the database.
+      *'FROM drizzle.__drizzle_migrations'*)
+        of=$(db_named "$@")
+        [ "$of" != hornhoof ] || [ -f "$STUB_STATE/status-when-asked" ] || cp "$HORNHOOF_CONTROL_DIR/status.json" "$STUB_STATE/status-when-asked"
+        cat "$(db_file "$of")" ;;
+      # Whether the session that reads the old database of a restore is on it.
+      *'FROM pg_stat_activity'*) if [ -f "$STUB_STATE/cutover-open" ]; then echo 1; else echo 0; fi ;;
+      # STUB_PUBLIC_TABLES: how many tables the database a copy is made in holds already; none unless a test says.
+      *"FROM pg_tables WHERE schemaname = 'public'"*) printf '%s\n' "${STUB_PUBLIC_TABLES:-0}" ;;
+      *"SELECT oid FROM pg_database WHERE datname = 'hornhoof'"*) oid_of hornhoof || true ;;
+      # The name the database with that number goes by now; nothing when there is none.
+      *'FROM pg_database WHERE oid = '*)
+        want=${!#}; want=${want##* }
+        for file in "$STUB_STATE"/oid-*; do
+          [ -f "$file" ] && [ "$(cat "$file")" = "$want" ] && printf '%s\n' "${file##*/oid-}"
+        done ;;
+      *'FROM pg_database'*)
+        names=''
+        for file in "$STUB_STATE/migrations" "$STUB_STATE/restored" "$STUB_STATE"/db-*; do
+          [ -f "$file" ] || continue
+          case "${file##*/}" in migrations) names="$names hornhoof" ;; restored) names="$names hornhoof_restore" ;; *) names="$names ${file##*/db-}" ;; esac
+        done
+        printf '%s\n' "${names# }" ;;
+      # Each statement in its turn, and none after one that failed.
+      *)
+        while [ $# -gt 0 ]; do
+          if [ "$1" = -c ]; then statement "$2" || { echo 'psql: error' >&2; exit 3; }; fi
+          shift
+        done ;;
     esac ;;
-  # A dump going into the copy of the database that takes the place of the one there.
+  # The leader's schema, read through the keeper's door for a copy: the password comes by the environment and stands in
+  # no argument. STUB_SCHEMA=fail: the leader cannot be read.
+  'exec -e')
+    # The rows of one table of an upload, on standard input. STUB_COPY_IN=fail: the table does not take them.
+    case " $* " in
+      *'\copy '*)
+        [ "${STUB_COPY_IN:-ok}" != fail ] || { cat > /dev/null; echo 'ERROR:  null value in column' >&2; exit 3; }
+        table="$*"; table=${table#*\\copy }; table=${table%% *}
+        cat > "$STUB_STATE/copied-$(printf '%s' "$table" | tr -d '"')"
+        exit 0 ;;
+    esac
+    [ -z "${PGPASSWORD:-}" ] || printf 'pg_dump had its password\n' >> "$STUB_LOG"
+    [ "${STUB_SCHEMA:-ok}" != fail ] || { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
+    case " $* " in
+      *' --schema-only '*) printf -- '-- the schema of %s\n' "${!#}" ;;
+      *' --data-only '*) printf -- '-- the rows of drizzle.__drizzle_migrations\n' ;;
+    esac ;;
   'exec -i')
-    [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
-    sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored" ;;
+    case " $* " in
+      # The password file of a copy's subscription, written in the database's own folder from standard input.
+      *' -u postgres '*replica.pgpass*) cat > "$STUB_STATE/passfile" ;;
+      # The leader's schema going into the database of a copy. STUB_RESTORE=fail: it does not load.
+      *' -1 -v ON_ERROR_STOP=1 '*)
+        [ "${STUB_RESTORE:-ok}" = fail ] && { cat > /dev/null; echo 'psql: error: out of disk space' >&2; exit 3; }
+        cat > "$STUB_STATE/loaded" ;;
+      # The session that stays on the database a restore closes. It answers once the connections are off: the term,
+      # machine and cluster of that database, and STUB_CARRY when it was asked who may get in. STUB_CUTOVER=fail: it
+      # never gets onto the database; left: another session would not end.
+      *' PGAPPNAME=hornhoof-cutover '*)
+        asked=$(cat)
+        [ "${STUB_CUTOVER:-ok}" = fail ] && { echo 'psql: error: connection refused' >&2; exit 2; }
+        touch "$STUB_STATE/cutover-open"
+        looks=0
+        until [ -f "$STUB_STATE/closed-hornhoof" ]; do
+          looks=$((looks + 1))
+          [ "$looks" -lt 400 ] || { rm -f "$STUB_STATE/cutover-open"; exit 3; }
+          /bin/sleep 0.05
+        done
+        rm -f "$STUB_STATE/cutover-open"
+        [ "${STUB_CUTOVER:-ok}" = left ] && { echo 'ERROR:  sessions left' >&2; exit 3; }
+        printf '{"term": %s, "machine": "m-old", "cluster": "c-old"}\n' "${STUB_TERM:-7}"
+        case "$asked" in
+          *recoveryKeys*) printf 'cutover with the carry\n' >> "$STUB_LOG"; printf '%s\n' "${STUB_CARRY:-}" ;;
+          *) printf 'cutover alone\n' >> "$STUB_LOG" ;;
+        esac ;;
+      # The loaded database taking over what the closed one went by. STUB_ADOPT=fail: it cannot.
+      *' term='*)
+        cat > "$STUB_STATE/adopted"
+        [ "${STUB_ADOPT:-ok}" = fail ] && exit 3 ;;
+      # A dump going into the copy of the database that takes the place of the one there.
+      *)
+        [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
+        dump=$(cat)
+        printf '%s\n' "$dump" | sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored"
+        printf '%s\n' "$dump" | sed -n 's/^-- copy //p' | tr -d '\n' > "$STUB_STATE/restored-copy" ;;
+    esac ;;
   'image inspect')
     last=${!#}
     case "${4:-}" in
@@ -56,8 +274,9 @@ case "$1 $2" in
           *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;;
           *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
         esac ;;
-      *.Config.Image*) printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}" ;;
-      *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
+      # STUB_OWN_IMAGE: the image of the container the updater itself runs in, which goes by the name of its host.
+      *.Config.Image*) if [ -n "${STUB_OWN_IMAGE:-}" ] && [ "${!#}" = "$(hostname)" ]; then printf '%s\n' "$STUB_OWN_IMAGE"; else printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}"; fi ;;
+      *) case "${!#}" in appcid | keepercid) printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;; esac ;;
     esac ;;
   *)
     case "$1" in
@@ -67,8 +286,28 @@ case "$1 $2" in
           *' pull '*)
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
-          # STUB_SERVICES: the services the compose file in the server folder names.
-          *' config --services '*) for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done ;;
+          # With no profile on, as COMPOSE_PROFILES said empty, the services that keep data are not named.
+          *' config --services '*)
+            if [ "${COMPOSE_PROFILES-unset}" = '' ]; then services_in "$(compose_file "$@")" | grep -v -e '^db$' -e '^migrate$' -e '^app$'; else services_in "$(compose_file "$@")"; fi ;;
+          *' config --format json '*)
+            printf '{"services":{"db":{"volumes":[{"type":"volume","source":"pgdata","target":"/var/lib/postgresql/data"}]}},"volumes":{"pgdata":{"name":"hornhoof_pgdata"},"control":{"name":"hornhoof_control"}}}\n' ;;
+          # A machine that stopped keeping a copy starts what a worker runs.
+          *' up -d --no-build --remove-orphans '*) [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG" ;;
+          # Whether what a restore carried over is there for the app that starts now.
+          *' up -d --no-build app '*) [ ! -f "$HORNHOOF_CONTROL_DIR/restore-carry.json" ] || printf 'up with the carry\n' >> "$STUB_LOG" ;;
+          # The services of a machine that joined, started under the role compose is told. STUB_UP=fail: its database
+          # does not start.
+          *' up -d --no-build front keeper '*)
+            [ -z "${STUB_LOG_ROLE:-}" ] || printf 'up as HORNHOOF_ROLE=%s\n' "${HORNHOOF_ROLE:-}" >> "$STUB_LOG"
+            case " $* " in *' db '*) [ "${STUB_UP:-ok}" != fail ] || exit 1 ;; esac ;;
+          # STUB_UPDATER_UP=fail: this build's updater does not start, the one named by HORNHOOF_UPDATER_REF does;
+          # never: no updater starts.
+          *' up '*' updater '*)
+            printf 'updater up HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+            case "${STUB_UPDATER_UP:-ok}" in
+              never) exit 1 ;;
+              fail) [ -n "${HORNHOOF_UPDATER_REF:-}" ] || exit 1 ;;
+            esac ;;
         esac ;;
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
@@ -84,7 +323,9 @@ case "$1 $2" in
             echo cid-computer ;;
           *) echo "cid-$(ref_tag "$2")" ;;
         esac ;;
+      # Any other container than a command's only starts.
       start)
+        [ "$2" = -a ] || exit 0
         echo "ran: $(cat "$STUB_STATE/computer-command")"
         [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
         if [ -n "${STUB_COMPUTER_RUNS:-}" ]; then
@@ -94,6 +335,60 @@ case "$1 $2" in
           rm -f "$STUB_STATE/computer-removed" "$STUB_STATE/computer-runs"
         fi
         exit "${STUB_COMPUTER_EXIT:-0}" ;;
+      # What the engine says of itself, its system and its name: STUB_INFO, or a failure with STUB_INFO=fail.
+      info)
+        [ "${STUB_INFO:-}" != fail ] || exit 1
+        printf '%s\n' "${STUB_INFO:-}" ;;
+      # The host's own interfaces, as a container on the host's network reads them: STUB_IP, or a failure with STUB_IP=fail.
+      run)
+        case " $* " in
+          *' --entrypoint ip '*)
+            [ "${STUB_IP:-}" != fail ] || exit 1
+            printf '%s\n' "${STUB_IP:-}" ;;
+        esac ;;
+      # The volume of the database. STUB_VOLUME_RM=fail: it cannot be removed.
+      volume)
+        case "$2" in
+          inspect) [ ! -f "$STUB_STATE/volume-gone" ] || exit 1 ;;
+          rm)
+            [ "${STUB_VOLUME_RM:-ok}" != fail ] || { echo 'Error response from daemon: volume is in use' >&2; exit 1; }
+            touch "$STUB_STATE/volume-gone" ;;
+        esac ;;
+      # Recorded Docker networks on the host, as "id|name|project|subnet|internal|bridge" in STUB_DOCKER_NETWORKS.
+      network)
+        case "${2:-}" in
+          ls)
+            for item in ${STUB_DOCKER_NETWORKS:-}; do printf '%s\n' "${item%%|*}"; done ;;
+          inspect)
+            shift 2
+            fmt=''
+            if [ "${1:-}" = --format ]; then fmt=${2:-}; shift 2; fi
+            for want in "$@"; do
+              for item in ${STUB_DOCKER_NETWORKS:-}; do
+                IFS='|' read -r id name proj sub internal bridge <<< "$item"
+                [ "$id" = "$want" ] || [ "$name" = "$want" ] || continue
+                cidr=${sub%%,*}
+                if [ -z "$cidr" ]; then
+                  cfg=''
+                elif [[ "$sub" == *, ]]; then
+                  if [[ "$fmt" == *'.Gateway'* ]]; then
+                    echo 'template parsing error: template: :1:201: executing "" at <.Gateway>: map has no entry for key "Gateway"' >&2
+                    exit 1
+                  elif [[ "$fmt" == *'{{with index . "Gateway"}}'* ]]; then
+                    cfg="${cidr},;"
+                  else
+                    cfg="${cidr},<no value>;"
+                  fi
+                elif [[ "$sub" == *,* ]]; then
+                  cfg="${cidr},${sub#*,};"
+                else
+                  gw=$(awk -F. '{ printf "%d.%d.%d.%d", $1, $2, $3, ($4 == 0 ? 1 : $4) }' <<< "${cidr%%/*}")
+                  cfg="${cidr},${gw};"
+                fi
+                printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "$cfg"
+              done
+            done ;;
+        esac ;;
       # The container goes, and a command that runs in it ends.
       rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
       cp)
@@ -109,15 +404,41 @@ case "$1 $2" in
 case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
 [ -z "\${HORNHOOF_NODES_FREE:-}" ] || printf 'installer told the nodes are free\n' >> "$STUB_LOG"
 [ -z "\${HORNHOOF_NODES_ONLY:-}" ] || printf 'installer told only %s\n' "\$HORNHOOF_NODES_ONLY" >> "$STUB_LOG"
-printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+# As the real installer, it writes the server folder's compose file and .env before it starts anything.
+cp "\$HORNHOOF_COMPOSE_FILE" "\$HORNHOOF_SERVER_DIR/compose.yaml"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
+# STUB_HANDS_OVER names builds whose installer, run by an updater from before revision 2, starts this build's updater,
+# and compose replacing the updater that runs it stops it. STUB_HANDOVER=fail: it could not start that updater.
+if [ -z "\${HORNHOOF_UPDATER_REV:-}" ]; then
+  case " ${STUB_HANDS_OVER:-} " in
+    *" $tag "*)
+      [ "${STUB_HANDOVER:-}" != fail ] || { echo 'Could not start the updater of this build, so nothing changed.'; exit 1; }
+      echo 'installer hands over' >> "$STUB_LOG"
+      kill -9 "\$PPID"
+      exit 0 ;;
+  esac
+fi
+printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s HORNHOOF_UPDATER_REV=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" "\${HORNHOOF_UPDATER_REV:-}" >> "$STUB_LOG"
+# front holds the web port from a build that has it on, so a build without it cannot take the port.
+case ",$(build_services "$tag")," in
+  *,front,*) touch "$STUB_STATE/port-holder" ;;
+  *) [ ! -f "$STUB_STATE/port-holder" ] || { echo 'Bind for 0.0.0.0:8080 failed: port is already allocated'; exit 1; } ;;
+esac
 # The build migrates the database when it starts, also when it fails afterwards.
 want=\$(for w in ${STUB_MIGRATIONS:-}; do [ "\${w%%=*}" = "$tag" ] && printf '%s' "\${w#*=}"; done)
 [ -n "\$want" ] && [ "\$want" -gt "\$(cat "$STUB_STATE/migrations")" ] && printf '%s' "\$want" > "$STUB_STATE/migrations"
 case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
 SCRIPT
             ;;
-          *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+          # The journal of that build's migrations: as many entries as the build applies.
+          *:/app/apps/server/drizzle/meta/_journal.json)
+            jq -n --argjson n "$(word "$tag" ${STUB_MIGRATIONS:-} | grep -E '^[0-9]+$' || echo 0)" '{entries: [range($n) | {idx: .}]}' > "$3" ;;
+          # The build's name in a comment, so services_in can tell whose file it is.
+          *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
+          # The overlay a worker adds. STUB_NO_OVERLAY names builds that have none.
+          *:/app/compose.worker.yaml)
+            case " ${STUB_NO_OVERLAY:-} " in *" $tag "*) exit 1 ;; esac
+            printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
         esac ;;
     esac ;;
 esac

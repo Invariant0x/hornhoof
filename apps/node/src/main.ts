@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -17,10 +17,12 @@ import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad } from './load.js';
+import { removalWatch } from './removal.js';
+import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
-import { nodeIdentity, seal, unseal } from './keys.js';
+import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -57,8 +59,6 @@ const LEARN_MS = 60_000;
 const LIMITS_MS = 5 * 60_000;
 /* How long a removal waits for called-off jobs to stop before it deletes their folders. */
 const STOP_WAIT_MS = 5_000;
-/* How many unconfirmed job ends a node keeps for a server that does not confirm them. */
-const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ProgramServerMessage, { type: 'job.run' }>;
 type Recipient = { nodeId: string; publicKey: string };
@@ -168,11 +168,6 @@ const noRunsBecause = (testUser: JobUser | null, browserError: string | null): s
   !testUser ? NO_RUNS : browserError ? `Playwright browsers could not start: ${browserError}` : null;
 
 /* A server that never confirms the ends of jobs leaves the node with only the last few. */
-function keepLast(kept: Map<string, NodeMessage>, id: string, m: NodeMessage): void {
-  kept.set(id, m);
-  if (kept.size > MAX_UNCONFIRMED) kept.delete(kept.keys().next().value!);
-}
-
 /* A screen's messages go to the sign-in that shows it, else to the agents' host. */
 const shownBy = (login: LoginTerminal | null, host: TerminalHost | null, termId: string) => (login?.owns(termId) ? login : host);
 
@@ -225,12 +220,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
   const testing = new Map<string, { stop: AbortController; done: Promise<void> }>();
-  /* Messages that could not be sent while offline. They go out right after the next hello. */
-  const outbox: NodeMessage[] = [];
-  /* Ends of jobs Hornhoof has not confirmed: a socket can drop with one on its way. They count as running and go again
-     after each hello. A server that never confirms keeps only the last few. */
-  const unconfirmed = new Map<string, NodeMessage>();
-  const unconfirmedTests = new Map<string, NodeMessage>();
+  /* The messages that change the company's data, numbered and kept in the volume until Hornhoof confirms them, so a
+     restart of the node or of Hornhoof loses none. A job's end counts as running until then. */
+  const outbox = new Outbox(dir, { onError: err => writeLog(`The outbox could not be written: ${message(err)}`) });
+  /* Messages that cannot be sent while offline and are worth nothing late wait here, and go out right after the next hello. */
+  const waiting: NodeMessage[] = [];
+  /* Whether Hornhoof confirms numbered messages: with the server that does not, what was sent is dropped at once. */
+  let confirmed = false;
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
   const checks = startCheckClient(dir, terminal, () => send);
@@ -261,13 +257,25 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
-    if (m.type === 'job.done') keep(m.jobId, m);
-    if (m.type === 'tests.done') keepTest(m.partId, m);
     const current = withPrograms(m, programs);
-    if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
+    if (isNumbered(current)) return void sendNumbered(current);
+    if (!send?.(current)) waiting.push(current);
   };
-  const keep = (jobId: string, m: NodeMessage) => keepLast(unconfirmed, jobId, m);
-  const keepTest = (partId: string, m: NodeMessage) => keepLast(unconfirmedTests, partId, m);
+  /* An end is numbered when its turn comes, after the messages of its job; the rest are numbered as they are made. */
+  const sendNumbered = (m: NodeMessage) => {
+    if (!isEnd(m)) return deliver(outbox.add(m));
+    outbox.hold(m);
+    sendHeld(endId(m));
+  };
+  /* The turn of an end that was held has come. None is held when a new connection numbered and sent it meanwhile. */
+  const sendHeld = (id: string) => {
+    const entry = outbox.number(id);
+    if (entry) deliver(entry);
+  };
+  /* A message that cannot go out now stays numbered in the outbox and goes after the next hello. */
+  const deliver = (entry: Entry) => {
+    if (send?.(entry.msg) && !confirmed && !isEnd(entry.msg)) outbox.dropSent(entry.n);
+  };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const learn = async (more: (string | null | undefined)[] = []) => {
     for (const s of more) if (s) known.add(s);
@@ -327,7 +335,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   if (browserError) log(`Playwright browsers could not start: ${browserError}`);
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
-  const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, harness: syncOne, emit });
+  const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: { has: partId => outbox.doneParts().includes(partId) }, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
@@ -348,36 +356,42 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (terminal) live = await terminal.tmux.livePrograms();
   };
   const liveNow = () => (live ? { live } : {});
+  /* The node stops once Hornhoof has heard of its removal, not before. */
+  const removal = removalWatch(() => outbox.owes('removed'), () => stop());
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
     log,
-    onOpen(next) {
+    onOpen(next, acks) {
       send = next;
       online = true;
       checks.online(true);
+      confirmed = acks;
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      const tests = [...testing.keys(), ...unconfirmedTests.keys()];
+      const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       testMessages.replay();
-      for (const m of outbox.splice(0)) emit(m);
+      for (const m of waiting.splice(0)) emit(m);
       /* What it read while Hornhoof was away, before the end of any job that brought it. */
       if (planLimits.waiting) tellStatus();
-      for (const m of unconfirmed.values()) next(m);
-      for (const m of unconfirmedTests.values()) next(m);
+      sendPending(outbox, next, acks);
+      removal.settle();
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onClose: () => {
       online = false; stopChecks(checks, testing); testMessages.cancelDescriptions();
     },
-    onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
+    onRefused: () => {
+      log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
+      removal.refused();
+    },
   });
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
@@ -397,10 +411,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       markRemoved(dir);
       emit({ type: 'removed' });
       log('This node was removed in Hornhoof.');
-      stop();
+      removal.start();
       return;
     }
-    if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
+    if (acknowledged(m, outbox)) return removal.settle();
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'job.cancel') {
@@ -524,17 +538,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const refusal = noRunsNow();
     if (refusal || !testUser) {
       const refusedPart: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: refusal || NO_RUNS };
-      keepTest(m.partId, refusedPart);
+      outbox.hold(refusedPart);
       testing.delete(m.partId);
-      return emit(refusedPart);
+      return sendHeld(m.partId);
     }
-    const waiting = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
+    const inQueue = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
     const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
       emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
-    }, waiting), { dir, user: testUser, hidden: [...known], signal, files, harness, runtimes: testCapabilities.testRuntimes }, waiting, () => {});
-    keepTest(m.partId, done);
+    }, inQueue), { dir, user: testUser, hidden: [...known], signal, files, harness, runtimes: testCapabilities.testRuntimes }, inQueue, () => {});
+    outbox.hold(done);
     testing.delete(m.partId);
-    emit(done);
+    sendHeld(m.partId);
   }
 
   /* A product's harness, ahead of any run: it waits its turn like a part does, as it uses the same user. */
@@ -582,13 +596,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
-    keep(m.jobId, done);
+    outbox.hold(done);
     running.delete(m.jobId);
     /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
        Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
     setup.met(done.failure);
     await status();
-    emit(done);
+    sendHeld(m.jobId);
     await renewedCodex().catch(() => {});
     /* The program may end on the sign-in or fail on it: either way its provider refused it. */
     if (done.error === 'not_logged_in' || done.failure?.kind === 'auth') {
@@ -654,6 +668,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     clearInterval(checkingBrowser);
     void host?.stop();
     void login?.shutdown();
+    outbox.close();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);
   }
@@ -662,8 +677,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
 export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
-const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | wait-update | prepare-browser [repo]';
+const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | set-server | wait-update | prepare-browser [repo]';
 const SET_KEY_LINE = 'set-key expects one line: <server> <id> <provider or machine> <key>';
+const SET_SERVER_LINE = 'set-server expects one line: <server>';
+const WEB_ADDRESS = /^https?:\/\/\S+$/;
 /* A machine joined without a plan has a node of its own: it runs no agent program and has nothing to sign in to. */
 const MACHINE = 'machine';
 const NO_PLAN = 'This machine has no plan to sign in to.';
@@ -683,16 +700,13 @@ function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessa
   return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
 }
 
-function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
-  if (message.type === 'job.ack') {
-    jobs.delete(message.jobId);
-    return true;
-  }
-  if (message.type === 'tests.ack') {
-    tests.delete(message.partId);
-    return true;
-  }
-  return false;
+/* What Hornhoof confirms goes out of the outbox: numbers up to one, or a job's or a part's end. */
+function acknowledged(message: ServerMessage, outbox: Outbox): message is Extract<ServerMessage, { type: 'ack' | 'job.ack' | 'tests.ack' }> {
+  if (message.type === 'ack') outbox.ack(message.upto);
+  else if (message.type === 'job.ack') outbox.ackJob(message.jobId);
+  else if (message.type === 'tests.ack') outbox.ackPart(message.partId);
+  else return false;
+  return true;
 }
 
 function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
@@ -748,8 +762,12 @@ function withInstall(adapter: ProviderAdapter, tools: string, provider: Provider
   };
 }
 
+/* The node these words set up is still the one that was here, so what waits in its outbox is still its own to say. */
+const sameNode = (was: NodeState | null, server: string | undefined, subscriptionId: string | undefined): boolean => was?.server === server && was?.subscriptionId === subscriptionId;
+
 async function setKey(dir: string, io: Io): Promise<number> {
   const [server, subscriptionId, provider, key, ...rest] = (await firstLine(io.stdin)).split(/\s+/);
+  const was = readState(dir);
   try {
     if (rest.length) throw new Error('extra words');
     mkdirSync(dir, { recursive: true });
@@ -758,8 +776,24 @@ async function setKey(dir: string, io: Io): Promise<number> {
     io.stderr.write(`${SET_KEY_LINE}.\n`);
     return 1;
   }
+  /* An old removed waiting in the outbox would revoke the new key. The file named removed goes last, so a crash before
+     it leaves a node that is cleared the next time. */
+  if (isRemoved(dir) || !sameNode(was, server, subscriptionId)) clearOutbox(dir);
   /* A new key means Hornhoof took this machine back after a removal. */
   rmSync(join(dir, 'removed'), { force: true });
+  return 0;
+}
+
+/* The node goes to another address of the same company's server, as the front door of its own machine is. It stays the
+   node it was, with its key, so what waits in its outbox is still its own to say. */
+async function setServer(dir: string, io: Io): Promise<number> {
+  const server = (await firstLine(io.stdin)).trim();
+  const was = readState(dir);
+  if (!was || !WEB_ADDRESS.test(server) || !URL.canParse(server)) {
+    io.stderr.write(`${SET_SERVER_LINE}.\n`);
+    return 1;
+  }
+  writeState(dir, { ...was, server });
   return 0;
 }
 
@@ -929,7 +963,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   const testUser = userFor(dir, 'tests');
   const verifyUser = testUser || agentUser();
   const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
-  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
+  const signIn = builtinKey(key, process.env.HORNHOOF_MACHINE_ID || null);
+  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
 }
 
 /* What the node's updater and its machine's setup call, or the usage for anything else. */
@@ -952,6 +987,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
+    case 'set-server':
+      return setServer(dir, io);
     default:
       return upkeepCommand(dir, args, io);
   }

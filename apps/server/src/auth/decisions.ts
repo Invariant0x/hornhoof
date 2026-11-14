@@ -41,8 +41,9 @@ export const notAllowed = () =>
   new ApiError(403, 'forbidden', 'This decision is not yours to take. Its department\'s owner or people, the CEO or the CEO delegate take it.', 'decision_not_allowed');
 
 /* Whom people see a decision is for: the department's people with the CEO and the delegate, its owner with them, or the
-   CEO and the delegate. A product's decision is its department's. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; departmentId: string | null };
+   CEO and the delegate. A product's decision is its department's. Opening a machine that holds its owner's key is its
+   owner's alone. */
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner'; departmentId: string | null };
 
 /* What no department's people take: its named owner's with the CEO, or the CEO's. */
 const decidedAbove = (subject: DecisionSubject, people: readonly Candidate[]): DecidedBy =>

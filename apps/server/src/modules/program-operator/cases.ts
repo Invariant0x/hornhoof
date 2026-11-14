@@ -4,7 +4,7 @@ import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type Oper
 import { and, asc, desc, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
@@ -147,7 +147,7 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
 /* An operator's turn goes where anyone's would: to a machine of its plan that can take a turn, whichever it was on before,
    and before its first turn it was on none. A machine that restarts for an update comes back: the turn waits for it. */
 async function planCanTakeTurn(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<boolean> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) || nodeHeld(ctx, BUILTIN);
+  if (sub.kind === 'api_key') return ctx.hub.isReady(ownBuiltin(ctx.config)) || nodeHeld(ctx, ownBuiltin(ctx.config));
   return (await planNodes(ctx.db, [sub.id])).some(node => takesTurns(ctx, node) || nodeHeld(ctx, nodeIdentity(node.id)));
 }
 

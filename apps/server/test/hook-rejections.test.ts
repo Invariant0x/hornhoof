@@ -3,7 +3,7 @@ import { parseNodeMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, jobs } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { as, setUpCompany, testApp } from './helpers.js';
 

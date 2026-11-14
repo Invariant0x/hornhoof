@@ -5,7 +5,7 @@ import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_PICTURE_BYTES, PROGRAM_OPERATOR_ROLE, type OperatorQuestion, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { agentEvents, agents, attachments, jobs, people, programOperatorCases, subscriptions, type AgentKind } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import * as programRpc from '../src/modules/program-operator/rpc.js';

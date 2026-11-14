@@ -30,9 +30,10 @@ it('shows the computer to people of the whole company and lets only the CEO and 
       const viaOrchestrator = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
       expect(viaOrchestrator.statusCode, `${action} by the orchestrator`).toBe(403);
     }
-    expect(c.ctx.computer.view().asked).not.toBeNull();
+    const asked = async () => (await c.ctx.computer.states(c.acme.id)).find(state => state.machine.id === c.machine)!.asked;
+    expect(await asked()).not.toBeNull();
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.delegate) })).statusCode).toBe(200);
-    expect(c.ctx.computer.view().asked).toBeNull();
+    expect(await asked()).toBeNull();
   });
 
 it('lets only the CEO and the delegate apply the structure card, and the people of a department its staff, with or without the card', async () => {

@@ -1,12 +1,12 @@
 # The link on the internet
 
-> In short: Hornhoof can give your company a link like `https://acme.hornhoof.org`, so people open it from anywhere. Nothing has to be opened on your router. Anyone who learns the link reaches the sign-in page, so a random name, which is hard to guess, is the safer choice.
+> In short: Hornhoof can give your company a link like `https://acme.hornhoof.org`, so people open it from anywhere. Nothing has to be opened on your router. Link names are public, because each certificate is listed in public logs, so Hornhoof starts with a long random name, which does not say whose company it is. You may change it, and the company's sign-ins protect what is inside.
 
 ## How do I get a link?
 
-Setup offers the company a public link, like `https://acme.hornhoof.org`. As you type the company's name, it shows the link the company will get, written in Latin letters.
+Setup offers the company a public link, like `https://acme.hornhoof.org`. It starts with a long random name.
 
-- You can write another name, or take a long random one with "Random name".
+- You can write another name, or take a new random one with "Random name".
 - Hornhoof tells you at once whether the name is free.
 - The link is on unless you untick "Open Hornhoof on the internet". Then Hornhoof stays on your own computer and network, and you can open the link later under Company settings.
 
@@ -16,11 +16,11 @@ Invite links and the commands for new machines use it. Hornhoof still opens at i
 
 ## Who can reach it?
 
-Anyone who learns the link reaches the sign-in page. A name like the company's own is easy to guess, so only the company's sign-ins protect what is inside. A random name is hard to guess.
+Link names are public: every link's certificate is listed in public logs, so anyone can find the name. Before sign-in the link tells nothing about the company, and it asks search engines not to list it. A name you pick may tell whose company this is. A random name does not. Either way, only the company's sign-ins protect what is inside.
 
 ## What does hornhoof.org see?
 
-hornhoof.org only passes the traffic on and has no accounts of its own. A small tunnel container next to the server keeps the connection to it, so nothing has to be opened on your router. The tunnel waits while the company has no link.
+The connection is encrypted to your company's own machine, which gets the link's certificate from Let's Encrypt. So hornhoof.org passes it on unread and sees only the name being reached. While that is not possible, the link falls back to https that ends at hornhoof.org, as Company settings shows. hornhoof.org has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
 
 ## How do I change or remove the link?
 

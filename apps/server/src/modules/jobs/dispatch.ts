@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson, type ModelCheckKind, type ModelIdentity, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { subscriptions } from '../../db/schema.js';
-import { identityOf } from '../nodes/hub.js';
+import { jobs, subscriptions } from '../../db/schema.js';
+import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { nodeHeldFrom } from '../updates/drain.js';
 
 export const TEST_PROMPT = 'Reply with one word: ready';
@@ -16,8 +16,10 @@ export const TEST_TIMEOUT_MS = 120_000;
 type JobToSend = {
   id: string;
   subscriptionId: string;
-  /* The node of a plan's machine it goes to; an API key's go to the built-in node. */
+  /* The node of a plan's machine it goes to; an API key's go to a built-in node: the one of the machine named, or this
+     app's own. */
   nodeId: string | null;
+  builtinMachine?: string | null;
   /* The role of the agent it is for: the one role that may go to a node waiting for an update. */
   role?: string | null;
   /* It is for the orchestrator or a head, whom a node that waits for an update holds up to a limit. */
@@ -53,10 +55,14 @@ const jobExtras = (job: JobToSend) => ({
   ...(job.skills ? { skills: job.skills } : {}),
 });
 
+/* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
+   A queued conversation turn still waits in Hornhoof and goes out later. */
+export const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
+
 /* Sends a job to its node. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
-  const node = sub && identityOf(sub, job.nodeId);
+  const node = sub && identityOf(sub, job.nodeId, job.builtinMachine ?? null, ownBuiltin(ctx.config));
   if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role, job.leader)) return false;
   const secret = sub.kind === 'api_key' ? secretOf(ctx, sub) : null;
   return ctx.hub.send(node, {

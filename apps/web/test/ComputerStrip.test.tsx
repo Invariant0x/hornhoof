@@ -2,23 +2,23 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import type { ComputerView } from '../src/types';
+import { makeKey } from '../src/owner-key';
+import { keyDefaults } from '../src/owner-key-store';
+import type { ComputerAccessView } from '../src/types';
 import { ComputerStrip } from '../src/ui/ComputerStrip';
-import { mockApi } from './api-mock';
+import { accessView, mockApi } from './api-mock';
 
 const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
-const open = (machine: string): ComputerView => ({ available: true, until: UNTIL, asked: null, machine, canAnswer: true });
-const asks = (machine: string, reason = 'Clean Docker images.'): ComputerView => ({ available: true, until: null, asked: { reason, at: '2026-11-04T10:00:00Z' }, machine, canAnswer: true });
-const closed = (machine: string): ComputerView => ({ available: true, until: null, asked: null, machine, canAnswer: true });
+const open = (machine: string): ComputerAccessView => accessView(machine, { until: UNTIL });
+const asks = (machine: string, reason = 'Clean Docker images.'): ComputerAccessView => accessView(machine, { asked: { reason, at: '2026-11-04T10:00:00Z' } });
+const closed = (machine: string): ComputerAccessView => accessView(machine);
 
-type Answer = (action: 'open' | 'close' | 'decline', machine: string | null | undefined) => Promise<ComputerView>;
-
-function strip(machines: ComputerView[], answer?: Answer) {
+function strip(machines: ComputerAccessView[]) {
   const onChange = vi.fn();
   const onFailure = vi.fn();
   const view = render(
     <LanguageProvider>
-      <ComputerStrip machines={machines} onChange={onChange} onFailure={onFailure} answer={answer} />
+      <ComputerStrip machines={machines} onChange={onChange} onFailure={onFailure} />
     </LanguageProvider>,
   );
   return { onChange, onFailure, ...view };
@@ -54,43 +54,74 @@ describe('ComputerStrip', () => {
     expect(screen.queryByRole('button', { name: /Other machines/ })).not.toBeInTheDocument();
   });
 
-  it("gives each line's button its own machine", async () => {
-    const user = userEvent.setup();
-    const answer = vi.fn<Answer>(() => Promise.resolve(closed('x')));
-    const { onChange } = strip([asks('a-host'), open('b-host')], answer);
-    await user.click(others(1));
-    await user.click(within(line('Access to b-host')).getByRole('button', { name: 'Close access' }));
-    expect(answer).toHaveBeenLastCalledWith('close', 'b-host');
-    await user.click(within(line('The orchestrator asks for access to a-host')).getByRole('button', { name: 'Open for a day' }));
-    expect(answer).toHaveBeenLastCalledWith('open', 'a-host');
-    await user.click(within(line('The orchestrator asks for access to a-host')).getByRole('button', { name: 'Not now' }));
-    expect(answer).toHaveBeenLastCalledWith('decline', 'a-host');
-    expect(onChange).toHaveBeenCalledTimes(3);
-  });
-
-  it('answers the old way, without the machine, while the server keeps one', async () => {
+  it("sends each line's button to its own machine", async () => {
     const user = userEvent.setup();
     const answered = closed('b-host');
-    const calls = mockApi({ 'POST /api/computer/close': [200, answered], 'POST /api/computer/open': [200, answered], 'POST /api/computer/decline': [200, answered] });
+    const calls = mockApi({
+      'POST /api/machines/m-b-host/access/close': [200, answered],
+      'POST /api/machines/m-a-host/access/open': [200, open('a-host')],
+      'POST /api/machines/m-a-host/access/decline': [200, closed('a-host')],
+    });
     const { onChange } = strip([asks('a-host'), open('b-host')]);
     await user.click(others(1));
     await user.click(within(line('Access to b-host')).getByRole('button', { name: 'Close access' }));
+    await vi.waitFor(() => expect(onChange).toHaveBeenLastCalledWith(answered));
     await user.click(within(line('The orchestrator asks for access to a-host')).getByRole('button', { name: 'Open for a day' }));
     await user.click(within(line('The orchestrator asks for access to a-host')).getByRole('button', { name: 'Not now' }));
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(3));
+    /* A machine that holds no key opens on the server's word: nothing is signed, and nothing asked. */
     expect(calls).toEqual([
-      { method: 'POST', path: '/api/computer/close', body: undefined },
-      { method: 'POST', path: '/api/computer/open', body: undefined },
-      { method: 'POST', path: '/api/computer/decline', body: undefined },
+      { method: 'POST', path: '/api/machines/m-b-host/access/close', body: undefined },
+      { method: 'POST', path: '/api/machines/m-a-host/access/open', body: {} },
+      { method: 'POST', path: '/api/machines/m-a-host/access/decline', body: undefined },
     ]);
-    expect(onChange).toHaveBeenLastCalledWith(answered);
+  });
+
+  it("opens a machine that holds its owner's key with what the owner signs, asking the password once", async () => {
+    const user = userEvent.setup();
+    /* Their key as the server keeps it, made on another device. */
+    const made = mockApi({ 'GET /api/me/key': [200, { key: null }] });
+    await makeKey('right');
+    const { password: _typed, ...stored } = made.find(call => call.method === 'PUT')!.body as { password: string; publicKey: string };
+    void _typed;
+    await keyDefaults.store.clear();
+    const calls = mockApi({ 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m-a-host/access/open': [200, open('a-host')] });
+    const { onChange } = strip([{ ...asks('a-host'), key: 'held' }]);
+    const asked = line('The orchestrator asks for access to a-host');
+    await user.click(within(asked).getByRole('button', { name: 'Open for a day' }));
+    await user.type(await within(asked).findByLabelText('Password'), 'right{Enter}');
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    const sent = calls.find(call => call.method === 'POST')!.body as { grant: { payload: string; signature: string } };
+    expect(JSON.parse(sent.grant.payload)).toMatchObject({ v: 1, machine: 'n-a-host' });
+    expect(sent.grant.signature).toMatch(/^[A-Za-z0-9_-]{86}$/);
+    /* Whoever leaves the question opens nothing. */
+    await keyDefaults.store.clear();
+    await user.click(within(asked).getByRole('button', { name: 'Open for a day' }));
+    await user.click(await within(asked).findByRole('button', { name: 'Cancel' }));
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('says why its owner cannot open a machine now, in place of that button', () => {
+    strip([{ ...asks('a-host'), key: 'not_held' }]);
+    const asked = line('The orchestrator asks for access to a-host');
+    expect(within(asked).getByText('a-host does not hold your key yet. Run a new command from Connect a machine on it: it takes your key only from there.')).toBeInTheDocument();
+    expect(within(asked).queryByRole('button', { name: 'Open for a day' })).not.toBeInTheDocument();
+    expect(within(asked).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+  });
+
+  it('says so when Hornhoof cannot reach the machine', () => {
+    strip([{ ...asks('a-host'), reachable: false }]);
+    const asked = line('The orchestrator asks for access to a-host');
+    expect(within(asked).getByText('Hornhoof cannot reach a-host now.')).toBeInTheDocument();
+    expect(within(asked).queryByRole('button', { name: 'Open for a day' })).not.toBeInTheDocument();
   });
 
   it('tells of a failed answer', async () => {
     const user = userEvent.setup();
-    const failure = new Error('Not now.');
-    const { onChange, onFailure } = strip([open('a-host')], () => Promise.reject(failure));
+    mockApi({ 'POST /api/machines/m-a-host/access/close': [409, { error: { code: 'conflict', message: 'Not now.' } }] });
+    const { onChange, onFailure } = strip([open('a-host')]);
     await user.click(screen.getByRole('button', { name: 'Close access' }));
-    expect(onFailure).toHaveBeenCalledWith(failure);
+    await vi.waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -134,29 +165,33 @@ describe('ComputerStrip', () => {
     strip([open('a-host')]);
     const access = line('Access to a-host');
     expect(within(access).getByText(/^access until .+$/)).toBeInTheDocument();
-    expect(within(access).queryByText(/can run commands on a-host/)).not.toBeInTheDocument();
+    expect(within(access).queryByText(/is open until/)).not.toBeInTheDocument();
     await user.click(within(access).getByRole('button', { name: 'More about access to a-host' }));
-    expect(within(access).getByText(/^The orchestrator can run commands on a-host until .+\. The company server runs there, so this shows wherever you open Hornhoof\.$/)).toBeInTheDocument();
+    expect(within(access).getByText(/^Access to a-host is open until .+\.$/)).toBeInTheDocument();
   });
 
   it('names the server when the machine has no name', () => {
-    strip([{ available: true, until: UNTIL, asked: null, canAnswer: true }]);
+    strip([accessView('the company server', { until: UNTIL, machine: { hostname: '', role: 'data', data: true } })]);
     expect(line("Access to the server's computer")).toBeInTheDocument();
     expect(screen.getByText("The server's computer")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: "More about access to the server's computer" })).toBeInTheDocument();
   });
 
   it('shows who decides in place of the buttons to someone who may not', () => {
-    strip([{ ...asks('a-host'), canAnswer: false }, { ...open('b-host'), canAnswer: false }]);
+    strip([{ ...asks('a-host'), canOpen: false, canClose: false, key: 'held' }, { ...open('b-host'), canOpen: false, canClose: false }, { ...asks('c-host'), canOpen: false }]);
     const asked = line('The orchestrator asks for access to a-host');
-    expect(within(asked).getByText('Decided by the CEO or the CEO delegate.')).toBeInTheDocument();
+    expect(within(asked).getByText("Decided by the machine's owner alone.")).toBeInTheDocument();
     expect(within(asked).queryByRole('button', { name: 'Open for a day' })).not.toBeInTheDocument();
     expect(within(asked).queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
   });
 
-  it('keeps the buttons for an older server that does not say who may answer', () => {
-    strip([{ available: true, until: UNTIL, asked: null, machine: 'a-host' }]);
-    expect(screen.getByRole('button', { name: 'Close access' })).toBeInTheDocument();
+  it('gives an open machine no button for someone who may not close it', async () => {
+    const user = userEvent.setup();
+    strip([{ ...open('b-host'), canOpen: false, canClose: false }, { ...asks('c-host'), canOpen: false }]);
+    await user.click(others(1));
+    expect(within(line('Access to b-host')).queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
+    /* The server's own machine with no key is the CEO's and the delegate's. */
+    expect(within(line('The orchestrator asks for access to c-host')).getByText('Decided by the CEO or the CEO delegate.')).toBeInTheDocument();
   });
 
   it('speaks Russian', async () => {

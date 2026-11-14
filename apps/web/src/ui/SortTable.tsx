@@ -4,7 +4,8 @@ import { Edge } from './Edge';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
 
-export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string };
+/* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card. */
+export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true };
 type Props<T> = {
   rows: readonly T[];
   columns: TableColumn<T>[];
@@ -24,7 +25,7 @@ function Arrow({ ascending }: { ascending: boolean }) {
 }
 
 function TableHead<T>({ columns, sort, choose }: SortControls<T>) {
-  return <thead><tr>{columns.map(c => <th key={c.key} scope="col" aria-sort={sort.key === c.key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}>
+  return <thead><tr>{columns.map(c => <th key={c.key} scope="col" className={c.lead ? c.className : undefined} aria-sort={sort.key === c.key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}>
     <button className={`sorth${sort.key === c.key ? ' on' : ''}`} type="button" onClick={() => choose(c)}>{c.label}<Arrow ascending={(sort.key === c.key ? sort.direction : c.direction) === 1} /></button>
   </th>)}</tr></thead>;
 }
@@ -41,9 +42,10 @@ function SortBar<T>({ columns, sort, choose }: SortControls<T>) {
 
 function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns: TableColumn<T>[]; name: string; expanded: boolean; toggle: () => void }) {
   const t = useT();
+  const named = Math.max(0, columns.findIndex(c => !c.lead));
   return <tr className={`rm${expanded ? ' open' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) toggle(); }}>
-    {columns.map((c, i) => <td key={c.key} className={i === 0 ? 'k-name' : c.className} data-label={i === 0 || c.className === 'k-status' ? undefined : c.label}>
-      {i === 0 ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
+    {columns.map((c, i) => <td key={c.key} className={i === named ? 'k-name' : c.className} data-label={i === named || c.className === 'k-status' ? undefined : c.label}>
+      {i === named ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
         <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>{c.cell(row)}
       </button> : c.cell(row)}
     </td>)}

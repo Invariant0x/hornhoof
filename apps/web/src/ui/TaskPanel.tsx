@@ -53,6 +53,16 @@ function cutText(t: Messages, data: unknown, when: (at: string) => string): stri
   return `${cutLine(t, { node: named, cause, job }, when(at))} ${then}`;
 }
 
+/* Hornhoof's line about a turn whose machine it cannot reach, and about that machine coming back, in the person's
+   language. Its English text is for the agents. */
+function awayText(t: Messages, e: TaskLogLine, when: (at: string) => string): string | null {
+  const [stage, host, since] = [field(e.data, 'stage'), field(e.data, 'host'), field(e.data, 'since')];
+  const machine = typeof host === 'string' && host ? host : null;
+  if (stage === 'back') return t.tasks.away.back(machine);
+  if (stage === 'ended') return t.tasks.away.ended(machine);
+  return stage === 'away' && typeof since === 'string' ? t.tasks.away.gone(machine, when(since)) : null;
+}
+
 function skippedText(t: Messages, e: TaskLogLine): string {
   const wake = field(e.data, 'wake');
   if (typeof wake !== 'string') return e.text;
@@ -74,6 +84,7 @@ const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string
   wake_skipped: skippedText,
   wake_obsolete: obsoleteText,
   interrupted: (t, e, when) => cutText(t, e.data, when),
+  away: awayText,
 };
 const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
 

@@ -7,7 +7,7 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 - There is no Hornhoof cloud and no account with us. The server, its database and its files run in Docker on your own computers.
 - The company's database sits on up to three of your machines: one leads, and the others keep full copies. Copies go only to machines of the CEO and of people who see the whole company.
 - No single machine is the company. If the leading machine stops, an up-to-date copy takes over within about a minute, under the same link.
-- Every 6 hours and before each update, the leading machine makes a backup, signs it and encrypts it. Up to three other company machines keep the latest two and cannot open them. Only the machines that may hold the data, and the recovery file you save in Settings, can. A machine's owner can untick "Keep company backups".
+- Every 6 hours and before each update, the leading machine makes a backup, signs it and encrypts it. Up to three other company machines keep the latest two and cannot open them. Only the machines that hold the data, and the recovery file the CEO saves in Company settings, can. A restore checks that a machine holding the data signed the backup. The copy saved before an update also stays on the server unencrypted, as the server holds the database anyway. A machine's owner can untick "Keep company backups".
 - A machine that only does work keeps no copy of the database, only those sealed backups when its owner allows them.
 - Your machines talk to each other over encrypted connections, and each one proves who it is with a certificate from the company's own authority. The port they talk on takes only machines with such a certificate.
 - Hornhoof looks for new builds at GitHub's container registry, anonymously, as `docker pull` does. An update runs exactly the images it checked, by their digests. It saves the database first, and goes back to the old build by itself if the new one does not answer.
@@ -33,8 +33,8 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 ## People see only what they are given
 
 - Until a company is set up, only the setup link from the server's own log can set it up.
-- Failed sign-ins are capped: 10 in 15 minutes for one email from one address, and 50 in an hour for one email.
-- Session cookies cannot be read by scripts on the page, and travel only over https when Hornhoof is on https.
+- Failed sign-ins are capped, and the counts survive a restart: 10 in 15 minutes for one email from one address, 50 in an hour for one email, and 30 in an hour from one address across all emails (an IPv6 address counts with its /64).
+- Session cookies cannot be read by scripts on the page, and travel only over https when Hornhoof is on https. On the hornhoof.org link the cookie's name starts with `__Host-`, so no page under another link can set or replace it. A session from before that change moves to the new name once, on its next visit.
 - A change, or a terminal connection, that comes from another site's page is refused, even with your cookie.
 - Each person sees only the departments they are given.
 - Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
@@ -48,9 +48,11 @@ The link, like `https://acme.hornhoof.org`, lets people open your company from a
 
 - It is optional. Untick "Open Hornhoof on the internet" at setup, or remove the link in Settings, and people open Hornhoof only from your own network.
 - Your server opens the tunnel itself, over an encrypted connection to hornhoof.org whose certificate it checks.
-- The tunnel carries traffic only to the Hornhoof app, never to anything else on your network, whatever hornhoof.org asks for.
+- The tunnel ends in the keeper, a container next to the app, which passes its traffic to the Hornhoof app only, never to anything else on your network, whatever hornhoof.org asks for.
 - hornhoof.org has no accounts and holds none of your company's data. For each link it keeps only the name, a hash of its key, when and from which address the link was made, and when its tunnel was last seen. For a company on several machines it also keeps which machine holds the link, and one flag that says whether the company's copy is up to date.
-- The browser's https connection ends at hornhoof.org. It opens each request to see which company it is for, passes it on through that company's tunnel, and keeps no copy. If you want no one in between, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
+- The browser's https connection ends at your own machine. hornhoof.org reads only the name being reached from the start of each connection, passes the encrypted bytes on through that company's tunnel, and keeps no copy. Your machine gets the link's certificate from Let's Encrypt itself, accepting Let's Encrypt's Subscriber Agreement for the company, and renews it on its own. If hornhoof.org stops passing connections through unread, or the certificate cannot be renewed in time, the link keeps working with its https ending at hornhoof.org, and Share access says so. A company on an older Hornhoof is served that way until it updates. If you want no one in between at all, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
+- A link's name is public: every certificate goes into public Certificate Transparency logs. Before sign-in, the link tells nothing about the company (not its name, its people or its version), and it asks search engines not to list it.
+- To stop your machine getting its own certificate, put `ACME_DIRECTORY=off` in the `.env` file next to `compose.yaml` and run `docker compose up -d app` there. The link then runs with its https ending at hornhoof.org, as before.
 - Traffic between your machines that goes through hornhoof.org is encrypted from one machine to the other, so hornhoof.org sees only encrypted bytes.
 - hornhoof.org decides nothing for your company. A link points to one machine at a time, and that tells two machines which of them leads. A company with no public link keeps a hidden name there for that alone. Three or more machines that are always on choose the leader by vote among themselves.
 

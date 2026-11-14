@@ -5,7 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { JobView, Me, SubView } from '../src/types';
 import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
-import { ME, MACHINE, mockApi, SUBS } from './api-mock';
+import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { fakeStream } from './fake-stream';
 
@@ -389,7 +389,7 @@ describe('Subscriptions', () => {
     expect(screen.getByRole('checkbox', { name: 'GLM' })).not.toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['claude', 'codex'] } });
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText(TRUST)).toBeInTheDocument();
   });
@@ -542,7 +542,7 @@ describe('Subscriptions', () => {
     await openAll();
     await user.click(await screen.findByRole('button', { name: 'New command for Kimi' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-kimi/command');
-    expect(await within(rowOf('Kimi')).findByText(COMMAND)).toBeInTheDocument();
+    expect(await within(rowOf('Kimi')).findByText(withKey(COMMAND))).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
   });
 
@@ -941,7 +941,7 @@ describe('the card of a plan that does not work', () => {
     const [why, steps, install, last, ...rest] = [...card.querySelector<HTMLElement>('.blk-fix')!.children] as HTMLElement[];
     expect(why!.textContent).toBe(words);
     expect(steps).toHaveRole('list');
-    expect(install).toHaveTextContent(COMMAND);
+    await vi.waitFor(() => expect(install).toHaveTextContent(withKey(COMMAND)));
     expect(install).toHaveTextContent(lifetime);
     expect(buttons(install!)).toEqual([actions[0], actions[0]]);
     expect(buttons(last!)).toEqual([actions[1]]);
@@ -956,7 +956,7 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Kimi, Maria' });
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(card.querySelector('.blk-fix')!.firstElementChild).toHaveTextContent('Maria has not run the install command yet.');
-    expect(within(card).queryByText(COMMAND)).not.toBeInTheDocument();
+    expect(within(card).queryByText(withKey(COMMAND))).not.toBeInTheDocument();
     expect(buttons(card)).toEqual(['Remove']);
   });
 

@@ -1,5 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
+import { stripSettings } from './client.js';
+import { confirmCommits, keepErrors } from './confirm.js';
+import { writeGate } from './gate.js';
+import { REFUSED_FUNCTIONS } from './sql-check.js';
+
+export { REFUSED_FUNCTIONS };
 
 /* What one statement gave back: its rows, and how many rows it added, changed or removed. */
 export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
@@ -7,22 +13,27 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
 /* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
 export type SqlMode = 'write' | 'read';
 
+/* A tool call with an id of its own: the answer the agent will read, made from what the statements answered. */
+export type SqlCall = { invocation: string; jobId: string; answer: (results: SqlAnswer[]) => unknown };
+
 /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
-export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
    model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. The
    outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt, a
    consent or a day's count, even from a turn of the orchestrator answering the CEO. Waits' owners, dates and policies
-   too: a row written by hand could move a promise or quiet an alarm, and they name private work. The keys of git hosts
-   Hornhoof creates repositories with too: a row put there would send a new repository and its key to another account. */
+   too: a row written by hand could move a promise or quiet an alarm, and they name private work. The link's
+   certificate too: it holds the sealed keys, and its mode decides how the link runs. And the count of failed sign-ins,
+   as a row taken out of it would give a guesser more tries. The keys of git hosts Hornhoof creates repositories with
+   too: a row put there would send a new repository and its key to another account. */
 const OUTBOUND = [
   'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'repo_hosts', ...OUTBOUND];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', ...OUTBOUND];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -70,6 +81,36 @@ const JOB_STATUS = ['status', 'error', 'finished_at'];
 const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'] };
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
+/* Whether the orchestrator's own SQL may change this column: what its role is granted below, said once more for
+   whatever else lets the orchestrator write a value of its own. */
+export function orchestratorWrites(table: string, column: string): boolean {
+  if (HIDDEN.includes(table) || READ_ONLY.includes(table) || SECRET[table]?.includes(column)) return false;
+  if (table === 'departments') return !DEPARTMENT_SETTINGS.includes(column);
+  if (table === 'agents') return !AGENT_FIXED.includes(column);
+  if (table === 'jobs') return JOB_STATUS.includes(column);
+  return !URGENCY[table]?.includes(column);
+}
+
+/* The rights stay the first guard, whatever the check of the text sees: PUBLIC loses EXECUTE on every overload of these, in the
+   catalog of this database, so neither role can call them. Runs at every start, so a new overload is covered too. */
+export const REFUSED_NAME_PATTERN = `^(${REFUSED_FUNCTIONS.map(name => name.replace('*', '.*')).join('|')})$`;
+export const PUBLIC_REVOKES = `DO $revokes$
+DECLARE f regprocedure;
+BEGIN
+  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'pg_catalog' AND p.proname ~ '${REFUSED_NAME_PATTERN}' LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', f);
+  END LOOP;
+END $revokes$`;
+
+/* What the write role runs right before its COMMIT. Its text may have set any of these for the transaction, and the lease must
+   still hold after what the text took: a margin, as the commit itself still takes a moment. */
+export const PRE_COMMIT_SETTINGS = 'SET LOCAL synchronous_commit = on; SET LOCAL statement_timeout = 0; SET LOCAL client_min_messages = warning';
+export const PRE_COMMIT = `${PRE_COMMIT_SETTINGS}; SELECT net.assert_lease('2 s', NULL)`;
+/* The same check for a tool call that front gave an id: it also keeps the call's answer and lists the call as applied, in
+   the change's own commit. */
+export const RECORD_CALL = "SELECT net.assert_lease('2 s', $1, $2, $3::jsonb)";
+
 /* One pair of roles per database, so two Hornhoofs on one Postgres do not share them. */
 const roleOf = (database: string, suffix: string) => `${database.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 63 - suffix.length)}${suffix}`;
 export const agentRole = (database: string) => roleOf(database, '_agent');
@@ -80,20 +121,23 @@ const quoted = (names: string[]) => `ARRAY[${names.map(n => `'${n}'`).join(', ')
 const columns = (table: string, but: string[] = []) =>
   `(SELECT string_agg(quote_ident(column_name), ', ') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' AND column_name <> ALL (${quoted(but)}))`;
 const visible = (table: string) => columns(table, SECRET[table] ?? []);
+/* A right to read these tables, column by column, without the secret columns. */
+const readVisible = (tables: string[], name: string) =>
+  tables.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n');
 
 /* Makes the role or brings its rights up to date, for tables later updates added too, starting from none. It owns
    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
-   A call may take 15 seconds and may not sit in an open transaction. */
-const role = (name: string, rights: string) => `DO $grants$
+   A call may not sit in an open transaction, and how long it may take is the role's own setting. */
+const role = (settings: string[], rights: (name: string) => string) => (name: string) => `DO $grants$
 DECLARE t text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
-  ALTER ROLE "${name}" SET statement_timeout = '15s';
+${settings.map(setting => `  ALTER ROLE "${name}" ${setting};`).join('\n')}
   ALTER ROLE "${name}" SET idle_in_transaction_session_timeout = '30s';
   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${name}";
   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${name}";
   GRANT USAGE ON SCHEMA public TO "${name}";
-${rights}
+${rights(name)}
 END $grants$`;
 
 /* Every table but the hidden ones and those named, one by one. */
@@ -106,17 +150,21 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
    may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
    subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
    forged or swapped. An assistant and its own agent are their owner's: neither changes here, nor what the assistant reads,
-   so no key is forged and no answer goes elsewhere. */
-export const grantsFor = (name: string) =>
-  role(
-    name,
+   so no key is forged and no answer goes elsewhere. A call may take 5 seconds before its commit, and the only thing of
+   the fence it reaches is the check right before that commit. */
+export const grantsFor = role(
+  ['RESET statement_timeout', "SET transaction_timeout = '5s'"],
+  name =>
     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(URGENCY), ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
 ${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT SELECT (%1$s), DELETE ON ${table} TO "${name}"; GRANT INSERT (%2$s), UPDATE (%2$s) ON ${table} TO "${name}"', ${visible(table)}, ${columns(table, [...but, ...(SECRET[table] ?? [])])});`).join('\n')}
-${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
+${readVisible(READ_ONLY, name)}
   EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
+  GRANT USAGE ON SCHEMA net TO "${name}";
+  GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid) TO "${name}";
+  GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid, uuid, jsonb) TO "${name}";
   EXECUTE $trigger$
     CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
     BEGIN
@@ -141,60 +189,99 @@ ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${
       WHEN (OLD.kind = 'assistant' AND current_user = '${name}')
       EXECUTE FUNCTION hornhoof_assistant_kept()
   $trigger$;`,
-  );
+);
 
 /* The head of Operations' role reads the rows of every table but the hidden ones and the secrets, and changes nothing:
-   it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. */
-export const readerGrantsFor = (name: string) =>
-  role(
-    name,
+   it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. It commits
+   nothing, so nothing of the fence is its, and a call may take 15 seconds. */
+export const readerGrantsFor = role(
+  ["SET statement_timeout = '15s'"],
+  name =>
     `  ALTER ROLE "${name}" SET default_transaction_read_only = on;
 ${eachTable(Object.keys(SECRET), `GRANT SELECT ON %I TO "${name}"`)}
-${Object.keys(SECRET)
-  .map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`)
-  .join('\n')}`,
-  );
+${readVisible(Object.keys(SECRET), name)}`,
+);
 
-/* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. Null, with a
-   warning, when the database does not let Hornhoof make roles. */
-export async function openAgentSql(url: string): Promise<AgentSql | null> {
-  const admin = new pg.Client({ connectionString: url });
-  const pools: pg.Pool[] = [];
-  const open = async (name: string, grants: string) => {
-    const password = randomBytes(24).toString('hex');
-    await admin.query(grants);
-    await admin.query(`ALTER ROLE "${name}" WITH LOGIN CONNECTION LIMIT 4 PASSWORD '${password}'`);
-    const own = new URL(url);
-    own.username = name;
-    own.password = password;
-    const pool = new pg.Pool({ connectionString: own.toString(), max: 2, idleTimeoutMillis: 60_000 });
-    pool.on('error', err => console.warn(`Lost an agent's database connection, will open another: ${err.message}`));
+const answersOf = (result: pg.QueryResult | pg.QueryResult[]): SqlAnswer[] =>
+  (Array.isArray(result) ? result : [result]).map(r => ({ rows: r.rows ?? [], changed: WRITES.has(r.command) ? (r.rowCount ?? 0) : 0 }));
+
+/* The text runs between a BEGIN and a COMMIT it did not write. */
+export async function inOneTransaction(client: pg.ClientBase, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
+  await client.query(mode === 'read' ? 'BEGIN READ ONLY' : 'BEGIN');
+  const answers = answersOf((await client.query(text)) as unknown as pg.QueryResult | pg.QueryResult[]);
+  if (mode === 'write') await beforeCommit(client, answers, call);
+  await client.query('COMMIT');
+  return answers;
+}
+
+async function beforeCommit(client: pg.ClientBase, answers: SqlAnswer[], call?: SqlCall): Promise<void> {
+  if (!call) return void (await client.query(PRE_COMMIT));
+  await client.query(PRE_COMMIT_SETTINGS);
+  await client.query(RECORD_CALL, [call.invocation, call.jobId, JSON.stringify(call.answer(answers))]);
+}
+
+/* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. */
+async function poolOfRole(admin: pg.Client, url: string, name: string, grants: string): Promise<pg.Pool> {
+  const password = randomBytes(24).toString('hex');
+  await admin.query(grants);
+  await admin.query(`ALTER ROLE "${name}" WITH LOGIN CONNECTION LIMIT 4 PASSWORD '${password}'`);
+  const own = new URL(stripSettings(url));
+  own.username = name;
+  own.password = password;
+  const pool = new pg.Pool({ connectionString: own.toString(), max: 2, idleTimeoutMillis: 60_000 });
+  pool.on('error', err => console.warn(`Lost an agent's database connection, will open another: ${err.message}`));
+  pool.on('connect', client => {
+    keepErrors(client);
+    confirmCommits(client);
+  });
+  return pool;
+}
+
+/* An agent's text that may write waits at the gate of the app's writes, as the app's own do; one that reads goes on. */
+export const gated = <T>(mode: SqlMode, work: () => Promise<T>): Promise<T> => (mode === 'write' ? writeGate.through(work) : work());
+
+async function runOn(pool: pg.Pool, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
+  return gated(mode, () => inOwnTransaction(pool, text, mode, call));
+}
+
+async function inOwnTransaction(pool: pg.Pool, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
+  const client = await pool.connect();
+  try {
+    return await inOneTransaction(client, text, mode, call);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/* pools collects each one as it opens, so that the caller can end them when a later step fails. */
+async function openRoles(admin: pg.Client, url: string, pools: pg.Pool[]): Promise<AgentSql> {
+  await admin.connect();
+  await admin.query(PUBLIC_REVOKES);
+  const open = async (name: string, grants: string): Promise<pg.Pool> => {
+    const pool = await poolOfRole(admin, url, name, grants);
     pools.push(pool);
     return pool;
   };
+  const database = (await admin.query<{ db: string }>('SELECT current_database() AS db')).rows[0]!.db;
+  const byMode = { write: await open(agentRole(database), grantsFor(agentRole(database))), read: await open(readerRole(database), readerGrantsFor(readerRole(database))) };
+  return {
+    run: (text, mode, call) => runOn(byMode[mode], text, mode, call),
+    close: async () => {
+      await Promise.all(pools.map(p => p.end()));
+    },
+  };
+}
+
+/* Null, with a warning, when the database does not let Hornhoof make roles. */
+export async function openAgentSql(url: string): Promise<AgentSql | null> {
+  const admin = new pg.Client({ connectionString: url });
+  keepErrors(admin);
+  const pools: pg.Pool[] = [];
   try {
-    await admin.connect();
-    const database = (await admin.query<{ db: string }>('SELECT current_database() AS db')).rows[0]!.db;
-    const byMode = { write: await open(agentRole(database), grantsFor(agentRole(database))), read: await open(readerRole(database), readerGrantsFor(readerRole(database))) };
-    return {
-      run: async (text, mode) => {
-        const client = await byMode[mode].connect();
-        try {
-          await client.query(mode === 'read' ? 'BEGIN READ ONLY' : 'BEGIN');
-          const result = (await client.query(text)) as unknown as pg.QueryResult | pg.QueryResult[];
-          await client.query('COMMIT');
-          return (Array.isArray(result) ? result : [result]).map(r => ({ rows: r.rows ?? [], changed: WRITES.has(r.command) ? (r.rowCount ?? 0) : 0 }));
-        } catch (err) {
-          await client.query('ROLLBACK').catch(() => {});
-          throw err;
-        } finally {
-          client.release();
-        }
-      },
-      close: async () => {
-        await Promise.all(pools.map(p => p.end()));
-      },
-    };
+    return await openRoles(admin, url, pools);
   } catch (err) {
     await Promise.all(pools.map(p => p.end().catch(() => {})));
     console.warn(`Agents get no database access: ${(err as Error).message}`);

@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { agentEvents, jobs } from '../src/db/schema.js';
 import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);

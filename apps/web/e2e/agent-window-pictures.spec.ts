@@ -54,7 +54,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     }
     if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
     if (url.pathname === '/api/me') return route.fulfill({ json: me });
-    if (url.pathname === '/api/computer') return route.fulfill({ json: { available: false, until: null, asked: null } });
+    if (url.pathname === '/api/machines/access') return route.fulfill({ json: { views: [] } });
     if (url.pathname === '/api/agents/orchestrator') return route.fulfill({ json: ORCHESTRATOR_CARD });
     if (url.pathname === '/api/agents/orchestrator/start') return route.fulfill({ json: { started: false } });
     const after = Number(url.searchParams.get('after') ?? 0);

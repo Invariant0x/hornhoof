@@ -86,7 +86,15 @@ export async function pushCredentials(ctx: Ctx, nodeId: string, loggedIn = false
     if ((loggedIn || mine) && recipients.length) ctx.hub.send(me, { type: 'cred.seal', kind, version: node.credVersion, recipients });
     return;
   }
-  if (mine) return void deliver(ctx, kind, node.credVersion, [mine]);
+  if (mine) {
+    deliver(ctx, kind, node.credVersion, [mine]);
+    /* A node of the plan that came while no holder was online still waits for its copy. This holder seals it one now,
+       after it has opened its own: a node takes its messages in the order they come. */
+    const holders = new Set(held.map(h => h.nodeId));
+    const waiting = (await keyedNodes(db, node.plan)).filter(recipient => !holders.has(recipient.nodeId));
+    if (waiting.length) ctx.hub.send(me, { type: 'cred.seal', kind, version: node.credVersion, recipients: waiting });
+    return;
+  }
   const peer = held.find(h => ctx.hub.isOnline(nodeIdentity(h.nodeId)));
   if (peer) sealFor(peer.nodeId);
 }

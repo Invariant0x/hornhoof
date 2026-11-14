@@ -8,8 +8,8 @@ export function CommandCard({ shown, onDone }: { shown: ShownCommand; onDone(): 
   const t = useT();
   const plans = shown.plans.join(', ');
   const host = shown.machine ?? '';
-  const title = shown.kind === 'machine' ? t.window.commandMachine : shown.kind === 'add' ? t.window.commandAdd(plans, host) : t.window.commandPlans(plans);
-  const run = shown.kind === 'machine' ? t.machines.runThis : shown.kind === 'add' ? t.machines.runOn(host) : t.subs.runThis;
+  const title = shown.kind === 'machine' ? t.window.commandMachine : shown.kind === 'core' ? t.machines.makeCore(host) : shown.kind === 'add' ? t.window.commandAdd(plans, host) : t.window.commandPlans(plans);
+  const run = shown.kind === 'machine' ? t.machines.runThis : shown.kind === 'core' ? t.machines.coreRun(host) : shown.kind === 'add' ? t.machines.runOn(host) : t.subs.runThis;
   return (
     <section className="t-card" aria-label={title}>
       <h4>{title}</h4>

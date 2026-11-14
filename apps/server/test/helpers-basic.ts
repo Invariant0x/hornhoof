@@ -1,12 +1,14 @@
 import type { LightMyRequestResponse } from 'fastify';
 import { eventually } from '../../../test-support/eventually.mjs';
+import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 
 export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
 
+/* The session a response set, under the cookie of the local address or of the public link. */
 export function sessionFrom(res: LightMyRequestResponse): string {
-  const cookie = res.cookies.find(c => c.name === 'hh_session');
-  if (!cookie) throw new Error(`No session cookie in a ${res.statusCode} response.`);
-  return cookie.value;
+  const [value] = res.cookies.filter(c => c.name === 'hh_session' || c.name === LINK_SESSION_COOKIE).map(c => c.value).filter(Boolean);
+  if (!value) throw new Error(`No session cookie in a ${res.statusCode} response.`);
+  return value;
 }
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });

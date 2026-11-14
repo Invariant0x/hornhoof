@@ -2,12 +2,11 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MachineDrain, type NodeWait } from '@hornhoof/protocol';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
-import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
-import { keyOf, type NodeIdentity } from '../nodes/hub.js';
+import { identityOfKey, keyOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
 import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
@@ -17,7 +16,6 @@ type Saved = z.infer<typeof Saved>;
 type Drain = { node: NodeIdentity; view: MachineDrain };
 /* By the config, which a transaction's copy of the context shares with the context itself. */
 const states = new WeakMap<Ctx['config'], NodeDrains>();
-const nodeOf = (key: string): NodeIdentity => key === 'builtin' ? { kind: 'builtin' } : { kind: 'node', nodeId: key };
 /* An installer that disappeared must not hold a node forever. Restarting gets longer for image/container startup. */
 const REQUEST_LEASE_MS = 2 * 60_000;
 const RESTART_LEASE_MS = 10 * 60_000;
@@ -39,8 +37,13 @@ class NodeDrains {
       throw err;
     }
     /* A damaged file only forgets the waits: each installer asks again, and the file is written anew. */
-    try { for (const record of z.array(Saved).parse(JSON.parse(raw))) this.records.set(record.key, record); }
+    /* A wait a build before saved for the server's built-in node names it by its bare word. */
+    try { for (const record of z.array(Saved).parse(JSON.parse(raw))) { const key = keyOf(this.nodeOf(record.key)); this.records.set(key, { ...record, key }); } }
     catch (err) { ctx.log.error({ error: loggable(err) }, `Could not read ${this.path}: no node waits for an update now.`); }
+  }
+
+  private nodeOf(key: string): NodeIdentity {
+    return identityOfKey(key, ownBuiltin(this.ctx.config));
   }
 
   view(node: NodeIdentity): MachineDrain | null {
@@ -48,7 +51,7 @@ class NodeDrains {
   }
 
   all(): Drain[] {
-    return [...this.records.values()].map(r => ({ node: nodeOf(r.key), view: r.view }));
+    return [...this.records.values()].map(r => ({ node: this.nodeOf(r.key), view: r.view }));
   }
 
   heldLong(node: NodeIdentity): boolean {
@@ -92,7 +95,7 @@ class NodeDrains {
   tick(): void {
     for (const record of this.records.values()) {
       const lease = record.view.state === 'restarting' ? RESTART_LEASE_MS : REQUEST_LEASE_MS;
-      if (Date.now() - record.touched > lease) { this.cancel(nodeOf(record.key)); continue; }
+      if (Date.now() - record.touched > lease) { this.cancel(this.nodeOf(record.key)); continue; }
       this.wakeLeaders(record);
       void this.check(record).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not check a node waiting for an update.'));
     }
@@ -123,7 +126,7 @@ class NodeDrains {
       this.woken.delete(record.key);
       this.save();
     }
-    const node = nodeOf(record.key);
+    const node = this.nodeOf(record.key);
     const work = await drainWork(this.ctx, node);
     if (this.records.get(record.key) !== record) return;
     const counts = { turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
@@ -156,12 +159,21 @@ class NodeDrains {
   }
 }
 
-export function startNodeDrains(app: FastifyInstance, ctx: Ctx): void {
+/* What it knows of the nodes is read on any machine; its rounds change turns and runs, so they go only while the app leads. */
+export function startNodeDrains(ctx: Ctx): void {
   const drains = new NodeDrains(ctx);
   states.set(ctx.config, drains);
-  const timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  let timer: NodeJS.Timeout | null = null;
+  ctx.mode.whenLead(
+    () => {
+      timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
+      timer.unref();
+    },
+    () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+  );
 }
 
 export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx.config)?.view(node) ?? null;
@@ -205,7 +217,8 @@ export async function nodeWaits(ctx: Ctx, companyId: string): Promise<NodeWait[]
 
 async function nodeWait(ctx: Ctx, companyId: string, { node, view }: Drain, place: Place | undefined): Promise<NodeWait> {
   const work = view.state === 'restarting' ? [] : namedWork(await drainWork(ctx, node), companyId);
-  return { node: keyOf(node), provider: place?.provider ?? null, hostname: place?.hostname ?? null, drain: view, work };
+  /* The server's own built-in node goes by its bare word, as the screens know it. */
+  return { node: sameNode(node, ownBuiltin(ctx.config)) ? 'builtin' : keyOf(node), provider: place?.provider ?? null, hostname: place?.hostname ?? null, drain: view, work };
 }
 
 const placeOrder = (wait: NodeWait): string => (wait.hostname === null ? '' : `${wait.hostname} ${wait.provider ?? ''} ${wait.node}`);

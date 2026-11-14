@@ -101,7 +101,7 @@ describe('updates', () => {
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
     expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
-    expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: downloading');
+    expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 5: downloading');
     expect(bar).toHaveAttribute('aria-valuenow', '0');
   });
 
@@ -144,11 +144,29 @@ describe('updates', () => {
     view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
     /* While it updates, the screen asks every two seconds. */
     await act(() => vi.advanceTimersByTimeAsync(2000));
-    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing');
-    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuenow', '2');
+    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 4 of 5: installing');
+    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuenow', '3');
     down = true;
     await act(() => vi.advanceTimersByTimeAsync(2000));
     expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.');
+  });
+
+  it('shows maintenance while the server answers with it', async () => {
+    let view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
+    let maintenance = false;
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': () =>
+        maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const bar = () => screen.getByRole('progressbar', { name: 'Update progress' });
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 4 of 5: installing'));
+    maintenance = true;
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.'));
+    maintenance = false;
+    view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
+    await vi.waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 5 of 5: waiting for the new server'));
   });
 
   it('lists versions and marks the running one', async () => {
@@ -225,7 +243,7 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
-    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: saving the database');
+    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 5: saving the database');
     expect(within(dialog).getByText(/Saving the database\./)).toBeInTheDocument();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
     await act(() => vi.advanceTimersByTimeAsync(2000));
@@ -253,7 +271,7 @@ describe('updates', () => {
   it('gives the time of the last check as the chosen language writes it', () => {
     localStorage.setItem('hh-lang', 'ru');
     const view = updates();
-    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, cut: null, check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {} };
+    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, cut: null, check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {} };
     render(
       <LanguageProvider>
         <Versions updates={idle} onClose={() => {}} />

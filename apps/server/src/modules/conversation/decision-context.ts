@@ -104,13 +104,17 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
   return p && (await runsDepartment(db, p, departmentId)) ? p.id : null;
 }
 
-/* For the computer the CEO opened: the CEO or the CEO delegate the turn answers now, or whose click opening it the note
-   that opened the turn tells of, until a person writes or types into it. A click answers no question, so it takes no
-   decision and asks for nothing else. */
-export async function computerPrincipal(db: Reader, jobId: string): Promise<string | null> {
+/* For a machine that is open: the person the turn answers now, or whose click opening a machine the note that opened the
+   turn tells of, until a person writes or types into it, when that person directs commands there: the CEO or the CEO
+   delegate, who direct the orchestrator, or the machine's own owner while active. A click answers no question, so it
+   takes no decision and asks for nothing else. */
+export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string): Promise<string | null> {
   const turn = await turnWords(db, jobId);
   const personId = turn && (answered(turn)?.personId ?? clickOf(turn));
-  return personId ? actingCeo(db, personId) : null;
+  if (!personId) return null;
+  if (personId !== ownerPersonId) return actingCeo(db, personId);
+  const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
+  return owner?.status === 'active' ? personId : null;
 }
 
 /* The CEO or the CEO delegate who gave their own answer in a task's card to a question about machines, while that task is

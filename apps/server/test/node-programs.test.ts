@@ -1,5 +1,6 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);

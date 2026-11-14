@@ -1,15 +1,17 @@
+import { createHmac } from 'node:crypto';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, departments, jobs, machines, nodes, pendingWakes, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agentEvents, departments, jobs, machines, nodes, pendingWakes, people, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
-import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { builtinOf, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, TEST_COMMIT, until, type FakeNode } from './helpers.js';
-import { company, done, gets, GIB, idle, nextOf } from './test-runs-company.js';
+import { company, done, gets, GIB, idle, nextOf, NODE_KEY } from './test-runs-company.js';
+import { BUILTIN } from './builtin.js';
 
 type TestsRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -285,6 +287,43 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 passed[\s\S]*Part 1 of 1 passed on the built-in node/);
   });
 
+  it('offers each built-in node as a place', async () => {
+    const c = await company();
+    const own = await c.builtin();
+    /* Another machine of the company keeps a copy of its data, and its own built-in node is there too. */
+    const MACHINE = 'c0'.repeat(16);
+    const [row] = await c.db.select({ companyId: machines.companyId, personId: machines.personId }).from(machines).limit(1);
+    const owner = row ?? { companyId: c.task.companyId, personId: (await c.db.select().from(people))[0]!.id };
+    const [copy] = await c.db.insert(machines).values({ ...owner, machineKey: 'copy-box-0001', hostname: 'copy-box', role: 'data', networkId: MACHINE }).returning();
+    const key = `builtin.${MACHINE}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${MACHINE}`).digest('hex')}`;
+    const other = await connectNode(c.url, key);
+    other.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    await until(() => c.app.ctx.hub.loadOf(builtinOf(MACHINE)) !== null);
+    const places = (await placesOf(c.app.ctx, c.task.companyId)).filter(place => place.builtin);
+    expect(places.map(place => [place.key, place.name, place.builtinMachine === MACHINE, place.machineId])).toEqual([
+      ['builtin', 'the built-in node', false, null],
+      [`builtin:${MACHINE}`, 'the built-in node on copy-box', true, copy!.id],
+    ]);
+    /* With the server's own gone, a part goes to the other machine's, and is that node's alone. */
+    own.close();
+    await own.closed;
+    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test' });
+    const run = await nextOf(other, 'tests.run');
+    const [part] = await c.db.select().from(testParts).where(eq(testParts.id, run.partId));
+    expect(part).toMatchObject({ status: 'running', builtin: true, builtinMachine: MACHINE, machineId: copy!.id, machineName: 'the built-in node on copy-box' });
+    /* The pool lists that node with its part, apart from the server's own. */
+    const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json() as { builtin: { parts: unknown[] }; builtins: { machine: string; name: string; online: boolean; parts: { part: number }[] }[] };
+    expect(pool.builtin.parts).toEqual([]);
+    expect(pool.builtins).toMatchObject([{ machine: MACHINE, name: 'the built-in node on copy-box', online: true, parts: [{ part: 1 }] }]);
+    /* The server's own node, back with no part of its own, takes nothing from it. */
+    const back = await c.builtin();
+    back.send({ ...done(run), log: 'not mine' });
+    other.send(done(run));
+    await nextOf(other, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 passed[\s\S]*Part 1 of 1 passed on the built-in node on copy-box/);
+  });
+
   it('ends a part that found no free machine within 2 hours', async () => {
     const c = await company();
     const { call } = await c.turn(c.bruno);
@@ -356,7 +395,7 @@ async function productNode(c: Awaited<ReturnType<typeof company>>) {
   const node = await c.builtin();
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
   const { testCapabilities } = await import('../src/modules/testruns/describe.js');
-  await until(() => testCapabilities(c.app.ctx, { kind: 'builtin' }).testEnvironmentVersion === 1);
+  await until(() => testCapabilities(c.app.ctx, BUILTIN).testEnvironmentVersion === 1);
   return node;
 }
 
@@ -555,7 +594,7 @@ it('resends its persisted describe request after server state is recreated and i
   expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
   const restarted = { ...c.app.ctx };
   const { noteTestCapabilities } = await import('../src/modules/testruns/describe.js');
-  noteTestCapabilities(restarted, { kind: 'builtin' }, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
+  noteTestCapabilities(restarted, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
   await pumpTests(restarted);
   expect(await nextOf(node, 'tests.describe')).toEqual(request);
   node.send({ ...await productDescription(request), requestId: '99999999-9999-4999-8999-999999999999' }); await pumpTests(c.app.ctx);
@@ -584,7 +623,7 @@ it('refuses to dispatch a pinned product snapshot after its repository configura
   const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
   /* The node takes no part until the repository changed: it names no runtime for a while. */
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [] });
-  await until(() => testCapabilities(c.app.ctx, { kind: 'builtin' }).testRuntimes?.length === 0);
+  await until(() => testCapabilities(c.app.ctx, BUILTIN).testRuntimes?.length === 0);
   node.send(reply); await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
   await c.db.update(departments).set({ repoUrl: 'https://example.test/replacement.git' }).where(eq(departments.id, c.dev.id));
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: reply.result.description.runtimeCapabilities });

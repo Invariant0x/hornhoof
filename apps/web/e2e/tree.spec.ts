@@ -193,7 +193,7 @@ for (const lang of ['en', 'ru'] as const) {
         '/api/agents/orchestrator/events?after=3': { events: [], state },
         '/api/agents/orchestrator/start': { started: false },
         '/api/nodes/commands': { commands: [] },
-        '/api/computer': { available: false, until: null, asked: null },
+        '/api/machines/access': { views: [] },
         '/api/version': { version: '0.5.0', commit: 'task-148' },
         '/api/updates': { current: { version: '0.5.0', commit: 'task-148' }, available: false, latest: null, updater: { status: null, waiting: null } },
       };

@@ -14,7 +14,21 @@ reply() { if [ -n "$out" ]; then printf '%b' "$1" > "$out"; else printf '%b' "$1
 case "$url" in
   */api/health)
     if [ "${STUB_HEALTH:-ok}" = fail ]; then echo "curl: (7) Failed to connect" >&2; exit 7; fi
-    reply '{"ok":true}' ;;
+    # STUB_HEALTH_MODES: what the server says of itself at each ask in turn, the last one from then on.
+    if [ -n "${STUB_HEALTH_MODES:-}" ]; then
+      asked=$(cat "$STUB_STATE/health-asks" 2> /dev/null || echo 0)
+      echo $((asked + 1)) > "$STUB_STATE/health-asks"
+      # shellcheck disable=SC2086 # the modes are words
+      set -- $STUB_HEALTH_MODES
+      shift "$((asked < $# ? asked : $# - 1))"
+      reply "{\"ok\":true,\"mode\":\"$1\"}"
+    else
+      reply '{"ok":true}'
+    fi ;;
+  # The keeper of a machine's core, which says whether it has its place in the company: STUB_KEEPER.
+  */api/keeper)
+    has_place='{"certificate":true}'
+    reply "${STUB_KEEPER:-$has_place}" ;;
   */api/nodes/join)
     reply "${STUB_JOIN_BODY:-}"
     [ -n "$fmt" ] && printf '%s' "${STUB_JOIN_STATUS:-200}" ;;

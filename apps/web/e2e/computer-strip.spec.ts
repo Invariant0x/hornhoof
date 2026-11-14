@@ -57,7 +57,7 @@ for (const s of SETTINGS) {
     await line.getByRole('button', { name: words.openDay, exact: true }).click();
     await expect(window.getByRole('region', { name: words.open, exact: true })).toBeVisible();
     await expect(line).toHaveCount(0);
-    expect(posts).toEqual(['/api/computer/open']);
+    expect(posts).toEqual(['/api/machines/a-host/access/open']);
     expect(errors).toEqual([]);
   });
 
@@ -69,7 +69,7 @@ for (const s of SETTINGS) {
     await expect(line).toHaveCount(0);
     await expect(strip(window)).toHaveCount(0);
     await expect.poll(async () => (await box(terminal(window))).height).toBeGreaterThan(withStrip.height);
-    expect(posts).toEqual(['/api/computer/decline']);
+    expect(posts).toEqual(['/api/machines/a-host/access/decline']);
     expect(errors).toEqual([]);
   });
 
@@ -84,7 +84,7 @@ for (const s of SETTINGS) {
     await expectFits(page, window);
     await line.getByRole('button', { name: words.close, exact: true }).click();
     await expect(line).toHaveCount(0);
-    expect(posts).toEqual(['/api/computer/close']);
+    expect(posts).toEqual(['/api/machines/a-host/access/close']);
     expect(errors).toEqual([]);
   });
 
@@ -103,7 +103,7 @@ for (const s of SETTINGS) {
     await expectFits(page, window);
     expect((await box(second)).height).toBe((await box(first)).height);
     await second.getByRole('button', { name: words.close, exact: true }).click();
-    await expect.poll(() => posts).toEqual(['/api/computer/close']);
+    await expect.poll(() => posts).toEqual(['/api/machines/b-host/access/close']);
     expect(errors).toEqual([]);
   });
 }
@@ -111,7 +111,7 @@ for (const s of SETTINGS) {
 test('many machines scroll inside the strip, and the terminal stays', async ({ page }) => {
   const { words, window, errors } = await openWindow(page, { lang: 'en', theme: 'dark', width: 375 }, OPEN, MANY);
   await window.getByRole('button', { name: new RegExp(`^Other machines with access: ${MANY.length}$`) }).click();
-  const last = window.getByRole('region', { name: `Access to ${MANY.at(-1)!.machine}`, exact: true });
+  const last = window.getByRole('region', { name: `Access to ${MANY.at(-1)!.machine.name}`, exact: true });
   await last.scrollIntoViewIfNeeded();
   await expect(last.getByRole('button', { name: words.close, exact: true })).toBeInViewport();
   const [all, whole] = [await box(strip(window)), await box(window)];
@@ -121,7 +121,7 @@ test('many machines scroll inside the strip, and the terminal stays', async ({ p
 });
 
 test('someone who may not answer sees who decides in the line, on a phone too', async ({ page }) => {
-  const { words, window, errors } = await openWindow(page, { lang: 'ru', theme: 'light', width: 375 }, { ...ASKED, canAnswer: false });
+  const { words, window, errors } = await openWindow(page, { lang: 'ru', theme: 'light', width: 375 }, { ...ASKED, canOpen: false, canClose: false });
   const line = window.getByRole('region', { name: words.asks, exact: true });
   await expect(line.getByText(words.decided)).toBeVisible();
   await expect(line.getByRole('button', { name: words.openDay, exact: true })).toHaveCount(0);

@@ -8,7 +8,7 @@ import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { waitedForReturn } from '../nodes/connections.js';
-import { identityOf, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, uncountedSinceMove, wentOn, wentOnAfterReturn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
@@ -737,7 +737,7 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
-  const node = identityOf(job.sub, job.job.nodeId);
+  const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db
     .update(jobs)

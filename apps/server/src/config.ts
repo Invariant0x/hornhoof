@@ -1,7 +1,10 @@
+import { isP256 } from './modules/computer/owner-key.js';
+import { hostOsOf, NETWORK_ID, type HostOs } from './modules/network/ids.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NodeBuild } from '@hornhoof/protocol';
 import { z } from 'zod';
+import { LETS_ENCRYPT } from './modules/tls/acme.js';
 
 export type Config = {
   databaseUrl?: string;
@@ -48,15 +51,26 @@ export type Config = {
   transcribeUrl?: string;
   transcribeKey?: string;
   transcribeModel: string;
-  /* The tunnel container's host name: only requests from it may say they came in over https. */
+  /* The keeper container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
+  /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
+  keeper: boolean;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
   harnessDir?: string;
   harnessBytes: number;
+  /* The ACME directory the link's certificate comes from; null with certificates off. */
+  acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
   hostId: string | null;
+  /* This install's id, which install.sh writes once and never changes; null for one installed before. */
+  machineId: string | null;
+  /* The key of the owner of the machine the server runs on, when a command they ran there brought one: its keeper then
+     opens the machine only on what that key signed. */
+  ownerKey: string | null;
+  /* The system of the computer the server runs on, as install.sh wrote it down. */
+  hostOs: HostOs | null;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -75,6 +89,7 @@ const wholeNumber = (min: number, max: number, message: string) =>
 const milliseconds = (name: string, min: number, example: string) =>
   wholeNumber(min, MAX_TIMER_MS, `${name} must be a whole number of milliseconds${min === 0 ? ', or 0' : ''}, like ${example}.`);
 const webAddress = (message: string) => z.preprocess(unset, z.url({ protocol: /^https?$/, error: message }).optional());
+const CERTIFICATES_OFF = 'off';
 
 /* The settings read from the environment, checked once at start so a typo stops the server with a clear message
    instead of running with a broken address or a timer that fires every millisecond. */
@@ -100,47 +115,65 @@ const Env = z.object({
   TRANSCRIBE_URL: webAddress('TRANSCRIBE_URL must be an http:// or https:// address, like https://api.openai.com/v1/audio/transcriptions.'),
   TRANSCRIBE_KEY: z.preprocess(unset, z.string().min(1).optional()),
   TRANSCRIBE_MODEL: z.preprocess(unset, z.string().min(1).max(100).optional()),
-  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
+  HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
   HARNESS_MB: wholeNumber(1, 100_000_000, 'HARNESS_MB must be a whole number of megabytes, like 20480.'),
+  ACME_DIRECTORY: z.preprocess(
+    unset,
+    z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
+  ),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
   ),
+  HORNHOOF_MACHINE_ID: z.preprocess(
+    unset,
+    z.string().regex(NETWORK_ID, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+  ),
+  /* Neither stops a start: a key that is none pins nothing, and a system that is not known is left out. */
+  HORNHOOF_OWNER_KEY: z.preprocess(unset, z.string().optional()),
+  HORNHOOF_HOST_OS: z.preprocess(unset, z.string().optional()),
 });
 
 /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
 const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
+const acmeDirectoryOf = (set: string | undefined): string | null => (set === CERTIFICATES_OFF ? null : (set ?? LETS_ENCRYPT));
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
 const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes'> => ({ ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}), harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024 });
 
-export function loadConfig(env: NodeJS.ProcessEnv): Config {
+/* One compose file serves a server and a worker, which holds no secret, so compose passes these two names empty when
+   .env lacks them. A server that got one empty says what to do about it. */
+const emptyIn = (name: string, what: string): Error => new Error(`${name} is empty. Put the company's ${what} into .env, or run the install command again.`);
+
+export function secretOf(env: NodeJS.ProcessEnv): Buffer {
   const raw = env.HORNHOOF_SECRET;
+  if (raw === '') throw emptyIn('HORNHOOF_SECRET', 'secret');
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
   const secret = Buffer.from(raw, 'base64');
   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
+  return secret;
+}
 
-  const checked = Env.safeParse(env);
-  if (!checked.success) throw new Error(checked.error.issues.map(issue => issue.message).join('\n'));
-  const set = checked.data;
-  const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+function nodeKeyOf(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.NODE_KEY === '') throw emptyIn('NODE_KEY', 'node key');
   const nodeKey = env.NODE_KEY || undefined;
   if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
+  return nodeKey;
+}
+
+function checkedEnv(env: NodeJS.ProcessEnv): z.infer<typeof Env> {
+  const checked = Env.safeParse(env);
+  if (!checked.success) throw new Error(checked.error.issues.map(issue => issue.message).join('\n'));
+  return checked.data;
+}
+
+/* The running build and where its published images come from. */
+function buildOf(env: NodeJS.ProcessEnv, set: z.infer<typeof Env>): Pick<Config, 'version' | 'commit' | 'migrations' | 'nodeBuild' | 'image' | 'registryUrl' | 'updateCheckMs'> {
   return {
-    databaseUrl: env.DATABASE_URL || undefined,
-    secret,
-    publicUrl,
-    port: set.PORT ?? 8080,
-    secureCookies: publicUrl.startsWith('https://'),
-    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
-    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
-    nodeKey,
-    nodePingMs: set.NODE_PING_MS ?? 20000,
-    streamPingMs: set.STREAM_PING_MS ?? 25000,
-    runsPerHost: set.MAX_RUNS_PER_HOST,
     version: env.HORNHOOF_VERSION || productVersion(),
     commit: env.HORNHOOF_COMMIT || 'local',
     migrations: migrationCount(),
@@ -148,11 +181,46 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+  };
+}
+
+/* Folders and scripts, each with the place the image keeps it. */
+function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScript' | 'controlDir' | 'templatesDir'> {
+  return {
+    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
+    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
+    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+  };
+}
+
+/* Intervals and limits, with their defaults. */
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeDrainMs' | 'nodeUpdateRetryMs' | 'nodeLeaderHoldMs'> {
+  return {
+    port: set.PORT ?? 8080,
+    nodePingMs: set.NODE_PING_MS ?? 20000,
+    streamPingMs: set.STREAM_PING_MS ?? 25000,
+    runsPerHost: set.MAX_RUNS_PER_HOST,
+    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     nodeDrainMs: set.NODE_DRAIN_MS,
     nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
-    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
-    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv): Config {
+  const secret = secretOf(env);
+  const set = checkedEnv(env);
+  const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+  return {
+    ...buildOf(env, set),
+    ...placesOf(env),
+    ...limitsOf(set),
+    databaseUrl: env.DATABASE_URL || undefined,
+    secret,
+    publicUrl,
+    secureCookies: publicUrl.startsWith('https://'),
+    nodeKey: nodeKeyOf(env),
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     feedbackInbox: set.FEEDBACK_INBOX === 'true',
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
@@ -160,8 +228,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     ...(set.TRANSCRIBE_KEY ? { transcribeKey: set.TRANSCRIBE_KEY } : {}),
     transcribeModel: set.TRANSCRIBE_MODEL ?? 'whisper-1',
     tunnelHost: set.TUNNEL_HOST,
-    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+    keeper: set.HORNHOOF_KEEPER === 'on',
+    acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     ...harnessSettings(set),
     hostId: set.HORNHOOF_HOST_ID ?? null,
+    machineId: set.HORNHOOF_MACHINE_ID ?? null,
+    ownerKey: set.HORNHOOF_OWNER_KEY && isP256(set.HORNHOOF_OWNER_KEY) ? set.HORNHOOF_OWNER_KEY : null,
+    hostOs: hostOsOf(set.HORNHOOF_HOST_OS),
   };
 }

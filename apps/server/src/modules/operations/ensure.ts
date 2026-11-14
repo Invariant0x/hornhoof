@@ -167,11 +167,19 @@ export async function checkOperations(ctx: Ctx, failed: (err: unknown) => void):
   }
 }
 
-/* The check runs as the server starts, before any turn is sent, and again every few minutes. */
+/* The check hires, so it runs only while the app leads: as it starts leading, and again every few minutes. */
 export function startOperationsCheck(app: FastifyInstance, ctx: Ctx): void {
   const failed = (err: unknown) => app.log.error({ error: loggable(err) }, 'Keeping Operations in full failed.');
-  app.addHook('onReady', () => checkOperations(ctx, failed));
-  const timer = setInterval(() => void checkOperations(ctx, failed), CHECK_MS);
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  let timer: NodeJS.Timeout | null = null;
+  ctx.mode.whenLead(
+    async () => {
+      timer = setInterval(() => void checkOperations(ctx, failed), CHECK_MS);
+      timer.unref();
+      await checkOperations(ctx, failed);
+    },
+    () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+  );
 }

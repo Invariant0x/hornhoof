@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ShownCommand, SubView } from '../src/types';
-import { ME, serveApi } from './api';
+import { ME, serveApi, serveOwnerKey } from './api';
 
 const START = Date.parse('2026-11-03T10:00:00Z');
 const names = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi' };
@@ -54,6 +54,7 @@ async function prepare(page: Page, language: 'en' | 'ru', theme: string) {
     }
     return route.fallback();
   });
+  await serveOwnerKey(page);
   return {
     expire: () => { commands = []; },
     join: () => { commands = []; subscriptions = subscriptions.map(s => ({ ...s, status: 'needs_login', online: true, machines: [{ id: 'demo-machine', hostname: 'demo-laptop', status: 'needs_login', online: true }] })); },

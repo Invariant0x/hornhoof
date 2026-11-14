@@ -10,7 +10,7 @@ import { createTask, report } from '../src/modules/tasks/engine.js';
 import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { echelonsTurn } from './helpers.js';
 import { failureCompany } from './failure-company.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
@@ -321,7 +321,7 @@ describe('a delayed retry owns the line', () => {
   it('keeps a passing rate limit separate from a plan usage limit, even when the words match the old pattern', async () => {
     const c = await atWork();
     const { handleNodeMessage } = await import('../src/modules/nodes/messages.js');
-    const { BUILTIN } = await import('../src/modules/nodes/hub.js');
+    const { BUILTIN } = await import('./builtin.js');
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: c.first.id, ok: false, sessionId: 'session', result: '', tail: '429 rate limit', error: 'agent_failed', failure: failure('rate_limited') });
     const { agentState } = await import('../src/modules/conversation/queue.js');
     expect((await agentState(c.ctx, c.agent.id)).limitUntil).toBeNull();

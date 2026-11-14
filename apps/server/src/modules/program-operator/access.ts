@@ -6,7 +6,7 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentParty } from '../events/parties.js';
-import { identityOf } from '../nodes/hub.js';
+import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import type { OperatorCaller } from './authorization.js';
 import { operatorNotification } from './notifications.js';
@@ -71,7 +71,7 @@ async function programOf(ctx: Ctx, me: Agent, employee: string): Promise<Program
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(agents.id, target.id), eq(jobs.companyId, me.companyId), eq(jobs.kind, 'conversation'), eq(subscriptions.companyId, me.companyId), reachedNode))
     .orderBy(desc(jobs.createdAt)).limit(1);
-  const node = found && identityOf(found.sub, found.job.nodeId);
+  const node = found && identityOf(found.sub, found.job.nodeId, found.job.builtinMachine, ownBuiltin(ctx.config));
   if (!found || !node) throw unavailable('no_program');
   return { agentId: found.agent.id, node, job: found.job, name: found.agent.name };
 }

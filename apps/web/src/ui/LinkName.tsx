@@ -1,6 +1,6 @@
 import { isLinkName, randomLinkName } from '@hornhoof/protocol/link';
 import { useEffect, useId, useRef, useState } from 'react';
-import { useT } from '../i18n';
+import { useT, type Messages } from '../i18n';
 
 export type NameCheck = { name: string; free: boolean; reason?: 'taken' | 'reserved' | 'invalid' };
 
@@ -22,57 +22,98 @@ type Props = {
   problem?: string;
   /* The name of the link the company has now, which is not asked about. */
   current?: string;
+  /* Starts on a long random name when the field is empty as it mounts. */
+  startRandom?: boolean;
 };
 
 /* Waits this long after the last key before asking, so typing a name asks once. */
 const PAUSE_MS = 350;
 
-/* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
-   free, asked while it is typed. */
-export function LinkName({ name, onName, domain, check, onState, problem, current }: Props) {
-  const t = useT();
-  const id = useId();
+/* What is known about a name before anyone is asked: nothing, the link now, a name a link can have, or one it cannot. */
+export const nameStateOf = (name: string, current?: string): NameState =>
+  !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
+
+const answerState = (found: NameCheck): NameState => (found.free ? 'free' : (found.reason ?? 'taken'));
+
+/* Asks about the name after the pause and tells the answer, 'unknown' when the check fails; the returned function drops a
+   pending ask, so a name typed over is never answered. */
+function askAfterPause(ask: (name: string) => Promise<NameCheck>, name: string, told: (state: NameState) => void): () => void {
+  let live = true;
+  const timer = setTimeout(() => {
+    void ask(name)
+      .then(answerState)
+      .catch((): NameState => 'unknown')
+      .then(next => live && told(next));
+  }, PAUSE_MS);
+  return () => {
+    live = false;
+    clearTimeout(timer);
+  };
+}
+
+/* The state of the name as it is typed, which the parent hears too. */
+function useNameState(name: string, current: string | undefined, check: Props['check'], onState: Props['onState']): NameState {
   const [state, setState] = useState<NameState>('empty');
-  const [random, setRandom] = useState('');
   const asking = useRef(check);
   asking.current = check;
   const told = useRef(onState);
   told.current = onState;
 
   useEffect(() => {
-    const now: NameState = !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
-    setState(now);
-    told.current?.(now);
-    if (now !== 'checking') return;
-    let live = true;
-    const timer = setTimeout(() => {
-      void asking
-        .current(name)
-        .then(found => (found.free ? 'free' : (found.reason ?? 'taken')) as NameState)
-        .catch((): NameState => 'unknown')
-        .then(next => {
-          if (!live) return;
-          setState(next === 'invalid' ? 'invalid' : next);
-          told.current?.(next);
-        });
-    }, PAUSE_MS);
-    return () => {
-      live = false;
-      clearTimeout(timer);
+    const say = (next: NameState) => {
+      setState(next);
+      told.current?.(next);
     };
+    const now = nameStateOf(name, current);
+    say(now);
+    if (now === 'checking') return askAfterPause(n => asking.current(n), name, say);
   }, [name, current]);
+  return state;
+}
 
-  const said = {
+/* The random name the field gave, to know whether the name in it is still that one, and the click that gives a new one;
+   with startRandom an empty field starts with one as it mounts. */
+function useRandomName(name: string, onName: (name: string) => void, startRandom: boolean | undefined): [string, () => void] {
+  const [random, setRandom] = useState('');
+  const named = useRef(onName);
+  named.current = onName;
+  const take = () => {
+    const next = randomLinkName();
+    setRandom(next);
+    named.current(next);
+  };
+  useEffect(() => {
+    // Only as the field mounts: a name emptied later is the person's own.
+    if (startRandom && !name) take();
+  }, []);
+  return [random, take];
+}
+
+const sayName = (t: Messages, state: NameState, address: string): string =>
+  ({
     empty: t.link.empty,
     invalid: t.link.invalid,
     current: t.link.current,
     checking: t.link.checking,
-    free: t.link.free(`${name}.${domain}`),
+    free: t.link.free(address),
     taken: t.link.taken,
     reserved: t.link.reserved,
     unknown: t.link.unknown,
-  }[state];
-  const bad = problem || (blocks(state) && state !== 'empty' && state !== 'current' ? said : '');
+  })[state];
+
+/* What is wrong with the name, if anything: the parent's problem, or what a state that stops the person says. */
+const trouble = (problem: string | undefined, state: NameState, said: string): string =>
+  problem || (blocks(state) && state !== 'empty' && state !== 'current' ? said : '');
+
+/* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
+   free, asked while it is typed. */
+export function LinkName({ name, onName, domain, check, onState, problem, current, startRandom }: Props) {
+  const t = useT();
+  const id = useId();
+  const state = useNameState(name, current, check, onState);
+  const [random, takeRandom] = useRandomName(name, onName, startRandom);
+  const said = sayName(t, state, `${name}.${domain}`);
+  const bad = trouble(problem, state, said);
 
   return (
     <div className="field link-name">
@@ -93,17 +134,7 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
       </div>
       <span id={`${id}-note`} className={bad ? 'bad' : 'hint'} aria-live="polite">{problem || said}</span>
       <span id={`${id}-safety`} className="hint">{name && name === random ? t.link.hardToGuess : t.link.guessable}</span>
-      <button
-        className="btn small ghost"
-        type="button"
-        onClick={() => {
-          const next = randomLinkName();
-          setRandom(next);
-          onName(next);
-        }}
-      >
-        {t.link.random}
-      </button>
+      <button className="btn small ghost" type="button" onClick={takeRandom}>{t.link.random}</button>
     </div>
   );
 }
