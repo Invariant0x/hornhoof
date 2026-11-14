@@ -105,18 +105,16 @@ async function agentOf(db: Reader, id: string): Promise<Agent | null> {
 
 type Ends = { companyId: string; upstreamAgentId: string; downstreamAgentId: string };
 
+const lineWhere = (e: Ends) => and(eq(mapReturns.companyId, e.companyId), eq(mapReturns.upstreamAgentId, e.upstreamAgentId), eq(mapReturns.downstreamAgentId, e.downstreamAgentId));
+
 /* The line's row, made when it has none, and held until the transaction ends so moves on it go one at a time. */
 async function locked(tx: Tx, e: Ends): Promise<Line> {
+  const [existing] = await tx.select().from(mapReturns).where(lineWhere(e)).for('no key update');
+  if (existing) return existing;
   await tx.insert(mapReturns).values({ companyId: e.companyId, upstreamAgentId: e.upstreamAgentId, downstreamAgentId: e.downstreamAgentId }).onConflictDoNothing();
-  const [row] = await tx
-    .select()
-    .from(mapReturns)
-    .where(and(eq(mapReturns.companyId, e.companyId), eq(mapReturns.upstreamAgentId, e.upstreamAgentId), eq(mapReturns.downstreamAgentId, e.downstreamAgentId)))
-    .for('update');
+  const [row] = await tx.select().from(mapReturns).where(lineWhere(e)).for('no key update');
   return row!;
 }
-
-const lineWhere = (e: Ends) => and(eq(mapReturns.companyId, e.companyId), eq(mapReturns.upstreamAgentId, e.upstreamAgentId), eq(mapReturns.downstreamAgentId, e.downstreamAgentId));
 
 /* New work started on the line: it begins a new cycle, once per turn however often that turn's start is told. */
 export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }): Promise<boolean> {
@@ -135,18 +133,21 @@ export type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJob
    turn handed in before it stays off. */
 const handedIn = (r: MapReturn) => (r.sourceTaskId ? { sourceJobId: r.sourceJobId, sourceTaskId: r.sourceTaskId } : {});
 
-/* A result came back along the line in the given cycle. Only a line from an agent to the one right above it takes one.
-   The same source again changes nothing, and neither does one older than the line's latest, by cycle and then by time. */
-export async function recordMapReturn(tx: Tx, r: MapReturn): Promise<void> {
-  const below = await agentOf(tx, r.downstreamAgentId);
-  if (!below || below.companyId !== r.companyId || (await above(tx, below)) !== r.upstreamAgentId) throw new Error('A result goes back only along a line of the map.');
-  const row = await locked(tx, r);
+async function writeMapReturn(tx: Tx, row: Line, r: MapReturn): Promise<void> {
   if (row.sourceKey === r.sourceKey || r.workEpoch !== row.workEpoch) return;
   if (row.returnedEpoch === r.workEpoch && row.returnedAt && row.returnedAt.getTime() > r.returnedAt.getTime()) return;
   await tx
     .update(mapReturns)
     .set({ returnedEpoch: r.workEpoch, returnedAt: r.returnedAt, sourceKey: r.sourceKey, ...handedIn(r) })
     .where(lineWhere(r));
+}
+
+/* A result came back along the line in the given cycle. Only a line from an agent to the one right above it takes one.
+   The same source again changes nothing, and neither does one older than the line's latest, by cycle and then by time. */
+export async function recordMapReturn(tx: Tx, r: MapReturn): Promise<void> {
+  const below = await agentOf(tx, r.downstreamAgentId);
+  if (!below || below.companyId !== r.companyId || (await above(tx, below)) !== r.upstreamAgentId) throw new Error('A result goes back only along a line of the map.');
+  await writeMapReturn(tx, await locked(tx, r), r);
 }
 
 /* The agent gave a result back to the one above it: in the cycle the line is in now, with the turn it runs. False when it
@@ -162,7 +163,7 @@ export async function returnAlongLine(tx: Tx, r: { agentId: string; sourceKey: s
     .from(jobs)
     .where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')))
     .limit(1);
-  await recordMapReturn(tx, { ...ends, workEpoch: line.workEpoch, sourceKey: r.sourceKey, sourceJobId: turn?.id ?? null, sourceTaskId: r.sourceTaskId, returnedAt: r.returnedAt });
+  await writeMapReturn(tx, line, { ...ends, workEpoch: line.workEpoch, sourceKey: r.sourceKey, sourceJobId: turn?.id ?? null, sourceTaskId: r.sourceTaskId, returnedAt: r.returnedAt });
   return true;
 }
 

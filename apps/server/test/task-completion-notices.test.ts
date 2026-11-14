@@ -36,7 +36,7 @@ describe('completion notices after checked work closes', () => {
     const seen = statements();
     await f.done(child.id);
     const at = (test: (s: { sql: string; params: unknown[] }) => boolean) => seen.findIndex(test);
-    const lock = at(s => s.sql.includes('from "tasks"') && s.sql.includes('for update') && s.params.includes(f.parent.id));
+    const lock = at(s => s.sql.includes('from "tasks"') && s.sql.includes('for no key update') && s.params.includes(f.parent.id));
     const closing = at(s => s.sql.startsWith('update "tasks"') && s.params.includes(child.id));
     const counting = at(s => s.sql.includes('"tasks"."parent_id"') && s.sql.includes('not in') && s.params.includes(f.parent.id));
     expect(lock).toBeGreaterThanOrEqual(0);

@@ -33,7 +33,7 @@ export type Scope = string | null;
 /* The people's words the orchestrator lays a turn out from: their newest messages to him, as many as he says, at most this. */
 export const TURN_MESSAGES = 6;
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 async function headOf(db: Live['db'] | Tx, departmentId: string) {
   const [head] = await db
@@ -264,7 +264,7 @@ async function openNext(ctx: Live, tx: Tx, companyId: string, departmentId: stri
     }
     const [next] = await tx.select().from(turns).where(and(ofDepartment, eq(turns.status, 'planned'))).orderBy(asc(turns.number)).limit(1);
     if (!next) return null;
-    const planned = await tx.select().from(tasks).where(and(eq(tasks.turnId, next.id), eq(tasks.status, 'planned'))).orderBy(asc(tasks.number));
+    const planned = await tx.select().from(tasks).where(and(eq(tasks.turnId, next.id), eq(tasks.status, 'planned'))).orderBy(asc(tasks.number)).for('no key update');
     const at = new Date();
     if (!planned.length) {
       await tx.update(turns).set({ status: 'closed', openedAt: at, closedAt: at }).where(eq(turns.id, next.id));
@@ -462,7 +462,7 @@ async function storeMerge(tx: Tx, by: Pick<By, 'companyId' | 'agentId'>, sourceN
   if (target.status === 'closed') throw refuse(409, 'turn_unknown', `Turn ${targetNumber} is over. Add the work to its department's open turn or plan a new one.`);
   if (target.departmentId !== source.departmentId) throw refuse(409, 'turn_department', `Turns ${sourceNumber} and ${targetNumber} are of different departments. Merge only turns of the same department: each department runs its own.`);
   if (target.mode !== source.mode) throw refuse(409, 'turn_mode_fixed', `Turn ${sourceNumber} runs in ${source.mode} and turn ${targetNumber} in ${target.mode}. Merge only turns of the same mode, so no turn runs half in each.`);
-  const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, by.companyId), eq(tasks.turnId, source.id))).orderBy(asc(tasks.number));
+  const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, by.companyId), eq(tasks.turnId, source.id))).orderBy(asc(tasks.number)).for('no key update');
   const moved = await moveTasks(tx, by, source, target, rows);
   const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.id, source.id), eq(turns.status, 'planned'))).returning();
   if (!closed) throw refuse(409, 'turn_open', `Turn ${sourceNumber} changed meanwhile. Read it again.`);

@@ -235,15 +235,15 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
 }
 
 async function lockMovePrerequisites(tx: Tx, task: Task, after: string[]): Promise<void> {
-  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
   await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, after)).orderBy(asc(tasks.id)).for('share');
   await refuseCircle(tx, task, after);
 }
 
 async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promise<void> {
   if (!set.status || !CLOSED.includes(set.status) || !task.parentId) return;
-  if (!set.after?.length) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
-  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('update');
+  if (!set.after?.length) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('no key update');
 }
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
@@ -256,7 +256,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
-    if (n.data?.turnCleanup) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+    if (n.data?.turnCleanup || n.data?.independentPart) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
@@ -381,6 +381,7 @@ async function checkIndependentExecutor(db: Db, departmentId: string | null, par
 }
 
 async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, plan: StageRoute): Promise<{ child: Task; wake: Wake }> {
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, parent.companyId)).for('no key update');
   const last = await lastTaskNumber(tx, parent.companyId);
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
@@ -456,7 +457,7 @@ async function requireNewReviewer(ctx: Ctx, assignee: typeof agents.$inferSelect
 
 async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
   if (!parent) return null;
-  const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
+  const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('no key update');
   stillOpen(now!);
   const route = await routeOf(tx, now!);
   if (isStaged(route.state.resultKind) && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking candidate cannot acquire unfinished child work.');
@@ -518,7 +519,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   let independent: Task | null = null;
   const wakes: Wake[] = [];
   /* Numbers go up one by one per company, so creating tasks waits on the company row. */
-  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('no key update');
   /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
