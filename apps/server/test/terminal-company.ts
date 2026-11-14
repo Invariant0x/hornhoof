@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import WebSocket from 'ws';
 import { agents, jobs, subscriptions } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as, connectNode, until, type FakeNode } from './helpers.js';
 

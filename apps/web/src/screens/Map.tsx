@@ -19,10 +19,12 @@ import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask } from '../ui/PeopleWires';
 import type { Rect } from '../ui/ortho';
-import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { FrameBreathe, MapPulse, MapWayOverlay, pauseMapAnimations } from '../ui/map-motion';
+import { motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
+import { guardedResizeObserver, useRenderGuard } from '../guard';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -266,6 +268,9 @@ function deptClass(d: Department, flashing: boolean): string {
   return `dept${busy ? ' busy' : ''}${waits ? ' waits' : ''}${flashing ? ' flash' : ''}`;
 }
 
+const deptAnimates = (d: Department, flashing: boolean) =>
+  flashing || d.employees.some(e => e.status === 'working' || e.status === 'waiting');
+
 /* Every card grows for the turn strip while any department works in the turn, and its lines keep their place under the name;
    with-turn: this department works in it. */
 const turnClass = (tall: boolean, works: boolean) => (works ? ' tall with-turn' : tall ? ' tall' : '');
@@ -279,18 +284,23 @@ type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string; spe
 
 const pulsePersonId = (from: Endpoint, to: Endpoint) => from.kind === 'person' ? from.id : to.kind === 'person' ? to.id : undefined;
 
+const gapsFor = (placed: PeopleLayout, personId?: string) =>
+  personId ? placed.gaps.filter(g => g.personId === personId) : undefined;
+
+type ActiveWorkWay = { id: string; pts: Point[]; tone: 'c' | 'a' };
+
 /* The way to each department runs while its head works on the orchestrator's task, down the trace to the card, and for
    five minutes after it gave a result back, up the trace to the hub. */
-function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: MapArrangement['depts']; stateOf(up: string, down: string): LineState; still: boolean }) {
+function activeWorkWays(org: Org, spots: MapArrangement['depts'], stateOf: (up: string, down: string) => LineState): ActiveWorkWay[] {
   const orchestrator = org.orchestrator;
-  if (!orchestrator) return null;
-  return org.departments.map((d, i) => {
+  if (!orchestrator) return [];
+  return org.departments.flatMap((d, i) => {
     const head = d.employees.find(e => e.kind === 'head');
     const state = head ? stateOf(orchestrator.id, head.id) : 'quiet';
-    if (state === 'quiet') return null;
+    if (state === 'quiet') return [];
     const down = spots[i]!.path;
     const back = state === 'yellow';
-    return <LiveWay key={d.id} pts={back ? [...down].reverse() : down} speed={PULSE_SPEED} tone={back ? 'a' : 'c'} still={still} data={{ 'data-work': d.id }} />;
+    return [{ id: d.id, pts: back ? [...down].reverse() : down, tone: back ? 'a' : 'c' }];
   });
 }
 
@@ -332,15 +342,6 @@ function LineHits({ lines, title, onHit }: { lines: MapLine[]; title: string; on
   ));
 }
 
-/* Decisions run amber from the hub or the person's department, with the same bridges as the quiet trace. */
-function DecisionSignals({ ways, still, placed, prefix }: { ways: { key: string; id: string; pts: Point[] }[]; still: boolean; placed: PeopleLayout; prefix: string }) {
-  return ways.map(w => (
-    <g key={w.key} mask={peopleMask(placed, prefix, w.id)}>
-      <LiveWay pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-ask': w.id }} />
-    </g>
-  ));
-}
-
 /* The line under a person's name: their title, else the department they belong to or what they reach. */
 function personDetail(t: Messages, p: MapPerson, org: Org): string {
   if (p.title) return p.title;
@@ -348,10 +349,10 @@ function personDetail(t: Messages, p: MapPerson, org: Org): string {
   return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
 }
 
-function PersonChipCard({ org, person, cut, onOpen }: { org: Org; person: MapPerson; cut: number; onOpen(personId: string): void }) {
+function PersonChipCard({ org, person, w, h, cut, onOpen }: { org: Org; person: MapPerson; w: number; h: number; cut: number; onOpen(personId: string): void }) {
   const t = useT();
   return (
-    <PersonButton person={person} onOpen={() => onOpen(person.id)}>
+    <PersonButton person={person} frame={{ w, h, cut }} onOpen={() => onOpen(person.id)}>
       <Edge cut={cut} className="chip">
         <PersonIcon label={t.map.person} />
         <span>
@@ -374,7 +375,7 @@ function PeopleRow({ org, people, cards, onOpen }: { org: Org; people: MapPerson
         const p = byId.get(c.id);
         return p ? (
           <li key={c.id} style={{ left: c.x, top: c.y, width: c.w, height: c.h }}>
-            <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
+            <PersonChipCard org={org} person={p} w={c.w} h={c.h} cut={8} onOpen={onOpen} />
           </li>
         ) : [];
       })}
@@ -392,7 +393,7 @@ function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: Person
         const p = byId.get(c.id);
         return p ? (
           <li key={c.id} style={{ left: c.x, top: c.y, width: c.w, height: c.h }}>
-            <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
+            <PersonChipCard org={org} person={p} w={c.w} h={c.h} cut={8} onOpen={onOpen} />
           </li>
         ) : [];
       })}
@@ -528,11 +529,20 @@ function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string;
 /* Where a block's grip stands: at its top left corner, and for the round hub on its rim, up and to the left. */
 const gripCorner = (key: string, r: Rect): Point => (key === HUB_KEY ? [r.x + HUB - Math.round(HUB * Math.SQRT1_2), r.y + HUB - Math.round(HUB * Math.SQRT1_2)] : [r.x, r.y]);
 
+/* While a department covers the map, its hidden SVG clocks and Web Animations pause so nothing ticks behind it. */
+function usePauseHiddenMap(box: { current: HTMLDivElement | null }, inside: boolean, shown: boolean) {
+  useEffect(() => {
+    if (!inside || !shown || !box.current) return;
+    return pauseMapAnimations(box.current);
+  }, [box, inside, shown]);
+}
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
 export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions, onHome }: Props) {
+  useRenderGuard('map');
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -665,6 +675,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
      is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
      moving a block leave the view alone. */
   const shown = !!arr;
+  usePauseHiddenMap(box, inside, shown);
   useEffect(() => {
     if (!shown || inside) return;
     const auto = () => {
@@ -673,7 +684,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     auto();
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(auto);
+    const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
   }, [shown, inside, layout.version, mine]);
@@ -768,21 +779,22 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     return [level(0), level(1)];
   };
   const bent = arr.lines.filter(l => bends[l.key]?.length);
+  const workWays = activeWorkWays(org, spots, stateOf);
   const hubArt = (
     <>
       <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
         <circle className="hub-bg" cx="120" cy="120" r="116" />
-        <g className="spin">
-          <circle className="hub-ring" cx="120" cy="120" r="119" />
-        </g>
         <path className="gauge-bg" d={arcD(GAUGE_FROM, GAUGE_TO)} pathLength={dashLength(GAUGE_SEGMENTS)} />
         <path className="gauge" d={gauge.d} pathLength={gauge.length} />
         <TurnArcs turns={turns} pointed={pointed} />
         <circle className="hub-in" cx="120" cy="120" r="88" />
         <path className="hub-hz" d="M 64 120 L 176 120" />
-        {/* Motion means real work: the dot runs only while an agent works. */}
-        {org.agents.working > 0 && <Pulse pts={GAUGE_TRACK} speed={motionSpeed(55, still)} bounce tone="k" />}
       </svg>
+      <svg className="hub-art hub-spin" viewBox="0 0 240 240" aria-hidden="true">
+        <circle className="hub-ring" cx="120" cy="120" r="119" />
+      </svg>
+      {/* Motion means real work: the dot runs only while an agent works. */}
+      {org.agents.working > 0 && <MapPulse pts={GAUGE_TRACK} speed={motionSpeed(55, still)} bounce tone="k" />}
       <LogoMark className="hub-mark" />
       <span className="hub-num" title={t.map.agentsWorking}>
         <b>{org.agents.working}</b>
@@ -813,16 +825,28 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
           <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
           <Roads arr={arr} bends={bent.flatMap(l => bends[l.key]!)} />
-          <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
-
-          <DecisionSignals ways={asked} still={still} placed={placed} prefix={wirePrefix} />
-          {shots.map(s => (
-            <g key={s.key} mask={peopleMask(placed, wirePrefix, s.personId)}>
-              <Pulse pts={s.pts} speed={s.speed} once tone={s.tone} />
+          {workWays.map(w => (
+            <path key={w.id} className={`tr live ${w.tone}`} d={toD(w.pts)} data-work={w.id} />
+          ))}
+          {asked.map(w => (
+            <g key={w.key} mask={peopleMask(placed, wirePrefix, w.id)}>
+              <path className="tr live a" d={toD(w.pts)} data-ask={w.id} />
             </g>
           ))}
           <LineHits lines={arr.lines} title={t.map.addBend} onHit={hitLine} />
         </svg>
+
+        <div className="map-live" aria-hidden="true" style={{ '--k': view.k } as CSSProperties}>
+          {workWays.map(w => (
+            <MapWayOverlay key={w.id} pts={w.pts} speed={PULSE_SPEED} tone={w.tone} still={still} k={view.k} />
+          ))}
+          {asked.map(w => (
+            <MapWayOverlay key={w.key} pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} k={view.k} gaps={gapsFor(placed, w.id)} />
+          ))}
+          {shots.map(s => (
+            <MapPulse key={s.key} pts={s.pts} speed={s.speed} once tone={s.tone} gaps={gapsFor(placed, s.personId)} mask={peopleMask(placed, wirePrefix, s.personId)} />
+          ))}
+        </div>
 
         <PeopleRow org={org} people={topPeople} cards={arr.top} onOpen={openDecisions} />
         <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
@@ -889,6 +913,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
               )}
               {turnOf.has(d.id) && <DeptTurn turn={turnOf.get(d.id)!} />}
             </Edge>
+            {deptAnimates(d, flashing.has(d.id)) && <FrameBreathe w={spots[i]!.w} h={spots[i]!.h} cut={12} corner />}
           </button>
         ))}
 

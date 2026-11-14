@@ -1,4 +1,5 @@
 import type { Terminal } from '@xterm/xterm';
+import { guardedResizeObserver } from '../guard';
 
 export type EdgeBox = { top: number; right: number; bottom: number; left: number };
 
@@ -157,7 +158,7 @@ export function fitTerminal(term: Terminal, box: HTMLElement): TerminalSize | nu
 
 export function observeTerminalFit(term: Terminal, box: HTMLElement, onChange: () => void): () => void {
   if (typeof ResizeObserver === 'undefined') return () => {};
-  const observer = new ResizeObserver(onChange);
+  const observer = guardedResizeObserver(onChange, 'terminal');
   observer.observe(box);
   const scrollArea = term.element?.querySelector('.xterm-scroll-area');
   if (scrollArea) observer.observe(scrollArea);

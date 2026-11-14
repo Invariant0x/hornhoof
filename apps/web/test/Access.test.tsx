@@ -17,7 +17,7 @@ const allowed: Parameters<typeof mockApi>[0] = {
   'GET /api/agents/b1': [200, CARD],
   'GET /api/agents/b1/events?last=300': EVENTS_REPLY,
   'GET /api/nodes/commands': [200, { commands: [] }],
-  'GET /api/computer': [200, { available: false, until: null, asked: null }],
+  'GET /api/machines/access': [200, { views: [] }],
 };
 const refused: [number, unknown] = [403, { error: { code: 'forbidden', message: 'Hidden resource details.' } }];
 

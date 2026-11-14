@@ -5,7 +5,7 @@ import { agents, departments, tasks } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { until } from './helpers.js';
 import { waitCompany } from './wait-company.js';
 

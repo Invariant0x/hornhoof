@@ -3,13 +3,20 @@ import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { AgentCardView, Briefing, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
+import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
 export const ME: Me = {
   person: { id: 'p1', companyId: 'c1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', scopeKind: 'company', isOwner: true },
   company: { id: 'c1', name: 'Acme' },
 };
+
+/* The key of the person at the browser as the server keeps it: a command that joins a machine is shown with its public part. */
+export const OWNER_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padEnd(122, 'k'), wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
+export const withKey = (command: string): string => `${command} --owner-key ${OWNER_KEY.publicKey}`;
+/* For a scenario that shows such a command: the server holds the person's key. The others have none, as before the
+   person made one, so nothing in them waits for a password. */
+export const serveOwnerKey = (page: Page) => page.route('**/api/me/key', route => route.fulfill({ json: { key: OWNER_KEY } }));
 
 /* A person who last chose the terminal in this browser: an agent's window opens with it rather than with the chat. */
 export const chooseTerminal = (page: Page) => page.addInitScript(() => localStorage.setItem('hh-agent-view', 'terminal'));
@@ -29,7 +36,7 @@ const ORG: Org = {
   ],
 };
 
-const DECISIONS: Decisions = { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } };
+const DECISIONS: Decisions = { requests: [], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
 
 const TURN: TurnView = {
   id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', mode: 'echelons', departmentId: DEV.id, canChangeMode: true, messages: [], taskId: null,
@@ -57,7 +64,7 @@ export const detail = (task: TaskLine): TaskDetail => ({
 const IMPROVEMENT: Improvement = {
   id: 'i1', title: 'Check card numbers before sending them', text: 'The card form sends numbers the bank turns down.', seen: 2, status: 'taken',
   result: 'Made a task for it.', at: '2026-10-30T08:00:00.000Z', updatedAt: '2026-10-30T09:00:00.000Z', agent: { id: 'b1', name: 'Bruno' },
-  department: DEV, decidedBy: 'Ivan', tasks: [{ id: 't3', number: 3, title: 'Checkout step 3' }], parts: null,
+  department: DEV, decidedBy: 'Ivan', tasks: [{ id: 't3', number: 3, title: 'Checkout step 3' }], parts: null, scope: 'company', code: null,
 };
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -68,13 +75,25 @@ const ROUTES: Record<string, unknown> = {
   '/api/org': ORG,
   '/api/requests': DECISIONS,
   '/api/nodes/commands': { commands: [] },
-  '/api/computer': { available: false, until: null, asked: null },
+  '/api/machines/access': { views: [] },
+  /* What the CEO's reminder of the recovery file asks at the start: nothing to remind of. */
+  '/api/backups/recovery': { recoveryNeeded: false, linkChanged: false },
+  '/api/machines/here': { machine: null, view: null },
+  /* What every page asks about where the company runs: it stays on its machine, and nothing waits for the CEO. */
+  '/api/network/switch': { self: null, moving: false, from: null, to: null, since: null, cut: false, question: false } satisfies SwitchWord,
+  '/api/network/switched': { switched: null },
+  '/api/network/question': { question: null, canAnswer: false },
+  '/api/machines': { machines: [] },
+  /* The link's certificate, asked beside the machines, and the backups a wide look at every screen opens. */
+  '/api/link': { link: null, domain: 'hornhoof.org' },
+  '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] } satisfies BackupsView,
   '/api/turns': { turns: [TURN] },
   '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
   '/api/tasks?status=all&department=d2': { tasks: TASKS },
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
+  '/api/feedback': { inbox: false },
   '/api/map/layout': { blocks: {} },
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },

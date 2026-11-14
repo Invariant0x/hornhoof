@@ -2,7 +2,7 @@ import type { PersonWire } from './map-people';
 import { lengthOf, type Point } from './ui/wires';
 
 type Segment = { a: Point; b: Point; offset: number };
-type Gap = { start: number; end: number };
+export type Gap = { start: number; end: number };
 export type WireGap = { personId: string; pts: Point[] };
 const BRIDGE = 6;
 const distance = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -37,7 +37,7 @@ function gapsOn(segment: Segment, obstacles: Segment[]): Gap[] {
   });
 }
 
-function mergeGaps(gaps: Gap[]): Gap[] {
+export function mergeGaps(gaps: Gap[]): Gap[] {
   const merged: Gap[] = [];
   for (const gap of gaps.sort((a, b) => a.start - b.start)) {
     const last = merged[merged.length - 1];

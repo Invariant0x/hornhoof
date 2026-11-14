@@ -9,7 +9,8 @@ import type { Db } from '../src/db/client.js';
 import { companies, departments, machines, nodeConnections, nodes, people } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { dropOldConnections, nodeConnected, nodeDisconnected } from '../src/modules/nodes/connections.js';
-import { BUILTIN, NodeHub, type NodeIdentity } from '../src/modules/nodes/hub.js';
+import { NodeHub, type NodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { appOn, as, connectNode, createTestDb, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'builtin-node-key-0123456789abcdef';

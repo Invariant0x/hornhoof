@@ -148,6 +148,8 @@ async function buildMessageApprovalDto(ctx: Ctx, bound: ApprovalRow, base: Appro
       bindingGeneration: fields.bindingGeneration,
     },
     messageId: msg.id,
+    /* It came back with a restored database and may have gone out before the restore: the person is told so. */
+    restored: msg.reasonCodes.includes('restored'),
     revision: rev.revision,
     locale: rev.document.locale,
     contentDigest: fields.contentDigest,

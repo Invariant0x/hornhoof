@@ -15,8 +15,13 @@ export function partsOf(selection) {
   return parts;
 }
 
+/* How many files one eslint takes. It keeps the types it asked of every file it linted, and the whole server in one run
+   needs more memory than node allows on a small machine, where a third of it does not. */
+export const LINT_FILES = 300;
+
 /* The files of the change the lint reads, one group for each workspace: eslint keeps every TypeScript program it builds, so
-   one for each, as npm run lint runs it, stays inside node's memory. */
+   one for each, as npm run lint runs it, stays inside node's memory. A workspace with more files than one run takes is
+   linted in several. */
 function lintGroups(changes, suites) {
   const groups = new Map();
   for (const change of changes) {
@@ -24,7 +29,7 @@ function lintGroups(changes, suites) {
     const key = ownerOf(suites, change.path)?.root ?? '.';
     groups.set(key, [...(groups.get(key) ?? []), change.path]);
   }
-  return [...groups.values()];
+  return [...groups.values()].flatMap(files => Array.from({ length: Math.ceil(files.length / LINT_FILES) }, (_, i) => files.slice(i * LINT_FILES, (i + 1) * LINT_FILES)));
 }
 
 /* What a run on GitHub checks of a change since a passed commit, when the selection chose its tests. */

@@ -49,6 +49,7 @@ function agentRoutes(live: AgentFixture): Record<string, unknown> {
     '/api/departments/d2/approval-policy': { departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, candidates: [], rules: [{ channel: 'message', mode: 'every' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'every' }, { channel: 'commit', mode: 'every' }, { channel: 'spend', mode: 'every' }, { channel: 'other', mode: 'every' }] },
     '/api/tasks/t1': { task: DETAIL },
     '/api/tasks?status=open&department=d2': { tasks: [] },
+    '/api/feedback': { inbox: false },
   };
   if (live.productOnly) {
     org.departments[0]!.employees = [];

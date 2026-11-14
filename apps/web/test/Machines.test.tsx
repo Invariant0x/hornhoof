@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
-import { fixedAt, MACHINES, ME, mockApi, SUBS } from './api-mock';
+import { makeKey } from '../src/owner-key';
+import { keyDefaults } from '../src/owner-key-store';
+import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
+import { clock } from '../src/ui/subscription';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -35,6 +38,49 @@ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(
 
 afterEach(() => localStorage.clear());
 
+const DAY = 24 * 3600_000;
+const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+const linkWithCertificate = (expiresAt: string) => ({ link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org', tls: { mode: 'https', certificate: true, expiresAt, failedAt: null } });
+
+describe('the link certificate warning', () => {
+  it('warns 14 days before the link\'s certificate ends', async () => {
+    const soon = endsIn(13);
+    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
+    render(<Machines me={ME} />);
+    const warning = (await screen.findByText(/The link's certificate ends/)).closest('p')!;
+    expect(warning).toHaveClass('alert');
+    expect(warning).toHaveAttribute('role', 'status');
+    expect(warning).toHaveTextContent(`The link's certificate ends on ${new Date(soon).toLocaleDateString('en')} and has not renewed yet. Hornhoof tries again every hour.`);
+    expect(warning).toHaveTextContent('If it ends, the link keeps working, encrypted to hornhoof.org.');
+  });
+
+  it('says nothing while the certificate has 15 days left', async () => {
+    const calls = lists({ 'GET /api/link': [200, linkWithCertificate(endsIn(15))] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/link')).toBe(true));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/The link's certificate ends/)).not.toBeInTheDocument();
+  });
+
+  it('warns in Russian with the date in that language', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const soon = endsIn(3);
+    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(/Сертификат ссылки заканчивается/)).toHaveTextContent(`Сертификат ссылки заканчивается ${new Date(soon).toLocaleDateString('ru')} и еще не обновился.`);
+  });
+
+  it('asks nothing about the link for people who do not see the whole company', async () => {
+    const calls = lists();
+    render(<Machines me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
+    await screen.findByRole('table');
+    expect(calls.some(c => c.path === '/api/link')).toBe(false);
+  });
+});
+
 describe('Machines', () => {
   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
     localStorage.setItem('hh-lang', language);
@@ -54,12 +100,12 @@ describe('Machines', () => {
     });
     render(<Machines me={ME} />);
     const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
-    expect(await within(mac).findByText(command.command)).toBeInTheDocument();
+    expect(await within(mac).findByText(withKey(command.command))).toBeInTheDocument();
     const update = within(mac).getByRole('button', { name: 'Update programs' });
     await userEvent.setup().click(update);
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
     await vi.waitFor(() => expect(update).toBeEnabled());
-    expect(within(mac).getByText(command.command)).toBeInTheDocument();
+    expect(within(mac).getByText(withKey(command.command))).toBeInTheDocument();
     expect(calls.some(c => c.path.endsWith('/hide'))).toBe(false);
   });
 
@@ -287,7 +333,7 @@ describe('Machines', () => {
     render(<Machines me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Connect a machine' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/command', body: undefined });
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
     expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
     expect(screen.getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
@@ -296,7 +342,7 @@ describe('Machines', () => {
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
+    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
   });
 
   it("adds one of the person's plans to a machine of theirs and shows the command to run there", async () => {
@@ -315,14 +361,14 @@ describe('Machines', () => {
     expect(screen.queryByRole('button', { name: 'Add Claude to ivan-mbp' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Add Kimi to ivan-mbp' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
     expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
     expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(within(mac).getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
+    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
   });
 
   it('keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel', async () => {
@@ -343,30 +389,30 @@ describe('Machines', () => {
     });
     const user = userEvent.setup();
     const first = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
-    expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
 
     /* Switching tabs and returning, or reloading the page, keeps both commands visible. */
     first.unmount();
     localStorage.setItem('hh-lang', 'ru');
     const inRu = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
-    expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
     expect(screen.getAllByText(/^Действует еще (59 мин|1 ч)\.$/)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(4);
     const cancels = screen.getAllByRole('button', { name: 'Отменить' });
     expect(cancels).toHaveLength(2);
     await user.click(cancels[0]!);
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${machineCmd.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(machineCmd.command)).not.toBeInTheDocument());
-    expect(screen.getByText(addCmd.command)).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByText(withKey(machineCmd.command))).not.toBeInTheDocument());
+    expect(screen.getByText(withKey(addCmd.command))).toBeInTheDocument();
 
     /* After the machine joins by the add-plan command or it expires, reload hides it too. */
     active = [];
     inRu.unmount();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(screen.queryByText(addCmd.command)).not.toBeInTheDocument();
+    expect(screen.queryByText(withKey(addCmd.command))).not.toBeInTheDocument();
   });
 
   it('disconnects a machine after a confirm', async () => {
@@ -388,6 +434,36 @@ describe('Machines', () => {
     expect(within(card('build-box')).getByRole('checkbox')).not.toBeChecked();
     await user.click(lend);
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { lendsTests: false } }));
+  });
+
+  it('ticks backups like test runs, on a machine with a core', async () => {
+    const withCore = MACHINES.map(machine => (machine.id === 'm1' ? { ...machine, keepsBackups: true, heldBackups: 2 } : { ...machine, keepsBackups: null, heldBackups: null }));
+    const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false }] });
+    const user = userEvent.setup();
+    render(<Machines me={ME} />);
+    const mine = await openCard('ivan-mbp');
+    const keep = within(mine).getByRole('checkbox', { name: "Keep the company's backups on ivan-mbp" });
+    expect(keep).toBeChecked();
+    expect(fact(mine, 'Backups')).toContain('Keep company backups');
+    expect(within(mine).getByText('Backups held: 2')).toBeInTheDocument();
+    await user.click(keep);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { keepsBackups: false } }));
+    await vi.waitFor(() => expect(keep).not.toBeChecked());
+    /* A machine without the company's core keeps none, and says nothing of them. */
+    const other = card('build-box');
+    expect(within(other).queryByRole('checkbox', { name: /backups/ })).not.toBeInTheDocument();
+    expect(within(other).queryByText(/company backups/)).not.toBeInTheDocument();
+  });
+
+  it("shows whether another person's machine keeps backups, without the switch", async () => {
+    const withCore = MACHINES.map(machine => ({ ...machine, keepsBackups: machine.id === 'm2', heldBackups: machine.id === 'm2' ? 1 : 0 }));
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: null }] });
+    const lead: Me = { ...ME, person: { ...ME.person, id: 'p9', scopeKind: 'listed', isOwner: false } };
+    render(<Machines me={lead} />);
+    const maria = await openCard('build-box');
+    expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(maria).getByText('Keeps company backups')).toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByText('Keeps no company backups')).toBeInTheDocument();
   });
 
   it("shows another person's machine as lent or not, without the switch", async () => {
@@ -488,6 +564,378 @@ describe('Machines', () => {
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
+  });
+
+  const shown = (language: string, machines: unknown[], routes: Parameters<typeof mockApi>[0] = {}) => {
+    localStorage.setItem('hh-lang', language);
+    const calls = lists({ 'GET /api/machines': [200, { machines, builtin: null, priority: true }], ...routes });
+    return { calls, view: render(<LanguageProvider><Machines me={ME} /></LanguageProvider>) };
+  };
+  const held = (over: object) => ({ number: null, why: null, pin: null, unfit: null, copy: null, leftAt: null, ...over });
+
+  it.each([['en', 'Copy: being made, 40%'], ['ru', 'Копия: создается, 40%']])("writes a copy's line in %s", async (language, line) => {
+    shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).getByText(line)).toBeInTheDocument();
+    /* Its place stands in the same part, above the line. */
+    expect(within(within(mac).getByText(line).closest('section')!).getByText('2')).toBeInTheDocument();
+  });
+
+  it("writes every state of a copy, and a machine's place without one", async () => {
+    const lines: [object, string][] = [
+      [{ number: 2, copy: { line: 'remaking', progress: 10 } }, 'Copy: being made again, 10%'],
+      [{ number: 2, copy: { line: 'ready' } }, 'Copy: up to date'],
+      [{ number: 2, copy: { line: 'saving' } }, 'Copy: saving what it did while it led'],
+      [{ number: 3, copy: { line: 'behind', minutes: 4 } }, 'Copy: 4 min behind'],
+      [{ number: 2, copy: { line: 'catching_up' } }, 'Copy: catching up'],
+      [{ number: 2, copy: { line: 'asleep', since: null } }, 'Copy: asleep'],
+      [{ number: 3, copy: { line: 'asleep', since: '2026-11-10T09:30:00.000Z' } }, `Copy: asleep since ${clock('en', '2026-11-10T09:30:00.000Z')}`],
+      [{ number: 2, copy: { line: 'stopped', why: null } }, 'Copy: stopped'],
+      [{ number: 2, copy: { line: 'stopped', why: 'disk_full' } }, 'Copy: stopped: disk full'],
+      [{ number: 2, copy: { line: 'stopped', why: 'setup' } }, "Copy: stopped: the company's settings cannot be written here"],
+      [{ number: 4, why: 'next' }, 'Gets a copy if one of the first three leaves'],
+      [{ number: 1, why: 'server' }, 'The company server runs here'],
+    ];
+    shown('en', lines.map(([data], n) => ({ ...MACHINES[0]!, id: `c${n}`, hostname: `host-${n}`, data: held(data) })));
+    await screen.findByRole('table');
+    for (const [n, [, line]] of lines.entries()) expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+  });
+
+  const names = () => screen.getAllByRole('button', { name: /^Open the card of / }).map(button => button.getAttribute('aria-label')!.replace('Open the card of ', ''));
+  const four = (over: object[] = []) => [
+    { number: 1, why: 'server' }, { number: 2, why: 'always.best_link' }, { number: 3, why: 'mostly.good_link' }, { number: 4, why: 'next' },
+  ].map((data, n) => ({ ...MACHINES[0]!, id: `p${n}`, hostname: `host-${n + 1}`, data: held({ ...data, ...over[n] }) }));
+  const radios = (node: HTMLElement) => within(node).queryAllByRole('radio').map(radio => [radio.closest('label')!.textContent, (radio as HTMLInputElement).checked]);
+
+  it('sorts by priority', async () => {
+    const rows = [[3, 'c'], [1, 'a'], [null, 'd'], [2, 'b']] as const;
+    const { view } = shown('en', rows.map(([number, hostname]) => ({ ...MACHINES[0]!, id: hostname, hostname, data: held({ number, why: number === 1 ? 'server' : null }) })));
+    await screen.findByRole('table');
+    expect(names()).toEqual(['a', 'b', 'c', 'd']);
+    expect(screen.getByRole('columnheader', { name: /Priority/ })).toHaveAttribute('aria-sort', 'ascending');
+    /* The number in its cell; a machine with none has a dash that says why. */
+    const cell = (hostname: string) => screen.getByRole('button', { name: `Open the card of ${hostname}` }).closest('tr')!.querySelector('.k-prio')!;
+    expect([cell('a').textContent, cell('c').textContent, cell('d').textContent]).toEqual(['1', '3', 'Cannot take the server']);
+    view.unmount();
+    /* Someone who does not see the whole company is told nothing of the order. */
+    lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null, priority: false }] });
+    render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false, scopeKind: 'listed' } }} />);
+    await screen.findByRole('table');
+    expect(screen.queryByRole('columnheader', { name: /Priority/ })).not.toBeInTheDocument();
+    expect(within(card('ivan-mbp')).queryByRole('heading', { name: 'Priority' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', ['Always online, best connection to machine 1', 'Always online, but has the least memory', 'Gets a copy if one of the first three leaves', 'Keeps its copy until the new one is up to date', 'New: connected less than 3 days ago', 'Often offline, but a slow disk'], 'If machine 1 goes away, machine 2 takes the server, then 3.'],
+    ['ru', ['Всегда в сети, лучшая связь с машиной 1', 'Всегда в сети, но памяти у нее меньше всех', 'Получит копию, если одна из первых трех уйдет', 'Хранит копию, пока новая не станет актуальной', 'Новая: подключена меньше 3 дней назад', 'Часто не в сети, но диск медленный'], 'Если машина 1 пропадет, сервер возьмет машина 2, за ней 3.'],
+  ])('says why in %s', async (language, lines, under) => {
+    const whys = ['always.best_link', 'always.small', 'next', 'handing', 'new', 'often_off.slow_disk'];
+    shown(language, whys.map((why, n) => ({ ...MACHINES[0]!, id: `w${n}`, hostname: `host-${n}`, data: held({ number: n + 2, why }) })));
+    await screen.findByRole('table');
+    for (const [n, line] of lines.entries()) {
+      expect(within(card(`host-${n}`)).getByText(line), line).toBeInTheDocument();
+      expect(within(card(`host-${n}`)).getByText(under)).toBeInTheDocument();
+    }
+  });
+
+  it('lets the CEO choose', async () => {
+    const { calls } = shown('en', four(), { 'PUT /api/machines/p1/priority': [204] });
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    expect(within(second).getByRole('radiogroup', { name: 'Priority' })).toBeInTheDocument();
+    expect(radios(second)).toEqual([['Automatically', true], ['By hand', false], ['Does not take the server', false]]);
+    expect(within(second).queryByRole('combobox', { name: 'Priority of host-2' })).not.toBeInTheDocument();
+    /* By hand keeps the machine at its number. */
+    await user.click(within(second).getByRole('radio', { name: 'By hand' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 2 } }]));
+    await user.click(within(second).getByRole('radio', { name: 'Does not take the server' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1)).toEqual({ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 'none' } }));
+    /* The server's machine and a machine set by hand elsewhere offer nothing to press here. */
+    expect(within(card('host-1')).queryByRole('radio')).not.toBeInTheDocument();
+  });
+
+  it('offers the places there are to a machine set by hand', async () => {
+    const calls = lists({ 'GET /api/machines': [200, { machines: four([{}, { why: 'pinned', pin: 2 }]), builtin: null, priority: true }], 'PUT /api/machines/p1/priority': [204] });
+    render(<Machines me={ME} />);
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    expect(within(second).getByText('Number set by hand')).toBeInTheDocument();
+    expect(radios(second)).toEqual([['Automatically', false], ['By hand', true], ['Does not take the server', false]]);
+    const select = within(second).getByRole('combobox', { name: 'Priority of host-2' }) as HTMLSelectElement;
+    expect([[...select.options].map(option => option.value), select.value]).toEqual([['2', '3', '4'], '2']);
+    await user.selectOptions(select, '3');
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p1/priority', body: { pin: 3 } }]));
+    /* The cell of a number set by hand says so. */
+    expect(screen.getByRole('button', { name: 'Open the card of host-2' }).closest('tr')!.querySelector('.k-prio [title]')).toHaveAttribute('title', 'Number set by hand');
+  });
+
+  it('shows the choice to the CEO alone', async () => {
+    lists({ 'GET /api/machines': [200, { machines: four(), builtin: null, priority: true }] });
+    render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false } }} />);
+    const second = await openCard('host-2');
+    expect(within(second).getByText('Always online, best connection to machine 1')).toBeInTheDocument();
+    expect(within(within(second).getByRole('heading', { name: 'Priority' }).closest('section')!).getByText('2')).toBeInTheDocument();
+    expect(within(second).queryByRole('radio')).not.toBeInTheDocument();
+    expect(within(second).queryByRole('combobox', { name: 'Priority of host-2' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a machine set out changeable', async () => {
+    const { calls } = shown('en', four([{}, {}, {}, { number: null, why: 'out', pin: 'none' }]), { 'PUT /api/machines/p3/priority': [204] });
+    const user = userEvent.setup();
+    const out = await openCard('host-4');
+    expect(within(out).getByText('Never takes the server: set by hand')).toBeInTheDocument();
+    expect(radios(out)).toEqual([['Automatically', false], ['By hand', false], ['Does not take the server', true]]);
+    expect(screen.getByRole('button', { name: 'Open the card of host-4' }).closest('tr')!.querySelector('.k-prio')).toHaveTextContent('Does not take the server');
+    await user.click(within(out).getByRole('radio', { name: 'Automatically' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/machines/p3/priority', body: { pin: null } }]));
+    /* By hand, from out: the place after the last one there is. */
+    await user.click(within(out).getByRole('radio', { name: 'By hand' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1)).toEqual({ method: 'PUT', path: '/api/machines/p3/priority', body: { pin: 4 } }));
+  });
+
+  /* The tab as the CEO sees it, with what the server says of a move. */
+  const moving = (move: object | null, more: { canMove?: boolean; me?: Me; over?: object[]; routes?: Parameters<typeof mockApi>[0]; language?: string } = {}) => {
+    localStorage.setItem('hh-lang', more.language ?? 'en');
+    const calls = lists({ 'GET /api/machines': [200, { machines: four(more.over), builtin: null, priority: true, move, canMove: more.canMove ?? true }], ...more.routes });
+    return { calls, view: render(<LanguageProvider><Machines me={more.me ?? ME} /></LanguageProvider>) };
+  };
+  const PAT: Me = { ...ME, person: { ...ME.person, isOwner: false } };
+
+  it.each([
+    ['en', (time: string) => `host-2 ran the server until ${time} and is up to date again.`, 'Move the server here'],
+    ['ru', (time: string) => `Машина host-2 держала сервер до ${time}, ее копия снова актуальна.`, 'Перенести сервер сюда'],
+  ] as const)('notes the machine the server moved from, beside the move, in %s', async (language, note, here) => {
+    const until = '2026-11-12T14:02:00.000Z';
+    const { view } = moving(null, { language, over: [{}, { copy: { line: 'ready' }, led: { until } }] });
+    const second = await openCard('host-2');
+    const line = within(second).getByText(note(clock(language, until)!));
+    /* The note and the button stand in the same part of the card. */
+    expect(within(line.closest('section')!).getByRole('button', { name: here })).toBeInTheDocument();
+    expect(within(card('host-3')).queryByText(/ran the server|держала сервер/)).not.toBeInTheDocument();
+    view.unmount();
+    /* Someone who may not move the server reads the note all the same. */
+    moving(null, { language, me: PAT, canMove: false, over: [{}, { copy: { line: 'ready' }, led: { until } }] });
+    const again = await openCard('host-2');
+    expect(within(again).getByText(note(clock(language, until)!))).toBeInTheDocument();
+    expect(within(again).queryByRole('button', { name: here })).not.toBeInTheDocument();
+  });
+
+  it('asks before it moves the server', async () => {
+    const { calls } = moving(null, { routes: { 'POST /api/machines/p3/move': [202, { state: 'preparing' }] } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    const here = within(fourth).getByRole('button', { name: 'Move the server here' });
+    await user.click(here);
+    /* The question stands in the button's place, with the focus on its first answer. */
+    expect(within(fourth).getByText('Move the company server to host-4? Hornhoof stops for a short while as it moves; your work is kept.')).toBeInTheDocument();
+    expect(within(fourth).queryByRole('button', { name: 'Move the server here' })).not.toBeInTheDocument();
+    expect(within(fourth).getByRole('button', { name: 'Move the server' })).toHaveFocus();
+    /* Cancel asks nothing of the server, and the focus is back on the button. */
+    await user.click(within(fourth).getByRole('button', { name: 'Cancel' }));
+    expect(within(fourth).getByRole('button', { name: 'Move the server here' })).toHaveFocus();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    await user.click(within(fourth).getByRole('button', { name: 'Move the server here' }));
+    const loads = calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length;
+    await user.click(within(fourth).getByRole('button', { name: 'Move the server' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: '/api/machines/p3/move', body: undefined }]));
+    /* Then the tab is read again. */
+    await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/machines' && c.method === 'GET').length).toBeGreaterThan(loads));
+  });
+
+  it('shows no move where it cannot be', async () => {
+    const here = (node: HTMLElement) => within(node).queryByRole('button', { name: 'Move the server here' });
+    /* Not on the server's own card, nor on a machine kept from the server or one that cannot take it. */
+    const first = moving(null, { over: [{}, {}, { number: null, why: 'out', pin: 'none' }, { number: null, why: null, unfit: { why: 'phone' } }] });
+    await screen.findByRole('table');
+    expect([here(card('host-1')), here(card('host-3')), here(card('host-4'))]).toEqual([null, null, null]);
+    expect(here(card('host-2'))).toBeInTheDocument();
+    first.view.unmount();
+    /* Not for someone who is not the CEO, nor where the server says the CEO cannot ask now. */
+    for (const more of [{ me: PAT, canMove: false }, { canMove: false }]) {
+      const view = moving(null, more);
+      expect(here(await openCard('host-2'))).toBeNull();
+      view.view.unmount();
+    }
+    /* Not while the server is moving. */
+    moving({ machine: 'p3', state: 'switching', reason: null, leader: 'host-1', progress: null });
+    expect(here(await openCard('host-2'))).toBeNull();
+  });
+
+  it('shows the move to everyone', async () => {
+    const view = moving({ machine: 'p3', state: 'switching', reason: null, leader: 'host-1', progress: null }, { me: PAT, canMove: false });
+    const fourth = await openCard('host-4');
+    expect(within(fourth).getByText('Moving the server to host-4.')).toBeInTheDocument();
+    expect(within(card('host-2')).queryByText('Moving the server to host-4.')).not.toBeInTheDocument();
+    view.view.unmount();
+    moving({ machine: 'p3', state: 'preparing', reason: null, leader: 'host-1', progress: 40 }, { me: PAT, canMove: false });
+    const waiting = await openCard('host-4');
+    expect(within(waiting).getByText('host-4 takes the server once its copy is up to date (40%)')).toBeInTheDocument();
+    expect(within(waiting).queryByRole('button', { name: 'Cancel the move' })).not.toBeInTheDocument();
+  });
+
+  it('says how the move goes', async () => {
+    const preparing = { machine: 'p3', state: 'preparing', reason: null, leader: 'host-1', progress: 40 };
+    const first = moving(preparing, { routes: { 'DELETE /api/machines/p3/move': [204] } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    expect(within(fourth).getByText('host-4 takes the server once its copy is up to date (40%)')).toBeInTheDocument();
+    expect(within(fourth).queryByRole('button', { name: 'Move the server here' })).not.toBeInTheDocument();
+    /* While one machine waits to take the server, another may still be asked in its place. */
+    expect(within(card('host-2')).getByRole('button', { name: 'Move the server here' })).toBeInTheDocument();
+    await user.click(within(card('host-4')).getByRole('button', { name: 'Cancel the move' }));
+    await vi.waitFor(() => expect(first.calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/machines/p3/move', body: undefined }]));
+    first.view.unmount();
+    const lines: [object, string][] = [
+      [{ ...preparing, progress: null }, 'host-4 takes the server once its copy is up to date.'],
+      [{ ...preparing, state: 'switching' }, 'Moving the server to host-4.'],
+      [{ ...preparing, state: 'failed', reason: 'behind' }, 'The server stayed on host-1: host-4 did not get the last changes within a minute.'],
+      [{ ...preparing, state: 'failed', reason: 'no_link' }, "The server stayed on host-1: host-4 could not take the company's link at hornhoof.org."],
+    ];
+    for (const [move, line] of lines) {
+      const view = moving(move);
+      expect(within(await openCard('host-4')).getByText(line), line).toBeInTheDocument();
+      view.view.unmount();
+    }
+    /* After a failure the CEO may ask again. */
+    moving(lines[2]![0]);
+    expect(within(await openCard('host-4')).getByRole('button', { name: 'Move the server here' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Move the server here', 'Move the server', 'Hornhoof is updating. Move the server once the update ended.', 'The server is moving to host-3 now.'],
+    ['ru', 'Перенести сервер сюда', 'Перенести сервер', 'Hornhoof обновляется. Перенесите сервер, когда обновление закончится.', 'Сервер как раз переезжает на host-3.'],
+  ])("shows a move's refusal in %s", async (language, here, yes, updating, switching) => {
+    const refused = (reason: string, details?: object) => [409, { error: { code: 'conflict', reason, message: 'Refused.', ...(details ? { details } : {}) } }] as [number, unknown];
+    const first = moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('updating') } });
+    const user = userEvent.setup();
+    const fourth = await openCard('host-4');
+    await user.click(within(fourth).getByRole('button', { name: here }));
+    await user.click(within(fourth).getByRole('button', { name: yes }));
+    /* Said in the part itself, as an alert. */
+    await vi.waitFor(() => expect(within(fourth).getByText(updating)).toHaveAttribute('role', 'alert'));
+    expect(within(fourth).getByText(updating).closest('.prio')).not.toBeNull();
+    /* The question stays, to be asked again or called off. */
+    expect(within(fourth).getByRole('button', { name: yes })).toBeEnabled();
+    first.view.unmount();
+    moving(null, { language, routes: { 'POST /api/machines/p3/move': refused('switching', { host: 'host-3' }) } });
+    const again = await openCard('host-4');
+    await user.click(within(again).getByRole('button', { name: here }));
+    await user.click(within(again).getByRole('button', { name: yes }));
+    await vi.waitFor(() => expect(within(again).getByText(switching)).toHaveAttribute('role', 'alert'));
+  });
+
+  it("keeps the company's install connected", async () => {
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[1]!, serverInstall: true }, MACHINES[0]!], builtin: null }] });
+    render(<Machines me={ME} />);
+    expect(within(await openCard('build-box')).queryByRole('button', { name: 'Disconnect build-box' })).not.toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByRole('button', { name: 'Disconnect ivan-mbp' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', [
+      'Cannot take the server: it is a phone.',
+      'Cannot take the server: Hornhoof runs here without Docker; make host-1 a full machine.',
+      'Cannot take the server: Docker here gets less than 4 GB of memory.',
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees one department.",
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees 2 departments.",
+      "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.",
+      "Cannot take the server: the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
+      'Cannot take the server: measuring this machine.',
+      'Cannot take the server: 12 GB free; it needs 40.5 GB.',
+      'Cannot take the server: the disk saves slowly (72.4 ms); it needs under 50 ms.',
+    ]],
+    ['ru', [
+      'Не может взять сервер: это телефон.',
+      'Не может взять сервер: здесь Hornhoof работает без Docker; сделайте host-1 полной машиной.',
+      'Не может взять сервер: Docker здесь получает меньше 4 ГБ памяти.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит один отдел.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит 2 отдела.',
+      'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.',
+      'Не может взять сервер: скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
+      'Не может взять сервер: машина еще измеряется.',
+      'Не может взять сервер: свободно 12 ГБ; нужно 40,5 ГБ.',
+      'Не может взять сервер: диск сохраняет медленно (72,4 мс); нужно меньше 50 мс.',
+    ]],
+  ])('says why a machine cannot take the server in %s', async (language, lines) => {
+    const reasons: object[] = [
+      { why: 'phone' }, { why: 'no_core' }, { why: 'memory', memory: 3.2 * GIB },
+      { why: 'scope', person: 'Anna', departments: 1 }, { why: 'scope', person: 'Anna', departments: 2 }, { why: 'scope', person: 'Anna', departments: 0 },
+      { why: 'no_link' }, { why: 'measuring' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
+    ];
+    shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
+    await screen.findByRole('table');
+    for (const [n, line] of lines.entries()) {
+      const one = card(`host-${n}`);
+      expect(within(one).getByText(line), line).toBeInTheDocument();
+      expect(within(one).queryByRole('radio')).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the server's machine as 1", async () => {
+    /* The card of the computer the server runs on says 1, whatever its own row says. */
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, data: held({ number: null }) }], builtin: { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } }, priority: true }] });
+    const view = render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    const part = within(mac).getByRole('heading', { name: 'Priority' }).closest('section')!;
+    expect(part.textContent).toBe('Priority1The company server runs hereIf machine 1 goes away, machine 2 takes the server, then 3.');
+    expect(within(mac).queryByRole('radio')).not.toBeInTheDocument();
+    view.unmount();
+    /* A company whose only machine is the server's. */
+    lists({ 'GET /api/machines': [200, { machines: [], builtin: BUILTIN, priority: true }] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    expect(screen.getByRole('columnheader', { name: /Priority/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open the card of Built-in node' }).closest('tr')!.querySelector('.k-prio')).toHaveTextContent('1');
+  });
+
+  it.each([
+    ['en', ['Move the server to another machine first.', 'host-2 holds the only up-to-date copy; give another machine a place first.', 'This machine cannot take the server.']],
+    ['ru', ['Сначала перенесите сервер на другую машину.', 'host-2 хранит единственную актуальную копию; сначала дайте место другой машине.', 'Эта машина не может взять сервер.']],
+  ])('words the refusals in %s', async (language, lines) => {
+    const refusals: [number, string, string][] = [[409, 'leader_pin', 'conflict'], [409, 'only_copy', 'conflict'], [400, 'unfit', 'validation']];
+    let at = 0;
+    shown(language, four(), { 'PUT /api/machines/p1/priority': () => [refusals[at]![0], { error: { code: refusals[at]![2], reason: refusals[at]![1], message: 'The words of the server.' } }] });
+    const user = userEvent.setup();
+    const second = await openCard('host-2');
+    for (const line of lines) {
+      await user.click(within(second).getAllByRole('radio')[2]!);
+      expect(await within(second).findByText(line)).toHaveAttribute('role', 'alert');
+      at += 1;
+    }
+  });
+
+  it.each([
+    ['en', (date: string) => `Stopped holding the company's data on ${date}. If it may be in other hands, change the company secret and the API keys.`],
+    ['ru', (date: string) => `Перестала хранить данные компании ${date}. Если она может быть в чужих руках, смените секрет компании и API-ключи.`],
+  ])('tells the CEO a machine left in %s', async (language, line) => {
+    const leftAt = '2026-11-10T09:30:00.000Z';
+    shown(language, [{ ...MACHINES[0]!, data: held({ leftAt }) }]);
+    expect(within(await openCard('ivan-mbp')).getByText(line(new Date(leftAt).toLocaleDateString(language)))).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'rack-01 leads. mac keeps a copy and takes over if rack-01 stops.', 'rack-01 leads. mac and deb keep copies; deb takes over if rack-01 stops.', (time: string) => `Only rack-01 holds changes since ${time}.`],
+    ['ru', 'rack-01 ведет компанию. mac хранит копию и возьмет сервер, если rack-01 остановится.', 'rack-01 ведет компанию. mac и deb хранят копии; deb возьмет сервер, если rack-01 остановится.', (time: string) => `Только rack-01 хранит изменения с ${time}.`],
+  ])('says who holds the company in %s', async (language, one, two, only) => {
+    const since = '2026-11-10T09:30:00.000Z';
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, copies: { leader: 'rack-01', copies: [{ hostname: 'mac', sync: false }], onlySince: null } }] });
+    const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(one)).toBeInTheDocument();
+    view.unmount();
+    /* Two copies: both are named, and the one commits wait for takes over; with none up to date, since when. */
+    lists({ 'GET /api/machines': [200, { machines: MACHINES, builtin: null, copies: { leader: 'rack-01', copies: [{ hostname: 'mac', sync: false }, { hostname: 'deb', sync: true }], onlySince: since } }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(two)).toBeInTheDocument();
+    expect(screen.getByText(only(clock(language as 'en' | 'ru', since)!))).toBeInTheDocument();
+  });
+
+  it('says nothing of copies where the server tells none', async () => {
+    shown('en', [MACHINES[0]!]);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).queryByText(/^Copy: /)).not.toBeInTheDocument();
+    expect(within(mac).queryByText(/^Holds no copy: /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ leads\. /)).not.toBeInTheDocument();
   });
 
   it('says in Russian that the server runs on a machine that joined', async () => {
@@ -657,5 +1105,154 @@ describe('Machines', () => {
       render(<Machines me={ME} />);
       expect(within(await openCard('ivan-mbp')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
     });
+  });
+});
+
+describe("each machine's place in the company's network", () => {
+  const SERVER_BOX = { ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true };
+  const WORKER = { ...MACHINES[0]!, core: { webPort: 8081, path: 'relay' as const }, needsCore: false };
+  const OLD = { ...MACHINES[1]!, owner: { id: 'p1', name: 'Ivan' }, core: null, needsCore: true };
+  const server: BuiltinView = { ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, webPort: 8080, refusedBy: ['ivan-mbp'] };
+  const show = (extra: Parameters<typeof mockApi>[0] = {}, machines = [WORKER, OLD, SERVER_BOX]) => {
+    const calls = lists({ 'GET /api/machines': [200, { machines, builtin: server }], ...extra });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    return calls;
+  };
+
+  it.each([
+    ['en', 'Company server here', 'Open here', 'debian does not take connections from ivan-mbp. If debian is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.'],
+    ['ru', 'Здесь сервер компании', 'Открыть здесь', 'debian не принимает подключения от ivan-mbp. Если на машине debian стоит macOS с включенным файрволом, разрешите на ней входящие подключения для Docker (com.docker.backend) или, если там Colima, для ssh.'],
+  ])('shows in %s where the company opens on each machine, and whom the server could not take', async (language, badge, openHere, refusal) => {
+    localStorage.setItem('hh-lang', language);
+    show();
+    const debian = await openCard('debian');
+    expect(within(debian).getByText(badge)).toBeInTheDocument();
+    expect(fact(debian, openHere)).toBe('localhost:8080');
+    expect(within(debian).getByText(refusal)).toBeInTheDocument();
+    const mac = card('ivan-mbp');
+    expect(fact(mac, openHere)).toBe('localhost:8081');
+    expect(within(mac).queryByText(refusal)).not.toBeInTheDocument();
+    /* A machine with no core has no address of its own for the company. */
+    expect(within(card('build-box')).queryByText(openHere)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Make build-box a full machine of the company', "Run this in a terminal on build-box. It adds the company's core there: the company opens on its localhost, and updates come by themselves."],
+    ['ru', 'Сделать build-box полной машиной компании', 'Выполните это в терминале на build-box. Команда добавит туда ядро компании: компания откроется на localhost этой машины, а обновления будут приходить сами.'],
+  ])('offers the core in %s to a machine joined before machines had one, and shows its command', async (language, action, run) => {
+    localStorage.setItem('hh-lang', language);
+    const id = '7'.repeat(64);
+    const calls = show({ 'POST /api/machines/m2/core': [201, { id, command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() }] });
+    const box = await openCard('build-box');
+    /* Only a machine that needs it is offered it. */
+    expect(within(card('ivan-mbp')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
+    await userEvent.setup().click(within(box).getByRole('button', { name: action }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m2/core', body: undefined });
+    expect(await within(box).findByText(withKey(`${COMMAND}-CORE`))).toBeInTheDocument();
+    expect(within(box).getByText(run)).toBeInTheDocument();
+    expect(within(box).queryByRole('button', { name: action })).not.toBeInTheDocument();
+  });
+
+  it('keeps a command for the core across a reload, as what it is', async () => {
+    const shown = { id: '8'.repeat(64), kind: 'core' as const, plans: [], machineId: 'm2', machine: 'build-box', command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+    show({ 'GET /api/nodes/commands': [200, { commands: [shown] }] });
+    const box = await screen.findByRole('article', { name: 'build-box' });
+    expect(await within(box).findByText(withKey(shown.command))).toBeInTheDocument();
+    expect(within(box).getByText(/^Run this in a terminal on build-box\. It adds the company's core there/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Disconnect', 'If it was stolen, its owner should also revoke its Claude sign-in at claude.ai, which stays valid for a year.'],
+    ['ru', 'Отключить', 'Если ее украли, владельцу нужно еще отозвать вход Claude на claude.ai: он действует год.'],
+  ])('says in %s what a Disconnect cannot end, for a machine that ran Claude alone', async (language, disconnect, claude) => {
+    localStorage.setItem('hh-lang', language);
+    show();
+    const user = userEvent.setup();
+    const mac = await openCard('ivan-mbp');
+    await user.click(within(mac).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
+    expect(within(mac).getByText(new RegExp(claude.replaceAll('.', '\\.')))).toBeInTheDocument();
+    const box = card('build-box');
+    await user.click(within(box).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
+    expect(within(box).queryByText(new RegExp(claude.replaceAll('.', '\\.')))).not.toBeInTheDocument();
+  });
+
+  it('says before a machine joins what a Mac that runs the server may ask', async () => {
+    lists({ 'POST /api/machines/command': [201, { id: '9'.repeat(64), command: COMMAND, expiresAt: new Date(Date.now() + 3600_000).toISOString() }] });
+    render(<Machines me={ME} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect a machine' }));
+    expect(await screen.findByText(/^If the company server runs on a Mac with its firewall on, the Mac may ask once whether Docker/)).toBeInTheDocument();
+  });
+});
+
+describe("computer access on a machine's card", () => {
+  const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
+  /* Ivan's Mac with the company's core, which holds his key, and the server on a machine of his that told its name. */
+  const mac = (over: Parameters<typeof accessView>[1] = {}) => ({ ...MACHINES[0]!, core: { webPort: 8081, path: 'direct' as const }, access: accessView('ivan-mbp', { key: 'held', ...over, machine: { id: 'm1', os: 'darwin', ...over.machine } }) });
+  const box = () => ({ ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true });
+  const server = (over: Parameters<typeof accessView>[1] = {}): BuiltinView => ({ ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, access: accessView('debian', { ...over, machine: { id: 'm-server', role: 'data', data: true, ...over.machine } }) });
+  const show = (machines: ReturnType<typeof mac>[], builtin: BuiltinView, extra: Parameters<typeof mockApi>[0] = {}) => {
+    const calls = lists({ 'GET /api/machines': [200, { machines: [...machines, box()], builtin }], ...extra });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    return calls;
+  };
+
+  it("opens the server's own machine on a click, and says what that gives", async () => {
+    const calls = show([mac()], server(), { 'POST /api/machines/m-server/access/open': [200, accessView('debian', { until: UNTIL })] });
+    const card_ = await openCard('debian');
+    expect(within(card_).getByText("Open access lets the orchestrator change anything on debian, the company's data included.")).toBeInTheDocument();
+    await userEvent.setup().click(within(card_).getByRole('button', { name: 'Open access to debian for a day' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} }));
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  });
+
+  it("opens a machine that holds its owner's key with what the owner signs", async () => {
+    /* Their key as the server keeps it, made on another device with this password. */
+    const made = mockApi({ 'GET /api/me/key': [200, { key: null }] });
+    await makeKey('right');
+    const sent = made.find(call => call.method === 'PUT')!.body as { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };
+    await keyDefaults.store.clear();
+    const stored = { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations };
+    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('ivan-mbp', { until: UNTIL })] });
+    const card_ = await openCard('ivan-mbp');
+    /* On a Mac the access reaches Docker's own system. */
+    expect(within(card_).getByText("On a Mac this reaches Docker's Linux system, not macOS itself.")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(card_).getByRole('button', { name: 'Open access to ivan-mbp for a day' }));
+    await user.type(await within(card_).findByLabelText('Password'), 'right{Enter}');
+    await vi.waitFor(() => expect(calls.some(call => call.path === '/api/machines/m1/access/open')).toBe(true));
+    const body = calls.find(call => call.path === '/api/machines/m1/access/open')!.body as { grant: { payload: string } };
+    expect(JSON.parse(body.grant.payload)).toMatchObject({ v: 1, machine: 'n-ivan-mbp' });
+  });
+
+  it('says until when a machine is open to everyone who sees its card, and lets only who may close it', async () => {
+    const calls = show([mac({ until: UNTIL, canOpen: false, canClose: false })], server({ until: UNTIL }), { 'POST /api/machines/m-server/access/close': [200, accessView('debian')] });
+    const others = await openCard('ivan-mbp');
+    expect(within(others).getByText(/^Access to ivan-mbp is open until .+\.$/)).toBeInTheDocument();
+    expect(within(others).queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
+    const own = card('debian');
+    await userEvent.setup().click(within(own).getByRole('button', { name: 'Close access' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined }));
+  });
+
+  it('gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs', async () => {
+    show([mac({ canOpen: false, canClose: false })], server({ reachable: false }));
+    const others = await openCard('ivan-mbp');
+    expect(within(others).queryByText('Computer access')).not.toBeInTheDocument();
+    expect(within(others).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
+    const own = card('debian');
+    expect(within(own).getByText('Hornhoof cannot reach debian now.')).toBeInTheDocument();
+    expect(within(own).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
+  });
+
+  it('tells its owner in Russian what stands in the way, and what opening gives', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    show([mac({ key: 'not_held' })], server({ machine: { os: null } }));
+    const mine = await openCard('ivan-mbp');
+    expect(within(mine).getByText('Машина ivan-mbp пока не хранит ваш ключ. Выполните на ней новую команду из «Подключить машину»: ключ она берет только оттуда.')).toBeInTheDocument();
+    expect(within(mine).queryByRole('button', { name: /Открыть доступ/ })).not.toBeInTheDocument();
+    const own = card('debian');
+    expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();
+    expect(within(own).getByText('Открытый доступ позволяет оркестратору изменить на машине debian что угодно, включая данные компании.')).toBeInTheDocument();
+    expect(within(own).getByText('Если на машине debian стоит macOS, этот доступ открывает только Linux внутри Docker, а не саму macOS.')).toBeInTheDocument();
   });
 });

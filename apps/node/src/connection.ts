@@ -1,4 +1,4 @@
-import { cut, parseServerMessage, type NodeDisconnectCause, type NodeReconnect } from '@hornhoof/protocol';
+import { ACKS_HEADER, cut, parseServerMessage, type NodeDisconnectCause, type NodeReconnect } from '@hornhoof/protocol';
 import { OperatorDeliveryMetadata, OperatorServerMessage, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
@@ -34,7 +34,8 @@ export type ConnectOptions = {
   url: string;
   key: string;
   log?(line: string): void;
-  onOpen(send: (m: ProgramNodeMessage) => boolean): void;
+  /* acks: the server says in its upgrade answer that it confirms numbered messages. */
+  onOpen(send: (m: ProgramNodeMessage) => boolean, acks: boolean): void;
   onMessage(m: ProgramServerMessage): void;
   onClose?(): void;
   /* Hornhoof does not know this key any more: the machine was disconnected there. */
@@ -61,6 +62,8 @@ type Attempt = {
   healthyOpen: boolean;
   watchdog: boolean;
   handshakeTimedOut: boolean;
+  /* The server's upgrade answer said it confirms numbered messages. */
+  acks: boolean;
   errorCause: NodeDisconnectCause | null;
   errorCode: string | null;
   error: string | null;
@@ -246,6 +249,7 @@ const newAttempt = (startedAt: number): Attempt => ({
   healthyOpen: false,
   watchdog: false,
   handshakeTimedOut: false,
+  acks: false,
   errorCause: null,
   errorCode: null,
   error: null,
@@ -451,7 +455,7 @@ class ConnectionSession {
   private invokeOnOpen(attempt: Attempt, send: (m: ProgramNodeMessage) => boolean): boolean {
     let ok = true;
     safeCall(
-      () => this.opts.onOpen(send),
+      () => this.opts.onOpen(send, attempt.acks),
       err => {
         ok = false;
         attempt.errorCause = 'abnormal_close';
@@ -557,7 +561,10 @@ class ConnectionSession {
   private bindSocket(ws: WebSocket, attempt: Attempt): void {
     this.active = { ws, attempt };
     this.connectingTimer = setTimeout(() => this.abortConnecting(ws, attempt), this.timings.handshakeTimeoutMs);
-    ws.on('upgrade', res => res.socket.setKeepAlive(true, this.timings.keepAliveMs));
+    ws.on('upgrade', res => {
+      attempt.acks = res.headers[ACKS_HEADER] === '1';
+      res.socket.setKeepAlive(true, this.timings.keepAliveMs);
+    });
     ws.on('ping', () => this.isCurrent(ws) && this.touchInbound());
     ws.on('pong', () => this.isCurrent(ws) && this.touchInbound());
     ws.on('open', () => this.handleOpen(ws, attempt));

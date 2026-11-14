@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
 import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { verifiedReuse } from '../src/modules/tasks/review-reuse.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
 import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { reusableUnits } from '../src/modules/testruns/reuse-evidence.js';

@@ -2,7 +2,7 @@ import { PROGRAM_SCREEN_MAX } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, jobs } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { as, setUpCompany, testApp } from './helpers.js';
 

@@ -291,7 +291,7 @@ describe('a task that comes after others', () => {
     const tests = (await member('End-to-end tests', tess.id)).task;
     const seen = statements();
     await updateTask(ctx, head.id, api.id, { after: [tests.id] });
-    const lock = seen.findIndex(s => /^select "id" from "companies" where "companies"\."id" = \$1 for update$/.test(s.sql) && s.params[0] === companyId);
+    const lock = seen.findIndex(s => /^select "id" from "companies" where "companies"\."id" = \$1 for no key update$/.test(s.sql) && s.params[0] === companyId);
     const circle = seen.findIndex(s => /^select "after" from "tasks" where "tasks"\."id" in \(\$1\)$/.test(s.sql) && s.params[0] === tests.id);
     const change = seen.findIndex(s => s.sql.startsWith('update "tasks"') && s.params.includes(api.id));
     expect(lock).toBeGreaterThanOrEqual(0);

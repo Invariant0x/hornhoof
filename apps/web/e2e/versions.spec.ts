@@ -50,7 +50,8 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await serveApi(page);
     const target = { ...BUILD, version: '0.5.1', tag: '0.5.1', commit: 'b'.repeat(40), migrations: 52 };
     const old = { ...BUILD, version: '0.4.0', tag: '0.4.0', commit: 'c'.repeat(40), migrations: 50 };
-    const status = { id: 'update', version: target.version, commit: target.commit, state, step: 'backup', log: '', at: '2026-11-03T10:00:00Z' };
+    /* A running update stands at the step with the longest words. */
+    const status = { id: 'update', version: target.version, commit: target.commit, state, step: state === 'running' ? 'promise' : 'backup', log: '', at: '2026-11-03T10:00:00Z' };
     const updater = { present: true, status: ['running', 'rolled_back'].includes(state) ? status : null, waiting: state === 'waiting' ? target : null };
     await page.route('**/api/version', route => route.fulfill({ json: CURRENT }));
     await page.route('**/api/updates', route => route.fulfill({ json: { ...UPDATES, latest: target, versions: [target, BUILD, old], updater } }));
@@ -68,7 +69,15 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
       await dialog.getByRole('listitem').filter({ hasText: '0.4.0 (ccccccc)' }).getByRole('button', { name: language === 'en' ? 'Install' : 'Установить', exact: true }).click();
       await expect(dialog.getByRole('button', { name: language === 'en' ? 'Go back to 0.4.0 (ccccccc)' : 'Вернуться к 0.4.0 (ccccccc)', exact: true })).toBeVisible();
     }
-    if (state === 'running') await expect(dialog.getByText(`${language === 'en' ? 'Updating Hornhoof to' : 'Hornhoof обновляется до'} 0.5.1 (bbbbbbb)`, { exact: true })).toBeVisible();
+    if (state === 'running') {
+      await expect(dialog.getByText(`${language === 'en' ? 'Updating Hornhoof to' : 'Hornhoof обновляется до'} 0.5.1 (bbbbbbb)`, { exact: true })).toBeVisible();
+      /* The bar of five steps and its words lie inside the dialog, the second step under way. */
+      const bar = dialog.getByRole('progressbar');
+      await expect(bar).toHaveAttribute('aria-valuetext', language === 'en' ? 'Step 2 of 5: asking the copies to wait' : 'Шаг 2 из 5: прошу копии подождать');
+      await expect(bar.locator('i')).toHaveCount(5);
+      const [inner, outer, words] = [await bar.boundingBox(), await dialog.boundingBox(), await dialog.locator('.uprog-text').boundingBox()];
+      for (const one of [inner!, words!]) expect(one.x >= outer!.x - 1 && one.x + one.width <= outer!.x + outer!.width + 1).toBe(true);
+    }
     if (state === 'rolled_back') {
       const result = language === 'en'
         ? 'The update to 0.5.1 (bbbbbbb) did not start. Hornhoof went back to 0.5.0 (84c8383).'

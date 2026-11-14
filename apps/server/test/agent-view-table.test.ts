@@ -48,6 +48,16 @@ const anIdea = (end: string) => async (c: AclCompany, agent: Crew): Promise<Call
   const [idea] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Idea', text: 'x' }).returning();
   return { method: 'POST', url: `/api/improvements/${idea!.id}/${end}` };
 };
+/* A finding about Hornhoof itself, sent on from its card: the window shows what goes, and only the right digest sends it. */
+const aFinding = (url: string, extra: object = {}) => async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
+  return { method: 'POST', url, payload: { kind: 'bug', title: 'Finding', text: 'x', improvement: finding!.id, ...extra } };
+};
+/* Its repeats, told from its card: a finding not sent yet has none to tell, so nothing reaches the relay from here. */
+const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
+  return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
+};
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
   const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
@@ -79,6 +89,10 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true, ownerToo: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
   { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
+  { route: 'POST /api/feedback/preview', of: aFinding('/api/feedback/preview'), companyOnly: true },
+  /* A digest of nothing: what reaches the relay is never sent from here. */
+  { route: 'POST /api/feedback', of: aFinding('/api/feedback', { digest: '0'.repeat(64) }), companyOnly: true },
+  { route: 'POST /api/feedback/repeats', of: aRepeated, companyOnly: true },
   /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
   { route: 'GET /api/attachments/:id', of: aPicture, closedStatus: 404 },
 ];
@@ -120,6 +134,8 @@ const LISTS: Listed[] = [
   { route: 'GET /api/improvements', url: () => '/api/improvements', statuses: WHOLE_ONLY },
   { route: 'GET /api/notebook', url: () => '/api/notebook', statuses: WHOLE_ONLY },
   { route: 'GET /api/computer', url: () => '/api/computer', statuses: WHOLE_ONLY },
+  { route: 'GET /api/machines/access', url: () => '/api/machines/access', statuses: ALL_OK },
+  { route: 'GET /api/machines/here', url: () => '/api/machines/here', statuses: ALL_OK },
   { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: { ...DEPARTMENT_ITSELF, ann: 403 } },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK, company: true },
@@ -127,6 +143,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
+  { route: 'GET /api/autonomous-releases', url: () => '/api/autonomous-releases', statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
   /* Ann has App of Development and does not run Development: its branches are closed to her, as its roster is. */
@@ -135,6 +152,7 @@ const LISTS: Listed[] = [
 
 /* Elsewhere, with the reason it is not a row above. */
 const ELSEWHERE: Record<string, string> = {
+  'PUT /api/departments/:id/approval-policy/autonomous-release': 'autonomous-release.test.ts: the signed-in human CEO alone, 403 for every other person and every agent',
   'PUT /api/departments/:id/wait-policy/:kind': 'agent-view-waits.test.ts: only this department owner, CEO or delegate; every role checked',
   'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
@@ -166,6 +184,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/assistant/mcp': "assistants-mcp.test.ts: the same reads and writes over MCP, by the assistant's key and with its owner's rights",
   'GET /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
   'DELETE /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
+  'GET /api/feedback/inbox': "feedback-inbox.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one; its cards came from installations, not from this company's agents",
+  'POST /api/feedback/inbox/:id/issue': "feedback-issue.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one",
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
@@ -176,6 +196,8 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
   'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
+  'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/decline', 'POST /api/machines/:id/access/open',
+  'GET /api/feedback', 'POST /api/feedback/inbound',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
   'PUT /api/departments/:id/work-mode',
@@ -186,7 +208,9 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
   'GET /api/map/layout', 'PATCH /api/map/layout', 'DELETE /api/map/layout',
-  'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/disconnect', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
+  'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'POST /api/machines/:id/disconnect', 'PUT /api/machines/:id/priority', 'POST /api/machines/:id/move', 'DELETE /api/machines/:id/move', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
+  'GET /api/me/key', 'PUT /api/me/key',
+  'GET /api/backups', 'POST /api/backups/recovery', 'GET /api/backups/recovery', 'GET /api/backups/:id/warning', 'POST /api/backups/:id/restore', 'POST /api/backups/kept/:name/leave', 'GET /api/merges/:id/conflicts', 'POST /api/merges/pick', 'GET /api/network/backups', 'POST /api/network/backups', 'GET /api/network/switch', 'GET /api/network/switched', 'GET /api/network/question', 'POST /api/network/question/go-on', 'POST /api/network/question/wait', 'POST /api/network/certificate', 'GET /api/network/computer', 'POST /api/network/computer/:id', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report', 'POST /api/network/secrets',
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
   'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',
   'GET /api/parts/:id/files/:name', 'PUT /api/parts/:id/files/:name',
@@ -194,9 +218,11 @@ const NO_AGENT_DATA: string[] = [
   'PATCH /api/people/:id', 'PUT /api/people/:id/ceo-delegate', 'POST /api/people/:id/invite', 'POST /api/people/invite',
   'POST /api/people/assistants', 'PATCH /api/people/:id/assistant', 'POST /api/people/:id/key', 'DELETE /api/people/:id/key',
   'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
+  'POST /api/recovery', 'GET /api/recovery', 'POST /api/recovery/restore', 'POST /api/recovery/challenge', 'PUT /api/recovery/bundles/:id',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
   'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
   'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'GET /install.ps1', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
+  'GET /robots.txt', 'GET /.well-known/acme-challenge/*',
 ];
 
 const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => c.app.inject({ method, url, ...(payload ? { payload } : {}), ...as(c.tokens[viewer]) });

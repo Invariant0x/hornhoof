@@ -1,0 +1,4 @@
+#!/bin/sh
+# The updater gives what it wrote for the keeper to the owner of the control folder. Here the test's own user owns
+# everything already, so this only says what it was asked.
+printf 'chown %s\n' "$*" >> "$STUB_LOG"

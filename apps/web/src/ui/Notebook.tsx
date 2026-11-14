@@ -93,7 +93,9 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   const base = notebookBase(departmentId);
   const load = useCallback(async () => {
     try {
-      setNotes((await api.get<{ notes: NoteView[] }>(base)).notes);
+      const res = await api.get<{ notes: NoteView[] }>(base);
+      if (!res) return;
+      setNotes(res.notes);
       setUnread(null);
     } catch (err) {
       setUnread(err);

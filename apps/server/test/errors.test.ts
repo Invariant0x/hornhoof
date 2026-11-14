@@ -2,7 +2,9 @@ import { Writable } from 'node:stream';
 import { DrizzleQueryError } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { registerErrorHandling } from '../src/errors.js';
+import { NotConfirmed, requestRoute } from '../src/db/confirm.js';
+import { NOT_CONFIRMED, registerErrorHandling } from '../src/errors.js';
+import { READ_ONLY_MESSAGE } from '../src/modules/keeper/app-mode.js';
 
 /* A route that throws err, and what the log got of it. */
 async function thrown(err: Error) {
@@ -13,7 +15,7 @@ async function thrown(err: Error) {
       done();
     },
   });
-  const app = Fastify({ logger: { level: 'error', stream } });
+  const app = Fastify({ logger: { level: 'warn', stream } });
   registerErrorHandling(app);
   app.get('/boom', async () => {
     throw err;
@@ -44,5 +46,34 @@ describe('an error no route handled', () => {
     expect(res.statusCode).toBe(500);
     expect(log).toContain('The disk is full at /data.');
     expect(log).toContain('errors.test.ts');
+  });
+
+  it('answers a refused lease as read_only and a lost commit as not_confirmed', async () => {
+    const refused = await thrown(new DrizzleQueryError('insert into "tasks"', [], Object.assign(new Error('This machine holds no lease now, so nothing was changed.'), { code: 'HHF01' })));
+    expect(refused.res.statusCode).toBe(503);
+    expect(refused.res.json()).toEqual({ error: { code: 'unavailable', message: READ_ONLY_MESSAGE, reason: 'read_only' } });
+
+    for (const lost of [new NotConfirmed({ message: 'a warning' }), Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' })]) {
+      const { res, log } = await thrown(lost);
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toEqual({ error: { code: 'unavailable', message: NOT_CONFIRMED, reason: 'not_confirmed' } });
+      const [line, ...others] = log.trim().split('\n');
+      expect(others).toEqual([]);
+      expect(JSON.parse(line!)).toMatchObject({ level: 40, route: '/boom', error: { type: lost.constructor.name, message: lost.message } });
+    }
+  });
+});
+
+describe('the route of a request', () => {
+  it('runs each route inside requestRoute', async () => {
+    const app = Fastify();
+    registerErrorHandling(app);
+    app.get('/api/x/:id', async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return { route: requestRoute.getStore() };
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/x/1' });
+    await app.close();
+    expect(res.json()).toEqual({ route: 'GET /api/x/:id' });
   });
 });

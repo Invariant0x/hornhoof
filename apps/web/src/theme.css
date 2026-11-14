@@ -207,7 +207,9 @@ select:disabled { opacity: .55; }
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
-.glass { background: var(--hud); border: 1px solid var(--line); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+/* Glass floats over the canvas, whose dots and signals move every frame: a blur under it is drawn again every frame and
+   stalled the page (Design, #874). The dense --hud of every skin stands in for it. */
+.glass { background: var(--hud); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
 .tabs { display: flex; height: 44px; box-sizing: border-box; padding: 0; }
@@ -242,6 +244,10 @@ select:disabled { opacity: .55; }
 }
 .update-banner > span { font-size: 13px; }
 .update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
+/* The question of which copy to go on from: its text, then its answers as one group below it. */
+.question-banner { flex-direction: column; align-items: stretch; box-sizing: border-box; inline-size: min(640px, calc(100% - 32px)); padding: 12px 14px; }
+.question-banner > p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.question-banner > .question-note { color: var(--muted); }
 .dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: var(--scrim); }
 .dialog {
   display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; scrollbar-gutter: stable; padding: 18px;
@@ -400,11 +406,13 @@ select:disabled { opacity: .55; }
 .body.page::before { content: ''; position: sticky; z-index: 5; top: 0; display: block; height: 68px; margin-bottom: -68px; background: var(--bg); }
 
 /* Map */
-.map {
-  position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+.map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.map::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+.map[inert] *, .map[inert] *::before, .map[inert] *::after { animation-play-state: paused !important; }
 .map:active { cursor: grabbing; }
 .map-failure { margin: 24px; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -412,6 +420,14 @@ select:disabled { opacity: .55; }
 .wires { left: 0; top: 0; pointer-events: none; overflow: visible; }
 .wires .tr { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .wires .via { fill: var(--bg); stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.map-live { left: 0; top: 0; width: 0; height: 0; pointer-events: none; overflow: visible; }
+.pt-box { position: absolute; pointer-events: none; overflow: visible; }
+.way-seg { position: absolute; overflow: hidden; pointer-events: none; transform-origin: 0 50%; }
+.way-run-svg { position: absolute; top: 0; display: block; pointer-events: none; animation: way-shift 0.9s linear infinite; }
+.way-run-svg > line { fill: none; stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.way-run-svg > line.c { stroke: var(--cyan); }
+.way-run-svg > line.a { stroke: var(--amber); }
+@keyframes way-shift { to { transform: translateX(calc(12px / var(--k, 1))); } }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
@@ -432,7 +448,8 @@ select:disabled { opacity: .55; }
 .hub > .hub-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .hub-bg { fill: var(--bg); }
 .hub-ring { fill: none; stroke: var(--line2); stroke-width: 1.2; stroke-dasharray: 3 9; }
-.spin { transform-origin: 120px 120px; animation: spin 60s linear infinite; }
+.hub > .hub-spin { pointer-events: none; transform-origin: 50% 50%; animation: spin 60s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .hub > .hub-spin { animation: none; } }
 .gauge-bg { fill: none; stroke: var(--idle); stroke-width: 12; stroke-dasharray: .72 .28; }
 .gauge { fill: none; stroke: var(--cyan); stroke-width: 12; stroke-dasharray: .72 .28; }
 .hub-in { fill: var(--surface); stroke: var(--line2); stroke-width: 1.2; }
@@ -1025,17 +1042,27 @@ button.dept { padding: 0; border: 0; background: none; font: inherit; color: inh
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
 button.dept:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
-   once when work reaches or leaves it. */
-button.dept.busy, button.dept.waits { animation: dglow 2.6s ease-in-out infinite; }
-button.dept.busy { --glow: var(--cyan); }
-button.dept.waits { --glow: var(--amber); }
-button.dept.busy > .edge, button.dept.waits > .edge { animation: dbreathe 2.6s ease-in-out infinite; }
-button.dept.flash > .edge { animation: eflash 1.4s ease-out; }
-@keyframes dbreathe { 50% { background: var(--glow); } }
-@keyframes dglow { 50% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--glow) 45%, transparent)); } }
+   once when work reaches or leaves it. Both layers animate opacity outside .edge's clip-path so WebKit composites them. */
+button.dept.busy { --glow: var(--cyan); --frame: var(--cyan); }
+button.dept.waits { --glow: var(--amber); --frame: var(--amber); }
+button.dept.flash { --frame: var(--cyan); }
+button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 45%, transparent);
+  animation: dglow 2.6s ease-in-out infinite;
+}
+.hub.attn { --glow: var(--amber); }
+.hub.attn::before { inset: 1px; border-radius: 50%; }
+.frame-breathe { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; opacity: 0; animation: dbreathe 2.6s ease-in-out infinite; }
+.frame-breathe > polygon, .frame-breathe > polyline { fill: none; stroke: var(--frame); stroke-width: 1.2; }
+button.dept.flash > .frame-breathe { animation: frame-flash 1.4s ease-out; }
+button.dept:hover > .frame-breathe, button.dept:focus-visible > .frame-breathe, button.chip-btn:hover > .frame-breathe, button.chip-btn:focus-visible > .frame-breathe { visibility: hidden; }
+@keyframes dbreathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes dglow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes frame-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  button.dept.busy, button.dept.waits, button.dept.flash > .edge { animation: none; }
-  button.dept.busy > .edge, button.dept.waits > .edge { animation: none; background: var(--glow); }
+  button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before, .frame-breathe { animation: none; display: none; }
+  button.dept.busy > .edge, button.dept.waits > .edge { background: var(--glow); }
 }
 /* A person's card opens the decisions waiting for them; while any wait, it shows their number and breathes amber, and so
    does the hub. */
@@ -1044,11 +1071,9 @@ button.chip-btn > .edge { height: 100%; }
 button.chip-btn:hover > .edge, button.chip-btn:focus-visible > .edge { background: var(--cyan); }
 button.chip-btn:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .chip-count { position: absolute; top: -8px; right: -8px; margin: 0; }
-button.chip-btn.attn, .hub.attn > .hub-art { --glow: var(--amber); animation: dglow 2.6s ease-in-out infinite; }
-button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ease-in-out infinite; }
+button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .hub.attn .hub-ring, .hub.attn .hub-in { stroke: var(--amber); }
 @media (prefers-reduced-motion: reduce) {
-  button.chip-btn.attn, .hub.attn > .hub-art, button.chip-btn.attn > .edge { animation: none; }
   button.chip-btn.attn > .edge { background: var(--amber); }
 }
 
@@ -1074,6 +1099,10 @@ button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ea
 .wires .tr.live { stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; pointer-events: none; animation: way-run 0.9s linear infinite; }
 .wires .tr.live.c { stroke: var(--cyan); }
 .wires .tr.live.a { stroke: var(--amber); }
+.map .wires .tr.live { animation: none; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-light]) .map .wires .tr.live { stroke: none; }
+}
 @keyframes way-run { to { stroke-dashoffset: -12; } }
 @media (prefers-reduced-motion: reduce) { .wires .tr.live { animation: none; } }
 .llab { z-index: 1; transform: translate(-50%, -50%) scale(var(--k, 1)); padding: 0 7px; background: var(--bg); color: var(--muted); font-size: 12px; line-height: 18px; white-space: nowrap; pointer-events: none; }
@@ -1244,6 +1273,14 @@ body:has(.dview) .version-mark { display: none; }
 .appr-limit .field { min-width: 0; }
 .appr-limit input { width: 100%; box-sizing: border-box; }
 .appr-limit .btn { grid-column: 1 / -1; justify-self: start; }
+.appr-auto { display: grid; gap: 6px; min-width: 0; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.appr-auto-toggle { display: flex; gap: 8px; align-items: start; font-size: 13px; cursor: pointer; min-width: 0; }
+.appr-auto-toggle input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--cyan); }
+.appr-auto-toggle span { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.appr-auto-journal { display: grid; gap: 4px; min-width: 0; margin-top: 2px; }
+.appr-auto-journal ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.appr-auto-journal li { min-width: 0; overflow-wrap: anywhere; }
+.appr-auto-journal code { font-family: var(--f-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
 
 /* Agent settings and task details share the left panel's frame. */
 .acard { position: fixed; z-index: 9; }
@@ -1388,6 +1425,39 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .imp-guesses li { font-style: italic; }
 .imp-source { display: block; font-size: 12px; color: var(--muted); }
 .imp-result { margin: 0; padding: 8px 12px; background: var(--surface2); border-left: 2px solid var(--line2); overflow-wrap: anywhere; }
+.imp-sent { border-left-color: var(--ok); }
+/* What became of a finding sent to Hornhoof's developers: its line of facts, its issue as a link, and the version that
+   fixed it. */
+.imp-fate { display: grid; gap: 8px; min-width: 0; }
+.imp-fate .imp-meta a { overflow-wrap: anywhere; }
+.imp-fixed { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--ok); background: var(--surface2); color: var(--ink); overflow-wrap: break-word; }
+.badge.imp-platform { color: var(--cyan-ink); }
+/* The feedback window: the kind as three 44 px choices that wrap by whole words, the description, a note on what is
+   hidden, then exactly what goes with its technical data. */
+.fb-kinds { flex-wrap: wrap; }
+.fb-kinds button { min-height: 44px; margin: 0; margin-inline-start: -1px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.fb-kinds button:first-child { margin-inline-start: 0; }
+.fb-input { width: 100%; min-height: 120px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; line-height: 1.45; resize: vertical; }
+.fb-input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.fb-note { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.fb-check { display: grid; gap: 12px; min-width: 0; }
+.fb-check h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
+.fb-check .facts dd { overflow-wrap: anywhere; }
+.fb-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-code { font-family: var(--f-mono); font-size: 12px; }
+.fb-hidden { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); color: var(--amber-ink); font-size: 13px; overflow-wrap: break-word; }
+/* A card of the inbox: its line on the start side and its priority word say how pressing it is, its words stay text. */
+.fb-card { border-left: 1px solid var(--line); border-inline-start: 3px solid var(--amber); min-width: 0; }
+.fb-card.fb-high { border-inline-start-color: var(--red); }
+.fb-card.fb-low { border-inline-start-color: var(--line2); }
+.fb-card .imp-meta { align-items: center; }
+.fb-card .imp-meta > span { min-width: 0; overflow-wrap: anywhere; }
+.badge.fb-kind { color: var(--cyan-ink); }
+.fb-high .badge.fb-priority { color: var(--red); }
+.fb-normal .badge.fb-priority { color: var(--amber-ink); }
+.fb-low .badge.fb-priority { color: var(--muted); }
+.fb-issue { margin: 0; overflow-wrap: anywhere; }
+.dialog.about .t-link { text-align: start; overflow-wrap: break-word; }
 .reqs { display: grid; gap: 10px; min-width: 0; }
 .req { display: grid; gap: 10px; min-width: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--amber); }
 .req-approval { border-left-color: var(--pink); }
@@ -1582,7 +1652,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 /* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
 .tview .tv-labs .dept-chip { position: absolute; }
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
-.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
+.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
 .tview .lchip.on { background: var(--cyan); }
@@ -1821,8 +1891,25 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .plist li > .pm { margin-top: 3px; }
 .plist li > .mc { margin-top: 2px; color: var(--muted); }
 .part-note { font-size: 12.5px; color: var(--muted); }
-.server-priority { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; }
-.server-priority b { display: inline-grid; place-items: center; flex: none; min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid var(--btn); font-family: var(--f-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--on-btn); background: var(--btn); }
+/* A machine's place in the server order: the number in a box, the server's filled, or a dash for a machine with none.
+   In the table's Priority column and in the Priority part of the card, where the CEO's choice stands under it. */
+.k-prio { width: 1%; }
+th.k-prio .sorth { white-space: nowrap; }
+.k-prio .pn, .prio .pn { display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid var(--line2); font-family: var(--f-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.k-prio .pn.one, .prio .pn.one { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
+.pdash { display: inline-block; width: 12px; height: 2px; margin-block: 10px 0; margin-inline: 6px; background: var(--line2); }
+.prio { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; justify-items: start; font-size: 13.5px; }
+.prio > * { min-width: 0; }
+.prio > small { font-size: 12.5px; color: var(--muted); }
+.prio-n { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.prio-n > .pn { flex: none; }
+.prio-n > .pdash { flex: none; margin-block: 8px 0; margin-inline: 0 6px; }
+.pmode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pm-opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.pm-opt input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
+.pm-opt input:disabled, .pm-opt:has(input:disabled) { cursor: not-allowed; }
+/* The question about moving the server takes the part's whole width, its answers under the words when they do not fit. */
+.prio > .ask, .prio > .alert, .prio > .machine-note { justify-self: stretch; }
 
 /* A block in parts: a small heading with a rule, then its meters, facts or list. Both cards use them. */
 .part { display: grid; gap: 8px; min-width: 0; }
@@ -1984,6 +2071,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
   .dt td[data-label] { grid-column: 1 / -1; display: flex; align-items: baseline; }
   .dt td[data-label]::before { content: attr(data-label); flex: 0 0 7em; margin-right: 10px; font-size: 12px; color: var(--muted); }
   .dt td[data-label] > * { min-width: 0; }
+  .dt td.k-prio .pdash { margin: 0; align-self: center; }
   .dt > tbody > tr.det { border-bottom: 1px solid var(--line); background: var(--surface2); }
   .dt > tbody > tr.det > td { padding: 0 10px 12px; }
   .dt td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
@@ -2148,4 +2236,26 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
     calc(100% - var(--step)) calc(2 * var(--step)), 100% calc(2 * var(--step)), 100% 100%, calc(2 * var(--step)) 100%,
     calc(2 * var(--step)) calc(100% - var(--step)), var(--step) calc(100% - var(--step)), var(--step) calc(100% - 2 * var(--step)), 0 calc(100% - 2 * var(--step))
   );
+}
+
+/* The guard. A block it stopped stands in its place with a button that draws it anew; one that floats, as an agent's
+   window does, keeps to the corner of the page. */
+/* Design (#888): one line and one button of 44 px on the second surface with the strong line; logical sides, so a
+   right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
+   hides none of their controls. */
+.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
+.guard-stop p, .light-note p { margin: 0; }
+.guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
+/* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
+   takes the ghost's shadow away. */
+.light-note .btn.ghost { border: 1px solid var(--line2); box-shadow: none; }
+.light-note .btn.ghost:hover { border-color: var(--cyan); }
+.guard-stop { max-inline-size: 520px; margin-block: 72px 0; margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
+.guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
+.light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
+/* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */
+:root[data-light] *, :root[data-light] *::before, :root[data-light] *::after {
+  animation: none !important; transition: none !important;
+  filter: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  box-shadow: none !important; text-shadow: none !important;
 }

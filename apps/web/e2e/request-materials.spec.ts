@@ -250,7 +250,7 @@ async function mountFixtureRoutes(page: Page) {
       const payload: Decisions = {
         requests: [legacyChoice, manifestQuestion],
         proposals: [],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: { 'p-ceo': 2 }, byAgent: { 'a-dsn': 2 }, total: 2 },
       };
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
@@ -734,7 +734,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
           ownerPersonId: 'p-ceo',
           canAnswer: true,
         }],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: { 'p-ceo': 2 }, byAgent: { 'a-dsn': 1, 'a-orch': 1 }, total: 2 },
       };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });

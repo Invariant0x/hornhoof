@@ -4,11 +4,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
+import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 
@@ -122,8 +123,8 @@ async function fakeRegistry(
   };
 }
 
-async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
-  const { app, db } = await testApp({
+const updatableApp = (registry: { base: string }, commit: string, control: string, env: NodeJS.ProcessEnv = {}) =>
+  testApp({
     HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
     REGISTRY_URL: registry.base,
     HORNHOOF_VERSION: '0.4.0',
@@ -131,7 +132,29 @@ async function company(registry: { base: string }, commit = 'aaa', control = mkd
     HORNHOOF_CONTROL_DIR: control,
     ...env,
   });
+
+async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await updatableApp(registry, commit, control, env);
   return { app, db, control, ceo: await setUpCompany(app) };
+}
+
+/* A company whose app leads on a keeper's word, with an agent at work, and the step down the keeper can order. */
+async function leadingCompany(registry: { base: string }) {
+  const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+  const say = (mode: Mode) => writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
+  const { app, db } = await updatableApp(registry, 'aaa', control, { HORNHOOF_KEEPER: 'on' });
+  /* Said once the app is built and not yet started, so a slow build cannot make the word stale. */
+  say('lead');
+  const ceo = await setUpCompany(app);
+  updaterAlive(control);
+  const [acme] = await db.select().from(companies);
+  const [sub] = await db.select().from(subscriptions);
+  const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+  const stepDown = async () => {
+    say('read');
+    await app.ctx.mode.check();
+  };
+  return { app, db, ceo, control, acme: acme!, job: job!, say, stepDown };
 }
 
 /* The updater is alive when it touched alive in the last 30 seconds. A touch an hour ahead of the clock stays that fresh
@@ -143,6 +166,7 @@ const updaterAlive = (control: string, ageSeconds = -3600) => {
 };
 const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
 const SHA = 'b'.repeat(40);
+const HELD_AFTER_MS = 10 * 60_000;
 /* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
 const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   id,
@@ -323,6 +347,109 @@ describe('updates', () => {
     const again = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '0.4.1' }, ...as(ceo) });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('update_running');
+  });
+
+  it('waits for a merge', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const update = () => app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
+    /* A database from before a restore is still being brought back: migrations could part the two shapes. */
+    await db.execute(sql`INSERT INTO net.merges (source, label) VALUES ('kept:hornhoof_before_t1', 'a database')`);
+    for (const status of ['pending', 'applied']) {
+      await db.execute(sql`UPDATE net.merges SET status = ${status}`);
+      const refused = await update();
+      expect([status, refused.statusCode, refused.json().error.reason, refused.json().error.message]).toEqual([
+        status, 409, 'merge_pending', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Company settings.',
+      ]);
+      expect(app.ctx.updater.claimed()).toBeNull();
+    }
+    await db.execute(sql`UPDATE net.merges SET status = 'merged'`);
+    expect((await update()).statusCode).toBe(202);
+  });
+
+  it('refuses an update while the server moves', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const update = () => app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
+    /* The CEO asked the server moved to another machine: an update would cut the copy it is to move with. */
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const row = (hostname: string) => db.insert(machines).values({ companyId: owner!.companyId, personId: owner!.id, machineKey: `joined-${hostname}`, hostname }).returning();
+    const [[from], [to]] = [await row('rack'), await row('studio')];
+    await db.execute(sql`INSERT INTO net.move (machine_id, from_machine_id, asked_by, asked_at, state) VALUES (${to!.id}, ${from!.id}, ${owner!.id}, now(), 'preparing')`);
+    for (const state of ['preparing', 'switching']) {
+      await db.execute(sql`UPDATE net.move SET state = ${state}`);
+      const refused = await update();
+      expect([state, refused.statusCode, refused.json().error.reason, refused.json().error.message]).toEqual([state, 409, 'moving', 'The server is moving to studio. Update once it moved.']);
+      expect(app.ctx.updater.claimed()).toBeNull();
+    }
+    /* A request that failed moves nothing. */
+    await db.execute(sql`UPDATE net.move SET state = 'failed', reason = 'behind', ended_at = now()`);
+    expect((await update()).statusCode).toBe(202);
+  });
+
+  it('one restore or update at a time', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const bundle = '0f0f0f0f-0000-4000-8000-00000000000a';
+    const update = (payload: object = { version: 'latest', whenIdle: false }) => app.inject({ method: 'POST', url: '/api/updates', payload, ...as(ceo) });
+    /* A restore of a bundle nobody recorded: it claims the updater first, and is refused for the bundle only after. */
+    const restore = async () => {
+      const answer = await app.inject({ method: 'POST', url: `/api/backups/${bundle}/restore`, payload: {}, ...as(ceo) });
+      return answer.statusCode === 404 ? 'free' : (answer.json().error.reason as string);
+    };
+    const reasonOf = async (asked: ReturnType<typeof update>) => (await asked).json().error?.reason as string | undefined;
+    const restoreSays = (state: string, step: string) => writeFileSync(join(control, 'restore-status.json'), JSON.stringify({ attempt: 'a1', id: bundle, state, step, line: '', at: '2026-11-10T08:00:00Z', kept: null }));
+
+    /* A restore its keeper still prepares. */
+    expect(app.ctx.updater.claim('restore', 'a1')).toBeNull();
+    expect(await reasonOf(update())).toBe('restore_running');
+    expect(await restore()).toBe('restore_busy');
+    app.ctx.updater.free('a1');
+    /* A restore the updater runs, which its status says. */
+    restoreSays('running', 'swap');
+    expect(await reasonOf(update())).toBe('restore_running');
+    expect(await restore()).toBe('restore_busy');
+    /* At a step of the keeper's the status alone holds nothing: only an order does. */
+    restoreSays('running', 'open');
+    expect(await restore()).toBe('free');
+    restoreSays('failed', 'swap');
+    expect(await restore()).toBe('free');
+    expect(app.ctx.updater.claimed()).toBeNull();
+
+    /* An update that waits for the agents. */
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [orchestrator] = await db.select().from(agents);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build', status: 'running', timeoutMs: 1000 }).returning();
+    expect((await update({ version: 'latest', whenIdle: true })).statusCode).toBe(202);
+    expect(await restore()).toBe('restore_busy');
+    /* Another update takes its place, as it always did; one that fails leaves the first waiting, and holding. */
+    expect((await update({ version: 'latest', whenIdle: true })).statusCode).toBe(202);
+    expect((await update({ version: 'no-such-build', whenIdle: true })).statusCode).toBe(400);
+    expect(await restore()).toBe('restore_busy');
+    /* Called off, it holds nothing. */
+    expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
+    expect(await restore()).toBe('free');
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+
+    /* Asked in the same tick, exactly one of the two is taken, whichever comes first. */
+    expect([app.ctx.updater.claim('restore', 'r2'), app.ctx.updater.claim('update', 'u2')]).toEqual([null, 'restore']);
+    app.ctx.updater.free('u2');
+    expect(app.ctx.updater.claimed()).toEqual({ kind: 'restore', id: 'r2' });
+    app.ctx.updater.free('r2');
+    expect([app.ctx.updater.claim('update', 'u3'), app.ctx.updater.claim('restore', 'r3')]).toEqual([null, 'update']);
+    app.ctx.updater.free('u3');
+    /* A request the updater has not taken yet holds it too. */
+    expect((await update()).statusCode).toBe(202);
+    expect(request(control)).not.toBeNull();
+    expect(app.ctx.updater.claimed()).toBeNull();
+    expect(await restore()).toBe('restore_busy');
+    /* Taken and done, the updater is free again. */
+    writeFileSync(join(control, 'status.json'), JSON.stringify({ id: request(control).id, version: '0.4.1', state: 'done', step: 'finished', log: '', at: '2026-10-30T01:00:00Z' }));
+    expect(await restore()).toBe('free');
   });
 
   it('leaves out an image a build does not have, so the updater takes it by its tag', async () => {
@@ -525,6 +652,94 @@ describe('updates', () => {
     await until(() => request(control) !== null);
     expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+  });
+
+  it('stops waiting when the app leaves lead, and starts no updater on a machine that no longer leads', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+    await stepDown();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await settled();
+    expect(request(control)).toBeNull();
+  });
+
+  it('hands over nothing when the app leaves lead while the agents are counted', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    const hold = holdNextCount();
+    await publishWorking(app.ctx, acme.id);
+    await hold.counted;
+    await stepDown();
+    hold.resume();
+    await settled();
+    expect(request(control)).toBeNull();
+  });
+
+  /* An update just handed over, with the turns still held, and the timeout that ends the hold, which the test may run
+     without waiting its ten minutes. */
+  async function handedOver() {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const made = await leadingCompany(registry);
+    const { app, db, ceo, control, acme, job } = made;
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timeouts.mockRestore());
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await expect.poll(() => request(control)).not.toBeNull();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === HELD_AFTER_MS);
+    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout };
+  }
+
+  it('lets the turns held after a hand-over go when its timeout ends', async () => {
+    const { app, acme, holdEnds } = await handedOver();
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+  });
+
+  it('keeps the turns held when the timeout of a hand-over ends and another update waits', async () => {
+    const { app, db, ceo, acme, job, holdEnds } = await handedOver();
+    await db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, job.id));
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+  });
+
+  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    onTestFinished(() => cleared.mockRestore());
+    const { app, acme, stepDown, holdTimeout } = await handedOver();
+    await stepDown();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect(cleared).toHaveBeenCalledWith(holdTimeout);
+  });
+
+  it('refuses an update whose reading of the registry crossed a step-down', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control, acme, say, stepDown } = await leadingCompany(registry);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    const read = app.ctx.updates.siblings.bind(app.ctx.updates);
+    app.ctx.updates.siblings = async tag => {
+      await stepDown();
+      return read(tag);
+    };
+    for (const whenIdle of [true, false]) {
+      const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle }, ...as(ceo) });
+      expect(res.json().error?.reason).toBe('read_only');
+      /* The next attempt crosses the same step-down, from lead again. */
+      say('lead');
+      await app.ctx.mode.check();
+    }
+    expect(request(control)).toBeNull();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
   });
 
   it('says when no updater runs', async () => {

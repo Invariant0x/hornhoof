@@ -9,7 +9,9 @@ import type { Db } from '../../db/client.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { cancelJob } from '../tasks/wake.js';
-import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { holdsMachine, installingMachines } from '../network/follow.js';
+import { pickBuiltin } from '../nodes/builtin.js';
+import { nodeIdentity, ownBuiltin, ownMachine } from '../nodes/hub.js';
 import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';
@@ -36,6 +38,8 @@ const notReady = (online: NodeRow[]) =>
     ? new ApiError(409, 'conflict', "Finish the first setup of this subscription's program on its machine first.", 'needs_setup')
     : new ApiError(409, 'conflict', 'Sign in to this subscription on its machine first.', 'needs_login');
 
+const updating = () => new ApiError(409, 'conflict', 'The machine for this subscription is installing a new build of Hornhoof. Try again in a few minutes.', 'machine_updating');
+
 export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub } = ctx;
 
@@ -48,21 +52,34 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!sub) throw new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
     if (sub.ownerPersonId !== me.id && me.scopeKind !== 'company') throw notOwner();
     const online = sub.kind === 'api_key' ? [] : (await planNodes(db, [sub.id])).filter(n => hub.isOnline(nodeIdentity(n.id)));
-    if (sub.kind === 'api_key' ? !hub.isOnline(BUILTIN) : !online.length) throw offline();
-    const node = online.find(n => n.status === 'ready');
+    /* An API key's check runs on a built-in node: the server's own as soon as it is connected, as the check is what
+       makes its plan ready; else another machine's that is ready. */
+    const builtinMachine = sub.kind !== 'api_key' ? null : hub.isOnline(ownBuiltin(ctx.config)) ? ownMachine(ctx.config) : await pickBuiltin(ctx, db, null);
+    if (sub.kind === 'api_key' ? !builtinMachine : !online.length) throw offline();
+    /* A machine that installs a build takes no check: one of the plan's other machines does, or the person hears why not. */
+    const installing = await installingMachines(db, ctx.config);
+    const ready = online.filter(n => n.status === 'ready');
+    const node = ready.find(n => !installing.has(n.machineId));
+    if (ready.length && !node) throw updating();
     if (sub.kind === 'personal' && !node) throw notReady(online);
 
     const nodeId = node?.id ?? null;
-    const [job] = await db
-      .insert(jobs)
-      .values({ companyId: sub.companyId, subscriptionId: sub.id, nodeId, prompt: TEST_PROMPT, timeoutMs: TEST_TIMEOUT_MS, createdBy: me.id })
-      .returning({ id: jobs.id });
-    if (!(await dispatchJob(ctx, { id: job!.id, subscriptionId: sub.id, nodeId, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS, instructions: null, toolToken: null }))) {
-      await db.update(jobs).set({ status: 'failed', error: 'machine_offline', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
+    /* With the machine's row held, so the check and a word to install never cross. */
+    const job = await db.transaction(async tx => {
+      if (await holdsMachine(tx, nodeId)) return null;
+      const [made] = await tx
+        .insert(jobs)
+        .values({ companyId: sub.companyId, subscriptionId: sub.id, nodeId, builtinMachine, prompt: TEST_PROMPT, timeoutMs: TEST_TIMEOUT_MS, createdBy: me.id })
+        .returning({ id: jobs.id });
+      return made!;
+    });
+    if (!job) throw updating();
+    if (!(await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, nodeId, builtinMachine, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS, instructions: null, toolToken: null }))) {
+      await db.update(jobs).set({ status: 'failed', error: 'machine_offline', finishedAt: new Date() }).where(eq(jobs.id, job.id));
       throw offline();
     }
     reply.code(201);
-    return { job: publicJob((await jobView(db, job!.id))!) };
+    return { job: publicJob((await jobView(db, job.id))!) };
   });
 
   app.get('/api/jobs/:id', async req => {

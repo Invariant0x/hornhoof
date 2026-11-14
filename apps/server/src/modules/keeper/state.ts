@@ -1,0 +1,57 @@
+import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { QuestionShape } from './question.js';
+
+export const KEEPER_FILE = 'keeper.json';
+export const FRESH_MS = 10_000;
+
+export const MODES = ['lead', 'read', 'maintenance', 'off'] as const;
+export type Mode = (typeof MODES)[number];
+
+const KeeperStateShape = z.object({
+  mode: z.enum(MODES),
+  at: z.string(),
+  link: z.object({ host: z.string().nullable(), fingerprint256: z.string().nullable() }).nullable(),
+  /* The doors the keeper holds open to other machines' databases: the port of each, by the machine's network id. */
+  doors: z.record(z.string(), z.number().int().min(1).max(65535)).optional(),
+  /* How each copy does, as the keeper that leads reads it from its own Postgres, by the copy's name. */
+  copies: z.array(z.object({ name: z.string(), state: z.enum(['sync', 'pace', 'behind', 'silent']) })).optional(),
+  /* How fast the keeper that leads sent to each machine at its best in the last week, in Mbit/s, by the machine's id. */
+  throughput: z.record(z.string(), z.object({ mbps: z.number().int().min(0), at: z.string() })).optional(),
+  /* Whether this machine reaches hornhoof.org, as its keeper last saw it; true when left out. A machine that only
+     reads and does not is cut off, and its agents are told to wrap up. */
+  internet: z.boolean().optional(),
+  /* The question a copy puts to the CEO while the machine that leads is gone and the copy may lack changes. */
+  question: QuestionShape.nullable().optional(),
+});
+export type KeeperState = z.infer<typeof KeeperStateShape>;
+
+/* The keeper's last word, or null when the file is missing, cut short or not this shape: the app then keeps what it has. */
+export function readKeeperState(dir: string): KeeperState | null {
+  try {
+    const parsed = KeeperStateShape.safeParse(JSON.parse(readFileSync(join(dir, KEEPER_FILE), 'utf8')));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/* Written whole and then renamed, so the app never reads half a word. The file holds no key and no token, so any
+   reader may have it. */
+export function writeKeeperState(dir: string, state: KeeperState): void {
+  const path = join(dir, KEEPER_FILE);
+  const partial = `${path}.${process.pid}.tmp`;
+  writeFileSync(partial, JSON.stringify(state));
+  chmodSync(partial, 0o644);
+  renameSync(partial, path);
+}
+
+/* The word, only while it is recent: a keeper that stopped writing is not obeyed. A word from the future means the clock
+   stepped back, so it says nothing about whether the keeper still lives; a live keeper's next word is obeyed anyway. */
+export function freshState(dir: string, now: number, staleMs = FRESH_MS): KeeperState | null {
+  const state = readKeeperState(dir);
+  if (!state) return null;
+  const age = now - Date.parse(state.at);
+  return age >= 0 && age <= staleMs ? state : null;
+}

@@ -53,6 +53,15 @@ describe('the registry of built-in skins', () => {
     expect(builtinSkin('cyberpunk')!.colors.line2).toBe('#687A8F');
   });
 
+  it('keeps the glass of every built-in skin dense, as Design set it for glass with no blur under it', () => {
+    expect(BUILTIN_SKINS.map(skin => [skin.id, skin.colors.hud])).toEqual([
+      ['cyberpunk', 'rgba(23, 30, 39, .94)'],
+      ['light', 'rgba(240, 244, 247, .94)'],
+      ['matrix', 'rgba(8, 16, 11, .94)'],
+      ['pixel', 'rgba(26, 26, 43, .94)'],
+    ]);
+  });
+
   it.each(BUILTIN_SKINS.map(skin => [skin.id, skin] as const))('%s fills all 31 colour roles and, given out as a file, passes the same check', (_id, skin) => {
     expect(COLOR_ROLES).toHaveLength(31);
     expect(Object.keys(skin.colors).sort()).toEqual([...COLOR_ROLES].sort());
@@ -107,7 +116,8 @@ describe('the contrast a skin must hold', () => {
     const light = builtinSkin('light')!.colors;
     expect(ratio('#6B6B6B', light.bg)).toBeCloseTo(4.44, 2);
     expect(weakPair({ ...light, muted: '#6B6B6B' })).toMatchObject({ text: 'muted', on: 'bg', kind: 'text' });
-    expect(weakPair({ ...light, muted: '#6A6A6A' })).toBeNull();
+    /* 4.51 holds on bg; the first pair it fails is muted on the glass over a black page, which Design holds at 4.5 too. */
+    expect(weakPair({ ...light, muted: '#6A6A6A' })).toEqual({ text: 'muted', on: 'hud', least: 4.5, kind: 'text' });
     expect(ratio('#878787', light.bg)).toBeCloseTo(2.99, 2);
     expect(weakPair({ ...light, line2: '#878787' })).toMatchObject({ text: 'line2', on: 'bg', kind: 'line' });
     expect(weakPair({ ...light, line2: '#868686' })).toBeNull();

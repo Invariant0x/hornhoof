@@ -16,6 +16,7 @@ import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, echelonsTurn, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'external-wait-test-node-key-0123456789abcdef';
 
@@ -69,7 +70,7 @@ async function messaging() {
     if (message.type === 'agent.say') node.send({ type: 'agent.said', ref: message.ref, ok: true });
   });
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true, skillFiles: true });
-  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null, null, BUILTIN)!));
   return { ...c, node };
 }
 

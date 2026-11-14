@@ -775,3 +775,71 @@ describe('plans on any machine', () => {
     }
   });
 });
+
+describe('numbered node messages', () => {
+  const event = { type: 'job.event', jobId: 'job-1', seq: 0, event: { kind: 'text', text: 'hi' } };
+  const nodeMessage = (m: object) => parseNodeMessage(JSON.stringify(m));
+
+  it('numbers what changes data and stays readable', () => {
+    expect(nodeMessage({ ...event, n: 3 })).toMatchObject({ type: 'job.event', n: 3 });
+    expect(nodeMessage(event)).toMatchObject({ type: 'job.event' });
+    expect(nodeMessage({ type: 'hello', version: '1', loggedIn: true, running: [], stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' })).toMatchObject({ stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' });
+    expect(parseServerMessage('{"type":"ack","upto":4}')).toEqual({ type: 'ack', upto: 4 });
+    expect(parseServerMessage('{"type":"ack","upto":0}')).toEqual({ type: 'ack', upto: 0 });
+    expect(nodeMessage({ ...event, n: 0 })).toBeNull();
+    expect(nodeMessage({ ...event, n: 1.5 })).toBeNull();
+    expect(nodeMessage({ ...event, n: 3, extra: 'x' })).not.toHaveProperty('extra');
+  });
+
+  it('takes a hello with as many runs and ends as a node can owe, and no more', () => {
+    const hello = (running: string[], tests: string[]) => nodeMessage({ type: 'hello', version: '1', loggedIn: true, running, tests });
+    const ids = (count: number) => Array.from({ length: count }, (_, i) => `id-${i}`);
+    expect(protocol.HELLO_IDS_BEFORE_ACKS).toBe(100);
+    expect(protocol.HELLO_IDS_MAX).toBeGreaterThan(protocol.HELLO_IDS_BEFORE_ACKS);
+    expect(hello(ids(protocol.HELLO_IDS_MAX), ids(protocol.HELLO_IDS_MAX))).not.toBeNull();
+    expect(hello(ids(protocol.HELLO_IDS_MAX + 1), [])).toBeNull();
+    expect(hello([], ids(protocol.HELLO_IDS_MAX + 1))).toBeNull();
+  });
+
+  it('leaves half of the 4 MiB a socket of the server takes for the rest of the longest hello', () => {
+    const uuid = '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11';
+    const hello = { type: 'hello', version: '1', loggedIn: true, running: Array(protocol.HELLO_IDS_MAX).fill(uuid), tests: Array(protocol.HELLO_IDS_MAX).fill(uuid) };
+    expect(JSON.stringify(hello).length).toBeLessThan(2 * 1024 * 1024);
+  });
+
+  it('refuses an ack that is negative or not whole', () => {
+    expect(parseServerMessage('{"type":"ack","upto":-1}')).toBeNull();
+    expect(parseServerMessage('{"type":"ack","upto":2.5}')).toBeNull();
+  });
+
+  it('lets every message in NUMBERED carry n, and no other', () => {
+    const samples: Record<string, object> = {
+      'job.started': { type: 'job.started', jobId: 'j' },
+      'job.event': event,
+      'job.done': { type: 'job.done', jobId: 'j', ok: true, sessionId: null, result: '', tail: '', error: null },
+      'tests.started': { type: 'tests.started', partId: 'p' },
+      'tests.done': { type: 'tests.done', partId: 'p', ok: true, exitCode: 0, error: null, commit: null, log: '' },
+      'cred.sealed': { type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [] },
+      'login.done': { type: 'login.done', ok: true, error: null },
+      'agent.context': { type: 'agent.context', agentKey: 'a', used: 0.5 },
+      removed: { type: 'removed' },
+      'job.program': { type: 'job.program', jobId: 'j', state: 'thinking', since: 1, screenAt: 1 },
+      'agent.hook_rejected': { type: 'agent.hook_rejected', agentKey: 'a', event: 'stop', reason: 'no' },
+      'agent.unheard': { type: 'agent.unheard', agentKey: 'a', jobId: null, text: 'hi' },
+      'agent.said': { type: 'agent.said', ref: 'r', ok: true },
+      'agent.restarted': { type: 'agent.restarted', agentKey: 'a', jobId: 'j', ok: true, reason: null },
+      'node.stopping': { type: 'node.stopping', startedAt: '2026-11-04T10:00:00.000Z', exit: { kind: 'planned', reason: 'stopped', startedAt: null, at: null, log: '' } },
+    };
+    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
+    for (const [type, sample] of Object.entries(samples)) {
+      const parsed = nodeMessage({ ...sample, n: 7 });
+      expect(parsed, type).not.toBeNull();
+      expect('n' in parsed!, type).toBe(protocol.NUMBERED.includes(type as never));
+      expect(protocol.isNumbered(nodeMessage(sample)!), type).toBe(protocol.NUMBERED.includes(type as never));
+    }
+  });
+
+  it('names the header a server sends to say it confirms', () => {
+    expect(protocol.ACKS_HEADER).toBe('hornhoof-acks');
+  });
+});

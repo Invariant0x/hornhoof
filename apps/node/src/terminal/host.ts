@@ -26,7 +26,7 @@ import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
-import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
+import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { busy, enterPending, hasSettled, idleRefusal, RETIRED, stale, type IdleEvidence, type RetireResult } from './program-retire.js';
 import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
@@ -111,6 +111,8 @@ type Agent = {
   sessionId: string | null;
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
+  /* Sessions the agent was in and left, in any program: what they still say is not about the turn that runs now. */
+  left: Set<string>;
   /* The session a person's clear began, until a turn types an assistant's whole conversation into it. */
   blank: string | null;
   tail: LineTail | null;
@@ -565,7 +567,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -866,7 +868,7 @@ export class TerminalHost {
 
   /* The program that goes takes its input with it, so it goes only once that holds nothing of anyone's. */
   private async startAnew(a: Agent, job: TermJob, { spec, hash, urls }: TurnLaunch): Promise<RunResult | null> {
-    const free = !typedSinceStart(a) || !(await this.opts.tmux.alive(a.name)) || (await this.freeForStart(a, job));
+    const free = !typedSinceStart(a) || !(await this.opts.tmux.alive(a.name)) || (await this.freeOfPerson(a, job));
     return free ? this.startProgram(a, job, spec, hash, urls) : this.inputNotFree(a, job);
   }
 
@@ -882,8 +884,9 @@ export class TerminalHost {
   }
 
   /* Its input holds nothing of anyone's, and what a person sent while this turn waited got its answer from the program it
-     went to. Another word may then be there. */
-  private freeForStart(a: Agent, job: TermJob): Promise<boolean> {
+     went to. Another word may then be there. A prompt typed before that answer would wait in the program's queue, and the
+     program would take it when the person's words seem answered and no turn runs: as words of a person's own. */
+  private freeOfPerson(a: Agent, job: TermJob): Promise<boolean> {
     return this.whilePromptWaits(a, async () => {
       for (;;) {
         if (!(await this.inputFree(a, job))) return false;
@@ -910,6 +913,7 @@ export class TerminalHost {
 
   private async prepareLaunch(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<void> {
     await this.prepare(job, urls);
+    if (a.sessionId) a.left.add(a.sessionId);
     Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID() });
     if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
     a.tail = this.tailFor(a);
@@ -1003,7 +1007,7 @@ export class TerminalHost {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
-    if (typedSinceStart(a) && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
+    if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
@@ -1305,12 +1309,14 @@ export class TerminalHost {
     a.took = false;
   }
 
-  private endsNoTurn(a: Agent, end: TurnEnd): boolean {
-    return a.restarting || this.personWordsAnswered(a, end);
+  private endsNoTurn(a: Agent): boolean {
+    return a.restarting || this.personWordsAnswered(a);
   }
 
-  private personWordsAnswered(a: Agent, end: TurnEnd): boolean {
-    if (end.status !== 'done' || !a.personWords || a.took) return false;
+  /* However the answer to a person's words ends, a stop of their own or a failure too, it is theirs: the turn's prompt goes
+     in after it. */
+  private personWordsAnswered(a: Agent): boolean {
+    if (!a.personWords || a.took) return false;
     a.personWords = false;
     a.unanswered = null;
     a.busy = false;
@@ -1608,6 +1614,7 @@ export class TerminalHost {
     this.drain(a);
     this.reportUnheard(a, true, 'the program changed its session');
     a.cleared.add(a.sessionId);
+    a.left.add(a.sessionId);
   }
 
   private followSessionLog(a: Agent, sessionId: string): void {
@@ -1663,6 +1670,11 @@ export class TerminalHost {
     return Boolean(a.turn?.ending);
   }
 
+  /* An interruption in the log ends the running turn, or the answer to a person's words sent while its prompt waited. */
+  private stopCounts(a: Agent): boolean {
+    return this.stoppable(a) || Boolean(a.personWords && !a.took);
+  }
+
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
   private stoppable(a: Agent): boolean {
     return Boolean(a.turn && (a.turn.typed || (a.busy && a.took)));
@@ -1694,9 +1706,9 @@ export class TerminalHost {
   }
 
   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
-    if (this.endsNoTurn(a, end)) return;
+    if (this.endsNoTurn(a)) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
-    if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
+    if (decision.conflict) this.logDisagreement(a);
     if (!decision.accept) return;
     const unanswered = end.status === 'stopped' ? null : a.unanswered;
     a.unanswered = null;
@@ -1927,7 +1939,7 @@ export class TerminalHost {
       if (a.program?.kind === 'claude') {
         if (wentOn(raw)) a.unanswered = null;
         this.dequeuedPrompt(a, raw);
-        if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
+        if (claudeInterrupted(data) && this.stopCounts(a)) this.interrupted(a);
         if (this.stoppable(a) && raw.type === 'assistant' && raw.isApiErrorMessage === true) {
           const text = isRecord(raw.message) ? contentText(raw.message.content) : '';
           a.apiError = FAILURE.claude({ error: raw.error, last_assistant_message: text });
@@ -2319,12 +2331,24 @@ export class TerminalHost {
 
   private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
+    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);
     if (detail) return this.turnFailed(a, detail.text, detail, id);
     await this.successfulStop(a, data, id);
+  }
+
+  private logDisagreement(a: Agent): void {
+    this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
+  }
+
+  /* The turn this stop tells of is over, so the session and the turn that run now are not its to change. All it can still
+     show is that the two channels disagree on how that turn ended. */
+  private lateStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
+    const status = data.stopped === true ? 'stopped' : this.stopFailure(a, data) ? 'failed' : 'done';
+    if (a.ends.end(status, false, id).conflict) this.logDisagreement(a);
   }
 
   private stopFailure(a: Agent, data: Record<string, unknown>): Failure | null {

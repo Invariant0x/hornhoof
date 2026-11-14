@@ -1,6 +1,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
@@ -36,7 +37,9 @@ export async function appFixture<T>(app: FastifyInstance, key: string, make: () 
   /* Browser support processes own their app without Vitest's lifecycle or fixture cache. */
   if (!process.env.VITEST) return make();
   const { fixture } = await import('./helpers-db.js');
-  const { $client } = app.ctx.db as unknown as { $client: PGlite };
+  const { $client } = app.ctx.db as unknown as { $client: PGlite | Pool };
+  /* A real Postgres of test/real is a database of one file, made and dropped by it: nothing is kept for it. */
+  if ('totalCount' in $client) return make();
   return fixture($client, `${key} ${JSON.stringify(app.ctx.config)}`, make);
 }
 

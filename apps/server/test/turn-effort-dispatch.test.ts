@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { insertTurn, openTypedTurn, pump } from '../src/modules/conversation/queue.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { turnAgain } from '../src/modules/tasks/again.js';
 import { comment, createTask, submit, verdict, type Task, type Wake } from '../src/modules/tasks/engine.js';

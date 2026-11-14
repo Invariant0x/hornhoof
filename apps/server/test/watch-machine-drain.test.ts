@@ -10,6 +10,7 @@ import { agentState } from '../src/modules/conversation/queue.js';
 import { SILENT_TURN_MS, checkSilentTurns } from '../src/modules/tasks/silent.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'builtin-watch-drain-key-0123456789abcdef';
 const TOKEN = 'tool-token-watch-drain-0123456789abcdef';
@@ -121,14 +122,14 @@ describe('the Task watchdog and a machine waiting for an update', () => {
     await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, f.round.id));
     expect((await f.waitForUpdate()).drain.state).toBe('restarting');
     f.builtin.close();
-    await until(() => !f.app.ctx.hub.isOnline({ kind: 'builtin' }));
+    await until(() => !f.app.ctx.hub.isOnline(BUILTIN));
     expect(await agentState(f.app.ctx, f.bruno.id)).toMatchObject({ ready: true, reason: null, machineDrain: { state: 'restarting' } });
   });
 
   it('reports a machine that goes away for no update as offline', async () => {
     const f = await company();
     f.builtin.close();
-    await until(() => !f.app.ctx.hub.isOnline({ kind: 'builtin' }));
+    await until(() => !f.app.ctx.hub.isOnline(BUILTIN));
     expect(await agentState(f.app.ctx, f.bruno.id)).toMatchObject({ ready: false, reason: 'machine_offline', machineDrain: null });
   });
 });

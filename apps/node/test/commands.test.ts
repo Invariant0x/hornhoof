@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
+import { Outbox } from '../src/outbox.js';
 import { markRemoved, readState } from '../src/state.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
+import { builtinKey } from '../src/keys.js';
 
 vi.mock('node:child_process', async importOriginal => {
   const original = await importOriginal<typeof import('node:child_process')>();
@@ -49,7 +51,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'FAKE_AGY_SETUP', 'HORNHOOF_SERVER', 'NODE_KEY']) delete process.env[k];
+  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'FAKE_AGY_SETUP', 'HORNHOOF_SERVER', 'NODE_KEY', 'HORNHOOF_MACHINE_ID']) delete process.env[k];
 });
 
 function io(input = '') {
@@ -117,6 +119,41 @@ async function fakeServer() {
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, headers, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
 }
 
+describe('set-server', () => {
+  const FRONT = 'http://host.docker.internal:8081';
+
+  it('moves the node to another address of its server and keeps who it is', async () => {
+    await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+    new Outbox(data).add({ type: 'removed' });
+    const res = await run(['set-server'], `${FRONT}\n`);
+    expect(res.code).toBe(0);
+    expect(readState(data)).toEqual({ server: FRONT, subscriptionId: 'sub-1', provider: 'claude', key: KEY });
+    expect(statSync(join(data, 'node.json')).mode & 0o777).toBe(0o600);
+    /* It is the same node of the same company, so what it still has to say is still its own. */
+    expect(new Outbox(data).pending().map(entry => entry.msg.type)).toEqual(['removed']);
+  });
+
+  it('keeps a machine node a machine node', async () => {
+    await run(['set-key'], `${SERVER} node-1 machine ${KEY}\n`);
+    expect((await run(['set-server'], `${FRONT}\n`)).code).toBe(0);
+    expect(readState(data)).toEqual({ server: FRONT, subscriptionId: 'node-1', provider: null, key: KEY });
+  });
+
+  it('refuses a line that is no address, and a node that was never set up', async () => {
+    const none = await run(['set-server'], `${FRONT}\n`);
+    expect(none.code).toBe(1);
+    expect(none.err).toContain('set-server expects one line: <server>');
+    expect(existsSync(join(data, 'node.json'))).toBe(false);
+    await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+    for (const line of ['', 'front:8080', 'ftp://front', `${FRONT} extra`]) {
+      const res = await run(['set-server'], `${line}\n`);
+      expect(res.code, line).toBe(1);
+      expect(res.err).toContain('set-server expects one line: <server>');
+    }
+    expect(readState(data)!.server).toBe(SERVER);
+  });
+});
+
 describe('set-key', () => {
   it('saves the line from the installer as a private state file', async () => {
     const res = await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
@@ -141,6 +178,50 @@ describe('set-key', () => {
     markRemoved(data);
     await run(['set-key'], `${SERVER} sub-2 claude ${KEY}\n`);
     expect((await run(['status'])).out.trim()).not.toBe('removed');
+  });
+
+  describe('and what waits in the outbox', () => {
+    const NEW_KEY = 'node-key-new-0123456789abcdef';
+    const kept = () => new Outbox(data).pending().map(entry => entry.msg.type);
+    /* A node set up on this server and plan, with a removed it could not get confirmed. */
+    const owingRemoved = async () => {
+      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+      new Outbox(data).add({ type: 'removed' });
+    };
+
+    it('forgets it when a removed node comes back, so an old removed cannot revoke the new key', async () => {
+      await owingRemoved();
+      markRemoved(data);
+      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
+      expect(kept()).toEqual([]);
+    });
+
+    it.each([
+      ['another server', `https://other.example.test sub-1 claude ${NEW_KEY}\n`],
+      ['another subscription', `${SERVER} sub-2 claude ${NEW_KEY}\n`],
+    ])('forgets it when the node moves to %s', async (_, line) => {
+      await owingRemoved();
+      await run(['set-key'], line);
+      expect(kept()).toEqual([]);
+    });
+
+    it('forgets it when nothing says whose it was', async () => {
+      new Outbox(data).add({ type: 'removed' });
+      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+      expect(kept()).toEqual([]);
+    });
+
+    it('keeps it when only the key changes', async () => {
+      await owingRemoved();
+      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
+      expect(kept()).toEqual(['removed']);
+    });
+
+    it('keeps it when the line is refused', async () => {
+      await owingRemoved();
+      expect((await run(['set-key'], `${SERVER} sub-2 claude ${NEW_KEY} extra\n`)).code).toBe(1);
+      expect(kept()).toEqual(['removed']);
+    });
   });
 });
 
@@ -275,6 +356,20 @@ describe('run --builtin', () => {
     const res = await run(['run', '--builtin']);
     expect(res.code).toBe(1);
     expect(res.err).toContain('HORNHOOF_SERVER');
+  });
+
+  it('signs in with the key of its machine when the machine has an id', async () => {
+    const server = await fakeServer();
+    const machine = 'a1b2c3d4'.repeat(4);
+    process.env.HORNHOOF_SERVER = server.url;
+    process.env.NODE_KEY = NODE_KEY;
+    process.env.HORNHOOF_MACHINE_ID = machine;
+    const node = await command(['run', '--builtin'], io().io);
+    if (typeof node === 'number') throw new Error(`run ended with ${node}`);
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.headers[0]).toBe(`Bearer ${builtinKey(NODE_KEY, machine)}`);
+    expect(server.headers[0]).toMatch(/^Bearer builtin\.[0-9a-f]{32}\.[0-9a-f]{64}$/);
   });
 
   it('runs each API key job with its own home and key, and ignores remove', async () => {

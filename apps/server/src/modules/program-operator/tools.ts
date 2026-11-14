@@ -6,6 +6,7 @@ import { ApiError } from '../../errors.js';
 import { readProgramView, sendProgramInput } from './access.js';
 import type { OperatorCaller } from './authorization.js';
 import { reportOperatorCase } from './reports.js';
+import { stopEmployeeTurn } from './stop.js';
 
 export { readProgramView, sendProgramInput, reportOperatorCase };
 const text = (value: unknown, isError = false) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }], ...(isError ? { isError } : {}) });
@@ -28,6 +29,14 @@ export function registerProgramAccessTools(server: McpServer, ctx: Ctx, caller: 
     description: 'Type into the program a fresh program_screen showed, as a person at its terminal would. text goes in first as a paste, then keys one after another, by their tmux names: Enter, Escape, Tab, BSpace, Up, Down, PageUp, a letter, C-u to clear the input line, C-c, M-b. Any key, any text, and any question answered, the owner\'s own too. Give a reason; on a permission question say decision allowed or denied. Hornhoof writes who, why, the keys and the text with secrets masked in the employee\'s log. A lost result is unknown and is never sent again: look again before you repeat it.',
     inputSchema: { employee: z.uuid(), snapshot: z.string().min(16).max(128), keys: z.array(z.string().min(1).max(40)).max(PROGRAM_INPUT_KEYS).optional(), text: z.string().min(1).max(PROGRAM_INPUT_TEXT).optional(), reason: z.string().trim().min(1).max(1000), decision: z.enum(['allowed', 'denied']).optional() },
   }, input => checked(async () => text(await sendProgramInput(ctx, caller, input))));
+}
+
+/* Operations' own stop of a turn that stands. The orchestrator has its own stop_employee among its controls. */
+export function registerStopTool(server: McpServer, ctx: Ctx, caller: OperatorCaller): void {
+  server.registerTool('stop_employee', {
+    description: 'Stop the turn any employee of the company runs now, the orchestrator and any head too, as Esc in its window does. Nobody is fired or switched off: its next turn starts from its queue. Look at program_screen first. Say why: who stopped whom and why goes in the log of the turn it ends.',
+    inputSchema: { employee: z.uuid(), reason: z.string().trim().min(1).max(500) },
+  }, input => checked(async () => text(await stopEmployeeTurn(ctx, caller, input))));
 }
 
 /* The program operator's report of the case it was given. */

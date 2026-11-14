@@ -14,6 +14,7 @@ import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, turnForNewTask, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
+import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
@@ -102,6 +103,12 @@ async function questionWords(db: Ctx['db'], task: Task, question: string, commit
 async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
   const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
+}
+
+async function autoCommitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
+  if (!commit || options?.length) return null;
+  const auto = await tryAutonomousCommitApproval(ctx, task, agentId, commit, question);
+  return auto ? { text: auto.text, moved: auto.moved } : null;
 }
 
 const TurnItem = z.object({ department: z.uuid().optional().describe("The turn's department; it may be left out."), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
@@ -426,7 +433,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
+          'An approval tells you and the person which passed test run checked that very commit, or that none did; when the CEO enabled autonomousRelease and that commit has a green full run_tests run with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
         inputSchema: {
           task: Ref,
@@ -448,6 +455,8 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
+          const auto = await autoCommitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          if (auto) return auto;
           await this.underQuestionCap();
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
@@ -533,7 +542,7 @@ class TaskTools {
             : "Lays out a new turn of your own department: a short title, the main point in one or two sentences, and its tasks, which come to you; ") +
           'a new goal of people gets a new turn, and no separate tasks for plans, contracts or proofs. ' +
           "When the department runs no turn it starts at once; otherwise it waits after the department's planned turns and starts by itself when the one before it is done. Other departments' turns run on their own. department and product ids from company. " +
-          'mode is required and fixed once the turn starts: echelons, or turnkey when one member of a turnkey team of the department does the whole turn alone; a turnkey turn needs such a team.',
+          'mode is required and fixed once the turn starts: echelons, or turnkey when members of a turnkey team carry tasks alone on task branches with local changed-area checks and one release owner runs run_tests once per release candidate on the combined release branch before main; a turnkey turn needs such a team.',
         inputSchema: { department: z.uuid().optional().describe(this.boss ? 'The department whose turn it is.' : 'Your own department; it may be left out.'), title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), mode: Mode, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
@@ -621,7 +630,7 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. Echelons exist only in a turn started in echelons: a task outside any turn, a task of a turnkey turn and a task given to a member of a turnkey team go through none, whatever its text says, and their holder does them end to end alone on their task branch with named local checks (never per-task run_tests) and closes them with report, with no checker, Cleanup or paths. A turnkey turn\'s work goes only to members of turnkey teams. Never write the echelons into a task\'s text: the route is the server\'s.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
@@ -655,7 +664,7 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision (with completed runIds only when integrating directly to main; non-main task branches verify named local checks without run_tests); the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance }) =>

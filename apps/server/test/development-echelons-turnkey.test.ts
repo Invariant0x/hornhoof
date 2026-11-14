@@ -51,11 +51,13 @@ describe('a task of a turnkey team never enters the echelons', () => {
     expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', phase: 'active', stages: [] });
   });
 
-  it('tells its holder to do it end to end and close it, never to follow the echelons', async () => {
+  it('tells its holder to do it end to end on its task branch with local checks, never to follow echelons or run_tests per task', async () => {
     const f = await turnkeyFixture();
     const { task } = await f.give();
     const text = wakePrompt(f.player, task, { agentId: f.player.id, taskId: task.id, why: 'assigned' }, 'turnkey');
     expect(text).toMatch(/end to end[^.]*alone[^.]*report done true/);
+    expect(text).toMatch(/named test files[^.]*without calling run_tests/i);
+    expect(text).not.toMatch(/tests,\s*merge and release/i);
     expect(text).not.toMatch(/follow task\.echelons|Review|verdict/);
     expect(wakePrompt(f.author, f.task, { agentId: f.author.id, taskId: f.task.id, why: 'assigned' }, 'code')).toMatch(/follow task\.echelons/);
   });

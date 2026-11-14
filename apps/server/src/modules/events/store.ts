@@ -59,7 +59,7 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
 export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
   const stored = await ctx.db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
-      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('update');
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
     if (!job?.agentId) return null;
     const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideCodes(event), personId: null }).returning({ id: agentEvents.id });
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };

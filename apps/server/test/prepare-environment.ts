@@ -29,6 +29,12 @@ function inputPaths(root: string): string[] {
 function inputs(root: string): Record<string, string> {
   return Object.fromEntries(inputPaths(root).map(path => [path, sha(readFileSync(join(root, path)))]));
 }
+/* Every test database holds this lease and says it is fenced (helpers.ts), so the whole suite runs under fence 1. */
+export const ENDLESS_LEASE = `
+  INSERT INTO net_local.state (term_number, term_machine, machine, cluster)
+    SELECT 1, 'test', 'test', system_identifier::text FROM pg_control_system();
+  INSERT INTO net_local.lease (term_number, term_machine, kind, until, sync) VALUES (1, 'test', 'normal', 'infinity', 'alone');`;
+
 export async function migratedPgliteDump(): Promise<Buffer> {
   const [
     { PGlite },
@@ -36,6 +42,7 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     { migrate: migratePglite },
     { agentRole, grantsFor, readerGrantsFor, readerRole },
     { applyMissingMigrations, MIGRATIONS },
+    { AFTER_MIGRATIONS },
     schema,
   ] = await Promise.all([
     import('@electric-sql/pglite'),
@@ -43,6 +50,7 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     import('drizzle-orm/pglite/migrator'),
     import('../src/db/agent-sql.js'),
     import('../src/db/client.js'),
+    import('../src/db/net.js'),
     import('../src/db/schema.js'),
   ]);
   const client = new PGlite();
@@ -50,6 +58,8 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     const db = pgliteDb(client, { schema });
     await migratePglite(db, { migrationsFolder: MIGRATIONS });
     await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    await client.exec(ENDLESS_LEASE);
     /* The roles of agent SQL with their rights, as a server makes them as it starts: a test that runs agent SQL then
        changes nothing beyond rows of the database its file shares. */
     await client.exec(`${grantsFor(agentRole('postgres'))};\n${readerGrantsFor(readerRole('postgres'))}`);

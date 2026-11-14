@@ -145,7 +145,7 @@ colors:
     glow: 'rgba(0, 163, 189, .10)'
     button: '#00768A'
     on_button: '#FFFFFF'
-    hud: 'rgba(240, 244, 247, .88)'
+    hud: 'rgba(240, 244, 247, .94)'
     shadow: 'rgba(20, 40, 60, .18)'
     provider_claude: '#A84628'
     provider_kimi: '#125BC7'
@@ -178,7 +178,7 @@ colors:
     glow: 'rgba(70, 224, 239, .10)'
     button: '#46E0EF'
     on_button: '#05222A'
-    hud: 'rgba(23, 30, 39, .84)'
+    hud: 'rgba(23, 30, 39, .94)'
     shadow: 'rgba(0, 0, 0, .45)'
     provider_claude: '#F08A66'
     provider_kimi: '#5E9BFF'
@@ -202,7 +202,7 @@ shape:
 decor:
   grid: { kind: dots, step: 22px, dot: 1px, color: dot }
   halo: { kind: radial, color: glow }
-  glass: { color: hud, blur: 10px }
+  glass: { color: hud, blur: none }
   map_hub: { ring: dashed line2, ring_active: accent, turn: 60s, gauge_steps: 24 }
   map_lines: { work: accent, return: warning }
   extra_layer: { kind: none }
@@ -297,7 +297,7 @@ colors:
     glow: 'rgba(0, 224, 90, .14)'
     button: '#00E05A'
     on_button: '#021C0B'
-    hud: 'rgba(8, 16, 11, .88)'
+    hud: 'rgba(8, 16, 11, .94)'
     shadow: 'rgba(0, 0, 0, .62)'
     provider_claude: '#F08A66'
     provider_kimi: '#639EFF'
@@ -321,7 +321,7 @@ shape:
 decor:
   grid: { kind: dots, step: 20px, dot: 1px, color: dot }
   halo: { kind: radial, color: glow }
-  glass: { color: hud, blur: 8px }
+  glass: { color: hud, blur: none }
   map_hub: { ring: dashed line2, ring_active: accent, turn: 60s, gauge_steps: 24 }
   map_lines: { work: accent, return: warning }
   # Falling code would be: { kind: code_rain, where: map background, glyphs: open technical, head: accent_ink, trail: accent, max_opacity: 0.14, column_step: 20px, speed: 36px/s, frames: 20/s }. Not drawn, not checked. Rules in section 2.

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { Notification } from '@hornhoof/protocol';
 import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type OperatorEvidence, type OperatorQuestion, type OperatorReason } from '@hornhoof/protocol/program-operator';
-import { and, asc, desc, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
@@ -117,8 +117,10 @@ async function caseForJob(ctx: Ctx, signal: Signal, jobId: string): Promise<Case
   return existing;
 }
 
+/* The turn a signal is of, on an employee: a person's own assistant's program is its owner's alone, and no case opens on it. */
 async function signalSubject(ctx: Ctx, signal: Signal) {
-  const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, signal.jobId!), eq(jobs.agentId, signal.agentKey)));
+  const employee = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, signal.agentKey), ne(agents.kind, 'assistant')));
+  const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, signal.jobId!), inArray(jobs.agentId, employee)));
   const [instance] = await ctx.db.select().from(programInstances).where(eq(programInstances.id, signal.instance));
   if (!job || !instance || job.error === 'cancelled' || job.error === 'stale') return;
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, signal.agentKey), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
@@ -147,7 +149,7 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
 /* An operator's turn goes where anyone's would: to a machine of its plan that can take a turn, whichever it was on before,
    and before its first turn it was on none. A machine that restarts for an update comes back: the turn waits for it. */
 async function planCanTakeTurn(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<boolean> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) || nodeHeld(ctx, BUILTIN);
+  if (sub.kind === 'api_key') return ctx.hub.isReady(ownBuiltin(ctx.config)) || nodeHeld(ctx, ownBuiltin(ctx.config));
   return (await planNodes(ctx.db, [sub.id])).some(node => takesTurns(ctx, node) || nodeHeld(ctx, nodeIdentity(node.id)));
 }
 

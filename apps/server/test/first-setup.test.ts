@@ -2,11 +2,12 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, jobs, machines, nodes, subscriptions } from '../src/db/schema.js';
 import { agentState, enqueueTurn, pump } from '../src/modules/conversation/queue.js';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { expireStaleNodes, NODE_STALE_MS, settlePlans } from '../src/modules/nodes/nodes.js';
 import { subViews } from '../src/modules/subscriptions/views.js';
 import { agentFailureState } from '../src/modules/tasks/failures.js';
+import { BUILTIN } from './builtin.js';
 import { failureCompany } from './failure-company.js';
 
 /* An Antigravity plan whose agy asks, on its machine, for a first setup only the plan's owner may pass: its terms. */

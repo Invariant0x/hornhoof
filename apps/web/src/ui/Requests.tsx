@@ -22,9 +22,15 @@ export function forgetRequestDrafts(): void {
   draftsByRequest.clear();
 }
 
+/* Drafts of so many cards stay at most, the one typed in last kept newest; the oldest one goes first. */
+export function keepDraft(drafts: Map<string, string>, requestId: string, value: string, kept = 200): void {
+  drafts.delete(requestId);
+  if (value) drafts.set(requestId, value);
+  if (drafts.size > kept) drafts.delete(drafts.keys().next().value!);
+}
+
 function storeRequestDraft(requestId: string, value: string): void {
-  if (value) draftsByRequest.set(requestId, value);
-  else draftsByRequest.delete(requestId);
+  keepDraft(draftsByRequest, requestId, value);
 }
 
 const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';

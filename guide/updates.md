@@ -11,6 +11,13 @@ Hornhoof checks for a newer build every 30 minutes. People who see the whole com
 
 Running the install line again updates too.
 
+## Do my other machines find the server after an update?
+
+A server installed by an older version did not write down its computer's name and addresses, and an update by the "Update" button runs inside Docker, where a Mac's own addresses cannot be seen.
+
+- **On Linux** the updater asks Docker what the computer is called and reads its addresses by itself. Nothing to do.
+- **On a Mac** run the install line once on that Mac after the update. Until then your other machines reach the server only through its hornhoof.org link, which works but needs the internet. After it they also find the Mac on your own network, so they go on working with each other when the internet is down.
+
 ## Why is 0.8.4 not offered on my server?
 
 A server on 0.8.0 to 0.8.3 offers a version only after a check on real Claude, Codex, Kimi and Antigravity that later versions no longer have, so it shows no banner for 0.8.4 and "Update" says it cannot install it. Run the install line once on the server's computer. It moves the server to the latest version, and from then on the banner offers each new one.

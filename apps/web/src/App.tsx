@@ -15,7 +15,7 @@ import { parseRoute } from './routes';
 type Screen =
   | { kind: 'loading' }
   | { kind: 'invite'; token: string }
-  | { kind: 'setup'; linkDomain?: string }
+  | { kind: 'setup'; linkDomain?: string; recovering?: boolean }
   | { kind: 'login' }
   | { kind: 'shell'; me: Me; welcome?: boolean }
   | { kind: 'error'; failure: unknown };
@@ -47,6 +47,16 @@ function useScreen() {
   return [screen, show] as const;
 }
 
+function validSetup(setup: { needed: boolean; linkDomain?: string; recovering?: boolean } | null) {
+  if (!setup || typeof setup.needed !== 'boolean') throw new ApiFailure(502, 'internal', '');
+  return setup;
+}
+
+function validMe(me: Me | null): Me {
+  if (!me?.person?.id || !me?.company?.id) throw new ApiFailure(502, 'internal', '');
+  return me;
+}
+
 function Screens() {
   const t = useT();
   const [screen, show] = useScreen();
@@ -55,9 +65,10 @@ function Screens() {
     const route = parseRoute(window.location.pathname);
     if (route.kind === 'invite') return show({ kind: 'invite', token: route.token });
     try {
-      const { needed, linkDomain } = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
-      if (needed) return show({ kind: 'setup', linkDomain });
-      show({ kind: 'shell', me: await api.get<Me>('/api/me'), welcome });
+      const setup = validSetup(await api.get<{ needed: boolean; linkDomain?: string; recovering?: boolean }>('/api/setup'));
+      if (setup.needed) return show({ kind: 'setup', linkDomain: setup.linkDomain, recovering: setup.recovering });
+      const me = validMe(await api.get<Me>('/api/me'));
+      show({ kind: 'shell', me, welcome });
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
       show({ kind: 'error', failure: err });
@@ -82,7 +93,7 @@ function Screens() {
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={() => home()} />;
     case 'setup':
-      return <Setup linkDomain={screen.linkDomain} onDone={({ welcome }) => home(welcome)} />;
+      return <Setup linkDomain={screen.linkDomain} recovering={screen.recovering} onDone={({ welcome }) => home(welcome)} />;
     case 'login':
       return <Login onDone={() => void decide()} />;
     case 'shell':

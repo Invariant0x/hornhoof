@@ -3,7 +3,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, jobs } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
 import { listEvents } from '../src/modules/events/store.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { failureCompany } from './failure-company.js';
 import { echelonsTurn, listen, mcp } from './helpers.js';

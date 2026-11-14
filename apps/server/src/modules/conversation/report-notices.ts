@@ -101,7 +101,7 @@ async function freezeInput(tx: Tx, row: Stored): Promise<void> {
 async function updateDelivered(ctx: Ctx, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string): Promise<boolean> {
   const changed = await ctx.db.transaction(async tx => {
     const [current] = await tx.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-      .where(and(eq(agentEvents.id, row.event.id), inArray(jobs.status, ['running', 'done']))).for('update');
+      .where(and(eq(agentEvents.id, row.event.id), inArray(jobs.status, ['running', 'done']))).for('no key update');
     if (!current || !coversTasks(current, input, incoming)) return false;
     const group = mergeGroup(current, input, incoming, report);
     if (!group) return false;
@@ -145,7 +145,7 @@ async function keepReceipts(tx: Tx, receipt: Parameters<WithEvent>[1], ...callba
 async function saveGroup(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string, into?: string, kept?: WithEvent): Promise<boolean> {
   const stored = await ctx.db.transaction(async tx => {
     const [current] = await tx.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-      .where(and(eq(agentEvents.id, row.event.id), eq(jobs.status, 'queued'))).for('update');
+      .where(and(eq(agentEvents.id, row.event.id), eq(jobs.status, 'queued'))).for('no key update');
     if (!current) return false;
     const group = mergeGroup(current, input, incoming, report);
     if (!group) return false;

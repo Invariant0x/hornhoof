@@ -10,6 +10,7 @@ import { sameProgram } from './program-history.js';
 import { programRestartStatus } from './program-restarts.js';
 import { logTurnFact } from './turn-log.js';
 import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
+import { builtinOf, nodeIdentity } from '../nodes/hub.js';
 import { stopStaleProgram } from './stale-program.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
@@ -197,7 +198,10 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
-    const alarm = alarmWithCheckQueue(ctx, job, program, task, nowMs);
+    /* A program on a machine Hornhoof cannot reach is silent for that reason, and nobody can look at its screen: no
+       alarm is raised for it until the machine is back. */
+    const node = job.nodeId ? nodeIdentity(job.nodeId) : job.builtinMachine ? builtinOf(job.builtinMachine) : null;
+    const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, job, program, task, nowMs);
     await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }

@@ -105,8 +105,9 @@ const RoleHead = z.object({
     .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
     .strict()
     .optional(),
-  /* A plain id is on by default; { id, on: false } is offered but off. Core and head skills are added, not listed. */
-  skills: z.array(z.union([z.string(), z.object({ id: z.string(), on: z.boolean() })])).default([]),
+  /* A plain id is on by default; { id, on: false } is offered but off; { id, locked: true } is on for everyone in the role,
+     whatever was on when they were hired. Core and head skills are added, not listed. */
+  skills: z.array(z.union([z.string(), z.object({ id: z.string(), on: z.boolean() }), z.object({ id: z.string(), locked: z.literal(true) })])).default([]),
 });
 
 export const textHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 12);
@@ -150,8 +151,11 @@ function loadSkills(dir: string): Map<string, Skill> {
   return skills;
 }
 
-const toRoleSkill = (s: string | { id: string; on: boolean }): RoleSkill =>
-  typeof s === 'string' ? { id: s, on: true, locked: false } : { ...s, locked: false };
+const listedSkill = (s: { id: string; on: boolean } | { id: string; locked: true }): RoleSkill =>
+  'locked' in s ? { id: s.id, on: true, locked: true } : { ...s, locked: false };
+
+const toRoleSkill = (s: string | { id: string; on: boolean } | { id: string; locked: true }): RoleSkill =>
+  typeof s === 'string' ? { id: s, on: true, locked: false } : listedSkill(s);
 
 function ensureSkillsExist(file: string, entries: readonly RoleSkill[], skills: ReadonlyMap<string, Skill>): void {
   for (const entry of entries) {

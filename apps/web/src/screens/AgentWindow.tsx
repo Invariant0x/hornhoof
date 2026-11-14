@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Language, type Messages }
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
+import type { AgentCardView, ComputerAccessView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
 import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
@@ -24,6 +24,7 @@ import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
+import { everyVisible, useRenderGuard } from '../guard';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -131,7 +132,7 @@ function useCardRight(id: string | null, fallback: boolean): boolean {
     if (!id) return;
     let live = true;
     api.get<Decisions>('/api/requests').then(
-      d => live && setRight(rightIn(d, id, fallback)),
+      d => live && d && setRight(rightIn(d, id, fallback)),
       () => {},
     );
     return () => {
@@ -150,18 +151,18 @@ function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?:
 }
 
 /* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
-   are the CEO's alone. Access to the computer the server runs on: the orchestrator asks, people of the whole company
-   see it, and the CEO's or the delegate's screen opens or closes it. */
-const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator && me.person.scopeKind === 'company' });
+   are the CEO's alone. Computer access to the company's machines: the orchestrator asks for one, its owner's screen opens
+   it, and the server answers each person with the machines that are theirs to see. */
+const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator });
 
 /* Loads them; null for what this person does not get, or what did not load. */
 const loadCards = (ownsCommands: boolean, seesComputer: boolean) =>
   Promise.all([
     ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
-    seesComputer ? api.get<ComputerView>('/api/computer').catch(() => null) : null,
+    seesComputer ? api.get<{ views: ComputerAccessView[] }>('/api/machines/access').catch(() => null) : null,
   ]);
 
-/* The request for the computer changed, here or on another of the CEO's screens: what the window shows of it loads again. */
+/* Computer access changed, here or on another screen: what the window shows of it loads again. */
 function useComputerChanges(load: () => Promise<void>): void {
   useStream(m => {
     if (m.type === 'computer') void load();
@@ -183,7 +184,7 @@ function personWords(e: LogEvent): boolean {
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
 
-/* What the orchestrator asked of the computer, and what the CEO did about it. */
+/* What the orchestrator asked of a machine, what its owner did about it, and what the machine itself refused. */
 function computerLine(t: Messages, language: Language, e: EventView): string {
   const who = e.person?.name ?? t.window.hornhoof;
   const machine = field(e.data, 'machine') || t.window.computerServer;
@@ -194,6 +195,8 @@ function computerLine(t: Messages, language: Language, e: EventView): string {
       return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
     case 'closed':
       return t.window.computerClosed(who, machine);
+    case 'refused':
+      return t.window.computerRefused(machine);
     default:
       return t.window.computerDeclined(who, machine);
   }
@@ -299,7 +302,16 @@ function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: bo
   );
 }
 
+function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void): void {
+  if (mounted && card) save(card);
+}
+
+function readyEvents<T>(mounted: boolean, res: T | null): res is T {
+  return mounted && res !== null;
+}
+
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
+  useRenderGuard('agent-window');
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -327,7 +339,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
   const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
-  const [computer, setComputer] = useState<ComputerView | null>(null);
+  const [computer, setComputer] = useState<ComputerAccessView[]>([]);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -351,7 +363,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
   const loadCard = useCallback(() => {
     api.get<AgentCardView>(path).then(
-      c => mounted.current && setCard(c),
+      c => applyLoadedCard(mounted.current, c, setCard),
       err => mounted.current && setFailure(err),
     );
   }, [path]);
@@ -374,7 +386,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     const [res, access] = await loadCards(ownsCommands, seesComputer);
     if (!mounted.current) return;
     if (res) setCommands(res.commands.filter(commandBlockOpen));
-    if (access) setComputer(access);
+    if (access) setComputer(access.views);
   }, [ownsCommands, seesComputer]);
 
   const hideCommand = (id: string) =>
@@ -391,7 +403,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         const n = ++catchUps.current;
         const fresh = last.current === 0;
         const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
-        if (!mounted.current) return;
+        if (!readyEvents(mounted.current, res)) return;
         merge(res.events);
         if (n > stateFrom.current) {
           stateFrom.current = n;
@@ -464,10 +476,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       await history;
       await greet();
     })();
-    const poll = setInterval(() => void catchUp(), POLL_MS);
+    const stopPoll = everyVisible(() => void catchUp(), POLL_MS);
     return () => {
       mounted.current = false;
-      clearInterval(poll);
+      stopPoll();
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;
     };
@@ -782,7 +794,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           {after}
         </div>
       )}
-      {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
+      {known && (
+        <ComputerStrip
+          machines={computer}
+          onChange={next => mounted.current && setComputer(views => views.map(view => (view.machine.id === next.machine.id ? next : view)))}
+          onFailure={err => mounted.current && setFailure(err)}
+        />
+      )}
       {known && <StateNotes state={state} ready={ready} sub={sub} />}
       {chat && (ready || state.busy) && <ChatState state={state} onStop={stop} />}
       {dragging && (

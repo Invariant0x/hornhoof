@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 const SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./install-stubs/', import.meta.url));
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum'];
+const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum', 'tee'];
 const OLD_NODE = 'ghcr.io/invariant0x/hornhoof-node:0.6.1';
 const NEW_NODE = `ghcr.io/invariant0x/hornhoof-node@sha256:${'c'.repeat(64)}`;
 const CLAUDE = 'hornhoof-claude-1c07dac4';
@@ -44,6 +44,7 @@ function fromUpdater(env: Record<string, string>) {
       HORNHOOF_HOME: join(dir, 'home', '.hornhoof'),
       HORNHOOF_DIR: join(dir, 'home', 'hornhoof'),
       HORNHOOF_FROM_UPDATER: '1',
+      HORNHOOF_UPDATER_REV: '2',
       HORNHOOF_PULLED: '1',
       HORNHOOF_SERVER_DIR: dir,
       HORNHOOF_VERSION: '0.7.0',
@@ -62,15 +63,17 @@ function fromUpdater(env: Record<string, string>) {
 
 const touched = (calls: string[], name: string) => calls.filter(c => c.includes(name) && !c.startsWith('docker ps'));
 const STOPS_BUILTIN = 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update';
-const WITH_NODE = 'docker compose up -d --no-build db app node tunnel';
-const WITHOUT_NODE = 'docker compose up -d --no-build db app tunnel';
+/* The built-in node alone is started again when it is named: the app and what it stands on run this build already. */
+const ONLY_NODE = 'docker compose up -d --no-build --no-deps node';
+/* With none named, the app goes in with the built-in node, as in any update whose nodes are free. */
+const APP_AND_NODE = 'docker compose up -d --no-build app node';
+const started = (calls: string[]) => calls.filter(c => c.startsWith('docker compose up'));
 
 describe('install.sh when the updater names the nodes that are free', () => {
   it('replaces only a plan node it names: the built-in node and the other plan node go on with what they run', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}` });
     expect(r.code).toBe(0);
-    expect(r.calls).toContain(WITHOUT_NODE);
-    expect(r.calls).not.toContain(WITH_NODE);
+    expect(started(r.calls)).toEqual([]);
     expect(r.calls).not.toContain(STOPS_BUILTIN);
     expect(r.calls).toContain(`docker exec ${CLAUDE} node /app/apps/node/dist/main.js prepare-stop hornhoof_update`);
     expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
@@ -80,7 +83,7 @@ describe('install.sh when the updater names the nodes that are free', () => {
   it('replaces only the built-in node when it names that one', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: 'builtin' });
     expect(r.code).toBe(0);
-    expect(r.calls).toContain(WITH_NODE);
+    expect(started(r.calls)).toEqual([ONLY_NODE]);
     expect(r.calls).toContain(STOPS_BUILTIN);
     expect(touched(r.calls, CLAUDE)).toEqual([]);
     expect(touched(r.calls, GOOGLE)).toEqual([]);
@@ -88,7 +91,7 @@ describe('install.sh when the updater names the nodes that are free', () => {
 
   it('replaces all it names at once', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `builtin id-of-${CLAUDE} id-of-${GOOGLE}` });
-    expect(r.calls).toContain(WITH_NODE);
+    expect(started(r.calls)).toEqual([ONLY_NODE]);
     expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
     expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
   });
@@ -102,7 +105,7 @@ describe('install.sh when the updater names the nodes that are free', () => {
 
   it('replaces them all, as before, when it names none', () => {
     const r = fromUpdater({});
-    expect(r.calls).toContain(WITH_NODE);
+    expect(r.calls).toContain(APP_AND_NODE);
     expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
     expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
   });

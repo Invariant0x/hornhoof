@@ -4,6 +4,7 @@ import type { DecidedBy } from '../types';
 
 function whoDecides(t: Messages, by: DecidedBy): string {
   const place = by.department?.name;
+  if (by.kind === 'machine_owner') return t.tasks.decidedByMachineOwner;
   if (place && by.kind === 'owner_and_ceo') return t.tasks.decidedByOwner(place);
   return place && by.kind === 'department_and_ceo' ? t.tasks.decidedByDepartment(place) : t.tasks.decidedByCeo;
 }

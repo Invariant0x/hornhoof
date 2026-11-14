@@ -4,7 +4,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf, onAgent } from '../conversation/queue.js';
-import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { agentProgramState, signInTurn } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
@@ -34,7 +34,7 @@ async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: n
   if (after === null) return refuse(`Hornhoof never restarts ${sub.provider}; its program must end its own wait. Tell the head if it stays silent.`);
   const quiet = now - signInTurn(program, job)!;
   if (quiet < after) return refuse(`The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${sub.provider} needs at least ${after / 60_000} minutes without a sign before a restart.`);
-  const node = identityOf(sub, job.nodeId);
+  const node = identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
   if (!node || !ctx.hub.isOnline(node)) return refuse('The turn\'s node is offline. Bring that machine online first.');
   if (!ctx.hub.hasTerminals(node)) return refuse('The turn\'s node has no live terminals. It cannot restart this program.');
   return { ready: { job, node, minutes: Math.floor(quiet / 60_000) } };
@@ -50,8 +50,11 @@ export async function programRestartStatus(ctx: Ctx, companyId: string, agentId:
   return { allowed: !!check.ready, reason: check.reason ?? null };
 }
 
-export async function restartProgram(ctx: Ctx, companyId: string, agentId: string): Promise<{ ok: boolean; text: string }> {
-  const [target] = await ctx.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
+/* The watchdog asks as Operations; an employee of Operations by its name, with whose program. */
+const askedBy = (by: string | undefined, whose: string) => (by ? `${by} requested a program restart of ${whose}` : 'Operations requested a program restart');
+
+export async function restartProgram(ctx: Ctx, companyId: string, agentId: string, by?: string): Promise<{ ok: boolean; text: string }> {
+  const [target] = await ctx.db.select({ kind: agents.kind, name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
   if (target?.kind === 'assistant') return { ok: false, text: "This is a person's own assistant, not an employee of the company: only its owner restarts it." };
   const checked = await onAgent(ctx, agentId, async (): Promise<Check> => {
     const check = await taskRestart(ctx, companyId, agentId, Date.now());
@@ -65,7 +68,7 @@ export async function restartProgram(ctx: Ctx, companyId: string, agentId: strin
   }
   const { job, node, minutes } = checked.ready;
   const note = `Your program was restarted after ${minutes} minutes without a sign from the model. Go on from where you were.`;
-  await logTurnFact(ctx, job, `Operations requested a program restart after ${minutes} minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
+  await logTurnFact(ctx, job, `${askedBy(by, target!.name)} after ${minutes} minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
   const reply = await waitForRestart(ctx, node, job, note);
   const text = await recordRestartReply(ctx, job, reply);
   return { ok: reply.ok, text };
@@ -108,6 +111,6 @@ export async function programRestarted(ctx: Ctx, node: NodeIdentity, msg: Extrac
   }
   const [found] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, msg.agentKey), eq(jobs.kind, 'conversation'), isNotNull(jobs.restartedAt))).limit(1);
-  const owner = found && identityOf(found.sub, found.job.nodeId);
+  const owner = found && identityOf(found.sub, found.job.nodeId, found.job.builtinMachine, ownBuiltin(ctx.config));
   if (owner && sameNode(owner, node)) await recordRestartReply(ctx, found.job, reply);
 }

@@ -9,6 +9,7 @@ import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights
 import { uploadTerminalPictures } from './terminal-pictures';
 import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
+import { disposeTerminal } from './xterm-release';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
    which a light background would wash out. */
@@ -627,7 +628,7 @@ function keepFitted(term: Terminal, box: HTMLElement) {
    after both. */
 function disposeLater(term: Terminal) {
   term.element?.remove();
-  requestAnimationFrame(() => setTimeout(() => term.dispose()));
+  requestAnimationFrame(() => setTimeout(() => disposeTerminal(term)));
 }
 
 const refusalText = (reason: InputRefusal, control: string, message: string) => reason === 'control' ? control : message;
