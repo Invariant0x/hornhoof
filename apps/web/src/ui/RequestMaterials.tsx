@@ -101,7 +101,7 @@ export function useSourceMaterials(sourceKind: 'requests' | 'proposals', sourceI
     let live = true;
     setFailure(null);
     void api.get<MaterialManifestView>(`/api/${sourceKind}/${encodeURIComponent(sourceId)}/materials`).then(
-      next => live && setManifest(next),
+      next => live && next && setManifest(next),
       err => live && setFailure(err),
     );
     return () => {

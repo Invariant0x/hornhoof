@@ -280,6 +280,13 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
    people open in a drawer at the left. */
+export function pruneSwitched(switched: Record<string, boolean>, employees: Employee[]): Record<string, boolean> {
+  const entries = Object.entries(switched);
+  if (!entries.length) return switched;
+  const kept = entries.filter(([id, on]) => employees.find(e => e.id === id)?.on !== on);
+  return kept.length === entries.length ? switched : Object.fromEntries(kept);
+}
+
 export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -433,7 +440,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
 
   /* A switch shows at once and holds until the company says the same; a refusal puts it back and says why. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
-  useEffect(() => setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on))), [d.employees]);
+  useEffect(() => setSwitched(x => pruneSwitched(x, d.employees)), [d.employees]);
   const shown = (e: Employee): Employee => (e.id in switched ? { ...e, on: switched[e.id]! } : e);
   const flip = (e: Employee) => (on: boolean) => {
     setSwitched(x => ({ ...x, [e.id]: on }));

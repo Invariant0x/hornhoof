@@ -28,7 +28,7 @@ function useBranches(departmentId: string): { found: DepartmentBranches | null; 
   useEffect(() => {
     let live = true;
     api.get<DepartmentBranches>(`/api/departments/${departmentId}/branches`).then(
-      answer => { if (live) setFound(answer); },
+      answer => { if (live && answer) setFound(answer); },
       err => { if (live) setFailure(err); },
     );
     return () => {

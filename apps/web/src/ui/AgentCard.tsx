@@ -154,6 +154,10 @@ function liveState(card: AgentCardView, live: AgentLive | undefined): AgentLive 
 }
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
+const keepLoadedCard = (live: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void) => {
+  if (live && card) save(card);
+};
+
 export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -173,7 +177,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
   useEffect(() => {
     let live = true;
     api.get<AgentCardView>(base).then(
-      c => live && setCard(c),
+      c => keepLoadedCard(live, c, setCard),
       err => live && setFailure(err),
     );
     return () => {

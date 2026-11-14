@@ -309,11 +309,16 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
-function DepartmentWorkspace({ tab, me, dept, missingDepartment, org, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
-  org: Org | null; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
+function departmentFallback(deptId: string | null, org: Org | null, orgFailure: unknown) {
+  return deptId && !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
+}
+
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
+  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; onHire: (dept: Department) => void;
 }) {
-  if (tab !== 'map' || !dept || missingDepartment) return null;
+  if (tab !== 'map' || denied || missingDepartment) return null;
+  if (!dept) return departmentFallback(deptId, org, orgFailure);
   return (
     <DepartmentView
       me={me}
@@ -427,7 +432,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
         <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} missingDepartment={missingDepartment} org={org} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
