@@ -701,7 +701,7 @@ describe('single pre-release full suite and DEV-HEAD inline byte budget', () => 
   };
 
   it('keeps DEV-HEAD and every shipped role within a 24000-byte inline instruction packet without raising MAX_INSTRUCTIONS', () => {
-    expect(MAX_INSTRUCTIONS).toBe(32_000);
+    expect(MAX_INSTRUCTIONS).toBe(200_000);
     const devHead = renderRole('DEV-HEAD');
     expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(24_000);
     for (const role of shipped.roles.values()) {

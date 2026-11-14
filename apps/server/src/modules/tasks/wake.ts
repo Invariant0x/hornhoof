@@ -27,7 +27,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry it end to end alone, as the task says: code, checks, tests, merge and release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    finish: 'carry its task scope end to end alone on its task branch, checking named test files of the changed area, build, types and lint locally in your workspace without calling run_tests unless this task itself assembles the final release to main; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -35,7 +35,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
-    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; report verified final-candidate runs in Tests; integrate only with the head authorization',
+    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; verify local affected checks in Tests without calling run_tests on non-main task branches (naming runIds only for direct main integration); integrate only with the head authorization',
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };

@@ -82,7 +82,7 @@ describe('accepting only a checked and integrated candidate', () => {
     await report(f.ctx, f.tester.id, f.task.id, {
       done: true,
       summary: 'Verified named local tests, types and lint on the task branch.',
-      verification: { candidateId: before.candidateId!, revision: before.revision } as never,
+      verification: { candidateId: before.candidateId!, revision: before.revision },
     });
     const afterTests = (await f.detail()).echelons;
     const accepted = await report(f.ctx, f.head.id, f.task.id, {
@@ -105,6 +105,7 @@ describe('accepting only a checked and integrated candidate', () => {
   });
   it('still requires completed run_tests evidence when integrating a task directly into main', async () => {
     const f = await testsFixture();
+    const turnId = f.task.turnId!;
     await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
     f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
     const direct = (await f.detail()).echelons;
@@ -114,8 +115,7 @@ describe('accepting only a checked and integrated candidate', () => {
       verification: { candidateId: direct.candidateId!, revision: direct.revision, runIds: [] },
     })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/run_tests/i) as unknown });
 
-    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 18, goal: 'Temp turn.', status: 'open', openedAt: new Date() }).returning();
-    await f.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, f.task.id));
+    await f.db.update(tasks).set({ turnId }).where(eq(tasks.id, f.task.id));
     const inTurn = (await f.detail()).echelons;
     await report(f.ctx, f.tester.id, f.task.id, {
       done: true,

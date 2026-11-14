@@ -4,9 +4,9 @@ import { agents, teams, turns, type TurnMode } from '../../db/schema.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
-/* A turnkey team: each member does a task end to end alone, from code and checks to merge and release, never enters the
-   echelons and calls no other member of the department onto its work. The mark is data on the team, never read from a name
-   or from a task's text. */
+/* A turnkey team: each member does a task end to end alone on its task branch with local changed-area checks (never
+   per-task run_tests), never enters the echelons and calls no other member of the department onto its work. The mark is
+   data on the team, never read from a name or from a task's text. */
 export async function turnkeyTeamOf(db: Db | Tx, companyId: string, agentId: string | null): Promise<{ id: string; name: string } | null> {
   if (!agentId) return null;
   const [team] = await db.select({ id: teams.id, name: teams.name }).from(agents)
