@@ -164,6 +164,7 @@ describe('real server startup in long-feedback-and-reports', () => {
       expect(outcome).toBe('ready');
 
       await harness.runAfterAll();
+      await harness.runAfterAll();
       expect(spawned).not.toBeNull();
       expect(spawned!.exitCode).toBe(0);
     } finally {

@@ -328,6 +328,8 @@ test.describe.configure({ mode: 'serial' });
 let srv: RealServerBoot;
 
 test.beforeAll(async () => {
+  /* Server startup waits for the readiness line rather than the clock; 0 disables Playwright's 30 s hook timeout. */
+  test.setTimeout(0);
   srv = await startRealServer(`http://localhost:${process.env.HORNHOOF_BROWSER_PORT ?? '4179'}`);
 });
 
