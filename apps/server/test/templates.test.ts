@@ -1282,7 +1282,7 @@ const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] 
   { id: 'quality-stages-in-own-workspace', holds: text => matchesAll(text, [/locally[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i, /whole suite[\s\S]*"run_tests"[\s\S]*groups[\s\S]*free compatible machines/i]) },
   { id: 'local-lockfile-installs', holds: text => /Install dependencies from the lockfile in your workspace once[\s\S]*lockfile changes/i.test(text) && !/Never install dependencies locally/i.test(text) },
   { id: 'prepared-dependencies-install-only-when-needed', holds: text => /manifest names its dependencies[^.]*already in place[^.]*install only when they are missing or after the lockfile changes/i.test(text) },
-  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*whole suite[\s\S]*"run_tests"[\s\S]*only on the release candidate/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
   { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to a local whole suite/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
   { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
   { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text) },
@@ -1807,6 +1807,8 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
         /from code and checks to merge and release/i,
         /tests,\s*merge and release/i,
         /\brun_tests\b[^.!?\n]*\bevery\s+(?:task|turnkey)\s+branch\b/i,
+        /use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it/i,
+        /\bstrictly once\b/i,
       ]),
   },
   {
@@ -1819,18 +1821,32 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
       ) &&
       forEvery([s.leadTasks, s.devLead, s.devTaskFlow], text =>
         matchesAll(text, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
-      ),
+      ) &&
+      matchesAll(s.devTaskFlow, [/no per-task run_tests \(unless this task itself assembles the final release to main\)/i]),
   },
   {
     id: 'single-full-run-on-combined-release-branch-before-main',
     holds: s =>
-      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devCiRelease, s.devPolicy, s.orchPlanTurn, s.orchCompany], text =>
-        matchesAll(text, [/\bonce\b[\s\S]*\bcombined release (?:branch|candidate)\b[\s\S]*\bmain\b/i]),
+      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devCiRelease, s.devPolicy, s.devTestEnv, s.devImplement, s.briefMembers, s.orchPlanTurn, s.orchCompany], text =>
+        matchesAll(text, [/\bonce per release candidate\b[\s\S]*\bcombined release (?:branch|candidate)\b[\s\S]*\bmain\b/i]),
       ),
+  },
+  {
+    id: 'lead-tasks-preserves-coordination-and-hold-meaning',
+    holds: s =>
+      matchesAll(s.leadTasks, [
+        /When small work arrives, the orchestrator passes it to the head immediately\./,
+        /Builders build and reviewers review[^.!?\n]*nobody approves their own independent gate/i,
+        /Do not start a new chain merely to find a free member\./,
+        /A report that claims success without evidence is treated as not done\./,
+        /this ability imposes no default downstream chain/i,
+        /letters, texts, layouts and tables as well as code, as files in its repository/,
+        /`pause_task` with the reason/,
+      ]),
   },
 ];
 
-describe('full test suite strictly once before release', () => {
+describe('full test suite once per release candidate before release', () => {
   const bundle = (): SingleReleaseRunSkills => ({
     leadTasks: templates.skills.get('hh-lead-tasks')!.body,
     runChecks: templates.skills.get('hh-run-checks')!.body,
@@ -1847,11 +1863,11 @@ describe('full test suite strictly once before release', () => {
     orchCompany: templates.skills.get('orch-company')!.body,
   });
 
-  it('requires local changed-area checks on task and turnkey branches and strictly one run_tests run on the combined release branch before main', () => {
+  it('requires local changed-area checks on task and turnkey branches and one run_tests run per release candidate on the combined release branch before main', () => {
     expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, bundle())).toEqual([]);
   });
 
-  it('rejects re-introducing turnkey merge-and-release ambiguity or per-task run_tests', () => {
+  it('rejects re-introducing turnkey merge-and-release ambiguity, workspace-fallback run_tests or strictly-once wording', () => {
     const base = bundle();
     expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, base)).toEqual([]);
     expect(
@@ -1859,6 +1875,12 @@ describe('full test suite strictly once before release', () => {
     ).toContain('no-turnkey-merge-and-release-ambiguity');
     expect(
       failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, runChecks: `${base.runChecks}\nCall run_tests on every turnkey branch before review.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, runChecks: `${base.runChecks}\nUse "run_tests" for one only when your own workspace cannot run it.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, leadTasks: `${base.leadTasks}\nRun run_tests strictly once ever.` }),
     ).toContain('no-turnkey-merge-and-release-ambiguity');
   });
 });

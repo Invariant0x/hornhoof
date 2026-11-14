@@ -13,6 +13,8 @@ describe('test tool guidance', () => {
     const text = descriptions().get('run_tests')!;
     expect(text.split('.')[0]).toMatch(/whole test suite[\s\S]*declared profile[\s\S]*groups[\s\S]*free machines/i);
     expect(text).toMatch(/own change[\s\S]*own workspace[\s\S]*need no run_tests/i);
+    expect(text).not.toMatch(/\bstrictly once\b/i);
+    expect(text).toMatch(/once per release candidate on the combined release branch before main/i);
     for (const fact of ['fingerprint', 'main branch', 'returns at once', 'fresh folder', 'woken on the task', 'full log', '{part}', '{parts}', 'hornhoof/tests']) expect(text).toContain(fact);
   });
 

@@ -710,12 +710,13 @@ describe('single pre-release full suite and DEV-HEAD inline byte budget', () => 
     }
   });
 
-  it('forbids per-task and parallel-turnkey run_tests and requires one full run on the combined release branch before main', () => {
+  it('forbids per-task and parallel-turnkey run_tests and requires one full run per release candidate on the combined release branch before main', () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = renderRole(roleId).whole;
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
+      expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
       expect(whole, roleId).toMatch(/never (?:assign|order|call|run)[^.!?\n]*`?"?run_tests"?`?[^.!?\n]*task branch/i);
-      expect(whole, roleId).toMatch(/combined release (?:branch|candidate)[^.!?\n]*before `?main`?/i);
+      expect(whole, roleId).toMatch(/once per release candidate[\s\S]*combined release (?:branch|candidate)[^.!?\n]*before `?main`?/i);
     }
   });
 });
