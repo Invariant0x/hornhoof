@@ -331,6 +331,13 @@ test.beforeAll(async () => {
   srv = await startRealServer(`http://localhost:${process.env.HORNHOOF_BROWSER_PORT ?? '4179'}`);
 });
 
+/* The page still asks the server while a test ends, and what it asked then has no test left to answer. It leaves the app
+   first, so it asks nothing more. */
+test.afterEach(async ({ page }) => {
+  await page.goto('about:blank');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 test.afterAll(async () => {
   await srv?.stop();
 });
