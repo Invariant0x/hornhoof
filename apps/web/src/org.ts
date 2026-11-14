@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { useStream } from './live';
+import { listen, useStream, type LiveMessage } from './live';
 import type { Department, Org, PersonView } from './types';
 import type { AgentLive } from './ui/AgentState';
 
@@ -84,29 +84,76 @@ function useFetchOnReturn(enabled: boolean, load: () => void): void {
   }, [enabled, load]);
 }
 
-/* The company as /api/org shows it, kept fresh from the live stream while enabled. */
+/* The company as the newest answer and the live stream since showed it, for every screen that shows it: a screen that
+   opens again, or one that does not ask yet, shows it at once instead of an empty map while its own answer comes. */
+let known: Org | null = null;
+/* Each screen that shows the company hears every change to it; an answer also clears what went wrong asking for it. */
+type Watch = (org: Org | null, answer: boolean) => void;
+const watchers = new Set<Watch>();
+/* Answers can come back out of order, to any screen; one older than the company shown is dropped. */
+let asked = 0;
+let shown = 0;
+/* While any screen shows the company, what the stream says of it goes into the company itself, once. */
+let unhear: (() => void) | null = null;
+
+function share(org: Org | null, answer: boolean): void {
+  known = org;
+  for (const watch of [...watchers]) watch(org, answer);
+}
+
+function hear(m: LiveMessage): void {
+  if (!known) return;
+  if (m.type === 'context') share(withContext(known, m.agentId, m.used), false);
+  if (m.type === 'working') share({ ...known, agents: { ...known.agents, working: m.working } }, false);
+}
+
+function watchOrg(watch: Watch): () => void {
+  watchers.add(watch);
+  unhear ??= listen(hear);
+  return () => {
+    watchers.delete(watch);
+    if (watchers.size || !unhear) return;
+    unhear();
+    unhear = null;
+  };
+}
+
+/* The answer to request n. A cut-off answer is no company, and one older than the company shown is no news: the company on
+   the screens stays until the next whole answer. */
+function answered(n: number, data: Org | null | undefined): void {
+  if (!data || n < shown) return;
+  shown = n;
+  share(data, true);
+}
+
+/* A person leaving the tab takes the company off every screen at once, with the answers still on their way for it. */
+export function forgetOrg(): void {
+  shown = ++asked;
+  share(null, true);
+}
+
+/* The company as /api/org shows it, kept fresh from the live stream; a screen asks for it again only while enabled. */
 export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
-  const [org, setOrg] = useState<Org | null>(null);
+  const [org, setOrg] = useState<Org | null>(() => known);
   const [failure, setFailure] = useState<unknown>(null);
   const mounted = useRef(true);
-  /* Answers can come back out of order; one older than the answer on screen is dropped. */
-  const asked = useRef(0);
-  const shown = useRef(0);
 
+  useEffect(() => {
+    const stop = watchOrg((next, answer) => {
+      setOrg(next);
+      if (answer) setFailure(null);
+    });
+    /* What came between the first drawing and now, a forgotten company too. */
+    setOrg(known);
+    return stop;
+  }, []);
+
+  /* A screen that went away meanwhile still leaves its answer for the screens after it. */
   const load = useCallback(() => {
-    const n = ++asked.current;
-    const fresh = () => {
-      if (!mounted.current || n < shown.current) return false;
-      shown.current = n;
-      return true;
-    };
+    const n = ++asked;
     api.get<Org>('/api/org').then(
-      data => {
-        if (!fresh()) return;
-        setOrg(data);
-        setFailure(null);
-      },
-      err => fresh() && setFailure(err),
+      data => answered(n, data),
+      err => mounted.current && n >= shown && setFailure(err),
     );
   }, []);
 
@@ -138,13 +185,8 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
         load();
       }, SETTLE_MS);
     }
-    if (FETCH_AT_ONCE.has(m.type)) load();
-    if (m.type === 'context') setOrg(o => o && withContext(o, m.agentId, m.used));
-    if (m.type === 'working') {
-      setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });
-      /* Employees move between working and sleeping too, so the company is fetched again for their states. */
-      load();
-    }
+    /* Employees move between working and sleeping too, so the company is fetched again for their states. */
+    if (FETCH_AT_ONCE.has(m.type) || m.type === 'working') load();
   });
 
   return { org, failure };
