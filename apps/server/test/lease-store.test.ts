@@ -1,6 +1,6 @@
 import net, { type AddressInfo } from 'node:net';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentRole, PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies } from '../src/db/schema.js';
@@ -159,11 +159,15 @@ describe('the lease the keeper holds in the database', () => {
   });
 
   it('records the horizon', async () => {
+    /* The migrated database comes from a cached dump that may be hours old when a test opens its copy. */
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 3 * 3_600_000 });
+    onTestFinished(() => { vi.useRealTimers(); });
     const s = await store();
     await s.lease.take('normal', FAR);
-    const horizon = async () => (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM now() - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
+    const horizon = async (at: 'now()' | "(pg_stat_file('PG_VERSION')).modification" = 'now()') =>
+      (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM ${at} - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
     /* A database is given one as it is migrated: whatever was pruned before is older than that. */
-    expect(Math.abs((await horizon()) - 7 * 86_400)).toBeLessThan(3600);
+    expect(Math.abs((await horizon("(pg_stat_file('PG_VERSION')).modification")) - 7 * 86_400)).toBeLessThan(3600);
     await s.run.query(`UPDATE net.horizon SET below = '2000-01-01'`);
     await s.db.execute(sql`INSERT INTO net.merges (id, source, label, status) VALUES ('00000000-0000-4000-8000-00000000000a', 'kept:hornhoof_before_t1', 'a database', 'done')`);
     await s.db.execute(sql`INSERT INTO net.merge_consumed (journal, merge, at, how) VALUES
