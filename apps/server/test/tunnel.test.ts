@@ -1,3 +1,4 @@
+import { ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,32 +93,36 @@ describe('the tunnel keeper', () => {
     expect(started()).toHaveLength(1);
   });
 
-  it('holds a running client through one empty read, and stops it on a second in a row', async () => {
+  it('tells a running client to stop at the first null read, and says why first', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    const { keeper, answers, write, started, alive, lines } = tunnel();
-    onTestFinished(() => { vi.useRealTimers(); });
-    write('first');
+    const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    let wanted = true;
+    let started = 0;
+    const lines: string[] = [];
+    const keeper = new TunnelKeeper({
+      read: async () => (wanted ? settingsWith('first') : null),
+      everyMs: 20,
+      restartMs: 30,
+      clientFor: () => (started++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      why: () => 'Stopping the public link while this keeper holds no lease or waits after a lease ended.',
+      log: line => lines.push(line),
+    });
+    onTestFinished(async () => {
+      await keeper.stop();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
     keeper.start();
-    await until(() => started().length === 1);
-    const firstPid = started()[0]![1]!;
+    await until(() => started === 1);
 
-    /* A single empty read, and another six virtual minutes later, never stop the running client. */
-    for (const gapMs of [20, 360_000]) {
-      await vi.advanceTimersByTimeAsync(gapMs);
-      answers(null);
-      await vi.advanceTimersByTimeAsync(20);
-      expect(alive(firstPid)).toBe(true);
-      expect(lines).not.toContain('No public link: the tunnel waits.');
-      write('first');
-      await vi.advanceTimersByTimeAsync(20);
-      expect(started()).toHaveLength(1);
-    }
-
-    /* Two empty reads in a row confirm the link is gone and stop the client. */
-    answers(null);
-    await vi.advanceTimersByTimeAsync(40);
-    await until(() => !alive(firstPid));
-    expect(lines).toContain('No public link: the tunnel waits.');
+    wanted = false;
+    await vi.advanceTimersByTimeAsync(20);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+    await until(() => lines.includes('No public link: the tunnel waits.'));
+    const whyAt = lines.indexOf('Stopping the public link while this keeper holds no lease or waits after a lease ended.');
+    expect(whyAt).toBeGreaterThanOrEqual(0);
+    expect(whyAt).toBeLessThan(lines.indexOf('No public link: the tunnel waits.'));
     await keeper.stop();
   });
 

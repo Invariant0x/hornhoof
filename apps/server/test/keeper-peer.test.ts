@@ -1,3 +1,4 @@
+import { ChildProcess } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, X509Certificate } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
@@ -27,7 +28,7 @@ import type { SyncCatalog, SyncControllerOptions } from '../src/modules/keeper/s
 import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
-import { authorityOf } from '../src/modules/network/store.js';
+import { authorityOf, peerSecret } from '../src/modules/network/store.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { PeerDoor } from '../src/net/peer-door.js';
 import type { PeerSessions } from '../src/net/peer-sessions.js';
@@ -752,11 +753,11 @@ describe('the peer link in the keeper', () => {
     const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
-    /* Every six virtual minutes the path through hornhoof.org gives no answer for roughly three seconds. */
+    /* Every six virtual minutes the path through hornhoof.org gives no answer for a second. */
     const relayClient: SyncControllerOptions['relay'] = {
       route: async () => {
         const elapsed = performance.now() - startMono;
-        if ((elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000)) {
+        if ((elapsed >= 359_500 && elapsed < 360_500) || (elapsed >= 719_500 && elapsed < 720_500)) {
           return { known: false, why: 'unreachable' };
         }
         return { known: true, state: 'held', client: ownClient, since: 1, generation: 1, relayStarted: 100, evictionBound: 30, sync: syncRecord };
@@ -821,6 +822,107 @@ describe('the peer link in the keeper', () => {
     expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await keeper.stop();
+    vi.useRealTimers();
+  });
+
+  it('offers no peer doors in read mode, stops the public link on the first read after a lease ends, and stops peer doors when leading ends', async () => {
+    const c = await company(true);
+    await peerSecret(c.db, c.config, 'data', true);
+    await peerSecret(c.db, c.config, 'app', true);
+    const target = await listening(c.app);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    const { catalog } = syncCatalog(copy);
+    const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
+    let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
+    const relayClient: SyncControllerOptions['relay'] = {
+      route: async () => ({ known: true, state: 'held', client: ownClient, since: 1, generation: 1, relayStarted: 100, evictionBound: 30, sync: syncRecord }),
+      setSync: async (_name, _key, post) => {
+        syncRecord = { state: post.state, copy: post.copy, epoch: post.epoch, generation: post.generation, at: Math.floor(Date.now() / 1000) };
+        return { stored: true, sync: syncRecord };
+      },
+    };
+
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+    const stepUntil = async (stepMs: number, check: () => boolean) => {
+      while (!check()) {
+        await vi.advanceTimersByTimeAsync(stepMs);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    };
+
+    /* A keeper in read mode never offers peer doors through hornhoof.org, even when both peer secrets exist. */
+    const reader = await keeperBeside(c, target, folder(), {
+      lease: null,
+      throughput: { start: ignore, stop: ignore, best: () => ({}) },
+      everyMs: 3000,
+      linkEveryMs: 3000,
+      peerEveryMs: 3000,
+      beatEveryMs: 60_000,
+      guardEveryMs: 60_000,
+    });
+    let readerPorts = false;
+    void reader.keeper.peerPorts().then(() => {
+      readerPorts = true;
+    });
+    await stepUntil(3000, () => readerPorts);
+    await vi.advanceTimersByTimeAsync(9000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(reader.keeper.mode()).toBe('read');
+    expect(reader.offered).toEqual([]);
+    await reader.keeper.stop();
+
+    /* When a leader's lease ends, its public link stops at the first read, and its peer tunnel stops once read mode holds. */
+    const clock = { wall: Date.now(), mono: 1_000_000 };
+    const renews = { hold: true };
+    let linkStarts = 0;
+    const leader = await keeperBeside(c, target, folder(), {
+      lease: fakeLease({ othersHoldData: true, renew: async () => renews.hold }),
+      now: () => ({ ...clock }),
+      throughput: { start: ignore, stop: ignore, best: () => ({}) },
+      everyMs: 20,
+      linkEveryMs: 3000,
+      peerEveryMs: 3000,
+      beatEveryMs: 60_000,
+      guardEveryMs: 60_000,
+      copies: { everyMs: 60_000 },
+      clientFor: () => (linkStarts++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: relayClient, everyMs: 3000, routeEveryMs: 0, linkPauseMs: 30_000 },
+    });
+    let leaderPorts = false;
+    void leader.keeper.peerPorts().then(() => {
+      leaderPorts = true;
+    });
+    await stepUntil(20, () => leaderPorts && leader.keeper.mode() === 'lead' && leader.offered.length === 1 && linkStarts === 1);
+
+    const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    renews.hold = false;
+    clock.wall += 11_000;
+    clock.mono += 11_000;
+    await stepUntil(20, () => leader.keeper.mode() === 'read' && !leader.keeper.linkWanted());
+    expect(kill).not.toHaveBeenCalled();
+
+    /* First 3 s read: the public link is told to stop at once, while the peer tunnel holds through one read. */
+    await vi.advanceTimersByTimeAsync(3000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(kill).toHaveBeenCalledTimes(1);
+    await until(() => leader.lines.includes('No public link: the tunnel waits.'));
+    expect(leader.lines).toContain('Stopping the public link while this keeper holds no lease or waits after a lease ended.');
+
+    /* Second 3 s read: sustained read mode stops the peer tunnel as well, saying why first. */
+    await vi.advanceTimersByTimeAsync(3000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(kill).toHaveBeenCalledTimes(2);
+    await until(() => leader.lines.includes('No public link: this machine is not offered to its peers through it.'));
+    const peerWhyAt = leader.lines.indexOf('Stopping the peer tunnel: this keeper no longer leads.');
+    expect(peerWhyAt).toBeGreaterThanOrEqual(0);
+    expect(peerWhyAt).toBeLessThan(leader.lines.indexOf('No public link: this machine is not offered to its peers through it.'));
+
+    await leader.keeper.stop();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 });
