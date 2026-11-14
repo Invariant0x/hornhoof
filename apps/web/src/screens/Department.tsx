@@ -280,7 +280,7 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
    people open in a drawer at the left. */
-function pruneSwitched(switched: Record<string, boolean>, employees: Employee[]): Record<string, boolean> {
+export function pruneSwitched(switched: Record<string, boolean>, employees: Employee[]): Record<string, boolean> {
   const entries = Object.entries(switched);
   if (!entries.length) return switched;
   const kept = entries.filter(([id, on]) => employees.find(e => e.id === id)?.on !== on);

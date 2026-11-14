@@ -4,6 +4,7 @@ import { App } from '../src/App';
 import { LanguageProvider } from '../src/i18n';
 import { forgetOrg, useOrg } from '../src/org';
 import { AgentWindows, useAgentWindows } from '../src/screens/AgentWindows';
+import { pruneSwitched } from '../src/screens/Department';
 import { Shell } from '../src/screens/Shell';
 import { forgetRequestDrafts } from '../src/ui/Requests';
 import type { AgentCardView, Department, Employee, Me, Org } from '../src/types';
@@ -399,5 +400,17 @@ describe('department owner answering head on a large company', () => {
       proto.pauseAnimations = prevPause;
       proto.unpauseAnimations = prevUnpause;
     }
+  });
+
+  it('keeps the switched state reference until an employee toggle actually settles in the roster', () => {
+    const employees = DEV_ORG.departments[0]!.employees;
+    const empty: Record<string, boolean> = {};
+    expect(pruneSwitched(empty, employees)).toBe(empty);
+
+    const pending = { b0: false };
+    expect(pruneSwitched(pending, employees)).toBe(pending);
+
+    const mixed = { b0: true, b1: false };
+    expect(pruneSwitched(mixed, employees)).toEqual({ b1: false });
   });
 });
