@@ -1,11 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { forgetOrg, useOrg } from '../src/org';
 import type { Org } from '../src/types';
-import { mockApi, ORG } from './api-mock';
+import { DEV_ORG, mockApi, ORG } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const working = (n: number): Org => ({ ...ORG, agents: { ...ORG.agents, working: n } });
+const brunoContext = (org: Org | null) => org?.departments[0]?.employees[1]?.context;
 
 /* /api/org answers with each company in turn; a company given as null waits until let go with the one after it. */
 function serve(...answers: (Org | null)[]) {
@@ -89,5 +91,74 @@ describe('the company every screen shows', () => {
     await letGo();
     const next = renderHook(() => useOrg());
     expect(next.result.current.org).toBeNull();
+  });
+
+  it('is forgotten at once on every screen that shows it, asking or not', async () => {
+    fakeStream();
+    serve(working(1));
+    const idle = renderHook(() => useOrg(false));
+    const asking = renderHook(() => useOrg());
+    await waitFor(() => expect(asking.result.current.org).toEqual(working(1)));
+    act(() => forgetOrg());
+    expect(asking.result.current).toEqual({ org: null, failure: null });
+    expect(idle.result.current.org).toBeNull();
+  });
+
+  it('keeps the context the stream said of an agent for every screen, asking or not, and for the next one', async () => {
+    const stream = fakeStream();
+    let held = false;
+    mockApi({ 'GET /api/org': () => (held ? new Promise(() => {}) : [200, DEV_ORG]) });
+    const idle = renderHook(() => useOrg(false));
+    const asking = renderHook(() => useOrg());
+    await waitFor(() => expect(asking.result.current.org).toEqual(DEV_ORG));
+    held = true;
+    stream.send({ type: 'context', agentId: 'b1', used: 0.75 });
+    expect(brunoContext(asking.result.current.org)).toBe(0.75);
+    expect(brunoContext(idle.result.current.org)).toBe(0.75);
+    asking.unmount();
+    idle.unmount();
+    const next = renderHook(() => useOrg());
+    expect(brunoContext(next.result.current.org)).toBe(0.75);
+  });
+
+  it('keeps the working count the stream said for every screen, asking or not, and for the next one', async () => {
+    const stream = fakeStream();
+    let held = false;
+    mockApi({ 'GET /api/org': () => (held ? new Promise(() => {}) : [200, working(1)]) });
+    const idle = renderHook(() => useOrg(false));
+    const asking = renderHook(() => useOrg());
+    await waitFor(() => expect(asking.result.current.org).toEqual(working(1)));
+    held = true;
+    stream.send({ type: 'working', working: 2 });
+    expect(asking.result.current.org).toEqual(working(2));
+    expect(idle.result.current.org).toEqual(working(2));
+    asking.unmount();
+    idle.unmount();
+    const next = renderHook(() => useOrg());
+    expect(next.result.current.org).toEqual(working(2));
+  });
+
+  it('hears nothing more from the stream once no screen shows the company', async () => {
+    const stream = fakeStream();
+    serve(working(1));
+    const idle = renderHook(() => useOrg(false), { wrapper: StrictMode });
+    const asking = renderHook(() => useOrg(), { wrapper: StrictMode });
+    await waitFor(() => expect(asking.result.current.org).toEqual(working(1)));
+    idle.unmount();
+    asking.unmount();
+    expect(stream.sources().length).toBeGreaterThan(0);
+    expect(stream.sources().filter(source => !source.closed)).toEqual([]);
+  });
+
+  it('brings no company back from the stream once it is forgotten', async () => {
+    const stream = fakeStream();
+    serve(DEV_ORG, null);
+    const asking = renderHook(() => useOrg());
+    await waitFor(() => expect(asking.result.current.org).toEqual(DEV_ORG));
+    act(() => forgetOrg());
+    stream.send({ type: 'context', agentId: 'b1', used: 0.75 });
+    stream.send({ type: 'working', working: 2 });
+    expect(asking.result.current.org).toBeNull();
+    expect(renderHook(() => useOrg(false)).result.current.org).toBeNull();
   });
 });
