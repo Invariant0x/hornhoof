@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { AgentCardView } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
@@ -30,6 +30,15 @@ const assignmentCard = (assignment = '', skill = 'Write the test first.') => {
 };
 
 describe('AgentCard', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('says the orchestrator made a change, and what it was', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [{ field: 'switch', personName: null, byOrchestrator: true, at: '2026-10-30T09:00:00.000Z' }] }] });
     expect(await screen.findByText(/^Switched on or off: Orchestrator, /)).toBeInTheDocument();
@@ -64,11 +73,6 @@ describe('AgentCard', () => {
 
   it('shows the latest failed turn under the state in English and Russian, with tooltip and collapsed details clipped to 300 characters', async () => {
     /* The card's clock stands on one day, so 14:02 is today whenever the test runs. */
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
     const at = new Date(2026, 10, 3, 14, 2).getTime();
     const rawText = `529 Overloaded: ${'x'.repeat(340)}`;
     const clipped = `${rawText.slice(0, 299)}…`;
@@ -106,12 +110,12 @@ describe('AgentCard', () => {
   });
 
   it('shows the stale reason and says when the program gave no output in English and Russian', async () => {
-    const at = new Date().setHours(14, 2, 0, 0);
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
     const text = 'Stale queued wake. Program state: not started. Last sign of life: no data.';
     for (const [lang, noOutput] of [['en', 'No output.'], ['ru', 'Вывода не было.']] as const) {
       localStorage.setItem('hh-lang', lang);
       open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'unknown', text, at, tail: 'No output.' } }] });
-      const summary = await screen.findByText(/Last turn failed|Последний ход не удался/);
+      const summary = await screen.findByText(/Last turn failed at 14:02|Последний ход не удался в 14:02/);
       const details = summary.closest('details');
       expect(details?.querySelector('pre')).toHaveTextContent(text);
       expect(details).toHaveTextContent(noOutput);
@@ -121,7 +125,7 @@ describe('AgentCard', () => {
   });
 
   it('shows an obsolete wake calmly in English and Russian without a failure', async () => {
-    const at = new Date().setHours(14, 2, 0, 0);
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
     for (const [lang, expected] of [
       ['en', 'Wake-up became obsolete: the task moved on'],
       ['ru', 'Побудка устарела: задача ушла дальше'],
@@ -137,12 +141,6 @@ describe('AgentCard', () => {
   });
 
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
-
     const todayAt = new Date(2026, 10, 3, 14, 2).getTime();
     const twoDaysAgoAt = new Date(2026, 10, 1, 14, 2).getTime();
 
@@ -412,9 +410,8 @@ describe('AgentCard', () => {
     ['ru', 'Лимиты', 'Неизвестно, последние данные от 21:44'],
   ])('shows stale Antigravity limits as unknown in the agent card in %s', async (language, heading, words) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
-    onTestFinished(() => { vi.useRealTimers(); localStorage.removeItem('hh-lang'); });
+    onTestFinished(() => { localStorage.removeItem('hh-lang'); });
     const antigravity = {
       ...TEAM_KEY,
       kind: 'personal' as const,

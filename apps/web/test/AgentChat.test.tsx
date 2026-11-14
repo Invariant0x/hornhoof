@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView } from '../src/types';
@@ -19,12 +19,16 @@ const EVENTS = '/api/agents/orchestrator/events';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const WITH_TERMINAL = { ...READY, terminal: true, canType: true };
 const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
-/* Today, so a line shows its clock time alone. */
-vi.useFakeTimers({ toFake: ['Date'] });
-vi.setSystemTime(new Date('2026-11-13T23:59:59.000Z'));
-const AT = new Date(new Date().setHours(10, 5, 0, 0)).toISOString();
-vi.useRealTimers();
+/* Fixed virtual day and clock so message lines and "now" never depend on the host clock or midnight UTC. */
+const NOW = new Date(2026, 10, 3, 12, 0);
+const AT = new Date(2026, 10, 3, 10, 5).toISOString();
 const time = (at: string, language = 'en') => new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(at));
+const dayAndTime = (at: string, language = 'en') => new Intl.DateTimeFormat(language, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(at));
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -138,8 +142,6 @@ describe("an agent's window opens as a chat", () => {
 
 describe('the chat', () => {
   it("shows the person's words and the agent's words, each with who wrote and when", async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-11-14T00:00:01.000Z'));
     const later = new Date(new Date(AT).getTime() + 60_000).toISOString();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
       ev(1, 'message', { text: 'We make characters for schools.' }, { person: { id: ME.person.id, name: ME.person.name } }),
@@ -154,6 +156,20 @@ describe('the chat', () => {
     expect(within(answer).getByText(time(later))).toBeInTheDocument();
     const lisa = screen.getByText('Parents matter too.').closest('article')!;
     expect(within(lisa).getByText('Lisa, via Telegram')).toBeInTheDocument();
+  });
+
+  it("keeps today's clock time at 23:59:59 UTC and adds the weekday once the clock crosses midnight UTC", async () => {
+    vi.setSystemTime(new Date(2026, 10, 3, 23, 59, 59));
+    const events = [ev(1, 'message', { text: 'Before midnight.' }, { person: { id: ME.person.id, name: ME.person.name } })];
+    const beforeMidnight = open({ [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }] });
+    const sameDay = (await screen.findByText('Before midnight.')).closest('article')!;
+    expect(within(sameDay).getByText(time(AT))).toBeInTheDocument();
+    beforeMidnight.unmount();
+
+    vi.setSystemTime(new Date(2026, 10, 4, 0, 0, 1));
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }] });
+    const nextDay = (await screen.findByText('Before midnight.')).closest('article')!;
+    expect(within(nextDay).getByText(dayAndTime(AT))).toBeInTheDocument();
   });
 
   it("names the assistant a person wrote through", async () => {
