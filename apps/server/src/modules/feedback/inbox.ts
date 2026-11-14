@@ -106,13 +106,21 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
     let [card] = await tx.select().from(feedbackInbox).where(place).for('update');
     if (!card) {
       within(limits.newCards, 'all', now);
-      /* One that came at the same moment opened it meanwhile: this one counts on it. */
-      [card] = await tx
+      const open = () => tx
         .insert(feedbackInbox)
         .values({ companyId, fingerprint, kind: report.kind, title, text, errorCode: report.facts.errorCode, versions, platforms, createdAt: at, updatedAt: at })
         .onConflictDoNothing()
         .returning();
-      card ??= (await tx.select().from(feedbackInbox).where(place).for('update'))[0];
+      const opened = async () => (await tx.select().from(feedbackInbox).where(place).for('update'))[0];
+      /* One that came at the same moment opened it meanwhile: this one counts on it. */
+      [card] = await open();
+      card ??= await opened();
+      if (!card) {
+        /* Its number was taken: a merge brought in cards with numbers this sequence had not given, so it moves past them. */
+        await tx.execute(sql`SELECT setval(pg_get_serial_sequence('feedback_inbox', 'number'), (SELECT max(number) FROM feedback_inbox))`);
+        [card] = await open();
+        card ??= await opened();
+      }
     } else {
       await tx.update(feedbackInbox).set({ versions: merged(card.versions, versions), platforms: merged(card.platforms, platforms), updatedAt: at }).where(eq(feedbackInbox.id, card.id));
     }

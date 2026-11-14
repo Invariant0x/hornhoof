@@ -132,6 +132,17 @@ describe('the inbox of Hornhoof developers', () => {
     expect([issued.statusCode, issued.json()]).toEqual([202, { received: true, number: 1, issue: { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' } }]);
   });
 
+  it('gives a new card the next free number after a merge brought in cards whose numbers its sequence had not given', async () => {
+    const { db, receive } = await inbox();
+    expect((await receive(report())).json()).toMatchObject({ number: 1 });
+    /* A merge of another machine's database writes its cards with their own numbers and leaves this sequence where it was. */
+    const companyId = (await db.select().from(companies))[0]!.id;
+    await db.insert(feedbackInbox).values([2, 3].map(number => ({ companyId, number, fingerprint: `merged-${number}`, kind: 'bug', title: `Merged ${number}`, text: '' })));
+    const taken = await receive(report({ title: 'The queue stopped' }));
+    expect([taken.statusCode, taken.json()]).toEqual([202, { received: true, number: 4, issue: null }]);
+    expect((await receive(report({ title: 'The map went blank' }))).json()).toMatchObject({ number: 5 });
+  });
+
   it('counts the repeats an installation reports on its card as that many signals of it', async () => {
     const { receive, cards } = await inbox();
     await receive(report());
