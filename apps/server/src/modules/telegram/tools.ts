@@ -54,7 +54,9 @@ function rankBot(botAgent: AgentRow, sender: AgentRow, topDeptId: string | null)
   return -1;
 }
 
-async function pickAuthorizedBot(db: Db, companyId: string, sender: AgentRow, recipient: Person): Promise<BotRow | null> {
+/* The bots that may carry a file of this agent to this person, in the order they are tried: its own, its department head's,
+   the orchestrator's. Only a bot whose agent the person may see is one of them. */
+async function authorizedBots(db: Db, companyId: string, sender: AgentRow, recipient: Person): Promise<BotRow[]> {
   const rows = await db
     .select({ bot: telegramBots, agent: agents })
     .from(telegramBots)
@@ -65,10 +67,44 @@ async function pickAuthorizedBot(db: Db, companyId: string, sender: AgentRow, re
     .map(r => ({ ...r, rank: rankBot(r.agent, sender, topDeptId) }))
     .filter(r => r.rank >= 0)
     .sort((a, b) => a.rank - b.rank);
+  const allowed: BotRow[] = [];
   for (const candidate of ranked) {
-    if (await canViewAgent(db, recipient, candidate.agent)) return candidate.bot;
+    if (await canViewAgent(db, recipient, candidate.agent)) allowed.push(candidate.bot);
   }
-  return null;
+  return allowed;
+}
+
+/* Telegram lets a bot write only to a person who wrote to it once and did not block it; any other bot of theirs may still. */
+const chatClosed = (err: unknown) => err instanceof TelegramError && (err.code === 403 || (err.code === 400 && /chat not found/i.test(err.message)));
+
+type Doc = { bytes: Buffer; name: string; mediaType: string };
+
+/* Sends the file through the first bot that may write to the person. What a bot that may not write to them tells is its
+   own name, for the person to write to it once. */
+async function sendThroughBots(ctx: Ctx, bots: BotRow[], chatId: number, doc: Doc, caption: string | undefined): Promise<{ sent: true } | { closed: string[] }> {
+  const closed: string[] = [];
+  for (const bot of bots) {
+    try {
+      await sendDocument(ctx.config.telegramApiUrl, decryptSecret(bot.tokenEnc, ctx.config.secret), chatId, doc, caption);
+      return { sent: true };
+    } catch (err) {
+      if (!chatClosed(err)) throw err;
+      closed.push(`@${bot.username}`);
+    }
+  }
+  return { closed };
+}
+
+/* What kept the file from the person, in words for the agent; null when it went. */
+async function sendProblem(ctx: Ctx, bots: BotRow[], to: { name: string; chatId: number }, file: Doc, caption: string | undefined): Promise<string | null> {
+  let result: Awaited<ReturnType<typeof sendThroughBots>>;
+  try {
+    result = await sendThroughBots(ctx, bots, to.chatId, file, caption);
+  } catch (err) {
+    return `Could not send ${file.name} to Telegram: ${err instanceof TelegramError ? err.message : 'Telegram did not accept the document.'}`;
+  }
+  if ('sent' in result) return null;
+  return `Telegram lets none of the bots ${to.name} may use write to them: they have to write to ${result.closed.join(' or ')} once first. Attach the file to the task or chat with hh-attach meanwhile.`;
 }
 
 export function registerTelegramTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -100,26 +136,15 @@ export function registerTelegramTools(server: McpServer, ctx: Ctx, job: ToolJob)
       }
       const file = await attachmentBytesForPerson(ctx.db, person, attachment);
       if (!file) return say('That file does not exist or that person is not allowed to see it.', true);
-      const bot = await pickAuthorizedBot(ctx.db, job.companyId, sender, person);
-      if (!bot) {
+      const bots = await authorizedBots(ctx.db, job.companyId, sender, person);
+      if (!bots.length) {
         return say(
           'No Telegram bot is connected on your card, your department head, or the orchestrator that this person may access. Attach the file with hh-attach instead.',
           true,
         );
       }
-      const token = decryptSecret(bot.tokenEnc, ctx.config.secret);
-      try {
-        await sendDocument(
-          ctx.config.telegramApiUrl,
-          token,
-          person.telegramUserId,
-          { bytes: file.bytes, name: file.name, mediaType: file.mediaType },
-          caption,
-        );
-      } catch (err) {
-        const reason = err instanceof TelegramError ? err.message : 'Telegram did not accept the document.';
-        return say(`Could not send ${file.name} to Telegram: ${reason}`, true);
-      }
+      const problem = await sendProblem(ctx, bots, { name: person.name, chatId: person.telegramUserId }, file, caption);
+      if (problem) return say(problem, true);
       markTelegramFileSent(job.id, person.telegramUserId, attachment);
       return say(JSON.stringify({ sent: true, file: file.name, recipient: person.name }));
     },

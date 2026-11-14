@@ -165,7 +165,7 @@ export const en = {
     keyHint: 'Paste a Google service account JSON (with Google Sheets API and Google Drive API enabled) or OAuth JSON with refresh_token.',
     keyKeep: 'Leave it empty to keep the saved key.',
     shareLabel: 'Share new spreadsheets with',
-    shareHint: 'Google account email given editor access to new service-account spreadsheets (optional).',
+    shareHint: 'The Google account that gets editor access to each new spreadsheet. A service account key needs it, as it opens its spreadsheets to no one else; with an OAuth key it is optional.',
   },
   invite: {
     heading: 'Invite link',
@@ -1682,6 +1682,7 @@ export const en = {
     repo_name_invalid: 'Name the repository with Latin letters, digits, dots, hyphens and underscores, 100 at most.',
     repo_exists: 'This product already has a repository. Create the new one on the department, where it comes as a new product.',
     google_sheets_invalid: 'Paste valid Google service account or OAuth JSON credentials, and enter a valid share email address or leave it empty.',
+    google_sheets_share_needed: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',
     link_reserved: 'This name is kept for Hornhoof itself. Pick another one.',

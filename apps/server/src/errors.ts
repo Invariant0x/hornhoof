@@ -129,6 +129,7 @@ export type ErrorReason =
   | 'repo_name_invalid'
   | 'repo_exists'
   | 'google_sheets_invalid'
+  | 'google_sheets_share_needed'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'file_empty'

@@ -18,6 +18,19 @@ const PutBody = z
   })
   .strict();
 
+/* A service account owns the spreadsheets it creates and opens them to no one else, so its links open only for the Google
+   account they are shared with. What an OAuth key creates belongs to its own account. */
+function requireShareFor(kind: Row['kind'], shareEmail: string | null): void {
+  if (kind === 'service_account' && !shareEmail) {
+    throw new ApiError(
+      400,
+      'validation',
+      'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
+      'google_sheets_share_needed',
+    );
+  }
+}
+
 export const googleSheetsView = (row: Row) => ({
   kind: row.kind,
   account: row.account,
@@ -51,6 +64,7 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const shareEmail = body.shareEmail === undefined ? (saved?.shareEmail ?? null) : checkShareEmail(body.shareEmail);
     if (!rawCreds && saved) {
+      requireShareFor(saved.kind, shareEmail);
       const [updated] = await db
         .update(googleSheets)
         .set({ shareEmail, updatedBy: me.id, updatedAt: new Date() })
@@ -60,6 +74,7 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
       return { google: googleSheetsView(updated!) };
     }
     const parsed = parseGoogleCredentials(rawCreds);
+    requireShareFor(parsed.secret.kind, shareEmail);
     const credentialsEnc = encryptSecret(JSON.stringify(parsed.secret), ctx.config.secret);
     const values = {
       kind: parsed.secret.kind,
