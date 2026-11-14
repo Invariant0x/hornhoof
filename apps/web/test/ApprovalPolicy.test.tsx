@@ -214,5 +214,63 @@ describe('the words', () => {
     expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов' });
     const words = JSON.stringify(r, (_k, v: unknown) => (typeof v === 'function' ? String((v as (a: string, b: string) => string)('a', 'b')) : v));
     expect(words).not.toMatch(/[\u0451\u0401\u2014]/);
+    expect(en.dept.approvals).toHaveProperty('autonomousRelease');
+    expect(ru.dept.approvals).toHaveProperty('autonomousRelease');
+    expect(String((ru.dept.approvals as Record<string, unknown>).autonomousRelease)).toContain('Автономный выпуск');
+  });
+
+  it('lets only the CEO toggle autonomous release on the commit channel and shows the company journal', async () => {
+    const entry = {
+      id: 'ar1',
+      taskId: 't1',
+      taskNumber: 858,
+      agentId: 'a1',
+      agentName: 'Dozer',
+      commitSha: 'a'.repeat(40),
+      testRunId: 'tr1',
+      testRunNumber: 42,
+      reviewerAgentId: 'a2',
+      reviewerName: 'Trinity',
+      verdictStage: 'review',
+      createdAt: '2026-11-14T12:00:00.000Z',
+    };
+    const calls = mockApi({
+      [POLICY]: [200, ceoView({ autonomousRelease: false, canSetAutonomousRelease: true } as Partial<ApprovalPolicyView>)],
+      'PUT /api/departments/d1/approval-policy/autonomous-release': [
+        200,
+        ceoView({ autonomousRelease: true, canSetAutonomousRelease: true, hasAutonomousReleases: true } as Partial<ApprovalPolicyView>),
+      ],
+      'GET /api/autonomous-releases?department=d1': [200, { entries: [entry] }],
+    });
+    const { unmount } = render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByRole('combobox', { name: t.owner });
+    const toggle = screen.getByRole('switch', { name: /autonomous release/i });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(calls.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: true }),
+    );
+    expect(await screen.findByText(/Dozer/)).toBeInTheDocument();
+    expect(screen.getByText(/Trinity/)).toBeInTheDocument();
+    expect(screen.getByText(/#858/)).toBeInTheDocument();
+    expect(screen.getByText(/42/)).toBeInTheDocument();
+    unmount();
+
+    /* Department owner (not CEO) sees read-only status with no switch to toggle it. */
+    mockApi({
+      [POLICY]: [
+        200,
+        view({
+          owner: { id: 'p2', name: 'Dana' },
+          canChangePolicy: true,
+          autonomousRelease: true,
+          canSetAutonomousRelease: false,
+        } as Partial<ApprovalPolicyView>),
+      ],
+      'GET /api/autonomous-releases?department=d1': [200, { entries: [] }],
+    });
+    render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByText(t.ownerIs('Dana'));
+    expect(screen.queryByRole('switch', { name: /autonomous release/i })).not.toBeInTheDocument();
   });
 });
