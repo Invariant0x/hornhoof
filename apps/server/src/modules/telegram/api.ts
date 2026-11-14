@@ -73,6 +73,20 @@ export const getUpdates = (base: string, token: string, offset: number, signal: 
 export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
   callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
 
+export const TELEGRAM_SEND_FILE_BYTES = 50 * 1024 * 1024;
+
+export async function sendDocument(
+  base: string,
+  token: string,
+  chatId: number,
+  doc: { bytes: Buffer; name: string; mediaType?: string },
+  caption?: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  void [base, token, chatId, doc, caption, signal];
+  throw new Error('not implemented');
+}
+
 /* The most one Telegram message holds. */
 export const TELEGRAM_TEXT_MAX = 4096;
 
