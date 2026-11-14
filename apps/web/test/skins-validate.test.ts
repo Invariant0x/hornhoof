@@ -187,6 +187,12 @@ describe('the safety check of a skin file', () => {
     expect(refused(file(raw => (colors(raw).line2 = '#42425C')))).toEqual({ code: 'faint_line', key: 'line2', value: 'bg' });
   });
 
+  it('refuses glass so thin that muted text on it fades over a white or a black page under it', () => {
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(26, 26, 43, .3)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(255, 255, 255, .9)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(26, 26, 43, .94)')))).toBeNull();
+  });
+
   it('says what to fix in plain words in English and Russian for every refusal', () => {
     for (const code of [...SKIN_ERROR_CODES, 'read_failed'] as const) {
       for (const words of [en, ru]) {

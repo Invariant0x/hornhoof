@@ -53,6 +53,15 @@ describe('the registry of built-in skins', () => {
     expect(builtinSkin('cyberpunk')!.colors.line2).toBe('#687A8F');
   });
 
+  it('keeps the glass of every built-in skin dense, as Design set it for glass with no blur under it', () => {
+    expect(BUILTIN_SKINS.map(skin => [skin.id, skin.colors.hud])).toEqual([
+      ['cyberpunk', 'rgba(23, 30, 39, .94)'],
+      ['light', 'rgba(240, 244, 247, .94)'],
+      ['matrix', 'rgba(8, 16, 11, .94)'],
+      ['pixel', 'rgba(26, 26, 43, .94)'],
+    ]);
+  });
+
   it.each(BUILTIN_SKINS.map(skin => [skin.id, skin] as const))('%s fills all 31 colour roles and, given out as a file, passes the same check', (_id, skin) => {
     expect(COLOR_ROLES).toHaveLength(31);
     expect(Object.keys(skin.colors).sort()).toEqual([...COLOR_ROLES].sort());
