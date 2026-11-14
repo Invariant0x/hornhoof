@@ -505,6 +505,41 @@ describe('tools a skill grants', () => {
     expect(out.installed.map(i => i.command)).toContain(`pip install --user pyyaml --target ${HOME} --token ${GITHUB_TOKEN}`.slice(0, 120));
   });
 
+  /* An agent's last failure and the tasks it holds, with a credential or a private path in their words, as agents shows
+     them to a watchdog of another department and to one of its own. */
+  async function failedHolder(c: Awaited<ReturnType<typeof company>>) {
+    const { db, acme, sub, bruno, task } = c;
+    const wait = { reason: `Waits for the bank to read ${HOME}`, since: new Date().toISOString(), until: new Date(Date.now() + 60_000).toISOString() };
+    await db.update(tasks).set({ title: `Checkout API for ${GITHUB_TOKEN}`, externalWait: wait }).where(eq(tasks.id, task.id));
+    const failure = { kind: 'unknown' as const, text: `Cannot load ${HOME} with ${GITHUB_TOKEN}`, retryable: false };
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed',
+      tail: `push token=${GITHUB_TOKEN} from ${HOME}`, failure, finishedAt: new Date(Date.now() - 60_000) });
+    return { wait, failure };
+  }
+  type Watched = { name: string; failure: { text: string; tail: string } | null; tasks: { title: string; externalWait: { reason: string } | null }[] }[];
+
+  it("keeps credentials and private paths out of another department's agent's last failure and the tasks it holds", async () => {
+    const c = await company(['ops-failure-review']);
+    await failedHolder(c);
+    const client = await mcp(c.app, TOKEN);
+    expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
+    const bruno = (JSON.parse((await call(client, 'agents')).content[0]!.text) as Watched).find(a => a.name === 'Bruno')!;
+    for (const secret of [GITHUB_TOKEN, HOME, 'fixture805']) expect.soft(JSON.stringify(bruno)).not.toContain(secret);
+    expect(bruno.failure).toMatchObject({ text: 'Cannot load [hidden] with [hidden]', tail: 'push token=[hidden] from [hidden]' });
+    expect(bruno.tasks).toEqual([expect.objectContaining({ title: 'Checkout API for [hidden]', externalWait: expect.objectContaining({ reason: 'Waits for the bank to read [hidden]' }) })]);
+  });
+
+  it("lets a watchdog of the same department read its agent's last failure and the tasks it holds as they are", async () => {
+    const c = await company(['ops-failure-review']);
+    const own = 'tool-token-watch-own-agents-0123456789';
+    await c.db.update(agents).set({ skills: ['ops-task-watch'] }).where(eq(agents.id, c.hana.id));
+    await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
+    const { wait, failure } = await failedHolder(c);
+    const bruno = (JSON.parse((await call(await mcp(c.app, own), 'agents')).content[0]!.text) as Watched).find(a => a.name === 'Bruno')!;
+    expect(bruno.failure).toMatchObject({ text: failure.text, tail: `push token=${GITHUB_TOKEN} from ${HOME}` });
+    expect(bruno.tasks).toEqual([expect.objectContaining({ title: `Checkout API for ${GITHUB_TOKEN}`, externalWait: wait })]);
+  });
+
   it('leaves the orchestrator its sight of every task', async () => {
     const { app, db, acme, sub, task } = await company(['ops-failure-review']);
     const [orchestrator] = await db.select().from(agents).where(and(eq(agents.companyId, acme.id), eq(agents.kind, 'orchestrator')));
