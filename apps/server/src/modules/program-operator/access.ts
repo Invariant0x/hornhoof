@@ -180,7 +180,7 @@ function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { ph
   return `${me.name}, ${said}: ${result}. Reason: ${action.reason ?? '[not recorded]'}.${choice}`;
 }
 
-function masked(text: string, secrets: string[]): string {
+export function masked(text: string, secrets: string[]): string {
   let out = text;
   for (const secret of secretForms(secrets)) out = out.replaceAll(secret, HIDDEN);
   return out;

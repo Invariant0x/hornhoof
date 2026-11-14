@@ -579,6 +579,13 @@ describe('templates', () => {
       for (const part of ['program_recovery_release', 'case', 'reason', 'only way']) expect(hold, part).toContain(part);
     });
 
+    it('ends a turn that stands itself, the orchestrator\'s and any head\'s too: a stop, a look at the queue, a safe restart, one line inside', () => {
+      const stands = body.slice(body.indexOf('7. A turn that stands'), body.indexOf('\n8. '));
+      for (const part of ['any employee', 'the orchestrator and the head of any department', "with no person's message", 'Never ask a person to stop a turn', 'press Stop turn or write done', 'never put this work in a wait for a person']) expect(stands, part).toContain(part);
+      expect(stands).toMatch(/stop_employee and your reason[\s\S]*queue moved[\s\S]*restart_program[\s\S]*same session[\s\S]*role, skills, memory and tasks stay[\s\S]*one line inside the company/);
+      expect(stands).toMatch(/program operator sends it to its head with message_employee; the head of Operations sends it to the orchestrator with tell_orchestrator/);
+    });
+
     it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
       const stuck = step('You do not understand');
       expect(stuck).toContain('tell_orchestrator');
@@ -638,7 +645,12 @@ describe('templates', () => {
     for (const part of ['any employee', 'program_screen', 'program_keys', 'any keys', 'any question', 'subscription owner', 'values of secrets', 'program_recovery_release']) expect(text, part).toContain(part);
   });
 
-  /* An employee keeps the skills it was hired with, but reads its role's line from the template every turn. */
+  it('locks the program skill on for the head of Operations and the program operator, so each one hired before has it too', () => {
+    for (const id of ['OPS-HEAD', 'OPS-PROGRAM']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'ops-program-operator'), id).toEqual({ id: 'ops-program-operator', on: true, locked: true });
+    for (const id of ['ops-intake', 'hh-questions']) expect(templates.skills.get(id)!.body, id).toMatch(/never ask a person to stop a turn or write done/);
+  });
+
+  /* An employee reads its role's line from the template every turn. */
   it('tells a head of Operations hired before it got the operator skill, in its own line, that it lifts a hold with program_recovery_release', () => {
     expect(templates.roles.get('OPS-HEAD')!.body).toContain('program_recovery_release');
   });
@@ -1728,7 +1740,7 @@ describe('identity, defaults and shared instruction delivery', () => {
   it('delivers every locked ability once even when optional selections are empty', () => {
     for (const role of roles) {
       const rendered = render(role, []);
-      const required = [...CORE_SKILLS, ...(role.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS)];
+      const required = [...CORE_SKILLS, ...(role.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS), ...role.skills.filter(skill => skill.locked).map(skill => skill.id)];
       for (const id of required) expect(rendered.parts.filter(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toHaveLength(1);
       expect(rendered.parts.find(part => part.kind === 'base')?.text, role.id).toBe(role.body);
     }

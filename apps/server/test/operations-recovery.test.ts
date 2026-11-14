@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, jobs, type AgentKind } from '../src/db/schema.js';
-import { renderInstructions } from '../src/modules/agents/instructions.js';
-import { placeOf } from '../src/auth/agent-view.js';
+import { placeOf, renderInstructions } from '../src/modules/agents/instructions.js';
+import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { stopEmployeeTurn } from '../src/modules/program-operator/stop.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { operatorCompany } from './program-operator-company.js';
@@ -39,7 +39,8 @@ async function staged() {
     return { names, call };
   };
   const statusOf = async (id: string) => (await c.db.select({ status: jobs.status, error: jobs.error }).from(jobs).where(eq(jobs.id, id)))[0]!;
-  const log = async (id: string) => (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, id))).map(e => e.data as { text: string; by?: string; operatorStop?: Record<string, unknown> });
+  /* What was said in the turn; how it ended is a separate event. */
+  const log = async (id: string) => (await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, id), eq(agentEvents.kind, 'message')))).map(e => e.data as { text: string; by?: string; operatorStop?: Record<string, unknown> });
   return { ...c, orchestrator: orchestrator!, opsHead: opsHead!, misnamed: misnamed!, turn, standing, tools, statusOf, log };
 }
 
@@ -63,8 +64,11 @@ describe('Operations stop a turn that stands', () => {
       operatorStop: expect.objectContaining({ actor: expect.objectContaining({ id: c.opsHead.id, name: 'Olga' }), employee: { id: c.orchestrator.id, name: c.orchestrator.name }, job: orchestratorTurn.id, operatorJobId: olga.id }),
     })]);
 
+    const behind = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: 'Next.', createdBy: null, message: { personId: null, text: 'Next.', from: 'agent', by: c.agent.id, name: c.agent.name } });
+    expect((await c.statusOf(behind)).status).toBe('queued');
     expect(await stopEmployeeTurn(c.ctx, operator, { employee: c.head.id, reason: 'Hana stands on a dead program.' })).toMatchObject({ result: 'stopped', employee: c.head.id, job: headTurn.id });
     expect(await c.statusOf(headTurn.id)).toEqual({ status: 'failed', error: 'cancelled' });
+    expect((await c.statusOf(behind)).status, 'the queue behind the stopped turn moves').toBe('running');
     expect((await c.log(headTurn.id))[0]).toMatchObject({ text: 'Operator stopped the turn of Hana. Reason: Hana stands on a dead program.', by: c.operator!.id });
   });
 
