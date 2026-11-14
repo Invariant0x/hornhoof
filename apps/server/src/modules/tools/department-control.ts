@@ -7,16 +7,16 @@ import { orchestratorDecisionHeaders } from '../../auth/internal.js';
 import { agents, departments, teams } from '../../db/schema.js';
 import type { AgentCard } from '../agents/routes.js';
 import { AgentPatch } from '../agents/routes.js';
-import { decisionPrincipal } from '../conversation/decision-context.js';
+import { standingPrincipal } from '../conversation/decision-context.js';
 import { hireLines } from './control.js';
 import type { ToolJob } from './job.js';
 import { departmentOf, StaffLine, staffingOptions } from './staff.js';
 import { ChangeItem } from './structure.js';
 
 /* A department runs itself: what a person who runs it decides in its head's window, its head carries out, with no word of
-   the orchestrator or the CEO. Each tool calls the route the department's screen calls, as the person the head's turn
-   answers, so the route allows exactly what that person may do there, and never as the company's owner. Nothing outside
-   the head's own department, its products and sub-units goes, whoever asks. */
+   the orchestrator or the CEO, in that turn or any later one. Each tool calls the route the department's screen calls, as
+   the last person who wrote to the head, so the route allows exactly what that person may do there, and never as the
+   company's owner. Nothing outside the head's own department, its products and sub-units goes, whoever asks. */
 
 type Call = { method: HTTPMethods; url: string; payload?: unknown };
 
@@ -24,10 +24,8 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or staffing_options.`);
 
 const ASK_THEM = 'Only the people of this department decide this, or the CEO; ask them';
-const NO_PRINCIPAL =
-  'This turn answers no person now: the last message in it came from an employee or from Hornhoof, or words for it are still on their way. ' +
-  `Nothing was changed. ${ASK_THEM} to tell you so in this window.`;
-const NOT_THEIRS = `The person this turn answers may not decide this. Nothing was changed. ${ASK_THEM}.`;
+const NO_PRINCIPAL = `No person's words stand behind this: nobody wrote to you yet, or words for this turn are still on their way. Nothing was changed. ${ASK_THEM}.`;
+const NOT_THEIRS = `The last person who wrote to you may not decide this. Nothing was changed. ${ASK_THEM}.`;
 const outside = (what: string) => `${what} is not in your department. Nothing was changed. You change only your own department: its sub-units, products and employees.`;
 
 /* Why the route refused, in the head's words: the person it went for may not do it there, or the turn answers nobody. */
@@ -80,11 +78,12 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
       ...(made.payload === undefined ? {} : { payload: made.payload as object }),
     });
 
-  /* A change goes as the person the turn answers now. A structure change or a hire the route keeps under the head's input
-     lock, checking the turn again; any other change it makes at once, as from that person's screen. The lock is not held
-     around a route here: what the route moves may wake the head, and words for its turn take that lock. */
+  /* A change goes as the last person who wrote to the head, in this turn or an earlier one. A structure change or a hire
+     the route keeps under the head's input lock, checking that again; any other change it makes at once, as from that
+     person's screen. The lock is not held around a route here: what the route moves may wake the head, and words for its
+     turn take that lock. */
   const asPerson = async (made: Call, shown?: (body: string) => string) => {
-    const principal = await decisionPrincipal(ctx.db, job.id);
+    const principal = await standingPrincipal(ctx.db, job.id);
     if (!principal) return say(NO_PRINCIPAL, true);
     return answered(await inject(made, principal.personId, principal.sourceSeq), shown);
   };
@@ -113,7 +112,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     'hire',
     {
       description:
-        'Hires employees into your department when a person who runs it, or the CEO, decides so in the turn that answers them: the last person who wrote into it. ' +
+        'Hires employees into your department when a person who runs it, or the CEO, decides so: the last person who wrote to you, in this turn or an earlier one. ' +
         'Each person is { role, name?, product?, team?, model?, subscription?, skills?: { on, off } }: left out, the name is the role\'s title, the model is Default, ' +
         'the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. Call staffing_options first. A department has one head.',
       inputSchema: { people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
@@ -129,7 +128,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     'change_department',
     {
       description:
-        'Changes your department itself when a person who runs it, or the CEO, decides so in the turn that answers them: teams creates sub-units by name, ' +
+        'Changes your department itself when a person who runs it, or the CEO, decides so, as the last person who wrote to you: teams creates sub-units by name, ' +
         'renames ({ id, name }) or removes ({ id, remove: true }) existing ones, whose employees go back to the department\'s pipeline; products adds products by name, ' +
         'each with the people its template keeps for a product; removeProducts takes away products with no employees, people, keys or open tasks. ' +
         'A new department, another department and removing your own stay with the CEO.',
@@ -153,7 +152,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     'set_team_urgent_only',
     {
       description:
-        'Says whether a sub-unit of your department takes only urgent work, when a person who runs the department, or the CEO, says so in the turn that answers them. ' +
+        'Says whether a sub-unit of your department takes only urgent work, when a person who runs the department, or the CEO, says so, as the last person who wrote to you. ' +
         'Who is in it holds what they hold; from then on work that is not urgent is not given to them.',
       inputSchema: { team: Id('sub-unit'), urgentOnly: z.boolean() },
     },
@@ -168,7 +167,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     'change_employee',
     {
       description:
-        'Changes an employee of your department as its card does, when a person who runs the department, or the CEO, says so in the turn that answers them: ' +
+        'Changes an employee of your department as its card does, when a person who runs the department, or the CEO, says so, as the last person who wrote to you: ' +
         "name, model ('' for Default), effort (a level its model takes, null for its role's level fitted to its model), subscription (null for none), " +
         'team (sub-unit id in your department, or null for the pipeline), skills { id: on/off }, base (its personal assignment, null to clear it), skillText { id: text or null }, ' +
         'on (false switches it off: it ends the turn it runs and takes no task turns until it is on again), and timer { minutes, order, forWork? } (null for none). ' +
@@ -186,7 +185,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     {
       description:
         'Puts an employee of your department back to its role as the templates have it now: its skills, texts and effort. Its model and subscription stay. ' +
-        'Only when a person who runs the department, or the CEO, says so in the turn that answers them.',
+        'Only when a person who runs the department, or the CEO, says so, as the last person who wrote to you.',
       inputSchema: { employee: Id('employee') },
     },
     async ({ employee }) => {
@@ -199,7 +198,7 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
     'fire_employee',
     {
       description:
-        'Removes an employee of your department from the company, when a person who runs the department, or the CEO, says so in the turn that answers them. ' +
+        'Removes an employee of your department from the company, when a person who runs the department, or the CEO, says so, as the last person who wrote to you. ' +
         'Its history stays. Not while it works or holds tasks, and never yourself.',
       inputSchema: { employee: Id('employee') },
     },

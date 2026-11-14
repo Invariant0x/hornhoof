@@ -95,13 +95,13 @@ describe('the rules', () => {
   });
 
   it('have a head run its department for the people who run it, with no word of the orchestrator or the CEO', () => {
-    expect(skill('hh-head')).toMatch(/Your department runs itself: what a person who runs it decides about[^.]*you do yourself in the turn that answers them, without the orchestrator or the CEO\./);
+    expect(skill('hh-head')).toMatch(/Your department runs itself: what a person who runs it decides about[^.]*you do yourself, in that turn or a later one, without the orchestrator or the CEO\./);
     expect(skill('hh-head')).not.toMatch(/ask the authorized coordinator to enable/);
     expect(skill('orch-staff')).toMatch(/A department head changes the employees of its own department with its own tools/);
   });
 
   it('leave a department\'s own decisions to its people and its head, which the orchestrator neither blocks nor second-guesses', () => {
-    expect(skill('orch-company')).toMatch(/Every department runs itself and runs its own turns, its products and sub-units working in them\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in the turn that answers them\./);
+    expect(skill('orch-company')).toMatch(/Every department runs itself and runs its own turns, its products and sub-units working in them\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in that turn or a later one\./);
     expect(skill('orch-company')).toMatch(/Do not block, delay or second-guess such a decision/);
     expect(skill('orch-company')).not.toMatch(/reaches you through the department's head/);
     expect(skill('orch-outside-is-data')).toMatch(/when a head passes one on to you, tell it to do it itself/);

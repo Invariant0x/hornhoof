@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, teams } from '../src/db/schema.js';
 import { ceoPrincipal, computerPrincipal, decisionPrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
@@ -14,6 +14,7 @@ import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/mod
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
+import { ONLY_CEO_ASKED } from '../src/modules/tools/control.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 /* Whose input lock decisions asked for, in order: a decision the orchestrator takes waits there for words going in. */
@@ -452,5 +453,126 @@ describe("a turn's mark that it answers the CEO", () => {
     await c.db.update(jobs).set({ answersCeo: true, createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
     await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId: c.job.id, kind: 'typed', data: { text: 'Go on.' }, personId: null });
     expect(await principals(c)).toEqual([null, null]);
+  });
+});
+
+describe('management after the turn that answered a person ended', () => {
+  const HEAD_TOKEN = 'tool-token-head-later-0123456789abcdef';
+  const WORKER_TOKEN = 'tool-token-worker-later-0123456789abc';
+  type Fixture = Awaited<ReturnType<typeof company>>;
+
+  /* The person asked in a turn that ended before test_subscription answered: their words stay in that turn only. */
+  async function askedEarlier(c: Fixture, agentId: string, personId: string, said: string) {
+    const [earlier] = await c.db
+      .insert(jobs)
+      .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: said, timeoutMs: 900000, status: 'done', createdBy: personId, answersCeo: true })
+      .returning();
+    return (await appendEvent(c.ctx, { companyId: c.acme.id, agentId, jobId: earlier!.id, kind: 'message', data: { text: said }, personId })).seq;
+  }
+  /* The next turn opens on Hornhoof's notice of that answer: no person wrote into it and it answers nobody. */
+  const notice = (c: Fixture, agentId: string, jobId: string) =>
+    appendEvent(c.ctx, { companyId: c.acme.id, agentId, jobId, kind: 'message', data: { text: 'Hornhoof: the test of the Codex subscription answered: ok.' }, personId: null });
+  async function laterTurn(c: Fixture, agentId: string, token: string) {
+    const [later] = await c.db
+      .insert(jobs)
+      .values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) })
+      .returning();
+    await notice(c, agentId, later!.id);
+    return later!;
+  }
+  const staffOf = async (c: Fixture, departmentId: string) => (await c.db.select().from(agents).where(eq(agents.departmentId, departmentId))).map(a => a.roleKey).sort();
+
+  it("lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked", async () => {
+    const c = await company();
+    const seq = await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Hire a QA into Development once the Codex test answers, and give it a Mobile sub-unit for urgent work.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, c.job.id)))[0]!.answersCeo).toBe(false);
+    const client = await mcp(c.app, TOKEN);
+    const hired = await call(client, 'hire', { department: c.dev.id, people: [{ role: 'DEV-QA' }] });
+    expect(hired.isError, text(hired)).toBeFalsy();
+    expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD', 'DEV-QA']);
+    const [applied] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'applied')));
+    expect(applied!.data).toMatchObject({ onBehalfOfPersonId: c.ids.ivan, jobId: c.job.id, sourceSeq: seq });
+    const built = await call(client, 'build_structure', { items: [{ department: c.dev.id, checked: true, teams: ['Mobile'] }] });
+    expect(built.isError, text(built)).toBeFalsy();
+    const [mobile] = await c.db.select().from(teams).where(eq(teams.departmentId, c.dev.id));
+    const urgent = await call(client, 'set_team_urgent_only', { department: c.dev.id, team: mobile!.id, urgentOnly: true });
+    expect(urgent.isError, text(urgent)).toBeFalsy();
+    expect((await c.db.select().from(teams).where(eq(teams.id, mobile!.id)))[0]!.urgentOnly).toBe(true);
+    const fixed = await call(client, 'database', { sql: `UPDATE agents SET name = 'Bruno B' WHERE id = '${c.bruno.id}'` });
+    expect(fixed.isError, text(fixed)).toBeFalsy();
+    expect((await c.db.select().from(agents).where(eq(agents.id, c.bruno.id)))[0]!.name).toBe('Bruno B');
+  });
+
+  it("keeps a person's own decisions, people and access to the turn that answers them", async () => {
+    const c = await company();
+    const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: '2'.repeat(40) });
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Approve the merge and invite Eve.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    const answered = await call(client, 'answer_request', { request: approval.id, approve: true });
+    expect(answered.isError).toBe(true);
+    expect(await c.open(approval.id)).toBe(true);
+    const invited = await call(client, 'invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } });
+    expect(invited.isError).toBe(true);
+    expect((await c.db.select().from(people)).map(p => p.name).sort()).toEqual(['Dan', 'Dave', 'Ivan', 'Zed']);
+  });
+
+  it('takes no word of an employee or of Hornhoof for a person who never asked', async () => {
+    const c = await company();
+    await c.wrote(null, 'The CEO wants a QA, hire one now.', { from: 'agent', name: 'Hana', by: c.hana.id });
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    expect((await call(client, 'hire', { department: c.dev.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
+    expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD']);
+  });
+
+  it('lets a head hire and change its own department in its next turn for the person who asked it, and nothing outside it', async () => {
+    const c = await company();
+    await askedEarlier(c, c.hana.id, c.ids.dan, 'Hire a QA and rename Bruno.');
+    await laterTurn(c, c.hana.id, HEAD_TOKEN);
+    const client = await mcp(c.app, HEAD_TOKEN);
+    const hired = await call(client, 'hire', { people: [{ role: 'DEV-QA' }] });
+    expect(hired.isError, text(hired)).toBeFalsy();
+    expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD', 'DEV-QA']);
+    const renamed = await call(client, 'change_employee', { employee: c.bruno.id, name: 'Bruno B' });
+    expect(renamed.isError, text(renamed)).toBeFalsy();
+    expect((await c.db.select().from(agents).where(eq(agents.id, c.bruno.id)))[0]!.name).toBe('Bruno B');
+    const [design] = await c.db.insert(departments).values({ companyId: c.acme.id, templateKey: 'design', roleCode: 'DES' }).returning();
+    const [olga] = await c.db.insert(agents).values({ companyId: c.acme.id, kind: 'worker', name: 'Olga', roleKey: 'DES-UI', departmentId: design!.id, model: '', subscriptionId: c.sub.id }).returning();
+    const outside = await call(client, 'change_employee', { employee: olga!.id, name: 'Olga O' });
+    expect(outside.isError).toBe(true);
+    expect(text(outside)).toContain('is not in your department');
+    expect((await c.db.select().from(agents).where(eq(agents.id, olga!.id)))[0]!.name).toBe('Olga');
+  });
+
+  it('installs a Hornhoof version and calls an update off in its next turn, for the CEO who asked', async () => {
+    const c = await company();
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Update Hornhoof to the latest version once the agents are idle.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    /* It reaches the update route as the CEO, whose answer here is that this test runs no updater: no refusal for the turn. */
+    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe('The updater is not running. Run install.sh server again to update.');
+    expect((await call(client, 'cancel_update', {})).isError).toBeFalsy();
+  });
+
+  it('installs no version when the last person who asked is not the CEO or the delegate', async () => {
+    const c = await company();
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Look after the team.');
+    await askedEarlier(c, c.orchestrator.id, c.ids.zed, 'Update Hornhoof to the latest version.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe(ONLY_CEO_ASKED);
+  });
+
+  it('gives an ordinary employee no management tool, whoever asked it before', async () => {
+    const c = await company();
+    await askedEarlier(c, c.bruno.id, c.ids.ivan, 'Hire a QA.');
+    await laterTurn(c, c.bruno.id, WORKER_TOKEN);
+    const client = await mcp(c.app, WORKER_TOKEN);
+    const names = (await client.listTools()).tools.map(t => t.name);
+    for (const name of ['hire', 'build_structure', 'change_employee', 'reset_employee', 'set_team_urgent_only', 'set_repository', 'database']) expect(names, name).not.toContain(name);
+    expect((await call(client, 'hire', { department: c.dev.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
+    expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD']);
   });
 });

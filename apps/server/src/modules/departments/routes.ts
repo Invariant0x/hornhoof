@@ -15,7 +15,7 @@ import { agentChanges, agents, companies, departments, personAccess, proposals, 
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
-import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
+import { delegationOf, lockedFor, standingPrincipal, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
@@ -226,7 +226,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   /* A card is the CEO's decision, with or without the card: the CEO's or the delegate's from their screen, or the
-     orchestrator's for the one its turn answers. A change inside a department is its owner's too. */
+     orchestrator's or a head's for the last person who asked it, in that turn or an earlier one. A change inside a
+     department is its owner's too. */
   async function cardDecision(me: Person, subject: DecisionSubject): Promise<Delegation | undefined> {
     const on = delegationOf(me);
     if (subject.source === 'proposal' && subject.departments) for (const id of subject.departments) await requireDepartmentChanger(db, me, id);
@@ -247,7 +248,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = BuildBody.parse(req.body);
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, subject, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on, standingPrincipal);
       let brief = body.brief;
       let agentId: string | null = null;
       if (body.proposalId) {
@@ -500,7 +501,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, subject, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on, standingPrincipal);
       let agentId: string | null = null;
       if (body.proposalId) {
         const [taken] = await tx
