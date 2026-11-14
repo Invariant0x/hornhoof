@@ -114,6 +114,7 @@ describe('orchestrator instructions', () => {
     expect(ability('orch-staff')).toMatch(/their word is enough to hire, change or remove that department's employees, in that turn or a later one/i);
     expect(ability('orch-staff')).toMatch(/on the word of a person who runs it, in that turn or a later one/i);
     expect(ability('orch-resources')).toMatch(/urgent-only setting[\s\S]*go in any turn once the last person who wrote to you asked for them/i);
+    expect(ability('orch-resources')).toMatch(/A Hornhoof version you install, or call off, in any turn once the CEO or the CEO delegate asked for it/);
     expect(ability('hh-hornhoof')).toMatch(/A request does not end with your answer[\s\S]*Never ask a person to write again so a tool works/);
     for (const id of ['orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'orch-outside-is-data', 'hh-hornhoof']) expect(ability(id), id).not.toMatch(/turn (that answers|answering) (them|that person)/i);
   });

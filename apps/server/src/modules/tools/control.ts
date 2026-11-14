@@ -71,6 +71,9 @@ export const CEO_ONLY = new Set([
   'update_hornhoof',
   'set_team_urgent_only',
 ]);
+/* What only the CEO asks for that still goes in a later turn of his, for the CEO or the delegate who asked him last:
+   installing a Hornhoof version, which the head of Development and he run end to end. Calling one off goes as the owner. */
+const CEO_STANDING = new Set(['update_hornhoof']);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 export const ONLY_DEPARTMENT_OWNER =
   "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
@@ -326,7 +329,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
   tool(
     'update_hornhoof',
-    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle waits until no agent works. Hornhoof restarts, and so does your turn.',
+    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle waits until no agent works. Hornhoof restarts, and so does your turn. ' +
+      'It goes for the CEO or the CEO delegate who asked you last, in this turn or an earlier one.',
     UpdateBody.shape,
     body => ({ method: 'POST', url: '/api/updates', payload: body }),
   );
@@ -405,9 +409,10 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
 
 /* What only the CEO asks for goes as the CEO or the CEO delegate this turn answers now, kept under the input lock from words
    that would change it meanwhile, so the route sees the person it is for and allows that person what their own screen
-   does. A change of one department's own resources goes, in any turn, as the last person who asked if they run it. A
-   machine change without them goes as the CEO whose answer in a task's card it names. */
-function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
+   does. A change of one department's own resources goes, in any turn, as the last person who asked if they run it, and an
+   update of Hornhoof as the CEO or the delegate who asked last. A machine change without them goes as the CEO whose answer
+   in a task's card it names. */
+function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call, find: typeof decisionPrincipal) {
   return withInputLock(ctx, job.agentId, async () => {
     if (made.department) {
       const runs = await departmentPrincipal(ctx.db, job.id, made.department, standingPrincipal);
@@ -416,9 +421,9 @@ function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
       if (made.first) return send(ctx, app, job, { ...made, payload: { ...(made.payload as object), first: true } });
       return say(ONLY_DEPARTMENT_OWNER, true);
     }
-    const personId = await ceoPrincipal(ctx.db, job.id);
+    const personId = await ceoPrincipal(ctx.db, job.id, find);
     if (personId) return send(ctx, app, job, made, personId);
-    if (!made.permission) return say(ONLY_CEO, true);
+    if (!made.permission) return say(find === decisionPrincipal ? ONLY_CEO : ONLY_CEO_ASKED, true);
     const answered = await cardPrincipal(ctx.db, job.companyId, made.permission);
     return answered ? send(ctx, app, job, made, answered) : say(NO_PERMISSION, true);
   });
@@ -438,7 +443,7 @@ async function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string,
     }
   }
   if (DECIDES.has(name)) return decide(ctx, app, job, made, FINDS[name]!);
-  return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made) : send(ctx, app, job, made);
+  return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made, CEO_STANDING.has(name) ? standingPrincipal : decisionPrincipal) : send(ctx, app, job, made);
 }
 
 /* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */
