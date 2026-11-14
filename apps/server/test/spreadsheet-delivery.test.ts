@@ -647,6 +647,32 @@ describe('the edges of a table delivered to a person', () => {
     expect(c.tg.sentDocuments.map(d => d.chat_id)).toEqual([MKT_TG.id, CEO_TG.id]);
   });
 
+  it('takes as the addressee only an active person of this company, never a Telegram number, a username or anyone else', async () => {
+    const c = await marketingCompany();
+    const { token } = await c.startTurn(c.mktSeo.id);
+    const up = await c.app.inject({
+      method: 'POST',
+      url: `/api/attachments?task=${c.task.number}&name=partner-contacts.xlsx`,
+      payload: SAMPLE_XLSX,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
+    });
+    const attachment = up.json().id as string;
+    /* Someone of another company who connected Telegram, someone of this one who no longer works in it, and Luiza's
+       assistant, which is no person: each has a Telegram number a bot could write to. */
+    const [other] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [outsider] = await c.db.insert(people).values({ companyId: other!.id, name: 'Olaf', email: 'olaf@other.test', status: 'active', scopeKind: 'company', telegramUserId: 7770009 }).returning();
+    const [gone] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Gina', email: 'gina@acme.test', status: 'disabled', scopeKind: 'company', telegramUserId: 7770010 }).returning();
+    const [assistant] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Luiza assistant', status: 'active', scopeKind: 'listed', isAgent: true, assistantOf: c.luiza.id, telegramUserId: 7770011 }).returning();
+    const client = await mcp(c.app, token);
+    const addressees = [String(MKT_TG.id), String(SALES_TG.id), '7770009', '+15550100', '@luiza_mkt', 'luiza_mkt', outsider!.id, 'Olaf', gone!.id, 'Gina', assistant!.id, 'Luiza assistant'];
+    for (const person of addressees) {
+      const reply = (await client.callTool({ name: 'send_telegram_file', arguments: { person, attachment } })) as ToolReply;
+      expect(reply.isError, person).toBe(true);
+      expect(reply.content[0]!.text, person).toMatch(/^There is no active person (?:named "[^"]+"|with that id) in this company\.$/);
+    }
+    expect(c.tg.sentDocuments).toEqual([]);
+  });
+
   it('shows a picture an agent attached to its chat as a picture, and gives every other chat file to save', async () => {
     const c = await marketingCompany();
     const { token } = await c.startTurn(c.mktSeo.id);
