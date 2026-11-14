@@ -65,6 +65,16 @@ function programStuck(program: TurnProgram | null, now: number): boolean {
   return program.state === 'retrying' && now - program.since >= SILENT_TURN_MS;
 }
 
+/* A turn that waits for something outside it: the external wait of its task, or a check of its own in line. */
+function turnWaitsOutside(ctx: Ctx, job: RunningJob, externalUntil: string | null, now: number): boolean {
+  return (!!externalUntil && Date.parse(externalUntil) > now) || jobCheckQueued(ctx, job.id, now);
+}
+
+/* The newest sign of a turn: of its program, a restart, the end of a check of its own, or a step it took. */
+function lastTurnSign(ctx: Ctx, job: RunningJob, program: TurnProgram | null, activityAt: number | undefined, now: number): number {
+  return latest([programLiveSign(job, program), job.restartedAt?.getTime(), jobCheckLastEnd(ctx, job.id, now), activityAt])!;
+}
+
 function isConversationLive(
   ctx: Ctx,
   job: RunningJob,
@@ -72,14 +82,12 @@ function isConversationLive(
   activityAt: number | undefined,
   now: number,
 ): boolean {
-  if (externalUntil && Date.parse(externalUntil) > now) return true;
-  if (jobCheckQueued(ctx, job.id, now)) return true;
+  if (turnWaitsOutside(ctx, job, externalUntil, now)) return true;
   const program = agentProgramState(ctx, job).program;
   if (program?.state === 'asking') return (job.startedAt ?? job.createdAt).getTime() + job.timeoutMs > now;
   if (programStuck(program, now)) return false;
   const limit = program?.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
-  const lastSign = latest([programLiveSign(job, program), job.restartedAt?.getTime(), jobCheckLastEnd(ctx, job.id, now), activityAt])!;
-  return now - lastSign < limit;
+  return now - lastTurnSign(ctx, job, program, activityAt, now) < limit;
 }
 
 async function externalWaitByTask(ctx: Ctx, taskIds: string[]): Promise<Map<string, string>> {
@@ -104,6 +112,26 @@ async function runningWorkOf(ctx: Ctx, node: NodeIdentity): Promise<{ runningJob
   return { runningJobs, runningParts };
 }
 
+/* The newest sign of the node itself: a frame or its load since this server started, a connection the database keeps, a
+   program report or a step of one of its turns. Without any, the time it took its newest running work. */
+async function nodeSignAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[], activity: Map<string, number>, takenAt: number | null): Promise<number | null> {
+  const reportedAt = runningJobs.map(j => agentProgramState(ctx, j).program?.reportedAt);
+  return latest([ctx.hub.lastSeenAt(node), ctx.hub.loadOf(node)?.at, await persistedNodeSignAt(ctx, node), ...reportedAt, ...activity.values()]) ?? takenAt;
+}
+
+/* A test part runs until the time of its run is up, and the grace after it. */
+const partLive = (now: number) => (p: RunningPart): boolean => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
+
+function jobLive(ctx: Ctx, job: RunningJob, externalUntil: string | null, activityAt: number | undefined, now: number): boolean {
+  if (job.kind !== 'conversation') return (job.startedAt ?? job.createdAt).getTime() + job.timeoutMs > now;
+  return isConversationLive(ctx, job, externalUntil, activityAt, now);
+}
+
+async function anyJobLive(ctx: Ctx, runningJobs: RunningJob[], activity: Map<string, number>, now: number): Promise<boolean> {
+  const waits = await externalWaitByTask(ctx, [...new Set(runningJobs.flatMap(j => (j.taskId ? [j.taskId] : [])))]);
+  return runningJobs.some(j => jobLive(ctx, j, j.taskId ? (waits.get(j.taskId) ?? null) : null, activity.get(j.id), now));
+}
+
 /* Whether running work on this node still holds a planned update back: a node silent past SILENT_TURN_MS, or one whose
    newest running work it took more than a full drain-and-retry cycle ago without any genuinely live turn or test part,
    updates without waiting. */
@@ -112,17 +140,8 @@ export async function hasLiveDrainWork(ctx: Ctx, node: NodeIdentity, now: number
   if (!runningJobs.length && !runningParts.length) return false;
   const activity = await latestTurnActivityAt(ctx, runningJobs.map(j => j.id));
   const takenAt = lastTakenWorkAt(runningJobs, runningParts);
-  const reportedAt = runningJobs.map(j => agentProgramState(ctx, j).program?.reportedAt);
-  const nodeSignAt = latest([ctx.hub.lastSeenAt(node), ctx.hub.loadOf(node)?.at, await persistedNodeSignAt(ctx, node), ...reportedAt, ...activity.values()]) ?? takenAt;
-  if (nodeSignAt !== null && now - nodeSignAt >= SILENT_TURN_MS) return false;
-  const noWorkLimit = ctx.config.nodeDrainMs + ctx.config.nodeUpdateRetryMs;
-  if (takenAt !== null && now - takenAt < noWorkLimit) return true;
-  if (runningParts.some(p => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now)) return true;
-  const taskIds = [...new Set(runningJobs.flatMap(j => (j.taskId ? [j.taskId] : [])))];
-  const externalWaits = await externalWaitByTask(ctx, taskIds);
-  return runningJobs.some(j =>
-    j.kind === 'conversation'
-      ? isConversationLive(ctx, j, j.taskId ? (externalWaits.get(j.taskId) ?? null) : null, activity.get(j.id), now)
-      : (j.startedAt ?? j.createdAt).getTime() + j.timeoutMs > now,
-  );
+  const signAt = await nodeSignAt(ctx, node, runningJobs, activity, takenAt);
+  if (signAt !== null && now - signAt >= SILENT_TURN_MS) return false;
+  if (takenAt !== null && now - takenAt < ctx.config.nodeDrainMs + ctx.config.nodeUpdateRetryMs) return true;
+  return runningParts.some(partLive(now)) || anyJobLive(ctx, runningJobs, activity, now);
 }

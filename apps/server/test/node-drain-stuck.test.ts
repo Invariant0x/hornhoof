@@ -2,10 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { QUIET_ALARM_MS } from '@hornhoof/protocol';
+import { TOOL_QUIET_ALARM_MS } from '@hornhoof/protocol/map';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, machines, nodes, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
@@ -214,5 +215,78 @@ describe('node drain updates silent or stuck nodes without interrupting live wor
     await until(() => s.app.ctx.hub.isReady({ kind: 'node', nodeId: s.nodeId }));
 
     expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+  });
+
+  describe('waits for a turn that is still live by its own signs, and only while it is', () => {
+    /* A node that answers, with one turn it took four hours ago: past a full drain-and-retry cycle, so the turn's own signs
+       decide. */
+    async function liveStand(turn: { startedAgoMs?: number; task?: (s: Awaited<ReturnType<typeof stuckStand>>) => Promise<string> } = {}) {
+      const s = await stuckStand();
+      const sock = await connectNode(s.url, s.nodeKey);
+      onTestFinished(() => sock.close());
+      const startedAt = new Date(Date.now() - (turn.startedAgoMs ?? 4 * 60 * MINUTE_MS));
+      const taskId = turn.task ? await turn.task(s) : undefined;
+      const [job] = await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: s.worker.id, nodeId: s.nodeId, taskId, kind: 'conversation', prompt: 'Long turn', status: 'running', createdAt: startedAt, startedAt, timeoutMs: TURN_TIMEOUT_MS }).returning();
+      sock.send({ type: 'hello', version: '0.23.3', loggedIn: true, running: [job!.id] });
+      await until(() => s.app.ctx.hub.isReady({ kind: 'node', nodeId: s.nodeId }));
+      const identity = { kind: 'node' as const, nodeId: s.nodeId };
+      /* The node itself goes on answering at every moment the test looks. */
+      const answers = () => handleNodeMessage(s.app.ctx, identity, { type: 'load', cpus: 8, load: 0.2, memTotal: 16e9, memFree: 12e9, tests: 0, jobs: 1 }, new Date());
+      await answers();
+      return { ...s, job: job!, startedAt, identity, answers };
+    }
+
+    it('while the turn took a step within the quiet limit although its program reports nothing new', async () => {
+      const s = await liveStand();
+      const at = Date.now();
+      const old = s.startedAt.getTime();
+      await handleNodeMessage(s.app.ctx, s.identity, { type: 'job.program', jobId: s.job.id, state: 'thinking', since: old, screenAt: old, signAt: old }, new Date(at));
+      await s.db.insert(agentEvents).values({ companyId: s.company.id, agentId: s.worker.id, jobId: s.job.id, kind: 'tool', data: { name: 'Bash' }, createdAt: new Date(at - MINUTE_MS) });
+      expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+      vi.setSystemTime(at + QUIET_ALARM_MS);
+      await s.answers();
+      expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    });
+
+    it('while the task of the turn waits for an outside event', async () => {
+      const waits = async (stand: Awaited<ReturnType<typeof stuckStand>>) => {
+        const now = Date.now();
+        const externalWait = { reason: 'A test run', since: new Date(now - 60 * MINUTE_MS).toISOString(), until: new Date(now + 30 * MINUTE_MS).toISOString() };
+        const [task] = await stand.db.insert(tasks).values({ companyId: stand.company.id, number: 1, title: 'Waits for a run', status: 'working', assigneeAgentId: stand.worker.id, externalWait }).returning();
+        return task!.id;
+      };
+      const s = await liveStand({ task: waits });
+      const at = Date.now();
+      expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+      vi.setSystemTime(at + 31 * MINUTE_MS);
+      await s.answers();
+      expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    });
+
+    it('while its program runs one tool, quiet for longer than a turn may be but not than a tool may', async () => {
+      const s = await liveStand();
+      const at = Date.now();
+      const toolAt = at - 2 * QUIET_ALARM_MS;
+      await handleNodeMessage(s.app.ctx, s.identity, { type: 'job.program', jobId: s.job.id, state: 'tool', tool: 'Bash', since: toolAt, screenAt: toolAt, signAt: toolAt }, new Date(at));
+      expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+      vi.setSystemTime(toolAt + TOOL_QUIET_ALARM_MS);
+      await s.answers();
+      expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    });
+
+    it('while its program asks a question within the time of the turn', async () => {
+      const s = await liveStand({ startedAgoMs: TURN_TIMEOUT_MS - 10 * MINUTE_MS });
+      const at = Date.now();
+      const old = s.startedAt.getTime();
+      await handleNodeMessage(s.app.ctx, s.identity, { type: 'job.program', jobId: s.job.id, state: 'asking', since: old, screenAt: old, signAt: old }, new Date(at));
+      expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+      vi.setSystemTime(at + 11 * MINUTE_MS);
+      await s.answers();
+      expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    });
   });
 });
