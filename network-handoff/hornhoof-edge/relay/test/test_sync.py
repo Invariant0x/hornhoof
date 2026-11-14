@@ -404,6 +404,72 @@ class SyncDiagnosticsTests(unittest.TestCase):
         for secret in (self.key, wrong_key, visitor_ip, '127.0.0.1', body_token):
             self.assertNotIn(secret, joined)
 
+    def test_logs_route_unknown_once_per_reason_change_and_not_twice_on_sync(self) -> None:
+        visitor_ip = '203.0.113.44'
+        seen_lines: list[str] = []
+
+        def take_lines() -> list[str]:
+            batch = list(self.lines)
+            seen_lines.extend(batch)
+            self.lines.clear()
+            return batch
+
+        self.relay.db().execute(
+            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            ('acme', 1, 'acme-aaaaaaaa-link', 'r1', 'https', 'held', 1_700_000_000),
+        )
+        self.relay.db().commit()
+
+        # On unknown inside POST /sync (even before any GET /route), only one line is emitted.
+        self.dash_records['/api/proxy/https/acme'] = (500, {})
+        status, _, _ = self._call('POST', '/api/v1/links/acme/sync', POST, visitor_ip=visitor_ip)
+        self.assertEqual(status, 503)
+        batch = take_lines()
+        self.assertEqual(len(batch), 1, batch)
+        self.assertIn('sync of acme refused: unknown', batch[0])
+
+        # Repeated GET /route calls with the same unknown failure log only once.
+        for attempt in range(4):
+            status, _, _ = self._call('GET', '/api/v1/links/acme/route', visitor_ip=visitor_ip)
+            self.assertEqual(status, 503)
+            batch = take_lines()
+            if attempt == 0:
+                self.assertEqual(len(batch), 1, batch)
+                self.assertIn('route of acme is unknown:', batch[0])
+            else:
+                self.assertEqual(batch, [])
+
+        # A different unknown reason logs once, then stays quiet while unchanged.
+        with patch.object(self.relay, 'route_of', side_effect=self.relay.WriteBusy('locked')):
+            for attempt in range(3):
+                status, _, _ = self._call('GET', '/api/v1/links/acme/route', visitor_ip=visitor_ip)
+                self.assertEqual(status, 503)
+                batch = take_lines()
+                if attempt == 0:
+                    self.assertEqual(batch, ['route of acme is unknown: store busy'])
+                else:
+                    self.assertEqual(batch, [])
+
+        # Once a known route answer succeeds, a later outage logs its reason once again.
+        self.dash_records['/api/proxy/https/acme'] = (200, {'status': 'online', 'clientID': 'acme-aaaaaaaa-link'})
+        status, _, _ = self._call('GET', '/api/v1/links/acme/route', visitor_ip=visitor_ip)
+        self.assertEqual(status, 200)
+        self.assertEqual(take_lines(), [])
+
+        self.dash_records['/api/proxy/https/acme'] = (500, {})
+        status, _, _ = self._call('GET', '/api/v1/links/acme/route', visitor_ip=visitor_ip)
+        self.assertEqual(status, 503)
+        batch = take_lines()
+        self.assertEqual(len(batch), 1, batch)
+        self.assertIn('route of acme is unknown:', batch[0])
+        status, _, _ = self._call('GET', '/api/v1/links/acme/route', visitor_ip=visitor_ip)
+        self.assertEqual(status, 503)
+        self.assertEqual(take_lines(), [])
+
+        joined = '\n'.join(seen_lines)
+        for secret in (self.key, visitor_ip, '127.0.0.1'):
+            self.assertNotIn(secret, joined)
+
 
 if __name__ == '__main__':
     unittest.main()
