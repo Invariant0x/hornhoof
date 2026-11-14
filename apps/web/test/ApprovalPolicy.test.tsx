@@ -227,6 +227,7 @@ describe('the words', () => {
       agentId: 'a1',
       agentName: 'Dozer',
       commitSha: 'a'.repeat(40),
+      baseCommitSha: '1'.repeat(40),
       testRunId: 'tr1',
       testRunNumber: 42,
       reviewerAgentId: 'a2',

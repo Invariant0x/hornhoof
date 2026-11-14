@@ -382,16 +382,23 @@ describe('autonomous release for exact commits to main', () => {
     expect(autoReq.text).not.toContain('waits for a person');
     expect(await f.db.select().from(requests).where(eq(requests.taskId, reqTask.id))).toEqual([]);
 
-    /* Echelons acceptCandidate on main succeeds without any human request card. */
+    /* Echelons acceptCandidate on main requires pre-push auto-approval on f.task, then succeeds without a human card. */
+    const taskAuto = await headCall('ask_person', {
+      task: f.task.number,
+      question: 'Integrate ready candidate to main.',
+      commit: CANDIDATE,
+    });
+    expect(taskAuto.isError).toBe(false);
+    expect(taskAuto.text).not.toContain('waits for a person');
     f.setMain(CANDIDATE);
     const closed = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated under autonomous release.', acceptance });
     expect(closed.task.status).toBe('done');
 
-    /* Company journal shows who requested each auto-approval, the 40-char SHA, the run_tests number and the reviewer PASS verdict. */
+    /* Company journal shows who requested each auto-approval, the 40-char SHA, base main SHA, run_tests number and reviewer PASS verdict. */
     const entries = (await f.journal()).json().entries;
     const deptEntries = (await f.app.inject({ method: 'GET', url: `/api/autonomous-releases?department=${f.departmentId}`, ...as(f.ceoToken) })).json().entries;
     expect(deptEntries).toEqual(entries);
-    expect(entries.length).toBeGreaterThanOrEqual(3);
+    expect(entries).toHaveLength(3);
     expect(entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -399,6 +406,7 @@ describe('autonomous release for exact commits to main', () => {
           agentId: f.head.id,
           agentName: f.head.name,
           commitSha: CANDIDATE,
+          baseCommitSha: MAIN_BASE,
           testRunId: fullRun.id,
           testRunNumber: fullRun.number,
           reviewerAgentId: f.reviewer.id,
@@ -407,6 +415,66 @@ describe('autonomous release for exact commits to main', () => {
         }),
       ]),
     );
+  });
+
+  it('refuses main acceptance without a pre-push auto-approval row or after a non-fast-forward overwrite of main', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const { acceptance } = await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+
+    /* 1. Skipping ask_person / request_approval before pushing to main cannot record a journal entry retroactively at acceptance. */
+    f.setMain(CANDIDATE);
+    await expect(
+      report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Pushed without asking first.', acceptance }).then(() => null),
+    ).rejects.toMatchObject({ status: 403 });
+    expect((await f.journal()).json().entries).toEqual([]);
+
+    /* 2. Force-push / non-fast-forward scenario (B1): before push, C is not fast-forward from main so ask_person opens a card;
+       even if main is then overwritten with C, acceptance refuses without human approval and writes no journal row. */
+    f.setMain(MAIN_BASE);
+    f.setFastForward(false);
+    const { call: headCall } = await f.openTools(f.head);
+    const beforePush = await headCall('ask_person', {
+      task: f.task.number,
+      question: 'Ship non-ff candidate?',
+      commit: CANDIDATE,
+    });
+    expect(beforePush.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+
+    f.setMain(CANDIDATE);
+    await f.db.delete(requests).where(eq(requests.taskId, f.task.id));
+    await f.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, f.task.id));
+    await expect(
+      report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Try acceptance after overwriting main.', acceptance }).then(() => null),
+    ).rejects.toMatchObject({ status: 403 });
+    expect((await loadTask(f.db, f.task.id)).status).not.toBe('done');
+    expect((await f.journal()).json().entries).toEqual([]);
+
+    /* 3. Even after a valid pre-push auto-approval recorded baseCommitSha = MAIN_BASE, if recorded baseCommitSha is not an ancestor
+       of integrationCommit when acceptance checks compare(baseCommitSha...integrationCommit), acceptance is refused. */
+    f.setMain(MAIN_BASE);
+    f.setFastForward(true);
+    const approved = await headCall('ask_person', {
+      task: f.task.number,
+      question: 'Ship fast-forward candidate.',
+      commit: CANDIDATE,
+    });
+    expect(approved.text).not.toContain('waits for a person');
+    expect((await f.journal()).json().entries).toHaveLength(1);
+    expect((await f.journal()).json().entries[0]).toMatchObject({ commitSha: CANDIDATE, baseCommitSha: MAIN_BASE });
+
+    f.setMain(CANDIDATE);
+    f.setCompareProblem('Recorded base is no longer an ancestor.');
+    await expect(
+      report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Broken ancestry.', acceptance }).then(() => null),
+    ).rejects.toMatchObject({ status: 403 });
+
+    f.setCompareProblem(null);
+    const done = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Verified ancestry.', acceptance });
+    expect(done.task.status).toBe('done');
+    expect((await f.journal()).json().entries).toHaveLength(1);
   });
 
   it('refuses auto-approval without a green full run, with a narrow/cached/stale/failed run, or with a full run on another SHA', async () => {

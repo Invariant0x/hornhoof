@@ -21,6 +21,7 @@ const JOURNAL: AutonomousReleaseEntry[] = [
     agentId: 'a1',
     agentName: 'Dozer',
     commitSha: 'd7a1eb2b34edb970a2c5abbaadf25e50d4dc4031',
+    baseCommitSha: '1111111111111111111111111111111111111111',
     testRunId: 'tr43',
     testRunNumber: 43,
     reviewerAgentId: 'a2',

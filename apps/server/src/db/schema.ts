@@ -2171,7 +2171,7 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
 ]);
 
 /* Each exact commit Hornhoof let go to main without a card while the CEO had autonomous release on: who asked for it,
-   the full commit SHA, the full test run that proved it and the independent PASS verdict it stood on. */
+   the full commit SHA, the main SHA it was fast-forward from, the full test run and the independent PASS verdict. */
 export const autonomousReleases = pgTable('autonomous_releases', {
   id: id(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -2181,6 +2181,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
   agentName: text('agent_name').notNull(),
   commitSha: text('commit_sha').notNull(),
+  baseCommitSha: text('base_commit_sha').notNull(),
   testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
   testRunNumber: integer('test_run_number').notNull(),
   reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
@@ -2192,4 +2193,5 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   index('autonomous_releases_company_created').on(t.companyId, t.createdAt),
   index('autonomous_releases_company_commit').on(t.companyId, t.commitSha),
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
+  check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
 ]);

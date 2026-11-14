@@ -7,6 +7,7 @@ CREATE TABLE "autonomous_releases" (
 	"agent_id" uuid,
 	"agent_name" text NOT NULL,
 	"commit_sha" text NOT NULL,
+	"base_commit_sha" text NOT NULL,
 	"test_run_id" uuid,
 	"test_run_number" integer NOT NULL,
 	"reviewer_agent_id" uuid,
@@ -14,7 +15,8 @@ CREATE TABLE "autonomous_releases" (
 	"verdict_event_id" bigint,
 	"verdict_stage" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "autonomous_releases_commit_sha" CHECK ("autonomous_releases"."commit_sha" ~ '^[0-9a-f]{40}$')
+	CONSTRAINT "autonomous_releases_commit_sha" CHECK ("autonomous_releases"."commit_sha" ~ '^[0-9a-f]{40}$'),
+	CONSTRAINT "autonomous_releases_base_commit_sha" CHECK ("autonomous_releases"."base_commit_sha" ~ '^[0-9a-f]{40}$')
 );
 --> statement-breakpoint
 ALTER TABLE "companies" ADD COLUMN "autonomous_release" boolean DEFAULT false NOT NULL;--> statement-breakpoint

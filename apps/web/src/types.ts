@@ -213,6 +213,7 @@ export type AutonomousReleaseEntry = {
   agentId: string | null;
   agentName: string;
   commitSha: string;
+  baseCommitSha?: string;
   testRunId: string | null;
   testRunNumber: number;
   reviewerAgentId: string | null;

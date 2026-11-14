@@ -1,5 +1,5 @@
 {
-  "id": "892801b2-7e64-47ea-ae0b-93c853ad3f8d",
+  "id": "43eece8f-3a69-498c-9b52-1a9f66588ded",
   "prevId": "2d601993-dcd3-4b65-9d9a-adac6c919a29",
   "version": "7",
   "dialect": "postgresql",
@@ -1704,6 +1704,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "base_commit_sha": {
+          "name": "base_commit_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "test_run_id": {
           "name": "test_run_id",
           "type": "uuid",
@@ -1892,6 +1898,10 @@
         "autonomous_releases_commit_sha": {
           "name": "autonomous_releases_commit_sha",
           "value": "\"autonomous_releases\".\"commit_sha\" ~ '^[0-9a-f]{40}$'"
+        },
+        "autonomous_releases_base_commit_sha": {
+          "name": "autonomous_releases_base_commit_sha",
+          "value": "\"autonomous_releases\".\"base_commit_sha\" ~ '^[0-9a-f]{40}$'"
         }
       },
       "isRLSEnabled": false

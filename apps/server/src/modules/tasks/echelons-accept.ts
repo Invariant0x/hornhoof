@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requests, turns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
-import { recordAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
+import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { testedEvidence } from './echelons-tests.js';
@@ -69,11 +69,11 @@ async function verifyMainIntegrationApproval(ctx: Reader, task: Task, branch: st
   return { humanApproval: null, autoProof };
 }
 
-async function confirmMainApprovalInTx(tx: Tx, task: Task, agentId: string, branch: string, commit: string, autoProof: AutoProof): Promise<void> {
+async function confirmMainApprovalInTx(tx: Tx, task: Task, branch: string, commit: string, autoProof: AutoProof): Promise<void> {
   if (branch !== 'main') return;
   if (await humanMainApproval(tx, task, commit)) return;
-  const recorded = autoProof ? await recordAutonomousMainAcceptance(tx, task, agentId, commit, autoProof) : null;
-  if (!recorded) throw noMainApproval();
+  const confirmed = autoProof ? await confirmAutonomousMainAcceptance(tx, task, commit, autoProof) : null;
+  if (!confirmed) throw noMainApproval();
 }
 
 /* Read-only proof of an integration already performed through the authorized Git route. */
@@ -107,7 +107,7 @@ export async function acceptCandidate(ctx: Reader, task: Task, route: Route, age
   }, async tx => {
     await requireTaskHead({ db: tx }, task, agentId);
     await testedEvidence(tx, task, route, candidate);
-    await confirmMainApprovalInTx(tx, task, agentId, integration.branch, integration.commit, autoProof);
+    await confirmMainApprovalInTx(tx, task, integration.branch, integration.commit, autoProof);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
   }, wakes);
   return { task: row, wakes };

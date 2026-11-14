@@ -27,8 +27,10 @@ type ScopeAddress = Snapshot['description']['repositoryScope'];
 
 type VerifiedRun = { id: string; number: number };
 type VerifiedVerdict = { eventId: number; reviewerAgentId: string; reviewerName: string; stage: string };
-type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict };
+type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; taskId: string; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string };
+
+export type RecordedMainApproval = { entryId: string; baseCommitSha: string; department: Dept };
 
 export type AutonomousReleaseEntry = {
   id: string;
@@ -38,6 +40,7 @@ export type AutonomousReleaseEntry = {
   agentId: string | null;
   agentName: string;
   commitSha: string;
+  baseCommitSha: string;
   testRunId: string | null;
   testRunNumber: number;
   reviewerAgentId: string | null;
@@ -78,6 +81,7 @@ export async function listAutonomousReleases(db: Pick<QueryDb, 'select'>, compan
     agentId: row.agentId,
     agentName: row.agentName,
     commitSha: row.commitSha,
+    baseCommitSha: row.baseCommitSha,
     testRunId: row.testRunId,
     testRunNumber: row.testRunNumber,
     reviewerAgentId: row.reviewerAgentId,
@@ -291,16 +295,25 @@ async function verifiedIndependentVerdict(db: QueryDb, askingTask: Task, reposit
   return null;
 }
 
-/* Condition (c): the commit is a fast-forward from current origin/main (ahead or identical, never diverged or behind). */
-async function verifiedFastForward(ctx: Reader, repo: Repo, commit: string): Promise<boolean> {
-  if (!ctx.readCommit || !ctx.readCompare) return false;
+async function verifiedAncestorSha(ctx: Reader, repo: Repo, base: string, head: string): Promise<boolean> {
+  if (!ctx.readCompare) return false;
   try {
-    const mainHead = await ctx.readCommit(repo, { branch: repo.branch }, 5_000);
-    if ('problem' in mainHead) return false;
-    const compared = await ctx.readCompare(repo, { base: mainHead.commitSha, head: commit }, 10_000);
-    return exactComparison(compared, mainHead.commitSha, commit);
+    const compared = await ctx.readCompare(repo, { base, head }, 10_000);
+    return exactComparison(compared, base, head);
   } catch {
     return false;
+  }
+}
+
+/* Condition (c): the commit is a fast-forward from current origin/main (ahead or identical, never diverged or behind). */
+async function verifiedFastForward(ctx: Reader, repo: Repo, commit: string): Promise<string | null> {
+  if (!ctx.readCommit) return null;
+  try {
+    const mainHead = await ctx.readCommit(repo, { branch: repo.branch }, 5_000);
+    if ('problem' in mainHead) return null;
+    return (await verifiedAncestorSha(ctx, repo, mainHead.commitSha, commit)) ? mainHead.commitSha : null;
+  } catch {
+    return null;
   }
 }
 
@@ -308,13 +321,13 @@ async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Pro
   if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
   if (!found) return null;
-  const [run, verdict, ff] = await Promise.all([
+  const [run, verdict, baseCommitSha] = await Promise.all([
     verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true),
     verifiedIndependentVerdict(ctx.db, task, found.department.id, commit),
     verifiedFastForward(ctx, found.repo, commit),
   ]);
-  if (!run || !verdict || !ff) return null;
-  return { department: found.department, repo: found.repo, run, verdict };
+  if (!run || !verdict || !baseCommitSha) return null;
+  return { department: found.department, repo: found.repo, run, verdict, baseCommitSha };
 }
 
 async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
@@ -330,6 +343,7 @@ function journalValues(
   agentId: string,
   agentName: string,
   commit: string,
+  baseCommitSha: string,
   department: Dept,
   fresh: { run: VerifiedRun; verdict: VerifiedVerdict },
 ) {
@@ -341,6 +355,7 @@ function journalValues(
     agentId,
     agentName,
     commitSha: commit,
+    baseCommitSha,
     testRunId: fresh.run.id,
     testRunNumber: fresh.run.number,
     reviewerAgentId: fresh.verdict.reviewerAgentId,
@@ -350,19 +365,29 @@ function journalValues(
   };
 }
 
-async function insertJournalRow(tx: Tx, task: Task, agentId: string, commit: string, department: Dept): Promise<string | null> {
+async function insertJournalRow(
+  ctx: Reader,
+  tx: Tx,
+  task: Task,
+  agentId: string,
+  commit: string,
+  department: Dept,
+  repo: Repo,
+): Promise<{ id: string; baseCommitSha: string } | null> {
   const fresh = await reverifyInTransaction(tx, task, commit, department);
   if (!fresh) return null;
+  const baseCommitSha = await verifiedFastForward(ctx, repo, commit);
+  if (!baseCommitSha) return null;
   const [requester] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
   if (!requester) return null;
   const [inserted] = await tx
     .insert(autonomousReleases)
-    .values(journalValues(task, agentId, requester.name, commit, department, fresh))
+    .values(journalValues(task, agentId, requester.name, commit, baseCommitSha, department, fresh))
     .returning({ id: autonomousReleases.id });
-  return inserted.id;
+  return { id: inserted.id, baseCommitSha };
 }
 
-/* Auto-approves an exact commit for main without opening a human card when autonomous release is on and (a)+(b)+(c) hold. */
+/* Auto-approves an exact commit before push without opening a human card when autonomous release is on and (a)+(b)+(c) hold. */
 export async function tryAutonomousCommitApproval(
   ctx: Ctx,
   task: Task,
@@ -375,39 +400,70 @@ export async function tryAutonomousCommitApproval(
   refusePaused(fresh);
   const proof = await verifyAllConditions(ctx, fresh, commit);
   if (!proof) return null;
-  const entryId = await ctx.db.transaction(tx => insertJournalRow(tx, fresh, agentId, commit, proof.department));
-  if (!entryId) return null;
+  const recorded = await ctx.db.transaction(tx => insertJournalRow(ctx, tx, fresh, agentId, commit, proof.department, proof.repo));
+  if (!recorded) return null;
   const noteText =
-    `Autonomous release approved exact commit ${commit} without a human card: ` +
+    `Autonomous release approved exact commit ${commit} before push without a human card: ` +
     `test run ${proof.run.number} passed full suite on ${commit}, ` +
-    `independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch}. ${reasonText}`;
+    `independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} (${recorded.baseCommitSha}). ${reasonText}`;
   const moved = await comment(ctx, { agentId }, fresh.id, noteText);
   return {
     moved,
     text:
       `No human card needed: autonomous release approved exact commit ${commit} ` +
-      `(full test run ${proof.run.number}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch}).`,
+      `(full test run ${proof.run.number}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} at ${recorded.baseCommitSha}).`,
   };
 }
 
-/* Verifies live autonomous release conditions for echelons main acceptance when no human request card was opened. */
-export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<Omit<VerifiedProof, 'repo'> | null> {
-  const proof = await verifyAllConditions(ctx, task, commit);
-  return proof ? { department: proof.department, run: proof.run, verdict: proof.verdict } : null;
+async function findRecordedAutoApproval(db: QueryDb, task: Task, commit: string): Promise<{ id: string; baseCommitSha: string } | null> {
+  const [row] = await db
+    .select({ id: autonomousReleases.id, baseCommitSha: autonomousReleases.baseCommitSha })
+    .from(autonomousReleases)
+    .where(and(eq(autonomousReleases.companyId, task.companyId), eq(autonomousReleases.taskId, task.id), eq(autonomousReleases.commitSha, commit)))
+    .orderBy(desc(autonomousReleases.createdAt), desc(autonomousReleases.id))
+    .limit(1);
+  return row ?? null;
 }
 
-export async function recordAutonomousMainAcceptance(
+async function loadAcceptanceTarget(ctx: Reader, task: Task, commit: string) {
+  if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
+  const recorded = await findRecordedAutoApproval(ctx.db, task, commit);
+  if (!recorded) return null;
+  const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
+  return found ? { recorded, department: found.department, repo: found.repo } : null;
+}
+
+/* Verifies pre-push autonomous release journal row + live run, verdict and recorded base ancestry for main acceptance. */
+export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
+  const target = await loadAcceptanceTarget(ctx, task, commit);
+  if (!target) return null;
+  const [run, verdict, ancestor] = await Promise.all([
+    verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true),
+    verifiedIndependentVerdict(ctx.db, task, target.department.id, commit),
+    verifiedAncestorSha(ctx, target.repo, target.recorded.baseCommitSha, commit),
+  ]);
+  return run && verdict && ancestor ? { entryId: target.recorded.id, baseCommitSha: target.recorded.baseCommitSha, department: target.department } : null;
+}
+
+export async function confirmAutonomousMainAcceptance(
   tx: Tx,
   task: Task,
-  agentId: string,
   commit: string,
-  proof: Omit<VerifiedProof, 'repo'>,
+  proof: RecordedMainApproval,
 ): Promise<string | null> {
   const [existing] = await tx
     .select({ id: autonomousReleases.id })
     .from(autonomousReleases)
-    .where(and(eq(autonomousReleases.companyId, task.companyId), eq(autonomousReleases.taskId, task.id), eq(autonomousReleases.commitSha, commit)))
+    .where(
+      and(
+        eq(autonomousReleases.id, proof.entryId),
+        eq(autonomousReleases.companyId, task.companyId),
+        eq(autonomousReleases.taskId, task.id),
+        eq(autonomousReleases.commitSha, commit),
+        eq(autonomousReleases.baseCommitSha, proof.baseCommitSha),
+      ),
+    )
     .limit(1);
-  if (!existing) return insertJournalRow(tx, task, agentId, commit, proof.department);
+  if (!existing) return null;
   return (await reverifyInTransaction(tx, task, commit, proof.department)) ? existing.id : null;
 }
