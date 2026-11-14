@@ -50,7 +50,8 @@ function connect(): void {
   });
 }
 
-function subscribe(fn: Listener): () => void {
+/* Calls fn for everything the server says live until the returned function is called. */
+export function listen(fn: Listener): () => void {
   listeners.add(fn);
   if (!source) connect();
   return () => {
@@ -72,5 +73,5 @@ export function useStream(onMessage: Listener): void {
   useLayoutEffect(() => {
     latest.current = onMessage;
   });
-  useEffect(() => subscribe(m => latest.current(m)), []);
+  useEffect(() => listen(m => latest.current(m)), []);
 }

@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode, useEffect } from 'react';
 import { describe, expect, it } from 'vitest';
 import { forgetOrg, useOrg } from '../src/org';
 import type { Org } from '../src/types';
@@ -91,6 +91,27 @@ describe('the company every screen shows', () => {
     await letGo();
     const next = renderHook(() => useOrg());
     expect(next.result.current.org).toBeNull();
+  });
+
+  it('leaves a screen that drew it just before it was forgotten, though that screen did not watch it yet', async () => {
+    fakeStream();
+    serve(working(1), null);
+    const first = renderHook(() => useOrg());
+    await waitFor(() => expect(first.result.current.org).toEqual(working(1)));
+    first.unmount();
+    /* Effects run in the order of the screen: this one forgets before the next one watches. */
+    function Leaving() {
+      useEffect(() => forgetOrg(), []);
+      return null;
+    }
+    const drawn: (Org | null)[] = [];
+    function Showing() {
+      drawn.push(useOrg(false).org);
+      return null;
+    }
+    render(<><Leaving /><Showing /></>);
+    expect(drawn[0]).toEqual(working(1));
+    expect(drawn.at(-1)).toBeNull();
   });
 
   it('is forgotten at once on every screen that shows it, asking or not', async () => {
