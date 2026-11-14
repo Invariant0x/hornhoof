@@ -1,5 +1,5 @@
 import { TOOL_QUIET_ALARM_MS, type TurnProgram } from '@hornhoof/protocol/map';
-import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, nodeConnections, nodes, tasks, testParts, testRuns } from '../../db/schema.js';
 import { jobCheckLastEnd, jobCheckQueued } from '../nodes/check-slots.js';
@@ -21,28 +21,10 @@ function latest(times: Array<number | null | undefined>): number | null {
 const jobTakenAt = (job: Pick<RunningJob, 'startedAt' | 'createdAt' | 'restartedAt'>): number =>
   Math.max((job.startedAt ?? job.createdAt).getTime(), job.restartedAt?.getTime() ?? 0);
 
-async function lastTakenWorkAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[], runningParts: RunningPart[]): Promise<number | null> {
-  const jobWhere = node.kind === 'builtin' ? isNull(jobs.nodeId) : eq(jobs.nodeId, node.nodeId);
-  const partWhere = node.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, node.nodeId);
-  const [lastJob] = await ctx.db
-    .select({ startedAt: jobs.startedAt, restartedAt: jobs.restartedAt })
-    .from(jobs)
-    .where(and(jobWhere, isNotNull(jobs.startedAt)))
-    .orderBy(desc(jobs.startedAt))
-    .limit(1);
-  const [lastPart] = await ctx.db
-    .select({ startedAt: testParts.startedAt })
-    .from(testParts)
-    .where(and(partWhere, isNotNull(testParts.startedAt)))
-    .orderBy(desc(testParts.startedAt))
-    .limit(1);
-  return latest([
-    ...runningJobs.map(jobTakenAt),
-    ...runningParts.map(p => (p.startedAt ?? p.queuedAt).getTime()),
-    lastJob?.startedAt?.getTime(),
-    lastJob?.restartedAt?.getTime(),
-    lastPart?.startedAt?.getTime(),
-  ]);
+/* When the node took the newest of the work it runs now. Work it took and ended says nothing of the turns it lost: a busy
+   node takes and ends turns of other agents the whole time those hang. */
+function lastTakenWorkAt(runningJobs: RunningJob[], runningParts: RunningPart[]): number | null {
+  return latest([...runningJobs.map(jobTakenAt), ...runningParts.map(p => (p.startedAt ?? p.queuedAt).getTime())]);
 }
 
 async function persistedNodeSignAt(ctx: Ctx, node: NodeIdentity): Promise<number | null> {
@@ -122,13 +104,14 @@ async function runningWorkOf(ctx: Ctx, node: NodeIdentity): Promise<{ runningJob
   return { runningJobs, runningParts };
 }
 
-/* Whether running work on this node still holds a planned update back: a node silent past SILENT_TURN_MS or one that has
-   taken no work for a full drain-and-retry cycle without any genuinely live turn or test part updates without waiting. */
+/* Whether running work on this node still holds a planned update back: a node silent past SILENT_TURN_MS, or one whose
+   newest running work it took more than a full drain-and-retry cycle ago without any genuinely live turn or test part,
+   updates without waiting. */
 export async function hasLiveDrainWork(ctx: Ctx, node: NodeIdentity, now: number): Promise<boolean> {
   const { runningJobs, runningParts } = await runningWorkOf(ctx, node);
   if (!runningJobs.length && !runningParts.length) return false;
   const activity = await latestTurnActivityAt(ctx, runningJobs.map(j => j.id));
-  const takenAt = await lastTakenWorkAt(ctx, node, runningJobs, runningParts);
+  const takenAt = lastTakenWorkAt(runningJobs, runningParts);
   const reportedAt = runningJobs.map(j => agentProgramState(ctx, j).program?.reportedAt);
   const nodeSignAt = latest([ctx.hub.lastSeenAt(node), ctx.hub.loadOf(node)?.at, await persistedNodeSignAt(ctx, node), ...reportedAt, ...activity.values()]) ?? takenAt;
   if (nodeSignAt !== null && now - nodeSignAt >= SILENT_TURN_MS) return false;
