@@ -182,4 +182,37 @@ describe('node drain updates silent or stuck nodes without interrupting live wor
     }, new Date(nowMs));
     expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
   });
+
+  it('updates a node whose old turns hang although another agent there took and ended a turn within the cycle', async () => {
+    const s = await stuckStand();
+    const sock = await connectNode(s.url, s.nodeKey);
+    onTestFinished(() => sock.close());
+    const [other] = await s.db.insert(agents).values({ companyId: s.company.id, departmentId: s.worker.departmentId, subscriptionId: s.sub.id, nodeId: s.nodeId, kind: 'worker', model: '', roleKey: 'DEV-FE', name: 'Other' }).returning();
+    /* The turn the node lost two days ago: Hornhoof still counts it as running, and nothing of it comes any more. */
+    const lostAt = new Date(Date.now() - 48 * 60 * MINUTE_MS);
+    const [lost] = await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: s.worker.id, nodeId: s.nodeId, kind: 'conversation', prompt: 'Lost turn', status: 'running', createdAt: lostAt, startedAt: lostAt, timeoutMs: TURN_TIMEOUT_MS }).returning();
+    /* While the update waited, another agent there had a turn of its own, which ended a quarter of an hour ago. */
+    const tookAt = new Date(Date.now() - 20 * MINUTE_MS);
+    await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: other!.id, nodeId: s.nodeId, kind: 'conversation', prompt: 'Short turn', status: 'done', createdAt: tookAt, startedAt: tookAt, finishedAt: new Date(Date.now() - 15 * MINUTE_MS), timeoutMs: TURN_TIMEOUT_MS });
+
+    sock.send({ type: 'hello', version: '0.18.17', loggedIn: true, running: [lost!.id] });
+    await until(() => s.app.ctx.hub.isReady({ kind: 'node', nodeId: s.nodeId }));
+    await handleNodeMessage(s.app.ctx, { kind: 'node', nodeId: s.nodeId }, { type: 'load', cpus: 8, load: 0.2, memTotal: 16e9, memFree: 12e9, tests: 0, jobs: 1 }, new Date());
+
+    expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+  });
+
+  it('updates a node of a build from before load and program reports, whose socket comes back every few minutes, once its turn has hung', async () => {
+    const s = await stuckStand();
+    const startAt = new Date(Date.now() - 3 * 60 * MINUTE_MS);
+    const [hung] = await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: s.worker.id, nodeId: s.nodeId, kind: 'conversation', prompt: 'Hung turn', status: 'running', createdAt: startAt, startedAt: startAt, timeoutMs: TURN_TIMEOUT_MS }).returning();
+    /* A node that sends no load is cut after a few quiet minutes and comes back with a new hello: its socket is fresh, its
+       turn says nothing. */
+    const sock = await connectNode(s.url, s.nodeKey);
+    onTestFinished(() => sock.close());
+    sock.send({ type: 'hello', version: '0.16.4', loggedIn: true, running: [hung!.id] });
+    await until(() => s.app.ctx.hub.isReady({ kind: 'node', nodeId: s.nodeId }));
+
+    expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+  });
 });
