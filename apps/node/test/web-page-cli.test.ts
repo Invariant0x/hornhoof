@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { LIMITS, main, parseArgs, USAGE } from '../src/web-page/cli.js';
+import { browsersPath, LIMITS, main, parseArgs, playwrightFrom, systemDeps, USAGE } from '../src/web-page/cli.js';
 import type { BrowseRequest } from '../src/web-page/browse.js';
 import type { BrowseResult } from '../src/web-page/read.js';
 
@@ -42,6 +45,39 @@ describe('the hh-browse command', () => {
     expect(parseArgs(['--max-mb', 'lots', 'https://a.example/'])).toMatchObject({ kind: 'error', message: expect.stringMatching(/--max-mb/) });
     expect(parseArgs(['--screenshot', 'shot.jpg', 'https://a.example/'])).toMatchObject({ kind: 'error', message: expect.stringMatching(/\.png/) });
     expect(parseArgs(['--help'])).toEqual({ kind: 'help' });
+  });
+
+  it('takes a word that only an object of JavaScript knows as an address, not as an option', () => {
+    for (const word of ['toString', 'constructor', '__proto__']) {
+      expect(parseArgs([word]), word).toMatchObject({ kind: 'browse', request: { address: word } });
+    }
+  });
+
+  it("uses the image's own Playwright and browsers, and the folder a node sets up first", () => {
+    expect(browsersPath(path => path === '/data/browsers')).toBe('/data/browsers');
+    expect(browsersPath(path => path === '/opt/ms-playwright')).toBe('/opt/ms-playwright');
+    expect(browsersPath(() => false)).toBe('/data/browsers');
+    expect(playwrightFrom(path => path === '/usr/local/lib/node_modules/playwright/package.json')).toBe('/usr/local/lib/node_modules/playwright/package.json');
+    expect(playwrightFrom(() => false)).toMatch(/^file:.*cli\.(ts|js)$/);
+  });
+
+  it("gives each call this process, this user, the machine's temporary folder and a new password", () => {
+    const deps = systemDeps();
+    expect(deps).toMatchObject({ tmp: tmpdir(), pid: process.pid, uid: process.getuid?.() ?? -1 });
+    const [first, second] = [deps.secret(), deps.secret()];
+    expect(first).toMatch(/^[0-9a-f]{48}$/);
+    expect(second).not.toBe(first);
+    const root = mkdtempSync(join(tmpdir(), 'web-page-cli-test-'));
+    try {
+      const dir = deps.makeDir(join(root, 'hh-browse-1-'));
+      expect(dir.startsWith(join(root, 'hh-browse-1-'))).toBe(true);
+      deps.writeFile(join(dir, 'page.png'), Buffer.from('PNG'));
+      expect(readFileSync(join(dir, 'page.png'), 'utf8')).toBe('PNG');
+      deps.removeDir(dir);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('prints its help with every limit, and an error with how to call it', async () => {

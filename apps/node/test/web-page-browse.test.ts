@@ -38,8 +38,11 @@ function fakeClock() {
   return clock;
 }
 
-type Navigation = 'answer' | 'busy' | 'hang' | 'through-proxy';
-type FakeOptions = { navigation?: Navigation; finalUrl?: string; status?: number; sample?: PageSample; collect?: 'hang'; launch?: 'fail'; close?: 'hang'; target?: string; asks?: string[] };
+type Navigation = 'answer' | 'busy' | 'hang' | 'through-proxy' | 'plain-redirect' | 'fail';
+type FakeOptions = {
+  navigation?: Navigation; finalUrl?: string; status?: number; sample?: PageSample; collect?: 'hang' | 'fail'; launch?: 'fail' | 'hang'; close?: 'hang';
+  target?: string; asks?: string[]; waitFor?: 'missing'; shot?: 'fail';
+};
 
 /* Playwright's Chromium as hh-browse drives it: what it was asked, in order, and the answers of a recorded page. */
 function fakeBrowser(o: FakeOptions = {}) {
@@ -56,6 +59,8 @@ function fakeBrowser(o: FakeOptions = {}) {
   const started = new Promise<void>(resolve => { entered = resolve; });
   let reading!: () => void;
   const collecting = new Promise<void>(resolve => { reading = resolve; });
+  let starting!: () => void;
+  const launching = new Promise<void>(resolve => { starting = resolve; });
   let options!: LaunchOptions;
   const page: BrowserPage = {
     url: () => o.finalUrl ?? 'https://shop.example/catalogue',
@@ -66,6 +71,17 @@ function fakeBrowser(o: FakeOptions = {}) {
       const doc = req(url, true);
       emit('request', doc);
       if (o.navigation === 'hang') return new Promise(() => {});
+      if (o.navigation === 'fail') {
+        emit('requestfailed', doc);
+        throw new Error(`page.goto: net::ERR_NAME_NOT_RESOLVED at ${url}\nCall log:\n  - navigating to "${url}"`);
+      }
+      if (o.navigation === 'plain-redirect') {
+        const target = o.target ?? 'http://10.0.0.5/admin';
+        emit('request', req(target, true));
+        const answer = await fetchThroughProxy(options, target);
+        emit('requestfinished', doc);
+        return { status: () => answer.status, headers: () => answer.headers };
+      }
       if (o.navigation === 'through-proxy') {
         const target = o.target ?? 'http://inside.example/';
         emit('request', req(target, true));
@@ -85,12 +101,21 @@ function fakeBrowser(o: FakeOptions = {}) {
         calls.push(`collect ${JSON.stringify(arg)}`);
         reading();
         if (o.collect === 'hang') return new Promise(() => {});
+        if (o.collect === 'fail') throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
         return o.sample ?? sample('rendered');
       }
       throw new Error('an unknown page function');
     },
-    waitForSelector: async selector => { calls.push(`wait for ${selector}`); return null; },
-    screenshot: async shot => { calls.push(`screenshot ${shot.fullPage ? 'full' : 'view'}`); return Buffer.from('PNG of the page'); },
+    waitForSelector: async selector => {
+      calls.push(`wait for ${selector}`);
+      if (o.waitFor === 'missing') throw new Error('page.waitForSelector: Timeout 25000ms exceeded.');
+      return null;
+    },
+    screenshot: async shot => {
+      calls.push(`screenshot ${shot.fullPage ? 'full' : 'view'}`);
+      if (o.shot === 'fail') throw new Error('page.screenshot: Target crashed');
+      return Buffer.from('PNG of the page');
+    },
   };
   const context: BrowserContext = {
     pages: () => [page],
@@ -99,12 +124,14 @@ function fakeBrowser(o: FakeOptions = {}) {
     close: () => { calls.push('close'); return o.close === 'hang' ? new Promise(() => {}) : Promise.resolve(); },
   };
   return {
-    calls, launches, reached, started, collecting,
+    calls, launches, reached, started, collecting, launching,
     finishApi: () => { calls.push('api finished'); emit('requestfinished', api); },
     launcher: {
       launchPersistentContext: async (dir: string, given: LaunchOptions) => {
         launches.push({ dir, options: given });
         options = given;
+        starting();
+        if (o.launch === 'hang') return new Promise<BrowserContext>(() => {});
         if (o.launch === 'fail') throw new Error("browserType.launchPersistentContext: Executable doesn't exist at /data/browsers/chromium_headless_shell-1248");
         return context;
       },
@@ -132,6 +159,20 @@ function askProxyFor(options: LaunchOptions, address: string) {
   return new Promise<void>(resolve => {
     const r = request({ host: server.hostname, port: Number(server.port), method: 'GET', path: address, headers: { host: new URL(address).host, 'proxy-authorization': auth } }, res => { res.resume(); res.on('end', () => resolve()); });
     r.on('error', () => resolve());
+    r.end();
+  });
+}
+
+/* Chromium following a redirect to a plain http address: the proxy answers for the next hop, and the browser shows that. */
+function fetchThroughProxy(options: LaunchOptions, address: string) {
+  const server = new URL(options.proxy.server);
+  const auth = `Basic ${Buffer.from(`${options.proxy.username}:${options.proxy.password}`).toString('base64')}`;
+  return new Promise<{ status: number; headers: Record<string, string> }>((resolve, reject) => {
+    const r = request({ host: server.hostname, port: Number(server.port), method: 'GET', path: address, headers: { host: new URL(address).host, 'proxy-authorization': auth } }, res => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers as Record<string, string> }));
+    });
+    r.on('error', reject);
     r.end();
   });
 }
@@ -253,6 +294,45 @@ describe('hh-browse reading one address in a browser on the node', () => {
     const result = await browse(asked('https://shop.example/catalogue'), deps);
     expect(result.status).toBe('ok');
     expect(result.notes).toEqual(['The page asked for 3 addresses that are not public, such as 169.254.169.254, localhost and 10.0.0.5; the browser opened none of them.']);
+  });
+
+  it('calls the page refused when it sent the browser on to an internal plain http address, which the proxy answered for', async () => {
+    const { browser, deps } = setUp({ navigation: 'plain-redirect', target: 'http://10.0.0.5/admin' });
+    const result = await browse(asked('https://shop.example/go'), deps);
+    expect(result).toMatchObject({ status: 'refused', reason: 'The page sent the browser on to 10.0.0.5, a private network address, which stays closed.' });
+    expect(browser.calls.at(-1)).toBe('close');
+  });
+
+  it('says why a page that could not be opened failed', async () => {
+    const { browser, removed, deps } = setUp({ navigation: 'fail' });
+    const result = await browse(asked('https://shop.example/catalogue'), deps);
+    expect(result).toMatchObject({ status: 'failed', reason: 'The page could not be opened: net::ERR_NAME_NOT_RESOLVED at https://shop.example/catalogue' });
+    expect(browser.calls.at(-1)).toBe('close');
+    expect(removed.at(-1)).toBe('/tmp/hh-browse-700-run1');
+  });
+
+  it('says why a page that could not be read failed', async () => {
+    const { browser, deps } = setUp({ collect: 'fail' });
+    const result = await browse(asked('https://shop.example/catalogue'), deps);
+    expect(result).toMatchObject({ status: 'failed', reason: expect.stringMatching(/^The page could not be read: Execution context was destroyed/) });
+    expect(browser.calls.at(-1)).toBe('close');
+  });
+
+  it('still reads the page when the element it waited for never showed and its picture could not be taken, and notes both', async () => {
+    const { written, deps } = setUp({ waitFor: 'missing', shot: 'fail' });
+    const result = await browse(asked('https://shop.example/catalogue', { waitFor: '#prices', screenshot: '/work/catalogue.png' }), deps);
+    expect(result).toMatchObject({ status: 'ok', screenshot: null, notes: ['The page showed no #prices within the time limit.', 'The screenshot could not be taken: Target crashed'] });
+    expect(written.size).toBe(0);
+  });
+
+  it('fails when the browser does not start within the time limit, and removes what the run made', async () => {
+    const { browser, clock, removed, deps } = setUp({ launch: 'hang' });
+    const done = browse(asked('https://shop.example/catalogue'), deps);
+    await browser.launching;
+    clock.advance(SETTLE);
+    const result = await done;
+    expect(result).toMatchObject({ status: 'failed', reason: 'The browser did not start within the time limit of 30 seconds.' });
+    expect(removed).toEqual(['/tmp/hh-browse-555-old', '/tmp/hh-browse-700-run1']);
   });
 
   it('says why a browser that cannot start failed, and removes what the run made', async () => {

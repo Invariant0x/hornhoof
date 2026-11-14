@@ -40,6 +40,44 @@ describe('what hh-browse makes of a page', () => {
     expect(judgePage({ requested: 'https://shop.example/missing', finalUrl: 'https://shop.example/missing', answer: { status: 404, headers: {} }, sample: sample('not-found') })).toEqual({ status: 'http_error', reason: 'The site answered 404.', notes: [] });
   });
 
+  it('says a sign-in is needed on a sign-in address that names it, also for a long page with a password field there', () => {
+    const page = { ...sample('article'), passwordFields: 0 };
+    const at = (path: string, more: Partial<PageSample> = {}) => judgePage({ requested: `https://shop.example${path}`, finalUrl: `https://shop.example${path}`, answer: ok, sample: { ...page, ...more } }).status;
+    expect(at('/login', { title: 'Log in to the shop' })).toBe('login_required');
+    expect(at('/login', { text: `Sign in with your account. ${page.text}` })).toBe('login_required');
+    const long = { text: 'Garden notes for small balconies. '.repeat(80), textLength: 2720 };
+    expect(at('/login', { ...long, passwordFields: 1 })).toBe('login_required');
+    expect(at('/login')).toBe('ok');
+    expect(at('/articles/login-tips', { ...long, passwordFields: 1 })).toBe('ok');
+    expect(judgePage({ requested: 'https://shop.example/', finalUrl: 'https://shop.example/', answer: { status: 407, headers: {} }, sample: page })).toMatchObject({ status: 'login_required', reason: expect.stringMatching(/407/) });
+  });
+
+  it('takes a short page that is little more than a robot check widget for a robot check, also with no answer at all', () => {
+    const gate = { ...sample('article'), text: 'Please confirm.', textLength: 15, links: [], linkCount: 0, markers: ['.h-captcha'] };
+    expect(judgePage({ requested: 'https://shop.example/', finalUrl: 'https://shop.example/', answer: null, sample: gate })).toMatchObject({ status: 'robot_check' });
+    const framed = { ...gate, markers: [], frames: ['https://newassets.hcaptcha.com/captcha/v1/static/hcaptcha.html'] };
+    expect(judgePage({ requested: 'https://shop.example/', finalUrl: 'https://shop.example/', answer: null, sample: framed })).toMatchObject({ status: 'robot_check' });
+    expect(judgePage({ requested: 'https://shop.example/', finalUrl: 'https://shop.example/', answer: null, sample: { ...sample('article'), title: 'Just a moment...' } }).status).toBe('robot_check');
+  });
+
+  it('prints where the page ended, its notes, links without words, links it holds back and the next step of each status', () => {
+    const base: BrowseResult = {
+      status: 'ok', reason: null, address: 'https://shop.example/', finalAddress: 'https://shop.example/home', httpStatus: null,
+      title: null, text: 'Home', textLength: 4, links: [{ text: '', url: 'https://shop.example/logo' }], linkCount: 1, screenshot: null, notes: ['The page was still loading.'],
+    };
+    expect(formatResult(base)).toBe([
+      'Status: ok', 'Address: https://shop.example/', 'Final address: https://shop.example/home', 'Note: The page was still loading.',
+      '', 'Text (4 characters):', 'Home', '', 'Links (1):', '- https://shop.example/logo', '',
+    ].join('\n'));
+    expect(formatResult({ ...base, links: [], linkCount: 7 })).toContain('\nLinks: 7, none shown; --max-links shows them.\n');
+    expect(formatResult({ ...base, links: [], linkCount: 0 })).toContain('\nLinks: none\n');
+    expect(formatResult({ ...base, links: [{ text: 'Sets', url: 'https://shop.example/sets' }], linkCount: 5 })).toContain('\nLinks (1 of 5):\n- Sets: https://shop.example/sets\n');
+    const refused = formatResult({ ...base, status: 'refused', reason: 'The address is refused: a loopback address.', finalAddress: null, text: null, links: [], linkCount: 0, notes: [] });
+    expect(refused).toBe('Status: refused\nReason: The address is refused: a loopback address.\nAddress: https://shop.example/\nNext: This address stays refused: go on with the other addresses.\n');
+    expect(formatResult({ ...base, status: 'failed', reason: 'The browser could not start.', text: null })).toMatch(/\nNext: Try the address once more[^\n]*for a person[^\n]*\n$/);
+    expect(formatResult({ ...base, status: 'robot_check', reason: 'The page checks.', text: null })).toMatch(/\nNext: Never try to get past it/);
+  });
+
   it('prints the page, its links and the next step a person needs, and exits 0 only when the page was reached', () => {
     const page = sample('rendered');
     const result: BrowseResult = {
