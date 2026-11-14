@@ -50,7 +50,7 @@ All colours are tokens in `:root` of `theme.css`. Light is the default. Dark app
 | `--glow` | `rgba(0, 163, 189, .10)` | `rgba(70, 224, 239, .10)` | Focus halo, chosen background |
 | `--btn` | `#00768A` | `#46E0EF` | Fill of the primary button `.btn` |
 | `--on-btn` | `#FFFFFF` | `#05222A` | Text on `--btn` |
-| `--hud` | `rgba(240, 244, 247, .88)` | `rgba(23, 30, 39, .84)` | See-through layer over the map: `.glass` |
+| `--hud` | `rgba(240, 244, 247, .94)` | `rgba(23, 30, 39, .94)` | Dense layer over the map, with no blur under it: `.glass` |
 | `--shadow` | `rgba(20, 40, 60, .18)` | `rgba(0, 0, 0, .45)` | Shadow of menus and windows |
 
 ### Contrast of text

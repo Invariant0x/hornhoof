@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLight } from '../guard';
 
 export type Point = [number, number];
 
@@ -53,6 +54,8 @@ export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r 
   const dur = pulseSeconds(pts, speed, bounce);
   const animation = useRef<SVGAnimateMotionElement>(null);
   useEffect(() => { beginMotion(animation.current); }, []);
+  /* A page the guard turned light moves nothing: the way itself still shows where work goes. */
+  if (useLight()) return null;
   return (
     <circle className={`pt ${tone}`} r={r}>
       <animateMotion

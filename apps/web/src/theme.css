@@ -207,7 +207,9 @@ select:disabled { opacity: .55; }
   pointer-events: none;
 }
 .topbar > * { pointer-events: auto; }
-.glass { background: var(--hud); border: 1px solid var(--line); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+/* Glass floats over the canvas, whose dots and signals move every frame: a blur under it is drawn again every frame and
+   stalled the page (Design, #874). The dense --hud of every skin stands in for it. */
+.glass { background: var(--hud); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
 .tabs { display: flex; height: 44px; box-sizing: border-box; padding: 0; }
@@ -1519,7 +1521,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 /* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
 .tview .tv-labs .dept-chip { position: absolute; }
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
-.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
+.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
 .tview .lchip.on { background: var(--cyan); }
@@ -2096,4 +2098,26 @@ th.k-prio .sorth { white-space: nowrap; }
     calc(100% - var(--step)) calc(2 * var(--step)), 100% calc(2 * var(--step)), 100% 100%, calc(2 * var(--step)) 100%,
     calc(2 * var(--step)) calc(100% - var(--step)), var(--step) calc(100% - var(--step)), var(--step) calc(100% - 2 * var(--step)), 0 calc(100% - 2 * var(--step))
   );
+}
+
+/* The guard. A block it stopped stands in its place with a button that draws it anew; one that floats, as an agent's
+   window does, keeps to the corner of the page. */
+/* Design (#888): one line and one button of 44 px on the second surface with the strong line; logical sides, so a
+   right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
+   hides none of their controls. */
+.guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
+.guard-stop p, .light-note p { margin: 0; }
+.guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
+/* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
+   takes the ghost's shadow away. */
+.light-note .btn.ghost { border: 1px solid var(--line2); box-shadow: none; }
+.light-note .btn.ghost:hover { border-color: var(--cyan); }
+.guard-stop { max-inline-size: 520px; margin-block: 72px 0; margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
+.guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
+.light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }
+/* A page the guard turned light draws nothing that costs a frame: no animation, transition, filter, blur or shadow. */
+:root[data-light] *, :root[data-light] *::before, :root[data-light] *::after {
+  animation: none !important; transition: none !important;
+  filter: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  box-shadow: none !important; text-shadow: none !important;
 }

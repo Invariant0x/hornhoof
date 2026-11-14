@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { listen, useStream, type LiveMessage } from './live';
+import { listen, type LiveMessage } from './live';
+import { refetcher } from './refetch';
 import type { Department, Org, PersonView } from './types';
 import type { AgentLive } from './ui/AgentState';
 
@@ -114,6 +115,7 @@ function share(org: Org | null, answer: boolean): void {
 }
 
 function hear(m: LiveMessage): void {
+  askAgain(m);
   if (!known) return;
   if (m.type === 'context') {
     const next = withContext(known, m.agentId, m.used);
@@ -122,6 +124,49 @@ function hear(m: LiveMessage): void {
   if (m.type === 'working' && known.agents.working !== m.working) {
     share(keepRoster(known, { ...known, agents: { ...known.agents, working: m.working } }), false);
   }
+}
+
+/* The screens that ask for the company again when the stream says it changed, each with where its failure goes. The
+   stream makes its requests for all of them, however many there are, and a burst of it costs a few requests, not one a
+   message on each screen. */
+const askers = new Set<(failure: unknown) => void>();
+let soon: ReturnType<typeof setTimeout> | null = null;
+
+function failed(n: number, err: unknown): void {
+  if (n < shown) return;
+  for (const fail of [...askers]) fail(err);
+}
+
+const shared = refetcher(() => {
+  if (!askers.size) return Promise.resolve();
+  /* Task and question changes that wait to settle are in this answer too. */
+  if (soon) clearTimeout(soon);
+  soon = null;
+  const n = ++asked;
+  return api.get<Org>('/api/org').then(data => answered(n, data), err => failed(n, err));
+});
+
+function askAgain(m: LiveMessage): void {
+  if (!askers.size) return;
+  /* Frequent task and question changes settle first, without letting a continuous stream postpone the refresh forever. */
+  if ((m.type === 'task' || m.type === 'requests') && !soon && !shared.inAnswer()) {
+    soon = setTimeout(() => {
+      soon = null;
+      if (askers.size) shared.run();
+    }, SETTLE_MS);
+  }
+  /* Employees move between working and sleeping too, so the company is fetched again for their states. */
+  if (FETCH_AT_ONCE.has(m.type) || m.type === 'working') shared.run();
+}
+
+function askWith(fail: (failure: unknown) => void): () => void {
+  askers.add(fail);
+  return () => {
+    askers.delete(fail);
+    if (askers.size || !soon) return;
+    clearTimeout(soon);
+    soon = null;
+  };
 }
 
 function watchOrg(watch: Watch): () => void {
@@ -146,6 +191,7 @@ function answered(n: number, data: Org | null | undefined): void {
 /* A person leaving the tab takes the company off every screen at once, with the answers still on their way for it. */
 export function forgetOrg(): void {
   shown = ++asked;
+  shared.forget();
   share(null, true);
 }
 
@@ -185,26 +231,11 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   /* The lines and the counts moved while the tab was away. */
   useFetchOnReturn(enabled, load);
 
-  /* Batch frequent task and question changes without letting a continuous stream postpone the refresh forever. */
-  const soon = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (soon.current) clearTimeout(soon.current);
-    },
-    [],
-  );
-
-  useStream(m => {
+  /* While it asks, the screen hears of the stream's changes through the one request all screens share. */
+  useEffect(() => {
     if (!enabled) return;
-    if ((m.type === 'task' || m.type === 'requests') && !soon.current) {
-      soon.current = setTimeout(() => {
-        soon.current = null;
-        load();
-      }, SETTLE_MS);
-    }
-    /* Employees move between working and sleeping too, so the company is fetched again for their states. */
-    if (FETCH_AT_ONCE.has(m.type) || m.type === 'working') load();
-  });
+    return askWith(err => mounted.current && setFailure(err));
+  }, [enabled]);
 
   return { org, failure };
 }

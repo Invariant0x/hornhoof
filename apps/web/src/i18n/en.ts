@@ -1058,6 +1058,14 @@ export const en = {
     products: 'Products',
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
+  /* The guard that stops a block drawing without end and turns heavy effects off while the page slows down. */
+  guard: {
+    stopped: 'This block was stopped: it was slowing the screen down.',
+    failed: 'This block was stopped: something went wrong in it.',
+    restart: 'Restart block',
+    light: 'Effects are off to keep the screen responsive.',
+    effectsBack: 'Turn effects back on',
+  },
   dept: {
     branches: {
       title: 'Branches not in main yet',

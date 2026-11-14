@@ -11,6 +11,7 @@ import { segmentText } from './tree-state';
 import { visibleDepartmentTree } from './tree-access';
 import { Chip } from '../ui/Chip';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from '../ui/canvas';
+import { guardedResizeObserver } from '../guard';
 
 type Props = {
   tree: DepartmentTree;
@@ -299,7 +300,7 @@ function useTreeBox(root: RefObject<HTMLDivElement | null>) {
     });
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = guardedResizeObserver(measure, 'tree');
     observer.observe(el);
     return () => observer.disconnect();
   }, [root]);

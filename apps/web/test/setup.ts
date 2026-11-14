@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, expect, vi } from 'vitest';
+import { leaveLight } from '../src/guard';
 import { forgetOrg } from '../src/org';
 import { forgetRequestDrafts } from '../src/ui/Requests';
 import { keyDefaults, type DeviceKey } from '../src/owner-key-store';
@@ -27,6 +28,8 @@ afterEach(() => {
   forgetOrg();
   forgetRequestDrafts();
   kept.key = null;
+  /* A test that tripped the guard leaves the page with its effects on for the next one. */
+  leaveLight();
   /* Timer tests keep their fake clock until cleanup has checked the resources they owned. */
   const timers = vi.isFakeTimers() ? vi.getTimerCount() : 0;
   vi.unstubAllGlobals();

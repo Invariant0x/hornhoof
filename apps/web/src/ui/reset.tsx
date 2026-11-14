@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT, type Messages } from '../i18n';
+import { everyVisible } from '../guard';
 
 const MINUTE = 60_000;
 
@@ -27,8 +28,7 @@ export function resetDurationAt(t: Messages, iso: string | null, now: number): s
 export function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return everyVisible(() => setNow(Date.now()), 1000);
   }, []);
   return now;
 }

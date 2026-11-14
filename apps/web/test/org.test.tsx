@@ -1,7 +1,8 @@
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode, useEffect } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { forgetOrg, useOrg } from '../src/org';
+import { useDecisions } from '../src/tasks';
 import type { Org } from '../src/types';
 import { DEV_ORG, mockApi, ORG } from './api-mock';
 import { fakeStream } from './fake-stream';
@@ -181,5 +182,64 @@ describe('the company every screen shows', () => {
     stream.send({ type: 'working', working: 2 });
     expect(asking.result.current.org).toBeNull();
     expect(renderHook(() => useOrg(false)).result.current.org).toBeNull();
+  });
+});
+
+/* A company of 120 agents says a lot at once: who works, what each task and question did, and that the company moved. */
+const burst = [
+  ...Array.from({ length: 60 }, (_, i) => ({ type: 'working', working: 1 + (i % 5) })),
+  ...Array.from({ length: 40 }, () => ({ type: 'task' })),
+  ...Array.from({ length: 40 }, () => ({ type: 'requests' })),
+  ...Array.from({ length: 20 }, () => ({ type: 'org' })),
+];
+
+describe('a burst of the stream', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fetches the company a few times for all the screens that show it, not once a message on each screen', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const stream = fakeStream();
+    const calls = mockApi({ 'GET /api/org': [200, working(1)] });
+    const screens = [renderHook(() => useOrg()), renderHook(() => useOrg()), renderHook(() => useOrg(false))];
+    await act(async () => {});
+    const before = calls.filter(c => c.path === '/api/org').length;
+    for (const m of burst) stream.send(m);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(calls.filter(c => c.path === '/api/org').length - before).toBeLessThanOrEqual(3);
+    for (const s of screens) s.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('tells every screen that asks when the request the stream made for them failed, and not a screen that does not ask', async () => {
+    const stream = fakeStream();
+    let down = false;
+    mockApi({ 'GET /api/org': () => (down ? [500, { error: { code: 'internal', message: 'Down.' } }] : [200, working(1)]) });
+    const asking = [renderHook(() => useOrg()), renderHook(() => useOrg())];
+    const idle = renderHook(() => useOrg(false));
+    await waitFor(() => expect(asking[0]!.result.current.org).toEqual(working(1)));
+    down = true;
+    stream.send({ type: 'org' });
+    await waitFor(() => expect(asking.every(s => s.result.current.failure !== null)).toBe(true));
+    expect(idle.result.current.failure).toBeNull();
+    expect(asking[0]!.result.current.org).toEqual(working(1));
+  });
+
+  it('fetches what waits for people a few times, not once a message', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const stream = fakeStream();
+    const calls = mockApi({ 'GET /api/requests': [200, { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }] });
+    const decisions = renderHook(() => useDecisions());
+    await act(async () => {});
+    const before = calls.filter(c => c.path === '/api/requests').length;
+    for (const m of burst) stream.send(m);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(calls.filter(c => c.path === '/api/requests').length - before).toBeLessThanOrEqual(2);
+    decisions.unmount();
   });
 });
