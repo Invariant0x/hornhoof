@@ -549,13 +549,19 @@ def run_id_recorded_elsewhere(run_id: str, name: str) -> bool:
 def frps_route(name: str) -> tuple[str, str | None, str | None]:
     """frps's own view of a name's route: ('online'|'offline', clientID, type), or ('absent', None, None).
 
-    Both proxy types are read: a name holds one route of either type, and two records is unknown.
+    Both proxy types are read: frps keeps an offline record after a switch between http and https,
+    so one online route wins over an offline one, while two online routes is unknown.
     """
     http = dash_answer(name, 'http')
     https = dash_answer(name, 'https')
-    if http is not None and https is not None:
+    online = [(proxy_type, answer) for proxy_type, answer in (('http', http), ('https', https))
+              if answer is not None and answer[0] == 'online']
+    if len(online) > 1:
         raise FrpsUnknown(f'dashboard shows both http and https routes for {name}')
-    for proxy_type, answer in (('http', http), ('https', https)):
+    if online:
+        proxy_type, answer = online[0]
+        return answer[0], answer[1], proxy_type
+    for proxy_type, answer in (('https', https), ('http', http)):
         if answer is not None:
             return answer[0], answer[1], proxy_type
     return 'absent', None, None
@@ -919,19 +925,28 @@ def store_sync(name: str, body: dict, link_hash: str) -> bool:
 
 def set_sync(name: str, body: dict, link_hash: str) -> tuple[str | None, dict | None]:
     """Serialize the frps holder check and committed write against the name's registrations."""
+    summary = f"state={body['state']} generation={body['generation']} epoch={body['epoch']}"
     with route_lock(name):
         if not sync_holder(name, body):
+            log_line(f'sync of {name} refused: not_holder ({summary})')
             return 'not_holder', None
-        if body['epoch'] <= sync_of(name)['epoch']:
+        current = sync_of(name)
+        if body['epoch'] <= current['epoch']:
+            log_line(f"sync of {name} refused: stale_epoch ({summary} stored_epoch={current['epoch']})")
             return 'stale_epoch', None
         if not store_sync(name, body, link_hash):
+            log_line(f'sync of {name} refused: not_holder ({summary})')
             return 'not_holder', None
         return None, sync_of(name)
 
 
 def locked_route_of(name: str) -> dict:
     """The R2.1 body with the per-name lock already held: the row straightened against frps."""
-    status, client_id, proxy_type = frps_route(name)
+    try:
+        status, client_id, proxy_type = frps_route(name)
+    except FrpsUnknown as failure:
+        log_line(f'route of {name} is unknown: {failure}')
+        raise
     row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
                        (name,)).fetchone()
     if row is not None:
@@ -939,7 +954,9 @@ def locked_route_of(name: str) -> dict:
         try:
             straighten_route(name, row, status, now())
         except sqlite3.Error as e:
-            raise FrpsUnknown(f'route store is not writable: {type(e).__name__}') from None
+            reason = f'route store is not writable: {type(e).__name__}'
+            log_line(f'route of {name} is unknown: {reason}')
+            raise FrpsUnknown(reason) from None
         row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
                            (name,)).fetchone()
     else:
@@ -1727,11 +1744,13 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get('Authorization') or ''
         return auth[7:].strip() if auth.lower().startswith('bearer ') else ''
 
-    def wrong_key(self, ip: str):
+    def wrong_key(self, ip: str, refused_line: str | None = None):
         """The 401 for a bad key, counted like DELETE; 429 once an address passes 30 bad keys in an hour."""
         wait = bad_keys.allow(ip)
         if wait:
             return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
+        if refused_line:
+            log_line(refused_line)
         return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
 
     def do_GET(self):
@@ -1754,7 +1773,7 @@ class Handler(BaseHTTPRequestHandler):
             body['reason'] = reason
         return self.send_json(200, body)
 
-    def authorize_link(self, name: str) -> bool:
+    def authorize_link(self, name: str, log_refused: str | None = None) -> bool:
         """Authenticate link API calls with the same 404 and wrong-key rate limit as route."""
         row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
         if row is None:
@@ -1762,7 +1781,8 @@ class Handler(BaseHTTPRequestHandler):
             return False
         key = self.bearer_key()
         if not key or not hmac.compare_digest(row[0], key_hash(key)):
-            self.wrong_key(self.client_ip())
+            refused = f'{log_refused} of {name} refused: unauthorized' if log_refused else None
+            self.wrong_key(self.client_ip(), refused)
             return False
         return True
 
@@ -1772,25 +1792,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             return self.send_json(200, route_of(name))
-        except (FrpsUnknown, WriteBusy):
+        except FrpsUnknown:
+            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+        except WriteBusy:
+            log_line(f'route of {name} is unknown: store busy')
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
 
     def sync_answer(self, name: str) -> None:
         """R2.4: accept a validated sync record only from the live route's holder."""
-        if not self.authorize_link(name):
+        if not self.authorize_link(name, log_refused='sync'):
             return
         if (self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json':
+            log_line(f'sync of {name} refused: unsupported_media_type')
             return self.error(415, 'unsupported_media_type', 'Send the body as application/json.')
         try:
             body = self.read_json()
         except ValueError:
+            log_line(f'sync of {name} refused: invalid')
             return self.error(400, 'invalid', 'The body is not valid JSON.')
         if not valid_sync_body(body):
+            log_line(f'sync of {name} refused: invalid')
             return self.error(400, 'invalid', 'Send client, generation, state, copy and epoch.')
         try:
             conflict, record = set_sync(name, body, key_hash(self.bearer_key()))
-        except FrpsUnknown:
+        except FrpsUnknown as failure:
+            log_line(f'sync of {name} refused: unknown ({failure})')
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+        except WriteBusy:
+            log_line(f'sync of {name} refused: busy')
+            raise
         if conflict is not None:
             return self.send_json(409, {'error': conflict})
         return self.send_json(200, {'sync': record})
