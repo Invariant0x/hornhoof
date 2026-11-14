@@ -5,11 +5,11 @@ import { agentInbox, agents, companies, departments, jobs, people, requests, sub
 import { said } from '../src/modules/conversation/live.js';
 import { letterKind, type MailMessage } from '../src/modules/conversation/inbox.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { comment, createTask } from '../src/modules/tasks/engine.js';
 import { queueTaskMessage, waitFor } from '../src/modules/tasks/external-wait.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { BUILTIN } from './builtin.js';
 import { as, echelonsTurn, invitePerson, listen, mcp, SETUP, setUpCompany, testApp } from './helpers.js';
 
 const MIN = 60_000;

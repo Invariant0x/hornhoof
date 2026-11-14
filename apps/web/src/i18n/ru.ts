@@ -923,7 +923,7 @@ export const ru: Messages = {
     changeNote: n => `Изменить запись №${n}`,
     removeNote: n => `Удалить запись №${n}`,
   },
-  inbox: {
+  agentInbox: {
     panel: 'Входящие',
     button: n => (n ? `Входящие: не прочитано ${n}` : 'Входящие: все прочитано'),
     modeLabel: 'Как сотрудник получает письма',

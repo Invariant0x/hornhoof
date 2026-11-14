@@ -729,9 +729,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
      answers its owner alone, keeps an inbox. */
   const inbox: WindowPanel = {
     id: 'inbox',
-    label: t.inbox.panel,
+    label: t.agentInbox.panel,
     icon: INBOX_ICON,
-    count: { n: unreadLetters, label: t.inbox.button(unreadLetters) },
+    count: { n: unreadLetters, label: t.agentInbox.button(unreadLetters) },
     render: close => <Inbox agentId={agentId} liveId={liveId} hasDepartment={Boolean(card?.department)} onClose={close} onUnread={heardUnread} />,
   };
   const sidePanels: WindowPanel[] = [

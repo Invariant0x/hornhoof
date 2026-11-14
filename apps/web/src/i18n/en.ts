@@ -902,7 +902,7 @@ export const en = {
     changeNote: (n: number) => `Change note #${n}`,
     removeNote: (n: number) => `Remove note #${n}`,
   },
-  inbox: {
+  agentInbox: {
     panel: 'Inbox',
     button: (n: number) => (n ? `Inbox: ${n} unread` : 'Inbox: all read'),
     modeLabel: 'How this employee gets letters',

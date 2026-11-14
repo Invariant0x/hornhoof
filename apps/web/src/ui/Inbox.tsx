@@ -105,7 +105,7 @@ export function letterTime(language: Language, iso: string, now: number): { show
 
 /* Who sent a letter: a name, and in muted words what they are. */
 function senderOf(t: Messages, language: Language, p: MessageParty): { name: string; about: string | null } {
-  if (p.kind === 'hornhoof') return { name: t.window.hornhoof, about: t.inbox.system };
+  if (p.kind === 'hornhoof') return { name: t.window.hornhoof, about: t.agentInbox.system };
   if (p.agentKind === 'orchestrator') return { name: t.window.orchestrator, about: t.window.hornhoof };
   if (p.kind === 'agent' && p.id === null) return { name: t.window.hiddenEmployee, about: null };
   const role = p.role?.[language];
@@ -143,8 +143,8 @@ function DeliveryMode({ agentId, view, hasDepartment, onSaved }: { agentId: stri
   }, [view]);
   const shown: Choice = picked ?? view.mode ?? 'rule';
   const effective = shown === 'rule' ? view.inheritedMode : shown;
-  const words = { ...t.inbox.modes, rule: hasDepartment ? t.inbox.modes.rule : t.inbox.modes.companyRule };
-  const now = t.inbox.now(t.inbox.nowMode[effective], shown === 'rule' ? t.inbox.byRule[hasDepartment ? 'department' : 'company'] : null);
+  const words = { ...t.agentInbox.modes, rule: hasDepartment ? t.agentInbox.modes.rule : t.agentInbox.modes.companyRule };
+  const now = t.agentInbox.now(t.agentInbox.nowMode[effective], shown === 'rule' ? t.agentInbox.byRule[hasDepartment ? 'department' : 'company'] : null);
 
   async function pick(choice: Choice) {
     if (saving) return;
@@ -167,21 +167,21 @@ function DeliveryMode({ agentId, view, hasDepartment, onSaved }: { agentId: stri
   const state = (
     <>
       <p className="inbox-now">{now}</p>
-      <p className="inbox-what">{t.inbox.modeWhat[effective]}</p>
+      <p className="inbox-what">{t.agentInbox.modeWhat[effective]}</p>
     </>
   );
   if (!view.canChangeMode) {
     return (
       <section className="inbox-mode" aria-labelledby={`${uid}-label`}>
-        <p className="inbox-mode-label" id={`${uid}-label`}>{t.inbox.modeLabel}</p>
+        <p className="inbox-mode-label" id={`${uid}-label`}>{t.agentInbox.modeLabel}</p>
         {state}
-        <p className="inbox-what">{t.inbox.readOnly}</p>
+        <p className="inbox-what">{t.agentInbox.readOnly}</p>
       </section>
     );
   }
   return (
     <fieldset className="inbox-mode" aria-busy={saving} data-keys={keys || undefined} onKeyDown={() => setKeys(true)} onPointerDown={() => setKeys(false)}>
-      <legend className="inbox-mode-label">{t.inbox.modeLabel}</legend>
+      <legend className="inbox-mode-label">{t.agentInbox.modeLabel}</legend>
       <div className="inbox-choices">
         {CHOICES.map(choice => (
           <label key={choice} className={shown === choice ? 'on' : undefined}>
@@ -192,8 +192,8 @@ function DeliveryMode({ agentId, view, hasDepartment, onSaved }: { agentId: stri
         ))}
       </div>
       <div aria-live="polite">{state}</div>
-      {saving && <p className="inbox-what" role="status">{t.inbox.saving}</p>}
-      {failed && <p className="inbox-mark-err" role="alert">{t.inbox.modeFailed}</p>}
+      {saving && <p className="inbox-what" role="status">{t.agentInbox.saving}</p>}
+      {failed && <p className="inbox-mark-err" role="alert">{t.agentInbox.modeFailed}</p>}
     </fieldset>
   );
 }
@@ -225,11 +225,11 @@ function Letter({ letter, canMark, failed, onMark }: { letter: InboxLetter; canM
           {about && <span>{keepWhole(about)}</span>}
         </p>
         <p className="inbox-meta">
-          <span className="inbox-kind">{t.inbox.kinds[letter.kind]}</span>
+          <span className="inbox-kind">{t.agentInbox.kinds[letter.kind]}</span>
           <time dateTime={letter.receivedAt} title={when.full}>{when.shown}</time>
           <span className={`inbox-state ${letter.unread ? 'new' : 'old'}`} id={`${uid}-state`}>
             <i aria-hidden="true" />
-            {letter.unread ? t.inbox.unread : t.inbox.read}
+            {letter.unread ? t.agentInbox.unread : t.agentInbox.read}
           </span>
         </p>
         {task && (task.id && openTask ? (
@@ -238,19 +238,19 @@ function Letter({ letter, canMark, failed, onMark }: { letter: InboxLetter; canM
           <p className="inbox-task">{taskWords}</p>
         ))}
         <p className="inbox-text" id={`${uid}-text`}>{long && !open ? lines.slice(0, 2).join('\n') : letter.text}</p>
-        {long && !open && <p className="inbox-fold">{t.inbox.more(lines.length - 2)}</p>}
+        {long && !open && <p className="inbox-fold">{t.agentInbox.more(lines.length - 2)}</p>}
       </div>
-      {failed && <p className="inbox-mark-err" role="alert">{t.inbox.markFailed}</p>}
+      {failed && <p className="inbox-mark-err" role="alert">{t.agentInbox.markFailed}</p>}
       {(long || (letter.unread && canMark)) && (
         <div className="entry-actions">
           {long && (
-            <button className="btn ghost" type="button" aria-expanded={open} aria-controls={`${uid}-text`} aria-label={open ? t.inbox.foldOf(name) : t.inbox.openOf(name)} onClick={() => setOpen(!open)}>
-              {open ? t.inbox.fold : t.inbox.open}
+            <button className="btn ghost" type="button" aria-expanded={open} aria-controls={`${uid}-text`} aria-label={open ? t.agentInbox.foldOf(name) : t.agentInbox.openOf(name)} onClick={() => setOpen(!open)}>
+              {open ? t.agentInbox.fold : t.agentInbox.open}
             </button>
           )}
           {letter.unread && canMark && (
-            <button className="btn ghost" type="button" aria-label={t.inbox.markOneOf(name)} onClick={onMark}>
-              {t.inbox.markOne}
+            <button className="btn ghost" type="button" aria-label={t.agentInbox.markOneOf(name)} onClick={onMark}>
+              {t.agentInbox.markOne}
             </button>
           )}
         </div>
@@ -263,7 +263,7 @@ function ListHead({ children }: { children?: ReactNode }) {
   const t = useT();
   return (
     <div className="inbox-sum">
-      <h4>{t.inbox.title}</h4>
+      <h4>{t.agentInbox.title}</h4>
       {children}
     </div>
   );
@@ -301,7 +301,7 @@ export function Inbox({ agentId, liveId, hasDepartment, onClose, onUnread }: { a
         <ListHead />
         <p className="inbox-status" role="status">
           <span className="spinner" aria-hidden="true" />
-          {t.inbox.loading}
+          {t.agentInbox.loading}
         </p>
         <div className="inbox-skel" aria-hidden="true">
           <i />
@@ -322,8 +322,8 @@ export function Inbox({ agentId, liveId, hasDepartment, onClose, onUnread }: { a
       <>
         <ListHead />
         <div className="inbox-empty">
-          <b>{t.inbox.emptyHead}</b>
-          <p>{t.inbox.emptyText}</p>
+          <b>{t.agentInbox.emptyHead}</b>
+          <p>{t.agentInbox.emptyText}</p>
         </div>
       </>
     );
@@ -332,17 +332,17 @@ export function Inbox({ agentId, liveId, hasDepartment, onClose, onUnread }: { a
       <>
         <div className="inbox-sum">
           <div className="inbox-sum-text">
-            <h4 ref={heading} tabIndex={-1}>{t.inbox.title}</h4>
-            <p role="status">{view.unreadCount ? t.inbox.sumUnread(view.unreadCount, view.total) : t.inbox.sumAll(view.total)}</p>
+            <h4 ref={heading} tabIndex={-1}>{t.agentInbox.title}</h4>
+            <p role="status">{view.unreadCount ? t.agentInbox.sumUnread(view.unreadCount, view.total) : t.agentInbox.sumAll(view.total)}</p>
           </div>
           {view.canMarkRead && view.unreadCount > 0 && (
             <div className="entry-actions">
-              <button className="btn ghost" type="button" onClick={() => void mark('all')}>{t.inbox.markAll}</button>
+              <button className="btn ghost" type="button" onClick={() => void mark('all')}>{t.agentInbox.markAll}</button>
             </div>
           )}
         </div>
-        {failed === 'all' && <p className="inbox-mark-err" role="alert">{t.inbox.markAllFailed}</p>}
-        <ul className="entries" aria-label={t.inbox.title}>
+        {failed === 'all' && <p className="inbox-mark-err" role="alert">{t.agentInbox.markAllFailed}</p>}
+        <ul className="entries" aria-label={t.agentInbox.title}>
           {view.letters.map(letter => (
             <Letter key={letter.id} letter={letter} canMark={view.canMarkRead} failed={failed === letter.id && letter.unread} onMark={() => void mark([letter.id])} />
           ))}
@@ -350,14 +350,14 @@ export function Inbox({ agentId, liveId, hasDepartment, onClose, onUnread }: { a
         {failure !== null && <Unread onRetry={again} />}
         {view.more && failure === null && (
           <div className="entry-actions">
-            <button className="btn ghost" type="button" disabled={reading} onClick={more}>{t.inbox.showMore}</button>
+            <button className="btn ghost" type="button" disabled={reading} onClick={more}>{t.agentInbox.showMore}</button>
           </div>
         )}
       </>
     );
   }
   return (
-    <PanelFrame label={t.inbox.panel} busy={loading} kind="inbox" onClose={onClose}>
+    <PanelFrame label={t.agentInbox.panel} busy={loading} kind="inbox" onClose={onClose}>
       {view && <DeliveryMode agentId={agentId} view={view} hasDepartment={hasDepartment} onSaved={again} />}
       {list}
     </PanelFrame>
@@ -369,10 +369,10 @@ function Unread({ onRetry }: { onRetry(): void }) {
   return (
     <div className="alert inbox-alert" role="alert">
       <p>
-        <b>{t.inbox.errorHead}</b> {t.inbox.errorText}
+        <b>{t.agentInbox.errorHead}</b> {t.agentInbox.errorText}
       </p>
       <div className="entry-actions">
-        <button className="btn" type="button" onClick={onRetry}>{t.inbox.retry}</button>
+        <button className="btn" type="button" onClick={onRetry}>{t.agentInbox.retry}</button>
       </div>
     </div>
   );
