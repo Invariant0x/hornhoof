@@ -9,6 +9,7 @@ import type { Term } from '../src/db/net.js';
 import type { Beat, Heard } from '../src/modules/keeper/beats.js';
 import { Keeper } from '../src/modules/keeper/keeper.js';
 import type { Clocks } from '../src/modules/keeper/lease.js';
+import { LEASE_MS } from '../src/modules/keeper/lease.js';
 import { LeaseProofs, othersFinished } from '../src/modules/keeper/proofs.js';
 import { fakeLease } from './fake-lease.js';
 import { createTestSql, ownDatabases, TEST_SECRET } from './helpers.js';
@@ -40,8 +41,8 @@ function proofs() {
   });
   const beat = (machine: string, stance: Beat['stance'], host = 'mac'): Beat => ({ machine, host, stance, number: 2, reach: null, ready: true, full: false });
   /* The copy's answer to a beat this keeper sent at that moment. */
-  const answer = (machine: string, stance: Beat['stance'], sentAt: number) => {
-    const heard = { beat: beat(machine, stance), at: sentAt + 50, sent: clocks(sentAt) };
+  const answer = (machine: string, stance: Beat['stance'], sentAt: number, host?: string) => {
+    const heard = { beat: beat(machine, stance, host), at: sentAt + 50, sent: clocks(sentAt) };
     answers.set(machine, heard);
     lasts.set(machine, heard);
   };
@@ -131,6 +132,83 @@ describe('the proofs a leader keeps its lease by', () => {
     /* At the same number the machine decides. */
     p.hears(C, { kind: 'lead', term: { number: 7, machine: C, split: false }, lease: 'normal', sync: null, until: 0 }, '');
     expect(p.it.ended()).toBe('another machine leads under term 7');
+  });
+
+  it('names the missing proof once per reason, and forgets it when a fresh proof arrives', async () => {
+    const p = proofs();
+    const lines: string[] = [];
+    const log = (line: string) => void lines.push(line);
+
+    /* Standing lease renewed at mono 1000: nothing missing before a full tick passes. */
+    p.said.b = null;
+    p.it.begin();
+    expect(p.it.proof()).toEqual(clocks(1000));
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    expect(lines).toEqual([]);
+
+    /* Silent link and no sync copy named: logged once, not repeated on the next tick. */
+    p.said.link = 'silent';
+    p.said.now = 2000;
+    await p.it.tick();
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    p.said.now = 3000;
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    expect(lines).toEqual(['Lease renewal skipped (missing proof: no answer from link probe; no sync copy named).']);
+
+    /* Different link and copy reasons each surface when they change. */
+    p.said.b = B;
+    p.said.link = 'throws';
+    await p.it.tick();
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    expect(lines.at(-1)).toBe('Lease renewal skipped (missing proof: link probe failed; no beat answer from sync copy).');
+
+    p.said.link = 'stale';
+    p.answer(B, { kind: 'attempting' }, 2500);
+    await p.it.tick();
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    expect(lines.at(-1)).toBe('Lease renewal skipped (missing proof: link probe returned another nonce; mac stance is attempting).');
+
+    p.answer(B, { kind: 'follow', term: { ...TERM, number: 6 } }, 2600);
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    expect(lines.at(-1)).toBe('Lease renewal skipped (missing proof: link probe returned another nonce; mac follows another term).');
+
+    /* Once a fresh proof arrives, the warning resets and can fire again on a later outage. */
+    p.said.link = 'self';
+    p.said.now = 4000;
+    await p.it.tick();
+    p.it.reportMissing(clocks(1000).wall + LEASE_MS, log);
+    p.said.now = 6000;
+    p.answer(B, { kind: 'follow', term: TERM }, 3500);
+    p.it.reportMissing(clocks(4000).wall + LEASE_MS, log);
+    expect(lines.at(-1)).toBe('Lease renewal skipped (missing proof: no new answer from link probe; no new beat from mac).');
+
+    p.answer(B, { kind: 'follow', term: TERM }, 3500, '');
+    p.it.reportMissing(clocks(4000).wall + LEASE_MS, log);
+    expect(lines.at(-1)).toBe('Lease renewal skipped (missing proof: no new answer from link probe; no new beat from sync copy).');
+  });
+
+  it('waits up to five seconds for a slow probe and records a timeout past that', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    let delayMs = 3500;
+    const it = new LeaseProofs({
+      probe: nonce => new Promise(resolve => setTimeout(() => resolve({ machine: A, nonce }), delayMs)),
+      beats: { answer: () => null, all: () => new Map() },
+      self: A, term: () => TERM, b: () => null,
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+    });
+    const first = it.tick();
+    expect(it.missing()).toBe('link probe in flight; no sync copy named');
+    await vi.advanceTimersByTimeAsync(3500);
+    await first;
+    expect(it.proof()).not.toBeNull();
+
+    delayMs = 5500;
+    const second = it.tick();
+    await vi.advanceTimersByTimeAsync(5000);
+    await second;
+    expect(it.missing()).toBe('link probe timed out; no sync copy named');
+    await vi.advanceTimersByTimeAsync(500);
   });
 });
 
@@ -266,5 +344,21 @@ describe('keeping the lease when the first copy finishes on a slow link', () => 
     }
     expect(lines.some(line => line.includes('Another machine holds a copy of the data'))).toBe(true);
     expect(lease.calls.filter(call => call.method === 'fence')).toEqual([]);
+  });
+
+  it('logs missing proof naming the unanswered link and unnamed sync copy when renewals are skipped', async () => {
+    const { keeper, lease, lines, state } = await slowLinkStand({ probeMs: 100 });
+    expect(keeper.mode()).toBe('lead');
+
+    state.link = 'silent';
+    state.needed = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    const missing = lines.filter(line => line.includes('missing proof'));
+    expect(missing).toEqual(['Lease renewal skipped (missing proof: no answer from link probe; no sync copy named).']);
+    expect(keeper.mode()).toBe('lead');
+
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(keeper.mode()).toBe('read');
+    expect(lease.calls.some(call => call.method === 'fence')).toBe(true);
   });
 });

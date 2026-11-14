@@ -540,15 +540,21 @@ export class Keeper {
     if (!proofs) return;
     const needed = await proofs.needed().catch(() => null);
     if (needed === null) return;
-    if (needed && this.neededNow === false) this.opts.log('Another machine holds a copy of the data: this machine leads only while hornhoof.org or that copy vouches for it.');
+    const began = needed && this.neededNow === false;
     this.neededNow = needed;
+    if (!began) return;
+    this.opts.log('Another machine holds a copy of the data: this machine leads only while hornhoof.org or that copy vouches for it.');
+    if (this.holder.standing()) this.leaseProofs!.begin();
+    this.prove();
   }
 
   /* Each second: a proof for the lease that stands, or a look for the way back to leading. */
   private prove(): void {
     if (this.stopped || !this.neededNow) return;
-    if (this.holder.standing()) void this.leaseProofs?.tick();
-    else void this.reentry?.tick();
+    const standing = this.holder.standing();
+    if (!standing) return void this.reentry!.tick();
+    this.leaseProofs!.reportMissing(standing.until, this.opts.log);
+    void this.leaseProofs!.tick();
   }
 
   /* Where this keeper stands, as it tells the other machines that keep data each second: handing the server over,

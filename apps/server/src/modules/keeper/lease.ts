@@ -64,11 +64,11 @@ function takeOnEntry(o: LeaseInputs): LeaseStep {
   return entry === null ? { do: 'none' } : { do: 'take', kind: kindOf(o), sent: entry.sent, term: entry.term };
 }
 
-/* A renewal promises 10 s from when its proof went out, so only a proof sent after the last renewal gives anything new.
-   The monotonic clock says which came first, since the wall clock can be corrected between the two. */
+/* A renewal promises 10 s from when its proof went out, so only a proof sent after the last renewal and still within a
+   lease gives anything new. The monotonic clock says which came first, since the wall clock can be corrected between the two. */
 function renewOnProof(held: Held, o: LeaseInputs): LeaseStep {
   const proof = o.proof === undefined ? o.now : o.proof;
-  if (proof === null || proof.mono <= held.sent.mono) return { do: 'none' };
+  if (proof === null || proof.mono <= held.sent.mono || !withinLease(proof, o.now)) return { do: 'none' };
   return { do: 'renew', kind: kindOf(o), endSessions: o.maintenance && held.kind !== 'maintenance', sent: proof };
 }
 
