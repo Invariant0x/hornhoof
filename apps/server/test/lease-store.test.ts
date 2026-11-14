@@ -1,6 +1,6 @@
 import net, { type AddressInfo } from 'node:net';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentRole, PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies } from '../src/db/schema.js';
@@ -159,6 +159,9 @@ describe('the lease the keeper holds in the database', () => {
   });
 
   it('records the horizon', async () => {
+    /* The migrated database comes from a cached dump that may be hours old when a test opens its copy. */
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 3 * 3_600_000 });
+    onTestFinished(() => { vi.useRealTimers(); });
     const s = await store();
     await s.lease.take('normal', FAR);
     const horizon = async () => (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM now() - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
