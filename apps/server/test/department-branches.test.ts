@@ -70,6 +70,21 @@ describe("a department's branches not in main yet", () => {
     expect(JSON.parse(read.content[0]!.text).departmentBranches).toEqual(c.open);
   });
 
+  it('go to no agent of another department, even one the task is given to, nor why they cannot be read; the orchestrator reads them', async () => {
+    const c = await staged();
+    await c.db.update(tasks).set({ assigneeAgentId: c.seller.id, executorAgentId: c.seller.id }).where(eq(tasks.id, c.task.id));
+    const read = async (agent: { id: string }) => JSON.parse((await call(await c.tools(agent), 'task', { task: c.task.number })).content[0]!.text);
+    const sid = await read(c.seller);
+    expect(sid.title).toBe('Checkout');
+    expect(sid).not.toHaveProperty('departmentBranches');
+    expect(JSON.stringify(sid)).not.toContain(sha(c.numbers.leads));
+    expect((await read(c.orchestrator)).departmentBranches).toEqual(c.open);
+    expect((await send(c, c.samToken, `/api/tasks/${c.task.id}`)).body).not.toContain(sha(c.numbers.leads));
+    c.app.ctx.readBranches = async () => ({ problem: 'Hornhoof could not read the branches of https://github.com/acme/shop.git: it answered 404.' });
+    expect(await read(c.seller)).not.toHaveProperty('departmentBranchesProblem');
+    expect((await read(c.head)).departmentBranchesProblem).toContain('it answered 404');
+  });
+
   it('say the merge is unknown where the repository cannot tell, and say why when its branches cannot be read', async () => {
     const c = await staged();
     c.app.ctx.readMerged = async () => null;

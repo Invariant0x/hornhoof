@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { WebSocket } from 'ws';
-import { agents, machines, nodes, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
@@ -74,6 +74,46 @@ describe('an employee whose machine is offline', () => {
     expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().offline).toEqual({ hostname: 'Laptop', since: '2026-11-13T19:30:00.000Z' });
     await c.db.update(nodes).set({ lastSeenAt: null });
     expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().offline).toMatchObject({ since: null });
+  });
+});
+
+describe('the machine of an employee outside the department', () => {
+  it('is named to no person who may not open the employee, on its card or on the card of its task', async () => {
+    const c = await staged();
+    const task = await send(c, c.samToken, 'GET', `/api/tasks/${c.task.id}`);
+    expect(task.statusCode).toBe(200);
+    expect(task.json().task.assigneeOffline).toBeNull();
+    expect(task.body).not.toContain('Marselle');
+    const card = await send(c, c.samToken, 'GET', `/api/agents/${c.worker.id}`);
+    expect(card.statusCode).toBe(403);
+    expect(card.body).not.toContain('Marselle');
+    expect((await send(c, c.wholeToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assigneeOffline).toBeNull();
+    expect((await send(c, c.wholeToken, 'GET', `/api/agents/${c.worker.id}`)).statusCode).toBe(403);
+  });
+
+  it('is named to no agent of another department that reads the task, and to the head of the department it is', async () => {
+    const c = await staged();
+    await c.db.update(tasks).set({ executorAgentId: c.seller.id }).where(eq(tasks.id, c.task.id));
+    const read = async (agent: { id: string }) => {
+      const res = (await (await c.tools(agent)).callTool({ name: 'task', arguments: { task: c.task.number } })) as { content: { text: string }[] };
+      return res.content[0]!.text;
+    };
+    const sid = await read(c.seller);
+    expect(JSON.parse(sid).assigneeOffline).toBeNull();
+    expect(sid).not.toContain('Marselle');
+    expect(JSON.parse(await read(c.head)).assigneeOffline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
+    expect(JSON.parse(await read(c.orchestrator)).assigneeOffline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
+  });
+
+  it('is named to no agent of another department that answers the employee', async () => {
+    const c = await staged();
+    /* Bruno wrote to Sid last, so Sid may answer him once from Sales. */
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.seller.id, kind: 'message', data: { from: 'agent', by: c.worker.id, text: 'Which leads are yours?' } });
+    const res = (await (await c.tools(c.seller)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: 'The ones from the fair' } })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toBe(
+      'Bruno cannot run now: the machine of its plan is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
+    );
   });
 });
 
