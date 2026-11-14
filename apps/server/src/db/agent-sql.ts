@@ -64,6 +64,7 @@ const READ_ONLY = [
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
+  'autonomous_releases',
   'assistants', 'assistant_events', 'assistant_replies', 'assistant_requests',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
@@ -78,7 +79,7 @@ const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode', 'owner_person_id'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 /* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */
-const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'] };
+const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'], companies: ['autonomous_release'] };
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
 /* Whether the orchestrator's own SQL may change this column: what its role is granted below, said once more for

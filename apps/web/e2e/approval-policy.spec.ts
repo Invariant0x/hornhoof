@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { ApprovalPolicyView, Org } from '../src/types';
+import type { ApprovalPolicyView, AutonomousReleaseEntry, Org } from '../src/types';
 import { ME, serveApi } from './api';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
@@ -12,11 +12,32 @@ const ORG: Org = {
   people: [],
   departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', ownerPersonId: null, agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }],
 };
+const JOURNAL: AutonomousReleaseEntry[] = [
+  {
+    id: 'ar1',
+    departmentId: 'd2',
+    taskId: 't858',
+    taskNumber: 858,
+    agentId: 'a1',
+    agentName: 'Dozer',
+    commitSha: 'd7a1eb2b34edb970a2c5abbaadf25e50d4dc4031',
+    baseCommitSha: '1111111111111111111111111111111111111111',
+    testRunId: 'tr43',
+    testRunNumber: 43,
+    reviewerAgentId: 'a2',
+    reviewerName: 'Trinity',
+    verdictStage: 'review',
+    createdAt: '2026-11-14T12:00:00.000Z',
+  },
+];
 const POLICY: ApprovalPolicyView = {
   departmentId: 'd2',
   owner: null,
   canSetOwner: true,
   canChangePolicy: true,
+  autonomousRelease: false,
+  canSetAutonomousRelease: true,
+  hasAutonomousReleases: false,
   candidates: [{ id: 'p2', name: 'Dana Abramovna Konstantinopolskaya', title: 'Head of Very Long Titles' }, { id: 'p3', name: 'Wes', title: '' }],
   rules: [
     { channel: 'message', mode: 'new_kinds' },
@@ -47,6 +68,13 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
     if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.7.0', commit: 'task-355' } });
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-355' }, available: false, latest: null, updater: { status: null, waiting: null } } });
     if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: shown });
+    if (url.pathname === '/api/autonomous-releases') return route.fulfill({ json: { entries: JOURNAL } });
+    if (url.pathname === '/api/departments/d2/approval-policy/autonomous-release') {
+      const body = route.request().postDataJSON() as { enabled: boolean };
+      puts.push({ url: url.pathname, body });
+      shown = { ...shown, autonomousRelease: body.enabled, hasAutonomousReleases: true };
+      return route.fulfill({ json: shown });
+    }
     if (url.pathname === '/api/departments/d2/owner') {
       const body = route.request().postDataJSON() as { personId: string | null };
       puts.push({ url: url.pathname, body });
@@ -114,6 +142,13 @@ for (const lang of ['en', 'ru'] as const) {
         await price.getByRole('button', { name: t.common.save, exact: true }).click();
         await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/price', body: { mode: 'within_limits', limit: 250, unit: 'USD' } });
 
+        const autoSwitch = part.getByRole('switch', { name: a.autonomousRelease, exact: true });
+        await expect(autoSwitch).not.toBeChecked();
+        await autoSwitch.click();
+        await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
+        await expect(autoSwitch).toBeChecked();
+        await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
+
         await fitsTheScreen(page, width);
         await part.screenshot({ path: info.outputPath(`approvals-ceo-open-${width}-${lang}-${theme}.png`) });
         expect(errors.filter(e => !/400/.test(e))).toEqual([]);
@@ -121,12 +156,24 @@ for (const lang of ['en', 'ru'] as const) {
 
       test(`someone with access reads the rules and changes nothing, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
-        const { errors } = await open(page, lang, theme, width, { ...POLICY, owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' }, canSetOwner: false, canChangePolicy: false, candidates: [] });
+        const { errors } = await open(page, lang, theme, width, {
+          ...POLICY,
+          owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' },
+          canSetOwner: false,
+          canChangePolicy: false,
+          autonomousRelease: true,
+          canSetAutonomousRelease: false,
+          hasAutonomousReleases: true,
+          candidates: [],
+        });
         const part = section(page, t);
+        await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
         await part.screenshot({ path: info.outputPath(`approvals-reader-${width}-${lang}-${theme}.png`) });
         await fitsTheScreen(page, width);
         await expect(part.getByText(t.dept.approvals.ownerIs('Dana Abramovna Konstantinopolskaya'))).toBeVisible();
+        await expect(part.getByText(t.dept.approvals.autonomousReleaseState(true))).toBeVisible();
         await expect(part.getByRole('combobox')).toHaveCount(0);
+        await expect(part.getByRole('switch')).toHaveCount(0);
         await expect(part.getByRole('button')).toHaveCount(0);
         await expect(part.getByText(t.dept.approvals.limitIs(100, 'USD'))).toBeVisible();
         expect(errors).toEqual([]);

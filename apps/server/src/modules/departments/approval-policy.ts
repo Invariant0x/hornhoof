@@ -7,8 +7,14 @@ import { accessOf, listsDepartment } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { approvalPolicies, departments, people, requests, tasks } from '../../db/schema.js';
+import { approvalPolicies, companies, departments, people, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import {
+  hasAutonomousReleaseEntries,
+  isAutonomousReleaseEnabled,
+  isHumanCeo,
+  listAutonomousReleases,
+} from '../tasks/autonomous-release.js';
 import { candidates, departmentOwners } from '../tasks/decisions.js';
 
 /* A department's owner and how its approvals go. The CEO names the owner; the owner, the CEO and the delegate set the rules.
@@ -19,6 +25,8 @@ type DeptRow = typeof departments.$inferSelect;
 const IdParams = z.object({ id: z.uuid() });
 const RuleParams = z.object({ id: z.uuid(), channel: ApprovalChannel });
 const OwnerBody = z.object({ personId: z.uuid().nullable() }).strict();
+const AutonomousBody = z.object({ enabled: z.boolean() }).strict();
+const JournalQuery = z.object({ department: z.uuid().optional() }).strict();
 
 const NO_ACCESS = 'Only an active person with access to this department can own it. Give them access first.';
 const ON_DEPARTMENT = 'A product has no owner or rules of its own: it goes by the department that holds it.';
@@ -67,13 +75,25 @@ export const mayChangeRules = async (db: Pick<Db, 'select'>, me: Person, departm
 
 async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
   const canSetOwner = actsAsCeo(me);
+  const [owner, canChangePolicy, ownerList, rules, autonomousRelease, canSetAutonomousRelease, hasAutonomousReleases] = await Promise.all([
+    departmentOwner(ctx, me.companyId, dept.id),
+    mayChangeRules(ctx.db, me, dept.id),
+    canSetOwner ? ownerCandidates(ctx, me.companyId, dept.id) : Promise.resolve([]),
+    departmentRules(ctx.db, dept.id),
+    isAutonomousReleaseEnabled(ctx.db, me.companyId),
+    isHumanCeo(ctx.db, me),
+    hasAutonomousReleaseEntries(ctx.db, me.companyId, dept.id),
+  ]);
   return {
     departmentId: dept.id,
-    owner: await departmentOwner(ctx, me.companyId, dept.id),
+    owner,
     canSetOwner,
-    canChangePolicy: await mayChangeRules(ctx.db, me, dept.id),
-    candidates: canSetOwner ? await ownerCandidates(ctx, me.companyId, dept.id) : [],
-    rules: await departmentRules(ctx.db, dept.id),
+    canChangePolicy,
+    autonomousRelease,
+    canSetAutonomousRelease,
+    hasAutonomousReleases,
+    candidates: ownerList,
+    rules,
   };
 }
 
@@ -91,6 +111,20 @@ const parseRule = (body: unknown): ApprovalRule => {
   if (rule.success) return rule.data;
   throw new ApiError(400, 'validation', 'Choose one of the three ways. "Up to a limit" takes a limit of 0 or more, and only that way takes one.', 'policy_invalid');
 };
+
+async function checkJournalDepartment(db: Pick<Db, 'select'>, me: Person, access: Awaited<ReturnType<typeof accessOf>>, department?: string) {
+  if (!department) return;
+  await ownDepartment(db, me.companyId, department);
+  if (!listsDepartment(access, department)) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+}
+
+async function visibleAutonomousReleases(db: Pick<Db, 'select'>, me: Person, query: unknown) {
+  const access = await accessOf(db, me);
+  const { department } = JournalQuery.parse(query ?? {});
+  await checkJournalDepartment(db, me, access, department);
+  const entries = await listAutonomousReleases(db, me.companyId, department);
+  return access.whole ? entries : entries.filter(entry => Boolean(entry.departmentId && listsDepartment(access, entry.departmentId)));
+}
 
 export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -118,12 +152,33 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
     return policyView(ctx, me, dept);
   });
 
+  app.put('/api/departments/:id/approval-policy/autonomous-release', async req => {
+    const me = await requirePerson(req, db);
+    if (!(await isHumanCeo(db, me))) {
+      throw new ApiError(403, 'forbidden', 'Only the signed-in human CEO can turn autonomous release on or off.', 'autonomous_release_ceo_only');
+    }
+    const dept = await ownDepartment(db, me.companyId, IdParams.parse(req.params).id);
+    const { enabled } = AutonomousBody.parse(req.body);
+    await db.update(companies).set({ autonomousRelease: enabled }).where(eq(companies.id, me.companyId));
+    logged(req, me, { departmentId: dept.id, autonomousRelease: enabled });
+    changed(me.companyId, dept.id);
+    return policyView(ctx, me, dept);
+  });
+
+  app.get('/api/autonomous-releases', async req => {
+    const me = await requirePerson(req, db);
+    return { entries: await visibleAutonomousReleases(db, me, req.query) };
+  });
+
   app.put('/api/departments/:id/approval-policy/:channel', async req => {
     const me = await requirePerson(req, db);
     const { id, channel } = RuleParams.parse(req.params);
     const dept = await ownDepartment(db, me.companyId, id);
     if (!(await mayChangeRules(db, me, dept.id))) throw new ApiError(403, 'forbidden', 'Only this department\'s owner, the CEO or the CEO delegate changes how its approvals go.', 'policy_not_allowed');
     const rule = parseRule(req.body);
+    if (channel === 'commit' && rule.mode !== 'every') {
+      throw new ApiError(400, 'validation', 'Commit approvals always check the exact commit; only the human CEO can enable autonomous release.', 'policy_invalid');
+    }
     const stored = { mode: rule.mode, limitAmount: rule.mode === 'within_limits' ? rule.limit : null, limitUnit: rule.mode === 'within_limits' ? (rule.unit ?? null) : null, updatedBy: me.id, updatedAt: new Date() };
     await db
       .insert(approvalPolicies)

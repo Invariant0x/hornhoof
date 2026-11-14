@@ -841,6 +841,13 @@
       "when": 1794694022555,
       "tag": "0120_google_sheets",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1794695767194,
+      "tag": "0121_autonomous_release",
+      "breakpoints": true
     }
   ]
 }

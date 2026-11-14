@@ -19,4 +19,4 @@ When broader validation is assigned, one owner freezes the exact candidate. Test
 
 A coordination group without its own executable output closes with a checked report and references to accepted current child candidates and evidence. Unfinished Review, unaccepted or stale child results block closure. A parent with its own executable output follows the same required Review route; its title grants no exemption.
 
-After Tests, integrate only by the task's authorized route. Main, publication and live updates require the authorized human's approval of the exact commit. Ability selection grants no permission to release or change another person's machine.
+After Tests, integrate only by the task's authorized route. Main requires asking with commit before pushing and receiving the authorized human's yes or pre-push auto-approval under CEO-enabled autonomous release; publication and live updates require the authorized human's exact-commit approval. Ability selection grants no permission to release or change another person's machine.

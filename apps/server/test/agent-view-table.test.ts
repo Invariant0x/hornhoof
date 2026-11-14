@@ -121,6 +121,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
+  { route: 'GET /api/autonomous-releases', url: () => '/api/autonomous-releases', statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
   /* Ann has App of Development and does not run Development: its branches are closed to her, as its roster is. */
@@ -129,6 +130,7 @@ const LISTS: Listed[] = [
 
 /* Elsewhere, with the reason it is not a row above. */
 const ELSEWHERE: Record<string, string> = {
+  'PUT /api/departments/:id/approval-policy/autonomous-release': 'autonomous-release.test.ts: the signed-in human CEO alone, 403 for every other person and every agent',
   'PUT /api/departments/:id/wait-policy/:kind': 'agent-view-waits.test.ts: only this department owner, CEO or delegate; every role checked',
   'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',

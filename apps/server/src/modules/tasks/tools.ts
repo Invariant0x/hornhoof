@@ -14,6 +14,7 @@ import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, turnForNewTask, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
+import { tryAutonomousCommitApproval } from './autonomous-release.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
@@ -102,6 +103,12 @@ async function questionWords(db: Ctx['db'], task: Task, question: string, commit
 async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
   const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
+}
+
+async function autoCommitReply(ctx: Ctx, task: Task, agentId: string, question: string, commit?: string, options?: unknown[]) {
+  if (!commit || options?.length) return null;
+  const auto = await tryAutonomousCommitApproval(ctx, task, agentId, commit, question);
+  return auto ? { text: auto.text, moved: auto.moved } : null;
 }
 
 const TurnItem = z.object({ department: z.uuid().optional().describe("The turn's department; it may be left out."), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
@@ -426,7 +433,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
+          'An approval tells you and the person which passed test run checked that very commit, or that none did; when the CEO enabled autonomousRelease and that commit has a green full run_tests run with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
         inputSchema: {
           task: Ref,
@@ -448,6 +455,8 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, question);
+          const auto = await autoCommitReply(this.ctx, task, this.job.agentId, question, commit, options);
+          if (auto) return auto;
           await this.underQuestionCap();
           const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
           const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));

@@ -74,6 +74,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   test_suite_memory: add('work'),
   outbound_contact_events: add('protected'),
   outbound_events: add('protected'),
+  autonomous_releases: { kind: 'add', topic: 'protected', task: 'task_id', hereOnly: ['verdict_event_id'] },
 
   agent_events: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq' },
   task_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id', task: 'task_id' },

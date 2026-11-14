@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
-import type { ApprovalMode, ApprovalPolicyView, ApprovalRule } from '../types';
+import type { ApprovalMode, ApprovalPolicyView, ApprovalRule, AutonomousReleaseEntry } from '../types';
 import { Field } from './Field';
 
 type Props = {
@@ -127,6 +127,147 @@ function OwnerWords({ owner }: { owner: ApprovalPolicyView['owner'] }) {
   return <p className="appr-owner">{owner ? t.ownerIs(owner.name) : t.ownerNone}</p>;
 }
 
+function useAutonomousJournal(departmentId: string, active: boolean, refreshKey: boolean): AutonomousReleaseEntry[] | null {
+  const [entries, setEntries] = useState<AutonomousReleaseEntry[] | null>(null);
+  useEffect(() => {
+    if (!active) {
+      setEntries(null);
+      return;
+    }
+    let alive = true;
+    void api
+      .get<{ entries: AutonomousReleaseEntry[] }>(`/api/autonomous-releases?department=${encodeURIComponent(departmentId)}`)
+      .then(res => alive && setEntries(res.entries))
+      .catch(() => alive && setEntries([]));
+    return () => {
+      alive = false;
+    };
+  }, [departmentId, active, refreshKey]);
+  return entries;
+}
+
+function AutonomousJournalView({ entries }: { entries: AutonomousReleaseEntry[] | null }) {
+  const t = useT().dept.approvals;
+  if (entries === null) return null;
+  return (
+    <div className="appr-auto-journal">
+      <p className="muted">{t.autonomousJournalTitle}</p>
+      {entries.length === 0 ? (
+        <p className="muted">{t.autonomousJournalEmpty}</p>
+      ) : (
+        <ul>
+          {entries.map(entry => (
+            <li key={entry.id}>
+              {t.autonomousJournalWho(entry.agentName, String(entry.taskNumber))}:{' '}
+              <code>{entry.commitSha}</code> ({t.autonomousJournalProof(String(entry.testRunNumber), entry.reviewerName)})
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AutonomousToggleOrState({
+  canSet,
+  enabled,
+  busy,
+  onToggle,
+}: {
+  canSet: boolean;
+  enabled: boolean;
+  busy: boolean;
+  onToggle(next: boolean): void;
+}) {
+  const t = useT().dept.approvals;
+  if (!canSet) return <p className="muted">{t.autonomousReleaseState(enabled)}</p>;
+  return (
+    <label className="appr-auto-toggle">
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label={t.autonomousRelease}
+        checked={enabled}
+        disabled={busy}
+        onChange={e => onToggle(e.target.checked)}
+      />
+      <span>{t.autonomousRelease}</span>
+    </label>
+  );
+}
+
+/* CEO-only toggle and company journal for exact-commit autonomous release to main. */
+function AutonomousReleaseControl({
+  departmentId,
+  path,
+  view,
+  onSaved,
+}: {
+  departmentId: string;
+  path: string;
+  view: ApprovalPolicyView;
+  onSaved(next: ApprovalPolicyView): void;
+}) {
+  const tt = useT();
+  const t = tt.dept.approvals;
+  const enabled = Boolean(view.autonomousRelease);
+  const showJournal = enabled || Boolean(view.hasAutonomousReleases);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const entries = useAutonomousJournal(departmentId, showJournal, enabled);
+
+  async function toggle(next: boolean) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      onSaved(await api.put<ApprovalPolicyView>(`${path}/autonomous-release`, { enabled: next }));
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="appr-auto">
+      <AutonomousToggleOrState canSet={Boolean(view.canSetAutonomousRelease)} enabled={enabled} busy={busy} onToggle={next => void toggle(next)} />
+      <p className="muted">{t.autonomousReleaseHint}</p>
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(tt, failure)}
+        </p>
+      )}
+      <AutonomousJournalView entries={entries} />
+    </div>
+  );
+}
+
+function ChannelFieldset({
+  departmentId,
+  path,
+  view,
+  rule,
+  modes,
+  onSaved,
+}: {
+  departmentId: string;
+  path: string;
+  view: ApprovalPolicyView;
+  rule: ApprovalRule;
+  modes: Record<ApprovalMode, string>;
+  onSaved(next: ApprovalPolicyView): void;
+}) {
+  const t = useT().dept.approvals;
+  const editable = view.canChangePolicy && rule.channel !== 'commit';
+  return (
+    <fieldset className="appr-rule">
+      <legend>{t.channels[rule.channel]}</legend>
+      {editable ? <RuleForm path={path} rule={rule} modes={modes} onSaved={onSaved} /> : <RuleWords rule={rule} />}
+      {rule.channel === 'commit' && <AutonomousReleaseControl departmentId={departmentId} path={path} view={view} onSaved={onSaved} />}
+    </fieldset>
+  );
+}
+
 /* Who owns a department and how its approvals go on each channel. The rules stay when the owner changes. */
 export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
   const tt = useT();
@@ -159,10 +300,7 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
       <p className="muted">{t.rulesHint}</p>
       <div className="appr-rules">
         {view.rules.map(rule => (
-          <fieldset key={rule.channel} className="appr-rule">
-            <legend>{t.channels[rule.channel]}</legend>
-            {view.canChangePolicy ? <RuleForm path={path} rule={rule} modes={modes} onSaved={setView} /> : <RuleWords rule={rule} />}
-          </fieldset>
+          <ChannelFieldset key={rule.channel} departmentId={departmentId} path={path} view={view} rule={rule} modes={modes} onSaved={setView} />
         ))}
       </div>
     </div>
