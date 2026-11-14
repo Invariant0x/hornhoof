@@ -55,7 +55,7 @@ export function LightNotice() {
   return (
     <div className="light-note" role="status">
       <p>{t.guard.light}</p>
-      <button className="btn" type="button" onClick={leaveLight}>
+      <button className="btn ghost" type="button" onClick={leaveLight}>
         {t.guard.effectsBack}
       </button>
     </div>

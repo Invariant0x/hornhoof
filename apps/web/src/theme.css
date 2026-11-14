@@ -2086,6 +2086,10 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }
 .guard-stop p, .light-note p { margin: 0; }
 .guard-stop .btn, .light-note .btn { flex: none; min-block-size: 44px; }
+/* Turning the effects back on is the second choice: a ghost button framed by a border, since the light mode it stands in
+   takes the ghost's shadow away. */
+.light-note .btn.ghost { border: 1px solid var(--line2); box-shadow: none; }
+.light-note .btn.ghost:hover { border-color: var(--cyan); }
 .guard-stop { max-inline-size: 520px; margin-block: 72px 0; margin-inline: auto; border-inline-start: 3px solid var(--pink-ink); }
 .guard-stop.float { position: fixed; z-index: 30; inset-inline-end: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); margin: 0; }
 .light-note { position: fixed; z-index: 30; inset-inline-start: 16px; inset-block-end: 72px; max-inline-size: min(520px, calc(100% - 32px)); }

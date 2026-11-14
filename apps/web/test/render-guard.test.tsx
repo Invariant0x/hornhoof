@@ -305,6 +305,9 @@ describe('the plates of the guard', () => {
     );
     expect(screen.getByRole('alert')).toHaveTextContent(/^Этот блок остановлен: он мешал работе экрана\.Перезапустить блок$/);
     expect(screen.getByRole('status')).toHaveTextContent(/^Эффекты выключены, чтобы экран не тормозил\.Вернуть эффекты$/);
+    /* Restarting the block is the main choice, turning the effects back on the second. */
+    expect(screen.getByRole('button', { name: 'Перезапустить блок' })).not.toHaveClass('ghost');
+    expect(screen.getByRole('button', { name: 'Вернуть эффекты' })).toHaveClass('btn', 'ghost');
     loop.on = false;
     fireEvent.click(screen.getByRole('button', { name: 'Перезапустить блок' }));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -335,6 +338,11 @@ describe('the plates of the guard', () => {
       expect(decl(`${plate} .btn`, 'min-block-size'), plate).toBe('44px');
     }
     expect(decl('.guard-stop', 'border-inline-start')).toBe('3px solid var(--pink-ink)');
+    /* Turning the effects back on is the second choice (Design, #888): a ghost button, framed by a border rather than the
+       ghost's shadow, which the light mode it stands in takes away. */
+    expect(decl('.light-note .btn.ghost', 'border')).toBe('1px solid var(--line2)');
+    expect(decl('.light-note .btn.ghost', 'box-shadow')).toBe('none');
+    expect(decl('.light-note .btn.ghost:hover', 'border-color')).toBe('var(--cyan)');
     /* Logical sides only, so a right-to-left page mirrors them. */
     const physical = /^(left|right|top|bottom|margin-(left|right|top|bottom)|padding-(left|right|top|bottom)|border-(left|right))$/;
     for (const selector of ['.guard-stop', '.guard-stop.float', '.light-note', '.guard-stop .btn', '.light-note .btn', '.guard-stop p', '.light-note p']) {

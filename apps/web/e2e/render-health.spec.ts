@@ -256,6 +256,9 @@ test.describe('a 120-agent company in the browser', () => {
     const restart = stopped.getByRole('button', { name: 'Перезапустить блок' });
     const effects = light.getByRole('button', { name: 'Вернуть эффекты' });
     for (const button of [restart, effects]) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    /* The second choice keeps its frame while the light mode takes every shadow away. */
+    await expect(effects).toHaveCSS('border-top-width', '1px');
+    await expect(effects).toHaveCSS('border-top-style', 'solid');
     await page.screenshot({ path: info.outputPath('cyberpunk-ru-stopped-block.png') });
     await restart.click();
     await expect(stopped).toHaveCount(0);
