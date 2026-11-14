@@ -1,6 +1,6 @@
 import type { Db } from '../../db/client.js';
 import { withNamedKeys } from './apply.js';
-import { factsOf, type Query, type TableFacts } from './facts.js';
+import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
 import { backupsOf, parkedOf, horizonOf, journalIds, journalRows, keyText, netTables, nonEmptyTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
@@ -18,10 +18,12 @@ const isCheckedTable = (name: string, byJournal: boolean): boolean => {
   return rule.kind !== 'skip' && (byJournal || rule.afterRestore !== 'skip');
 };
 
-async function checkedTables(src: Query, order: string[], byJournal: boolean): Promise<string[]> {
-  const candidates = order.filter(name => isCheckedTable(name, byJournal));
-  const nonEmpty = await nonEmptyTables(src, candidates);
-  return candidates.filter(name => nonEmpty.has(name));
+const hasFiles = (t: TableFacts): boolean => t.columns.some(column => column.type === 'bytea');
+
+async function checkedTables(src: Query, facts: Facts, byJournal: boolean): Promise<string[]> {
+  const candidates = facts.order.filter(name => isCheckedTable(name, byJournal));
+  const nonEmpty = await nonEmptyTables(src, candidates.filter(name => !hasFiles(facts.tables.get(name)!)));
+  return candidates.filter(name => hasFiles(facts.tables.get(name)!) || nonEmpty.has(name));
 }
 
 /* What the leader's records say of rows of one table: the keys a conflict of any merge names, those a merge left to a
@@ -76,7 +78,7 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
   };
 
   const facts = await factsOf(q);
-  for (const name of await checkedTables(src, facts.order, byJournal)) {
+  for (const name of await checkedTables(src, facts, byJournal)) {
     const rule = ruleOf(name);
     const t = facts.tables.get(name) as TableFacts;
     const by = rule.kind === 'log' && rule.match && !(t.key.length === 1 && t.key[0] === rule.match) ? rule.match : undefined;

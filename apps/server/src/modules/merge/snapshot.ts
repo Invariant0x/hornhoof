@@ -111,12 +111,17 @@ async function readTablePages(src: Query, t: TableFacts, nameKeys: NameKeys): Pr
   return pages;
 }
 
+const fileColumns = (t: TableFacts): string[] => t.columns.filter(column => column.type === 'bytea').map(column => column.name);
+
+const hasFiles = (t: TableFacts): boolean => fileColumns(t).length > 0;
+
 async function readComparedTables(src: Query, facts: Facts, nameKeys: NameKeys): Promise<Map<string, Row[][]>> {
   const names = facts.order.filter(isComparedTable);
-  const nonEmpty = await nonEmptyTables(src, names);
+  const nonEmpty = await nonEmptyTables(src, names.filter(name => !hasFiles(facts.tables.get(name)!)));
   const compared = new Map<string, Row[][]>();
   for (const name of names) {
-    compared.set(name, nonEmpty.has(name) ? await readTablePages(src, facts.tables.get(name)!, nameKeys) : []);
+    const t = facts.tables.get(name)!;
+    compared.set(name, hasFiles(t) || nonEmpty.has(name) ? await readTablePages(src, t, nameKeys) : []);
   }
   return compared;
 }
@@ -130,8 +135,6 @@ async function readCompareSide(
   if (!needsCompare) return { compared: null, last: null };
   return { compared: await readComparedTables(src, facts, nameKeys), last: await lastChange(src) };
 }
-
-const fileColumns = (t: TableFacts): string[] => t.columns.filter(column => column.type === 'bytea').map(column => column.name);
 
 const hasFileHash = (row: Row, columns: string[]): boolean =>
   columns.some(name => typeof row[name] === 'string' && (row[name] as string).startsWith(FILE_HASH));
