@@ -59,7 +59,10 @@ describe('where change checks run and what proves them', () => {
     for (const id of ['hh-run-checks', 'dev-task-flow', 'dev-gates', 'hh-task-flow']) {
       expect(body(id), id).toMatch(/assignment can widen what is checked[^.]*never move[^.]*change checks to "?run_tests"?/i);
     }
-    expect(body('hh-run-checks')).toMatch(/"run_tests"[^.]*only when your own workspace cannot run it[^.]*say what is missing/i);
+    for (const id of ['hh-run-checks', 'dev-implement']) {
+      expect(body(id), id).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it/i);
+      expect(body(id), id).toMatch(/when your workspace cannot run a check[\s\S]*named local tests of the touched area[\s\S]*say what is missing[\s\S]*release owner's `?"?run_tests"?`? run once per release candidate on the combined release candidate before main/i);
+    }
   });
 
   it('tells whoever leads not to order change checks through run_tests', () => {
@@ -133,7 +136,7 @@ describe('turnkey work', () => {
     expect(body('orch-plan-turn')).toMatch(/mode is fixed once the turn starts[^.]*edit_turn[^.]*planned/);
   });
 
-  it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
-    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*report done true/);
+  it('tells the member of a turnkey team to carry its task end to end alone, skip per-task run_tests except on a standalone release, and close it with report', () => {
+    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*no per-task run_tests \(unless this task itself assembles the final release to main\)[^.]*report done true/);
   });
 });

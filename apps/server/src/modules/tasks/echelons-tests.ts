@@ -15,9 +15,9 @@ import { reusableUnits } from '../testruns/reuse-evidence.js';
 import { unitKey } from '../testruns/plan-environment.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
-export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
-export type Verification = z.infer<typeof Verification>;
-const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })).min(1) });
+export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).max(100).default([]) }).strict();
+export type Verification = z.input<typeof Verification>;
+const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })) });
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -157,7 +157,7 @@ async function failureKind(db: Ctx['db'] | Tx, task: Task, route: Route, ids: st
   return failures.includes('content') ? 'content' : 'infrastructure';
 }
 
-async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification): Promise<Moved> {
+async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: z.output<typeof Verification>): Promise<Moved> {
   const kind = await failureKind(ctx.db, task, route, input.runIds);
   const headId = kind === 'content' ? await departmentHead(ctx.db, task) : null;
   const wakes = headId ? [{ agentId: headId, taskId: task.id, why: 'blocked' as const, text: summary }] : [];
@@ -173,6 +173,14 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   return { task: row, wakes };
 }
 
+async function verifiedRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision = route.revision) {
+  if (!ids.length) {
+    if (!task.turnId) throw refuse(409, 'task_invalid', 'Direct main integration needs completed candidate run_tests evidence.');
+    return [];
+  }
+  return candidateRunEvidence(db, task, route, ids, testedRevision);
+}
+
 export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
   const input = Verification.safeParse(value);
@@ -180,7 +188,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   await requireTestsIdentity(ctx.db, task, route);
   if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
   const headId = await departmentHead(ctx.db, task);
-  const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
+  const evidence = await verifiedRunEvidence(ctx.db, task, route, input.data.runIds);
   const candidate = await currentCandidate(ctx.db, task, route);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
@@ -188,7 +196,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
     kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } }, returned: true,
   }, async tx => {
     await heldCheckingIdentity(tx, task, route, candidate);
-    await candidateRunEvidence(tx, task, route, input.data.runIds);
+    await verifiedRunEvidence(tx, task, route, input.data.runIds);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
@@ -214,5 +222,5 @@ export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, 
   const proof = Verified.safeParse(event?.data.verifiedCandidate);
   const tester = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId;
   if (!proof.success || !matchesTestsReport(proof.data, event?.agentId, tester, candidate, verifiedRevision)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
-  return candidateRunEvidence(db, task, route, proof.data.evidence.map(run => run.runId), proof.data.testedRevision);
+  return verifiedRunEvidence(db, task, route, proof.data.evidence.map(run => run.runId), proof.data.testedRevision);
 }

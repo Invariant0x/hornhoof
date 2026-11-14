@@ -603,7 +603,8 @@ describe('renderInstructions', () => {
       expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
       expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
-      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact, use run_tests for the complete affected package[\s\S]*exact candidate/i);
+      expect(impl, roleKey).toMatch(/never call `?run_tests`? on (?:an )?individual or (?:parallel )?turnkey task branch/i);
+      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*complete affected package[\s\S]*combined release candidate/i);
       expect(impl, roleKey).toMatch(/install from the lockfile and run builds, types and quality checks locally/i);
       expect(policy, roleKey).toContain('NOT_RUN');
       expect(policy, roleKey).toMatch(/fresh and upgraded data[\s\S]*both up\/down when supported[\s\S]*report unsupported down explicitly/i);
@@ -685,6 +686,38 @@ describe('work a department did before', () => {
       expect(whole, role.id).toMatch(/departmentBranches[^.]*branches of [^.]*accepted and handed-in tasks not in main/);
       expect(whole, role.id).toMatch(/starts from that branch/);
       expect(whole, role.id).toMatch(/machine that is off stops no work kept in the repository[^.]*plan of your department is online[^.]*never tell a person the work stands because a machine is off/);
+    }
+  });
+});
+
+describe('single pre-release full suite and DEV-HEAD inline byte budget', () => {
+  const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const renderRole = (roleId: string) => {
+    const role = shipped.roles.get(roleId)!;
+    return renderInstructions(
+      shipped,
+      agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      PLACE,
+    );
+  };
+
+  it('keeps DEV-HEAD and every shipped role within a 24000-byte inline instruction packet without raising MAX_INSTRUCTIONS', () => {
+    expect(MAX_INSTRUCTIONS).toBe(200_000);
+    const devHead = renderRole('DEV-HEAD');
+    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(24_000);
+    for (const role of shipped.roles.values()) {
+      const packet = renderRole(role.id);
+      expect(Buffer.byteLength(packet.text), role.id).toBeLessThanOrEqual(24_000);
+    }
+  });
+
+  it('forbids per-task and parallel-turnkey run_tests and requires one full run per release candidate on the combined release branch before main', () => {
+    for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
+      const whole = renderRole(roleId).whole;
+      expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
+      expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
+      expect(whole, roleId).toMatch(/never (?:assign|order|call|run)[^.!?\n]*`?"?run_tests"?`?[^.!?\n]*task branch/i);
+      expect(whole, roleId).toMatch(/once per release candidate[\s\S]*combined release (?:branch|candidate)[^.!?\n]*before `?main`?/i);
     }
   });
 });
