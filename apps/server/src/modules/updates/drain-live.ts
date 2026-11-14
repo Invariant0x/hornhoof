@@ -84,7 +84,7 @@ function isConversationLive(
 ): boolean {
   if (turnWaitsOutside(ctx, job, externalUntil, now)) return true;
   const program = agentProgramState(ctx, job).program;
-  if (program?.state === 'asking') return (job.startedAt ?? job.createdAt).getTime() + job.timeoutMs > now;
+  if (program?.state === 'asking') return jobTakenAt(job) + job.timeoutMs > now;
   if (programStuck(program, now)) return false;
   const limit = program?.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
   return now - lastTurnSign(ctx, job, program, activityAt, now) < limit;
@@ -123,7 +123,7 @@ async function nodeSignAt(ctx: Ctx, node: NodeIdentity, runningJobs: RunningJob[
 const partLive = (now: number) => (p: RunningPart): boolean => (p.startedAt ?? p.queuedAt).getTime() + p.timeoutMs + TEST_PART_LATE_MS > now;
 
 function jobLive(ctx: Ctx, job: RunningJob, externalUntil: string | null, activityAt: number | undefined, now: number): boolean {
-  if (job.kind !== 'conversation') return (job.startedAt ?? job.createdAt).getTime() + job.timeoutMs > now;
+  if (job.kind !== 'conversation') return jobTakenAt(job) + job.timeoutMs > now;
   return isConversationLive(ctx, job, externalUntil, activityAt, now);
 }
 

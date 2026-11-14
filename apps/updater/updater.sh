@@ -758,7 +758,7 @@ updater_name() {
 }
 
 # behind_of <server> <image>: the plans of that server's nodes on this computer, by their labels, that have stopped or
-# whose image Docker does not keep as <image>.
+# whose image Docker does not keep as <image>; a stopped container whose volume says Hornhoof removed its plan goes here.
 behind_of() {
   local name plan id
   { docker ps -a --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
@@ -767,6 +767,11 @@ behind_of() {
     [ -n "$id" ] || continue
     if [ "$(docker inspect --format '{{.State.Running}}' "$name" 2> /dev/null || true)" != false ]; then
       case " $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true) " in *" $2 "*) continue ;; esac
+    elif docker cp "$name:/data/removed" - > /dev/null 2>&1; then
+      printf 'Removing %s, which was removed in Hornhoof.\n' "$name" >&2
+      docker rm -f "$name" > /dev/null 2>&1 || true
+      docker volume rm "$name" > /dev/null 2>&1 || true
+      continue
     fi
     printf '%s ' "$plan"
   done
