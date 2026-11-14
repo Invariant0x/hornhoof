@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+case " $* " in
+  *' addr '*) [ -z "${STUB_IP_ADDR:-}" ] || printf '%s\n' "$STUB_IP_ADDR" ;;
+  *' route '*) [ -z "${STUB_IP_ROUTE:-}" ] || printf '%s\n' "$STUB_IP_ROUTE" ;;
+esac
+exit 0

@@ -354,6 +354,23 @@ case "$1 $2" in
             [ "${STUB_VOLUME_RM:-ok}" != fail ] || { echo 'Error response from daemon: volume is in use' >&2; exit 1; }
             touch "$STUB_STATE/volume-gone" ;;
         esac ;;
+      # Recorded Docker networks on the host, as "id|name|project|subnet|internal|bridge" in STUB_DOCKER_NETWORKS.
+      network)
+        case "${2:-}" in
+          ls)
+            for item in ${STUB_DOCKER_NETWORKS:-}; do printf '%s\n' "${item%%|*}"; done ;;
+          inspect)
+            shift 2
+            [ "${1:-}" = --format ] && shift 2
+            for want in "$@"; do
+              for item in ${STUB_DOCKER_NETWORKS:-}; do
+                IFS='|' read -r id name proj sub internal bridge <<< "$item"
+                [ "$id" = "$want" ] || [ "$name" = "$want" ] || continue
+                gw=''; [ -z "$sub" ] || gw=$(awk -F. '{ printf "%d.%d.%d.%d", $1, $2, $3, ($4 == 0 ? 1 : $4) }' <<< "${sub%%/*}")
+                printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "${sub:+${sub},${gw};}"
+              done
+            done ;;
+        esac ;;
       # The container goes, and a command that runs in it ends.
       rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
       cp)

@@ -721,7 +721,7 @@ remove_unnamed() {
 # run_installer <tag> <app> <node> <updater>: the installer of that build. It takes as long as it takes: no clock ends it.
 run_installer() {
   local tag=$1 dir="$WORK/$1"
-  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
+  HORNHOOF_CONTROL_DIR="$CONTROL" HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
     HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" "$(install_mode)" >> "$WORK/install.log" 2>&1
 }
 
@@ -933,9 +933,132 @@ install_new() {
   fi
 }
 
+manual_subnet_heal_command() {
+  local project=$1 base suffix
+  if joined; then
+    printf 'the Hornhoof install command (or HORNHOOF_SERVER_DIR=%s install.sh worker)' "$SERVER_DIR"
+    return 0
+  fi
+  case "$project" in
+    hornhoof-?*)
+      suffix=${project#hornhoof-}
+      base=$(basename "$SERVER_DIR")
+      if [ "$base" = "hornhoof-$suffix" ]; then
+        printf 'install.sh server --name %s in %s' "$suffix" "$SERVER_DIR"
+        return 0
+      fi
+      ;;
+  esac
+  printf 'install.sh server in %s' "$SERVER_DIR"
+}
+
+warn_subnet_overlap() {
+  local relayed addrs ids nets project hits sub host cmd
+  if [ -n "$WORK" ] && [ -f "$WORK/install.log" ]; then
+    relayed=$(grep "^Docker network .* overlaps this computer's network" "$WORK/install.log" 2> /dev/null || true)
+    if [ -n "$relayed" ]; then
+      while IFS= read -r sub; do
+        [ -n "$sub" ] && say "$sub"
+      done <<< "$relayed"
+      return 0
+    fi
+  fi
+  [ -n "$SERVER_DIR" ] || return 0
+  addrs=$(
+    {
+      env_value HORNHOOF_ADDRESSES | tr ',' '\n'
+      if [ -f "$CONTROL/addresses.json" ]; then jq -r '.addresses[]? // empty' "$CONTROL/addresses.json" 2> /dev/null || true; fi
+    } | awk 'NF'
+  )
+  [ -n "$addrs" ] || return 0
+  ids=$(docker network ls -q 2> /dev/null || true)
+  [ -n "$ids" ] || return 0
+  project=$(env_value COMPOSE_PROJECT_NAME)
+  [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  [ -n "$project" ] || return 0
+  # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
+  nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+  [ -n "$nets" ] || return 0
+  hits=$(
+    {
+      printf '%s\n' "$addrs"
+      printf -- '---\n'
+      printf '%s\n' "$nets"
+    } | awk -v project="$project" '
+      function parse_range(tok,    slash, ip_part, p, n, oct, i, v, ip, size) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
+        if (tok == "" || tok == "default") return 0
+        slash = index(tok, "/")
+        if (slash > 0) {
+          ip_part = substr(tok, 1, slash - 1)
+          p = substr(tok, slash + 1)
+          if (p !~ /^[0-9]+$/) return 0
+          p += 0
+        } else {
+          ip_part = tok
+          p = -1
+        }
+        n = split(ip_part, oct, ".")
+        if (n < 1 || n > 4) return 0
+        for (i = 1; i <= n; i++) {
+          if (oct[i] !~ /^[0-9]+$/) return 0
+          v = oct[i] + 0
+          if (v < 0 || v > 255) return 0
+          oct[i] = v
+        }
+        for (i = n + 1; i <= 4; i++) oct[i] = 0
+        if (oct[1] == 127 || oct[1] == 0 || oct[1] >= 224) return 0
+        if (p < 0) p = n * 8
+        if (p < 4 || p > 32) return 0
+        ip = ((oct[1] * 256 + oct[2]) * 256 + oct[3]) * 256 + oct[4]
+        size = 2 ^ (32 - p)
+        R_START = int(ip / size) * size
+        R_END = R_START + size - 1
+        return 1
+      }
+      $0 == "---" { net_mode = 1; next }
+      !net_mode {
+        for (k = 1; k <= NF; k++) {
+          if (parse_range($k)) {
+            h_tok[++nh] = $k
+            h_start[nh] = R_START
+            h_end[nh] = R_END
+          }
+        }
+        next
+      }
+      net_mode && NF {
+        split($0, f, "|")
+        if (f[3] != project && f[2] != (project "_default") && f[2] != (project "_internal")) next
+        n = split(f[6], items, ";")
+        for (i = 1; i <= n; i++) {
+          if (items[i] == "") continue
+          split(items[i], sg, ",")
+          cidr = sg[1]
+          if (cidr == "" || seen[cidr]++ || !parse_range(cidr)) continue
+          s = R_START; e = R_END
+          for (j = 1; j <= nh; j++) {
+            if (s <= h_end[j] && h_start[j] <= e) {
+              print cidr " " h_tok[j]
+              break
+            }
+          }
+        }
+      }
+    '
+  ) || true
+  [ -n "$hits" ] || return 0
+  cmd=$(manual_subnet_heal_command "$project")
+  while IFS=' ' read -r sub host; do
+    [ -n "$sub" ] || continue
+    say "Docker network $sub in $SERVER_DIR overlaps this computer's network ($host), and an automatic update cannot recreate the network it runs on. Run $cmd on this computer once to move it to a free subnet."
+  done <<< "$hits"
+}
+
 check_new() {
   step health "Waiting for the new server to answer."
   if healthy "$TARGET"; then
+    warn_subnet_overlap
     stop_with "done" "Hornhoof runs $VERSION now." finished
     swap_updater "$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")"
     return 0
@@ -2444,14 +2567,52 @@ learn_host() {
 }
 
 write_addresses() {
-  local now out list
+  local now out ids nets='' list
   learn_host
   [ "$HOST_OS" = linux ] || return 0
   now=$(date +%s)
   [ "$now" -ge "$ADDRESSES_AT" ] || return 0
   ADDRESSES_AT=$((now + ADDRESSES_EVERY))
   out=$(docker run --rm --network host --entrypoint ip "$COMPUTER_IMAGE" -4 -o addr show scope global 2> /dev/null) || return 0
-  list=$(printf '%s\n' "$out" | awk '$2 !~ /^(docker|br-|veth|virbr)/ && $3 == "inet" { split($4, a, "/"); print a[1] }' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null) || return 0
+  if [ -n "$out" ]; then
+    ids=$(docker network ls -q 2> /dev/null || true)
+    if [ -n "$ids" ]; then
+      # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
+      nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+    fi
+  fi
+  list=$(
+    {
+      printf '%s\n' "$nets"
+      printf -- '---\n'
+      printf '%s\n' "$out"
+    } | awk '
+      $0 == "---" { addr_mode = 1; next }
+      !addr_mode && NF {
+        split($0, f, "|")
+        if (f[1] != "") skip_if["br-" substr(f[1], 1, 12)] = 1
+        if (f[4] != "") skip_if[f[4]] = 1
+        n = split(f[6], items, ";")
+        for (i = 1; i <= n; i++) {
+          if (items[i] == "") continue
+          split(items[i], sg, ",")
+          if (sg[2] != "") skip_ip[sg[2]] = 1
+          split(sg[1], cp, "/")
+          if (split(cp[1], oct, ".") == 4 && oct[4] == "0") {
+            skip_ip[oct[1] "." oct[2] "." oct[3] ".1"] = 1
+          }
+        }
+        next
+      }
+      addr_mode && $3 == "inet" {
+        iface = $2
+        sub(/:.*/, "", iface)
+        if (iface ~ /^(docker|br-|veth|virbr|cni|podman|flannel|calico|nerdctl)/ || skip_if[iface] || skip_if[$2]) next
+        split($4, a, "/")
+        if (a[1] != "" && !skip_ip[a[1]]) print a[1]
+      }
+    ' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null
+  ) || return 0
   jq -cn --argjson at "$now" --argjson addresses "$list" '{at: $at, addresses: $addresses}' > "$CONTROL/addresses.json.new" 2> /dev/null || return 0
   mv "$CONTROL/addresses.json.new" "$CONTROL/addresses.json"
 }

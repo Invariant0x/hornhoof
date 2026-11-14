@@ -772,7 +772,7 @@ core_env() {
 }
 
 # The folder of the company's core on this computer: the one that names the company already, else the one the server
-# named, and with that name taken by another company's the next of -2 to -9.
+# named, and with that name or compose project taken by another company's the next of -2 to -9.
 core_dir() {
   local parent env dir n=1
   parent=$(dirname "$BASE_DIR")
@@ -782,7 +782,7 @@ core_dir() {
     return 0
   fi
   dir="$parent/$CORE_FOLDER"
-  while [ -e "$dir" ]; do
+  while [ -e "$dir" ] || [ -n "$(project_elsewhere "$(basename "$dir")" "$dir")" ]; do
     n=$((n + 1))
     [ "$n" -le 9 ] || fail "There are 9 Hornhoof folders here already. Remove one you do not use."
     dir="$parent/$CORE_FOLDER-$n"
@@ -796,12 +796,12 @@ core_dir() {
 worker_core() {
   local env_file waited=0 web servers=''
   WORKER=1
-  SERVER_DIR=$(core_dir) || exit 1
-  env_file="$SERVER_DIR/.env"
   find_compose
   [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
   [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
   [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
+  SERVER_DIR=$(core_dir) || exit 1
+  env_file="$SERVER_DIR/.env"
   if [ -f "$env_file" ]; then
     # A run that stopped before the ports were chosen left the line empty: that folder has no ports to keep yet.
     if ! grep -q '^HORNHOOF_PORT=$' "$env_file"; then ENV_BEFORE=1; fi
@@ -843,6 +843,7 @@ worker_core() {
   WANT_WEB=$CORE_PORT
   reserve_ports
   say "Starting the company's core on this machine, in $SERVER_DIR."
+  if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down || true; fi
   start_keeper_and_front "${COMPOSE[@]}"
   compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
   web=$(port_of "$env_file")
@@ -1110,7 +1111,7 @@ drop_nodes_updater() {
 # The company's core on this machine goes: its containers and volumes, with the machine's key in them, its folder, and
 # its line in the list of ports. A machine that joins again later is a new machine to the company.
 remove_core() {
-  local core=$1 registry
+  local core=$1 registry subnets
   say "Removing the company's core in $core."
   find_compose
   (cd "$core" && "${COMPOSE[@]}" down -v) > /dev/null 2>&1 || say "Could not stop the core in $core. Run docker compose down -v there, then remove the folder."
@@ -1120,6 +1121,11 @@ remove_core() {
     take_port_lock
     registry=$(read_registry) || registry=''
     other_lines "$registry" | write_registry || say "Could not take $core off the list of Hornhoof's ports on this computer."
+    if subnets=$(read_subnets); then
+      other_lines "$subnets" | write_subnets || say "Could not take $core off the list of Hornhoof's subnets on this computer."
+    else
+      say "Could not read the list of Hornhoof's subnets on this computer, so $core stayed on it."
+    fi
     drop_port_lock "$PORT_LOCK_ID"
   fi
   rm -rf "$core"
@@ -1243,19 +1249,52 @@ valid_name() {
   [ "${#1}" -le 32 ]
 }
 
-# The Hornhoof servers anyone on this computer runs, running or not, as "project|folder|container" lines. Docker is one
-# for every person on a computer, so these are other people's companies too, whatever folder they run from.
+# The Hornhoof servers and cores anyone on this computer runs, running or not, as "project|folder|container" lines.
+# Docker is one for every person on a computer, so these are other people's companies too, whatever folder they run from.
 hornhoof_servers() {
-  "${DOCKER[@]}" ps -a --filter label=com.docker.compose.service=app --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Image}}|{{.ID}}' 2> /dev/null |
-    while IFS='|' read -r project folder image id; do
-      case "$project|$image" in *hornhoof*) printf '%s|%s|%s\n' "$project" "$folder" "$id" ;; esac
-    done
+  {
+    "${DOCKER[@]}" ps -a --filter label=com.docker.compose.service=app --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Image}}|{{.ID}}' 2> /dev/null || true
+    "${DOCKER[@]}" ps -a --filter label=com.docker.compose.service=keeper --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Image}}|{{.ID}}' 2> /dev/null || true
+  } | awk -F'|' 'tolower($1 "|" $3) ~ /hornhoof/ && $1 != "" && !seen[$1 "|" $2]++ { print $1 "|" $2 "|" $4 }'
 }
 
 # project_elsewhere <project> <folder>: the folder another company runs that compose project from; nothing when none does.
 project_elsewhere() {
-  "${DOCKER[@]}" ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2> /dev/null |
-    grep -v -x -F -e "$2" | head -1 || true
+  local found env proj line folder
+  found=$("${DOCKER[@]}" ps -a --filter "label=com.docker.compose.project=$1" --format '{{.Label "com.docker.compose.project.working_dir"}}' 2> /dev/null |
+    awk 'NF' | grep -v -x -F -e "$2" | head -1 || true)
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env "$(dirname "$BASE_DIR")"/hornhoof-*/.env; do
+    [ -r "$env" ] || continue
+    folder=$(dirname "$env")
+    [ "$folder" != "$2" ] || continue
+    proj=$(value_in "$env" COMPOSE_PROJECT_NAME)
+    [ -n "$proj" ] || proj=$(basename "$folder" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+    if [ "$proj" = "$1" ]; then
+      printf '%s\n' "$folder"
+      return 0
+    fi
+  done
+  if [ ! -f "$2/.env" ] || [ "$(value_in "$2/.env" COMPOSE_PROJECT_NAME)" != "$1" ]; then
+    found=$("${DOCKER[@]}" volume ls -q --filter "label=com.docker.compose.project=$1" 2> /dev/null | head -1 || true)
+    if [ -n "$found" ]; then
+      printf 'another folder on this computer\n'
+      return 0
+    fi
+  fi
+  if [ -n "$APP_REF" ] && [ -z "$FROM_UPDATER" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      folder=$(line_folder "$line")
+      if [ "$folder" != "$2" ] && [ "$(basename "$folder" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')" = "$1" ]; then
+        printf '%s\n' "$folder"
+        return 0
+      fi
+    done <<< "$(read_registry 2> /dev/null || true)"
+  fi
 }
 
 # The compose project of the server in SERVER_DIR: its name's, else the one its .env keeps, else its folder's.
@@ -1470,10 +1509,19 @@ ENV_BEFORE=''
 # This run chose the web or the peer port by the free search, so it may move it when something outside Docker holds it.
 NEW_WEB=''
 NEW_PEER=''
-# Ports Docker refused during this run.
+# Ports and subnets Docker refused during this run.
 REFUSED_PORTS=''
+REFUSED_SUBNETS=''
 # The web port a machine that joined asks for first: the one the company's server has.
 WANT_WEB=''
+# Subnets this project's existing Docker networks hold right now, and whether this run chose new ones over them.
+LIVE_DEFAULT_SUBNET=''
+LIVE_INTERNAL_SUBNET=''
+OWN_BRIDGES=''
+OTHER_DOCKER_CIDRS=''
+SUBNET_MOVED=''
+CHOSEN_DEFAULT_SUBNET=''
+CHOSEN_INTERNAL_SUBNET=''
 
 # Whoever made a lock more than 2 minutes ago is gone. It goes by the id just read, so a lock made meanwhile stays.
 remove_stale_port_lock() {
@@ -1501,6 +1549,10 @@ drop_port_lock() { "${DOCKER[@]}" rm "$1" > /dev/null 2>&1 || true; }
 read_registry() { "${DOCKER[@]}" run --rm --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat /ports/registry 2> /dev/null || true'; }
 
 write_registry() { "${DOCKER[@]}" run --rm -i --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat > /ports/registry.new && mv /ports/registry.new /ports/registry'; }
+
+read_subnets() { "${DOCKER[@]}" run --rm --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat /ports/subnets 2> /dev/null || true'; }
+
+write_subnets() { "${DOCKER[@]}" run --rm -i --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat > /ports/subnets.new && mv /ports/subnets.new /ports/subnets'; }
 
 # The host ports every container publishes, running or stopped. A container gone since the list leaves the others.
 bound_ports() {
@@ -1538,10 +1590,407 @@ held_ports() {
   local line env
   other_lines "$1" | while IFS= read -r line; do printf '%s ' "$(line_ports "$line")"; done
   bound_ports
-  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
+  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env "$(dirname "$BASE_DIR")"/hornhoof-*/.env; do
     if [ -r "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then printf '%s %s ' "$(port_of "$env")" "$(value_in "$env" HORNHOOF_PEER_PORT)"; fi
   done
   printf '%s ' "$REFUSED_PORTS"
+}
+
+# Inspects existing Docker networks on this computer: separates this project's own live networks and bridge names from
+# every other Docker network's IPv4 subnets.
+inspect_docker_networks() {
+  local project=$1 ids lines id name proj bridge internal cfg entries item cidr
+  LIVE_DEFAULT_SUBNET=''
+  LIVE_INTERNAL_SUBNET=''
+  OWN_BRIDGES=''
+  OTHER_DOCKER_CIDRS=''
+  ids=$("${DOCKER[@]}" network ls -q 2> /dev/null) || true
+  [ -n "$ids" ] || return 0
+  # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
+  lines=$("${DOCKER[@]}" network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+  while IFS='|' read -r id name proj bridge internal cfg; do
+    [ -n "$id$name" ] || continue
+    if [ -n "$project" ] && { [ "$proj" = "$project" ] || [ "$name" = "${project}_default" ] || [ "$name" = "${project}_internal" ]; }; then
+      [ -z "$id" ] || OWN_BRIDGES="$OWN_BRIDGES br-${id:0:12}"
+      [ -z "$bridge" ] || OWN_BRIDGES="$OWN_BRIDGES $bridge"
+      entries=$(printf '%s' "$cfg" | tr ';' '\n')
+      while IFS= read -r item; do
+        cidr=${item%%,*}
+        case "$cidr" in *.*/*) ;; *) continue ;; esac
+        if [ "$name" = "${project}_internal" ] || [ "$internal" = true ]; then
+          [ -n "$LIVE_INTERNAL_SUBNET" ] || LIVE_INTERNAL_SUBNET=$cidr
+        else
+          [ -n "$LIVE_DEFAULT_SUBNET" ] || LIVE_DEFAULT_SUBNET=$cidr
+        fi
+      done <<< "$entries"
+    else
+      entries=$(printf '%s' "$cfg" | tr ';' '\n')
+      while IFS= read -r item; do
+        cidr=${item%%,*}
+        case "$cidr" in *.*/*) OTHER_DOCKER_CIDRS="$OTHER_DOCKER_CIDRS $cidr" ;; esac
+      done <<< "$entries"
+    fi
+  done <<< "$lines"
+}
+
+parse_ifconfig_cidrs() {
+  awk -v own_bridges="$OWN_BRIDGES" '
+    BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
+    /^[^[:space:]:]+:/ {
+      iface = $1
+      sub(/:.*/, "", iface)
+      next
+    }
+    $1 == "inet" {
+      if (iface == "lo" || iface == "lo0" || iface ~ /^veth/ || (iface in skip)) next
+      ip = $2
+      if (ip ~ /^127\./) next
+      mask = ""
+      for (i = 3; i < NF; i++) if ($i == "netmask") { mask = $(i + 1); break }
+      if (mask ~ /^0x[0-9a-fA-F]+$/) {
+        hex = tolower(substr(mask, 3))
+        bits = 0
+        for (i = 1; i <= length(hex); i++) {
+          c = substr(hex, i, 1)
+          if (c == "f") bits += 4
+          else if (c == "e") bits += 3
+          else if (c == "c") bits += 2
+          else if (c == "8") bits += 1
+        }
+        if (bits >= 4 && bits <= 32) print ip "/" bits
+      } else if (split(mask, m, ".") == 4) {
+        bits = 0
+        for (i = 1; i <= 4; i++) {
+          v = m[i] + 0
+          if (v == 255) bits += 8
+          else if (v == 254) bits += 7
+          else if (v == 252) bits += 6
+          else if (v == 248) bits += 5
+          else if (v == 240) bits += 4
+          else if (v == 224) bits += 3
+          else if (v == 192) bits += 2
+          else if (v == 128) bits += 1
+        }
+        if (bits >= 4 && bits <= 32) print ip "/" bits
+      }
+    }
+  '
+}
+
+raw_host_network_cidrs() {
+  local iface ip
+  if [ "$OS" = linux ]; then
+    if command -v ip > /dev/null 2>&1; then
+      ip -4 -o addr show 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
+        $3 == "inet" {
+          iface = $2
+          sub(/:.*/, "", iface)
+          if (iface == "lo" || iface ~ /^veth/ || (iface in skip) || ($2 in skip)) next
+          print $4
+        }
+      ' || true
+      ip -4 route show 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
+        $1 != "default" && $1 != "" {
+          dev = ""
+          for (i = 2; i < NF; i++) if ($i == "dev") { dev = $(i + 1); break }
+          if (dev == "lo" || dev ~ /^veth/ || (dev in skip)) next
+          print $1
+        }
+      ' || true
+    elif command -v ifconfig > /dev/null 2>&1; then
+      ifconfig 2> /dev/null | parse_ifconfig_cidrs || true
+    fi
+  elif [ "$OS" = darwin ]; then
+    if command -v ifconfig > /dev/null 2>&1; then
+      ifconfig 2> /dev/null | parse_ifconfig_cidrs || true
+    fi
+    if command -v netstat > /dev/null 2>&1; then
+      netstat -rn -f inet 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
+        NF >= 2 && $1 != "Destination" && $1 != "Routing" && $1 != "Internet:" && $1 != "default" {
+          netif = $NF
+          if ($4 != "" && $4 !~ /^[0-9]+$/) netif = $4
+          if (netif == "lo0" || $NF == "lo0" || (netif in skip) || ($NF in skip)) next
+          print $1
+        }
+      ' || true
+    fi
+    if command -v ipconfig > /dev/null 2>&1; then
+      for iface in en0 en1; do
+        ip=$(ipconfig getifaddr "$iface" 2> /dev/null || true)
+        [ -z "$ip" ] || printf '%s/24\n' "$ip"
+      done
+    fi
+  fi
+}
+
+# The computer's own IPv4 addresses and routes, read only outside the updater's container.
+host_network_cidrs() {
+  [ -z "$FROM_UPDATER" ] || return 0
+  raw_host_network_cidrs
+}
+
+reserved_other_cidrs() {
+  local line env
+  other_lines "$1" | while IFS= read -r line; do printf '%s\n' "$(line_ports "$line")"; done
+  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env "$(dirname "$BASE_DIR")"/hornhoof-*/.env; do
+    if [ -r "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then
+      printf '%s %s\n' "$(value_in "$env" HORNHOOF_SUBNET)" "$(value_in "$env" HORNHOOF_INTERNAL_SUBNET)"
+    fi
+  done
+  printf '%s\n' "$REFUSED_SUBNETS"
+}
+
+# select_subnet_pair <kept default> <kept internal> [<force keep>]: reads blocked CIDRs and routes on stdin and prints two
+# non-overlapping /24 subnets, keeping the given ones when they remain valid and outside every blocked range (or unconditionally
+# when force keep is set for an automatic update running on the live network).
+select_subnet_pair() {
+  awk -v kept_def="$1" -v kept_int="$2" -v force_keep="${3:-}" '
+    function parse_range(tok,    slash, ip_part, p, n, oct, i, v, ip, size) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
+      if (tok == "" || tok == "default") return 0
+      slash = index(tok, "/")
+      if (slash > 0) {
+        ip_part = substr(tok, 1, slash - 1)
+        p = substr(tok, slash + 1)
+        if (p !~ /^[0-9]+$/) return 0
+        p += 0
+      } else {
+        ip_part = tok
+        p = -1
+      }
+      n = split(ip_part, oct, ".")
+      if (n < 1 || n > 4) return 0
+      for (i = 1; i <= n; i++) {
+        if (oct[i] !~ /^[0-9]+$/) return 0
+        v = oct[i] + 0
+        if (v < 0 || v > 255) return 0
+        oct[i] = v
+      }
+      for (i = n + 1; i <= 4; i++) oct[i] = 0
+      if (oct[1] == 127 || oct[1] == 0 || oct[1] >= 224) return 0
+      if (p < 0) p = n * 8
+      if (p < 4 || p > 32) return 0
+      ip = ((oct[1] * 256 + oct[2]) * 256 + oct[3]) * 256 + oct[4]
+      size = 2 ^ (32 - p)
+      R_START = int(ip / size) * size
+      R_END = R_START + size - 1
+      return 1
+    }
+    function overlaps_blocked(s, e,    i) {
+      for (i = 1; i <= nb; i++) {
+        if (s <= b_end[i] && b_start[i] <= e) return 1
+      }
+      return 0
+    }
+    function valid_cidr(cidr,    slash, tmp_oct) {
+      slash = index(cidr, "/")
+      if (slash <= 0) return 0
+      if (split(substr(cidr, 1, slash - 1), tmp_oct, ".") != 4) return 0
+      return parse_range(cidr)
+    }
+    function try_pick(cidr,    s, e) {
+      if (!parse_range(cidr)) return 0
+      s = R_START; e = R_END
+      if (overlaps_blocked(s, e)) return 0
+      if (picked_def == "") {
+        picked_def = cidr
+        b_start[++nb] = s; b_end[nb] = e
+        return 1
+      }
+      if (picked_int == "") {
+        picked_int = cidr
+        b_start[++nb] = s; b_end[nb] = e
+        return 1
+      }
+      return 1
+    }
+    {
+      for (f = 1; f <= NF; f++) {
+        if (parse_range($f)) {
+          b_start[++nb] = R_START
+          b_end[nb] = R_END
+        }
+      }
+    }
+    END {
+      picked_def = ""
+      picked_int = ""
+      if (valid_cidr(kept_def) && (force_keep != "" || !overlaps_blocked(R_START, R_END))) {
+        picked_def = kept_def
+        b_start[++nb] = R_START; b_end[nb] = R_END
+      }
+      if (valid_cidr(kept_int) && (force_keep != "" || !overlaps_blocked(R_START, R_END))) {
+        picked_int = kept_int
+        b_start[++nb] = R_START; b_end[nb] = R_END
+      }
+      for (b = 200; b <= 254 && (picked_def == "" || picked_int == ""); b++) {
+        for (c = 0; c <= 255 && (picked_def == "" || picked_int == ""); c++) {
+          try_pick("10." b "." c ".0/24")
+        }
+      }
+      for (b = 29; b <= 31 && (picked_def == "" || picked_int == ""); b++) {
+        for (c = 0; c <= 255 && (picked_def == "" || picked_int == ""); c++) {
+          try_pick("172." b "." c ".0/24")
+        }
+      }
+      for (c = 200; c <= 254 && (picked_def == "" || picked_int == ""); c++) {
+        try_pick("192.168." c ".0/24")
+      }
+      if (picked_def != "" && picked_int != "") {
+        print picked_def " " picked_int
+        exit 0
+      }
+      exit 1
+    }
+  '
+}
+
+manual_subnet_heal_command() {
+  local project=$1 suffix
+  if [ -n "${WORKER:-}" ]; then
+    printf 'the Hornhoof install command (or HORNHOOF_SERVER_DIR=%s install.sh worker)' "$SERVER_DIR"
+    return 0
+  fi
+  case "$project" in
+    hornhoof-?*)
+      suffix=${project#hornhoof-}
+      if [ "$SERVER_DIR" = "$BASE_DIR-$suffix" ]; then
+        printf 'install.sh server --name %s in %s' "$suffix" "$SERVER_DIR"
+        return 0
+      fi
+      ;;
+  esac
+  printf 'install.sh server in %s' "$SERVER_DIR"
+}
+
+warn_updater_subnet_overlap() {
+  local project=$1 def_sub=$2 int_sub=$3 addr_file="${HORNHOOF_CONTROL_DIR:-/control}/addresses.json" hits sub host cmd
+  hits=$(
+    {
+      env_value HORNHOOF_ADDRESSES | tr ',' '\n'
+      if [ -r "$addr_file" ]; then grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$addr_file" 2> /dev/null || true; fi
+      printf -- '---\n'
+      raw_host_network_cidrs
+    } | awk -v def_sub="$def_sub" -v int_sub="$int_sub" -v live_def="$LIVE_DEFAULT_SUBNET" -v live_int="$LIVE_INTERNAL_SUBNET" '
+      function parse_range(tok,    slash, ip_part, p, n, oct, i, v, ip, size) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
+        if (tok == "" || tok == "default") return 0
+        slash = index(tok, "/")
+        if (slash > 0) {
+          ip_part = substr(tok, 1, slash - 1)
+          p = substr(tok, slash + 1)
+          if (p !~ /^[0-9]+$/) return 0
+          p += 0
+        } else {
+          ip_part = tok
+          p = -1
+        }
+        n = split(ip_part, oct, ".")
+        if (n < 1 || n > 4) return 0
+        for (i = 1; i <= n; i++) {
+          if (oct[i] !~ /^[0-9]+$/) return 0
+          v = oct[i] + 0
+          if (v < 0 || v > 255) return 0
+          oct[i] = v
+        }
+        for (i = n + 1; i <= 4; i++) oct[i] = 0
+        if (oct[1] == 127 || oct[1] == 0 || oct[1] >= 224) return 0
+        if (p < 0) p = n * 8
+        if (p < 4 || p > 32) return 0
+        ip = ((oct[1] * 256 + oct[2]) * 256 + oct[3]) * 256 + oct[4]
+        size = 2 ^ (32 - p)
+        R_START = int(ip / size) * size
+        R_END = R_START + size - 1
+        return 1
+      }
+      BEGIN {
+        has_ld = parse_range(live_def); ld_s = R_START; ld_e = R_END
+        has_li = parse_range(live_int); li_s = R_START; li_e = R_END
+      }
+      $0 == "---" { raw_mode = 1; next }
+      {
+        for (f = 1; f <= NF; f++) {
+          if (!parse_range($f)) continue
+          if (raw_mode && ((has_ld && R_START == ld_s && R_END == ld_e) || (has_li && R_START == li_s && R_END == li_e))) continue
+          h_tok[++nh] = $f
+          h_start[nh] = R_START
+          h_end[nh] = R_END
+        }
+      }
+      function check_sub(sub_cidr,    s, e, i) {
+        if (sub_cidr == "" || seen[sub_cidr]++) return
+        if (!parse_range(sub_cidr)) return
+        s = R_START; e = R_END
+        for (i = 1; i <= nh; i++) {
+          if (s <= h_end[i] && h_start[i] <= e) {
+            print sub_cidr " " h_tok[i]
+            return
+          }
+        }
+      }
+      END {
+        check_sub(def_sub)
+        check_sub(int_sub)
+      }
+    '
+  ) || true
+  [ -n "$hits" ] || return 0
+  cmd=$(manual_subnet_heal_command "$project")
+  while IFS=' ' read -r sub host; do
+    [ -n "$sub" ] || continue
+    say "Docker network $sub in $SERVER_DIR overlaps this computer's network ($host), and an automatic update cannot recreate the network it runs on. Run $cmd on this computer once to move it to a free subnet."
+  done <<< "$hits"
+}
+
+choose_subnets() {
+  local subnets_list=$1 own_sub kept_def kept_int pair def_sub int_sub project
+  project=$(env_value COMPOSE_PROJECT_NAME)
+  [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  inspect_docker_networks "$project"
+  own_sub=$(own_ports "$subnets_list")
+  kept_def=$(env_value HORNHOOF_SUBNET)
+  [ -n "$kept_def" ] || kept_def=${own_sub%% *}
+  [ -n "$kept_def" ] || kept_def=$LIVE_DEFAULT_SUBNET
+  kept_int=$(env_value HORNHOOF_INTERNAL_SUBNET)
+  [ -n "$kept_int" ] || kept_int=${own_sub##* }
+  [ -n "$kept_int" ] || kept_int=$LIVE_INTERNAL_SUBNET
+  case " $REFUSED_SUBNETS " in *" $kept_def "*) kept_def='' ;; esac
+  case " $REFUSED_SUBNETS " in *" $kept_int "*) kept_int='' ;; esac
+
+  if [ -n "$FROM_UPDATER" ]; then
+    # The updater runs on the project's live network, so an update keeps the live subnets when they exist and logs a clear
+    # recovery instruction when a live project subnet covers the computer's own network.
+    pair=$(
+      {
+        printf '%s\n' "$OTHER_DOCKER_CIDRS"
+        reserved_other_cidrs "$subnets_list"
+      } | select_subnet_pair "$kept_def" "$kept_int" 1
+    ) || fail "No free Docker subnet for Hornhoof that avoids other Docker projects."
+    CHOSEN_DEFAULT_SUBNET=${pair%% *}
+    CHOSEN_INTERNAL_SUBNET=${pair#* }
+    warn_updater_subnet_overlap "$project" "$CHOSEN_DEFAULT_SUBNET" "$CHOSEN_INTERNAL_SUBNET"
+    return 0
+  fi
+
+  SUBNET_MOVED=''
+  pair=$(
+    {
+      printf '%s\n' "$OTHER_DOCKER_CIDRS"
+      host_network_cidrs
+      reserved_other_cidrs "$subnets_list"
+    } | select_subnet_pair "$kept_def" "$kept_int"
+  ) || fail "No free Docker subnet for Hornhoof that avoids this computer's networks and other Docker projects. Free a private network range, then run this command again."
+  def_sub=${pair%% *}
+  int_sub=${pair#* }
+  if { [ -n "$LIVE_DEFAULT_SUBNET" ] && [ "$LIVE_DEFAULT_SUBNET" != "$def_sub" ]; } ||
+    { [ -n "$LIVE_INTERNAL_SUBNET" ] && [ "$LIVE_INTERNAL_SUBNET" != "$int_sub" ]; }; then
+    SUBNET_MOVED=1
+  fi
+  CHOSEN_DEFAULT_SUBNET=$def_sub
+  CHOSEN_INTERNAL_SUBNET=$int_sub
 }
 
 # From the updater localhost is its own container, so only a run by hand can ask it.
@@ -1568,23 +2017,43 @@ kept_port() {
   if [ "$port" != "$1" ]; then printf '%s' "$port"; fi
 }
 
-# The list comes first: a failed write leaves .env as it was, and a failed .env write a line that only holds the ports.
+# The lists come first: a failed write leaves .env as it was, and a failed .env write a line that only holds the reservation.
 record_ports() {
   local lock
   lock=$("${DOCKER[@]}" inspect --format '{{.Id}}' "$PORT_LOCK" 2> /dev/null) || true
   [ "$lock" = "$PORT_LOCK_ID" ] || fail "$PORT_LOCK_BUSY"
   { other_lines "$1"; printf '%s %s %s\n' "$SERVER_DIR" "$2" "$3"; } | write_registry ||
     fail "Could not write the list of Hornhoof's ports on this computer. Run this command again."
+  { other_lines "$4"; printf '%s %s %s\n' "$SERVER_DIR" "$5" "$6"; } | write_subnets ||
+    fail "Could not write the list of Hornhoof's subnets on this computer. Run this command again."
   set_env HORNHOOF_PORT "$2"
   set_env HORNHOOF_PEER_PORT "$3"
+  set_env HORNHOOF_SUBNET "$5"
+  set_env HORNHOOF_INTERNAL_SUBNET "$6"
   # People get the company's link at setup, so the server starts at its address on this computer. Another address of
   # its own, such as a domain, goes into PUBLIC_URL later. A machine that only joined has no address of the company's.
   if [ -z "$ENV_BEFORE" ] && [ -z "$WORKER" ]; then set_env PUBLIC_URL "http://localhost:$2"; fi
 }
 
+check_registry_project_collision() {
+  [ -z "$FROM_UPDATER" ] && [ -z "$ENV_BEFORE" ] || return 0
+  local project line folder
+  project=$(env_value COMPOSE_PROJECT_NAME)
+  [ -n "$project" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    folder=$(line_folder "$line")
+    if [ "$(basename "$folder" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')" = "$project" ]; then
+      fail "The Hornhoof in $folder already has the name $project on this computer, and this one would start in its containers. Run this command again with --name and a name no company here has, such as --name home."
+    fi
+  done <<< "$(other_lines "$1")"
+}
+
 choose_ports() {
-  local registry own held web peer
+  local registry subnets_list own held web peer
   registry=$(read_registry) || fail "Could not read the list of Hornhoof's ports on this computer. Run this command again."
+  subnets_list=$(read_subnets) || fail "Could not read the list of Hornhoof's subnets on this computer. Run this command again."
+  check_registry_project_collision "$registry"
   own=$(own_ports "$registry")
   held=" $(held_ports "$registry") "
   web=$(kept_port "$1" HORNHOOF_PORT "${own%% *}")
@@ -1605,11 +2074,12 @@ choose_ports() {
     peer=$(first_free_port "$FIRST_PEER_PORT" "$held")
     NEW_PEER=1
   fi
-  record_ports "$registry" "$web" "$peer"
+  choose_subnets "$subnets_list"
+  record_ports "$registry" "$web" "$peer" "$subnets_list" "$CHOSEN_DEFAULT_SUBNET" "$CHOSEN_INTERNAL_SUBNET"
 }
 
-# reserve_ports [<port>]: settles this company's two ports under the lock, which goes whatever happens. Given a port
-# Docker refused, the side it belongs to searches again and the other side keeps its port.
+# reserve_ports [<port>]: settles this company's ports and subnets under the lock, which goes whatever happens. Given a
+# port Docker refused, the side it belongs to searches again and the other side keeps its port.
 reserve_ports() {
   if [ -n "${1:-}" ]; then REFUSED_PORTS="$REFUSED_PORTS $1"; fi
   take_port_lock
@@ -1625,6 +2095,21 @@ refused_port() {
   printf '%s\n' "$1" | grep -E 'port is already allocated|address already in use' | head -1 | grep -oE ':[0-9]+' | head -1 | tr -d ':' || true
 }
 
+subnet_overlap_error() {
+  case "$1" in
+    *'Pool overlaps'* | *'conflicts with existing route'* | *'overlaps with'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+retry_subnet_overlap() {
+  [ -z "$FROM_UPDATER" ] || return 1
+  REFUSED_SUBNETS="$REFUSED_SUBNETS $(env_value HORNHOOF_SUBNET) $(env_value HORNHOOF_INTERNAL_SUBNET)"
+  say "The chosen Docker subnet overlaps an existing route on this computer, so Hornhoof takes another one."
+  compose_step "$@" down || true
+  reserve_ports
+}
+
 port_is_new() {
   { [ -n "$NEW_WEB" ] && [ "$1" = "$(env_value HORNHOOF_PORT)" ]; } || { [ -n "$NEW_PEER" ] && [ "$1" = "$(env_value HORNHOOF_PEER_PORT)" ]; }
 }
@@ -1632,8 +2117,12 @@ port_is_new() {
 # These two publish the ports, so this is where a port something outside Docker holds shows. A port this run chose moves
 # to the next one, up to 5 times; a port the company already has stays, as other things know it by that port.
 start_keeper_and_front() {
-  local moved=0 port
+  local moved=0 sub_moved=0 port
   until compose_step "$@" up -d --no-build keeper front; do
+    if [ "$sub_moved" -lt 5 ] && subnet_overlap_error "$STEP_OUTPUT" && retry_subnet_overlap "$@"; then
+      sub_moved=$((sub_moved + 1))
+      continue
+    fi
     port=$(refused_port "$STEP_OUTPUT")
     [ -n "$port" ] || start_failed
     if [ "$moved" -ge 5 ] || ! port_is_new "$port"; then
@@ -1675,13 +2164,24 @@ start_app() {
 # The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
 # comes back, so the maintenance answer is up while migrate runs.
 start_server_services() {
+  local sub_moved=0
   say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
   if [ -n "$NODES_ONLY" ]; then
     replace_named_nodes "$@"
     return 0
   fi
+  if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
+    prepare_builtin_stop "$@"
+    compose_step "$@" down || true
+  fi
   (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
-  compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
+  until compose_step "$@" up -d --no-build --remove-orphans --wait db; do
+    if [ "$sub_moved" -lt 5 ] && subnet_overlap_error "$STEP_OUTPUT" && retry_subnet_overlap "$@"; then
+      sub_moved=$((sub_moved + 1))
+      continue
+    fi
+    fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
+  done
   start_keeper_and_front "$@"
   if [ -n "$FROM_UPDATER" ]; then
     if nodes_stay "$@"; then
@@ -1869,7 +2369,14 @@ worker_core_update() {
   if [ -z "$PULLED" ]; then
     (cd "$SERVER_DIR" && "${COMPOSE[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
+  if ! grep -q '^HORNHOOF_PORT=$' "$SERVER_DIR/.env"; then ENV_BEFORE=1; fi
+  reserve_ports
   say "Starting the company's core${PIN:+ $PIN}."
+  if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
+    compose_step "${COMPOSE[@]}" down || true
+    compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
+    return 0
+  fi
   # shellcheck disable=SC2046 # the services are compose service names, one word each.
   compose_step "${COMPOSE[@]}" up -d --no-build $(core_services) || start_failed
 }
