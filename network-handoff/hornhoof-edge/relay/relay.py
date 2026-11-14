@@ -179,6 +179,8 @@ SCHEMA = {
 def init_db() -> None:
     """Make what is missing. A made database takes no write lock: an admin command that only reads must not wait for,
     or fail behind, a long commit of the service."""
+    with _route_locks_guard:
+        _route_unknown_reasons.clear()
     made = {row[0] for row in db().execute('SELECT name FROM sqlite_master')}
     for name, statement in SCHEMA.items():
         if name not in made:
@@ -609,7 +611,6 @@ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy
                and client_id == (row[2] if row[1] == 'legacy' else row[1]))
     if matches:
         return
-    log_line(f'route of {name} is online outside the relay record')
     raise FrpsUnknown(f'frps route of {name} does not match the relay record')
 
 
@@ -902,7 +903,7 @@ def valid_sync_body(body: object) -> bool:
 
 def sync_holder(name: str, body: dict) -> bool:
     """An online frps route must name this registration; a pending row cannot set sync."""
-    route = locked_route_of(name)
+    route = locked_route_of(name, log_unknown=False)
     row = db().execute('SELECT state FROM routes WHERE name = ?', (name,)).fetchone()
     return (row == ('held',) and route['client'] == body['client']
             and route['generation'] == body['generation'])
@@ -940,27 +941,27 @@ def set_sync(name: str, body: dict, link_hash: str) -> tuple[str | None, dict | 
         return None, sync_of(name)
 
 
-def locked_route_of(name: str) -> dict:
+def locked_route_of(name: str, *, log_unknown: bool = True) -> dict:
     """The R2.1 body with the per-name lock already held: the row straightened against frps."""
     try:
         status, client_id, proxy_type = frps_route(name)
-    except FrpsUnknown as failure:
-        log_line(f'route of {name} is unknown: {failure}')
-        raise
-    row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
-                       (name,)).fetchone()
-    if row is not None:
-        check_route_holder(name, row, status, client_id, proxy_type)
-        try:
-            straighten_route(name, row, status, now())
-        except sqlite3.Error as e:
-            reason = f'route store is not writable: {type(e).__name__}'
-            log_line(f'route of {name} is unknown: {reason}')
-            raise FrpsUnknown(reason) from None
         row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
                            (name,)).fetchone()
-    else:
-        check_route_holder(name, None, status, client_id, proxy_type)
+        if row is not None:
+            check_route_holder(name, row, status, client_id, proxy_type)
+            try:
+                straighten_route(name, row, status, now())
+            except sqlite3.Error as e:
+                raise FrpsUnknown(f'route store is not writable: {type(e).__name__}') from None
+            row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+                               (name,)).fetchone()
+        else:
+            check_route_holder(name, None, status, client_id, proxy_type)
+    except FrpsUnknown as failure:
+        if log_unknown:
+            note_route_unknown(name, str(failure))
+        raise
+    note_route_unknown(name, None)
     return route_body(name, row)
 
 
@@ -975,6 +976,19 @@ def route_of(name: str) -> dict:
 
 _route_locks_guard = threading.Lock()
 _route_locks: dict[str, threading.Lock] = {}
+_route_unknown_reasons: dict[str, str] = {}
+
+
+def note_route_unknown(name: str, reason: str | None) -> None:
+    """Log an unknown route once per reason change; None forgets it once a known route is read."""
+    with _route_locks_guard:
+        if reason is None:
+            _route_unknown_reasons.pop(name, None)
+            return
+        if _route_unknown_reasons.get(name) == reason:
+            return
+        _route_unknown_reasons[name] = reason
+    log_line(f'route of {name} is unknown: {reason}')
 
 
 def route_lock(name: str) -> threading.Lock:
@@ -1377,7 +1391,10 @@ def release_binding(name: str, expected_hash: str | None = None) -> bool:
                       (name, name, expected_hash))
             write('DELETE FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
                   (name, expected_hash))
-        return db().execute('SELECT changes()').fetchone()[0] == 1
+        removed = db().execute('SELECT changes()').fetchone()[0] == 1
+    if removed:
+        note_route_unknown(name, None)
+    return removed
 
 
 def unban_binding(name: str) -> None:
@@ -1795,7 +1812,7 @@ class Handler(BaseHTTPRequestHandler):
         except FrpsUnknown:
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
         except WriteBusy:
-            log_line(f'route of {name} is unknown: store busy')
+            note_route_unknown(name, 'store busy')
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
 
     def sync_answer(self, name: str) -> None:
