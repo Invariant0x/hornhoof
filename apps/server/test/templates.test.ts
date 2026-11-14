@@ -315,7 +315,7 @@ describe('templates', () => {
     const hornhoof = body('hh-hornhoof');
     expect(hornhoof).toMatch(/inbox/);
     expect(hornhoof).toMatch(/"inbox"[^.]*"inbox_mark"/);
-    expect(hornhoof).toMatch(/A person's words[^.]*never[^.]*inbox/);
+    expect(hornhoof).toMatch(/A person's words never wait there\./);
     expect(hornhoof).not.toMatch(/\u2014/);
   });
 
