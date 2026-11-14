@@ -30,9 +30,16 @@ type Snapshot = EnvironmentSnapshot;
 type ScopeAddress = Snapshot['description']['repositoryScope'];
 
 type VerifiedRun = { id: string; number: number };
-type VerifiedVerdict = { eventId: number; reviewerAgentId: string; reviewerName: string; stage: string; allowedRunBranches: Set<string> };
+type VerifiedVerdict = {
+  eventId: number;
+  reviewerAgentId: string;
+  reviewerName: string;
+  stage: string;
+  baseCommitSha: string;
+  allowedRunBranches: Set<string>;
+};
 type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
-type VerdictRow = { id: number; taskId: string; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; candidateId: string };
+type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
 
 export type RecordedMainApproval = { entryId: string; baseCommitSha: string; department: Dept };
 
@@ -227,7 +234,7 @@ function candidateBranchLeadsToMain(taskNumber: number, turnId: string | null, t
 }
 
 function isLiveMainCodeRoute(route: Route): boolean {
-  return route.state.resultKind === 'code' && (route.state.phase === 'active' || route.state.phase === 'ready');
+  return route.state.resultKind === 'code' && (route.state.phase === 'ready' || (route.state.phase === 'active' && route.state.stage === 'tests'));
 }
 
 async function loadCurrentCommitCandidate(db: QueryDb, task: Task, route: Route, commit: string): Promise<EchelonCandidate | null> {
@@ -267,7 +274,7 @@ async function requesterMayAutoApprove(db: QueryDb, askingTask: Task, verdictTas
   return route.state.resultKind === 'coordination' && route.state.phase === 'active';
 }
 
-async function commitAuthors(db: QueryDb, verdictTask: Task, askingTask: Task, commit: string): Promise<Set<string>> {
+async function commitAuthors(db: QueryDb, verdictTask: Task, askingTask: Task): Promise<Set<string>> {
   const ids = new Set<string>([verdictTask.executorAgentId, verdictTask.id === askingTask.id ? askingTask.executorAgentId : null].filter((id): id is string => Boolean(id)));
   const submitted = await db
     .select({ agentId: taskEvents.agentId, producer: sql<string | null>`${taskEvents.data}->'candidate'->'producedBy'->>'agentId'` })
@@ -277,7 +284,6 @@ async function commitAuthors(db: QueryDb, verdictTask: Task, askingTask: Task, c
         eq(taskEvents.companyId, verdictTask.companyId),
         inArray(taskEvents.taskId, [verdictTask.id, askingTask.id]),
         eq(taskEvents.kind, 'submitted'),
-        sql`${taskEvents.data}->'candidate'->>'commit' = ${commit}`,
       ),
     );
   for (const row of submitted) {
@@ -287,30 +293,43 @@ async function commitAuthors(db: QueryDb, verdictTask: Task, askingTask: Task, c
   return ids;
 }
 
-async function activeReviewerName(db: QueryDb, companyId: string, agentId: string | null, authors: Set<string>): Promise<string | null> {
+async function activeReviewer(
+  db: QueryDb,
+  companyId: string,
+  agentId: string | null,
+  authors: Set<string>,
+): Promise<{ reviewerAgentId: string; reviewerName: string } | null> {
   if (!agentId || authors.has(agentId)) return null;
   const [reviewer] = await db
     .select({ name: agents.name })
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-  return reviewer?.name ?? null;
+  return reviewer ? { reviewerAgentId: agentId, reviewerName: reviewer.name } : null;
 }
 
-function allLatestStagesPassed(rows: VerdictRow[], candidateId: string): Map<string, VerdictRow> | null {
-  const forCandidate = rows.filter(row => row.candidateId === candidateId);
-  if (!forCandidate.length) return null;
+function stageRowPassedOnCommit(row: VerdictRow, commit: string): boolean {
+  return row.pass && !row.wrongGoal && row.reviewedCommit === commit;
+}
+
+function allLatestStagesPassed(rows: VerdictRow[], commit: string): Map<string, VerdictRow> | null {
   const latestByStage = new Map<string, VerdictRow>();
-  for (const row of forCandidate) latestByStage.set(row.stage, row);
+  for (const row of rows) {
+    if (['review', 'security', 'cleanup'].includes(row.stage)) latestByStage.set(row.stage, row);
+  }
+  if (!latestByStage.size) return null;
   for (const row of latestByStage.values()) {
-    if (!row.pass || row.wrongGoal) return null;
+    if (!stageRowPassedOnCommit(row, commit)) return null;
   }
   return latestByStage;
 }
 
 async function securityStageVerified(db: QueryDb, companyId: string, required: boolean, securityRow: VerdictRow | undefined, authors: Set<string>): Promise<boolean> {
   if (!required) return true;
-  if (!securityRow) return false;
-  return Boolean(await activeReviewerName(db, companyId, securityRow.agentId, authors));
+  return Boolean(securityRow && (await activeReviewer(db, companyId, securityRow.agentId, authors)));
+}
+
+function primaryStageRow(latestByStage: Map<string, VerdictRow>): VerdictRow | null {
+  return latestByStage.get('review') ?? latestByStage.get('security') ?? null;
 }
 
 async function verifiedPrimaryVerdict(
@@ -319,15 +338,30 @@ async function verifiedPrimaryVerdict(
   askingTask: Task,
   route: Route,
   latestByStage: Map<string, VerdictRow>,
-  commit: string,
+  baseCommitSha: string,
   allowedRunBranches: Set<string>,
 ): Promise<VerifiedVerdict | null> {
-  const authors = await commitAuthors(db, verdictTask, askingTask, commit);
+  const authors = await commitAuthors(db, verdictTask, askingTask);
   if (!(await securityStageVerified(db, askingTask.companyId, route.state.security.required, latestByStage.get('security'), authors))) return null;
-  const primary = latestByStage.get('review') ?? latestByStage.get('security');
-  if (!primary?.agentId) return null;
-  const name = await activeReviewerName(db, askingTask.companyId, primary.agentId, authors);
-  return name ? { eventId: primary.id, reviewerAgentId: primary.agentId, reviewerName: name, stage: primary.stage, allowedRunBranches } : null;
+  const primary = primaryStageRow(latestByStage);
+  if (!primary) return null;
+  const reviewer = await activeReviewer(db, askingTask.companyId, primary.agentId, authors);
+  return reviewer ? { eventId: primary.id, stage: primary.stage, ...reviewer, baseCommitSha, allowedRunBranches } : null;
+}
+
+async function queryCandidateVerdicts(db: QueryDb, companyId: string, taskId: string, candidateId: string): Promise<VerdictRow[]> {
+  return db
+    .select({
+      id: taskEvents.id,
+      agentId: taskEvents.agentId,
+      pass: sql<boolean>`(${taskEvents.data}->>'pass') = 'true'`,
+      wrongGoal: sql<boolean>`(${taskEvents.data}->>'wrongGoal') = 'true'`,
+      stage: sql<string>`coalesce(${taskEvents.data}->>'stage', '')`,
+      reviewedCommit: sql<string>`coalesce(${taskEvents.data}->>'reviewedCommit', '')`,
+    })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.companyId, companyId), eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'candidateId' = ${candidateId}`))
+    .orderBy(asc(taskEvents.id));
 }
 
 async function taskVerdictOnCommit(
@@ -335,29 +369,21 @@ async function taskVerdictOnCommit(
   verdictTask: Task,
   askingTask: Task,
   placeIds: string[],
-  rows: VerdictRow[],
   commit: string,
 ): Promise<VerifiedVerdict | null> {
   if (!(await requesterMayAutoApprove(db, askingTask, verdictTask, placeIds))) return null;
   const route = await routeOf(db, verdictTask);
   const eligible = await candidateIntegratesToMain(db, verdictTask, route, commit);
   if (!eligible) return null;
-  const latestByStage = allLatestStagesPassed(rows, eligible.candidate.id);
+  const rows = await queryCandidateVerdicts(db, verdictTask.companyId, verdictTask.id, eligible.candidate.id);
+  const latestByStage = allLatestStagesPassed(rows, commit);
   if (!latestByStage) return null;
-  return verifiedPrimaryVerdict(db, verdictTask, askingTask, route, latestByStage, commit, eligible.allowedRunBranches);
+  return verifiedPrimaryVerdict(db, verdictTask, askingTask, route, latestByStage, eligible.candidate.baseCommit, eligible.allowedRunBranches);
 }
 
-async function queryCommitVerdicts(db: QueryDb, companyId: string, placeIds: string[], commit: string): Promise<VerdictRow[]> {
-  return db
-    .select({
-      id: taskEvents.id,
-      taskId: taskEvents.taskId,
-      agentId: taskEvents.agentId,
-      pass: sql<boolean>`(${taskEvents.data}->>'pass') = 'true'`,
-      wrongGoal: sql<boolean>`(${taskEvents.data}->>'wrongGoal') = 'true'`,
-      stage: sql<string>`coalesce(${taskEvents.data}->>'stage', '')`,
-      candidateId: sql<string>`coalesce(${taskEvents.data}->>'candidateId', '')`,
-    })
+async function candidateTaskIdsOnCommit(db: QueryDb, companyId: string, placeIds: string[], commit: string): Promise<string[]> {
+  const rows = await db
+    .select({ taskId: taskEvents.taskId })
     .from(taskEvents)
     .innerJoin(tasks, eq(tasks.id, taskEvents.taskId))
     .where(
@@ -370,26 +396,18 @@ async function queryCommitVerdicts(db: QueryDb, companyId: string, placeIds: str
       ),
     )
     .orderBy(asc(taskEvents.id));
+  return [...new Set(rows.map(row => row.taskId))];
 }
 
-function groupVerdictsByTask(rows: VerdictRow[]): Map<string, VerdictRow[]> {
-  const byTask = new Map<string, VerdictRow[]>();
-  for (const row of rows) {
-    if (!['review', 'security', 'cleanup'].includes(row.stage)) continue;
-    byTask.set(row.taskId, [...(byTask.get(row.taskId) ?? []), row]);
-  }
-  return byTask;
-}
-
-/* Condition (b): independent PASS verdict on that exact 40-char SHA from a task whose route integrates into main. */
+/* Condition (b): independent PASS verdict on that exact 40-char SHA from a main-line task in the same turn scope. */
 async function verifiedIndependentVerdict(db: QueryDb, askingTask: Task, repositoryOwnerId: string, commit: string): Promise<VerifiedVerdict | null> {
   const placeIds = await repoDepartmentIds(db, askingTask.companyId, repositoryOwnerId);
-  const rows = await queryCommitVerdicts(db, askingTask.companyId, placeIds, commit);
-  const byTask = groupVerdictsByTask(rows);
-  const taskIds = [...byTask.keys()].sort((a, b) => Number(b === askingTask.id) - Number(a === askingTask.id));
+  const taskIds = (await candidateTaskIdsOnCommit(db, askingTask.companyId, placeIds, commit)).sort(
+    (a, b) => Number(b === askingTask.id) - Number(a === askingTask.id),
+  );
   for (const taskId of taskIds) {
     const verdictTask = taskId === askingTask.id ? askingTask : await loadTask(db, taskId);
-    const verified = await taskVerdictOnCommit(db, verdictTask, askingTask, placeIds, byTask.get(taskId)!, commit);
+    const verified = await taskVerdictOnCommit(db, verdictTask, askingTask, placeIds, commit);
     if (verified) return verified;
   }
   return null;
@@ -417,23 +435,39 @@ async function verifiedFastForward(ctx: Reader, repo: Repo, commit: string): Pro
   }
 }
 
-async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {
+/* Conditions (b.2) + (c): review.baseCommit is an ancestor of current origin/main, and commit is a fast-forward from origin/main. */
+async function verifiedMainLine(ctx: Reader, repo: Repo, candidateBaseSha: string, commit: string): Promise<string | null> {
+  const mainSha = await verifiedFastForward(ctx, repo, commit);
+  if (!mainSha) return null;
+  return (await verifiedAncestorSha(ctx, repo, candidateBaseSha, mainSha)) ? mainSha : null;
+}
+
+async function enabledMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
   if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
-  if (!found || !isMainRepository(found.department, found.repo)) return null;
-  const [verdict, baseCommitSha] = await Promise.all([
-    verifiedIndependentVerdict(ctx.db, task, found.department.id, commit),
-    verifiedFastForward(ctx, found.repo, commit),
-  ]);
-  if (!verdict || !baseCommitSha) return null;
+  return found && isMainRepository(found.department, found.repo) ? { department: found.department, repo: found.repo } : null;
+}
+
+async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {
+  const found = await enabledMainRepo(ctx, task);
+  if (!found) return null;
+  const verdict = await verifiedIndependentVerdict(ctx.db, task, found.department.id, commit);
+  if (!verdict) return null;
+  const baseCommitSha = await verifiedMainLine(ctx, found.repo, verdict.baseCommitSha, commit);
+  if (!baseCommitSha) return null;
   const run = await verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true, verdict.allowedRunBranches);
   return run ? { department: found.department, repo: found.repo, run, verdict, baseCommitSha } : null;
 }
 
+async function enabledMainInTransaction(tx: Tx, companyId: string, departmentId: string): Promise<boolean> {
+  const [companyRow] = await tx.select({ autonomousRelease: companies.autonomousRelease }).from(companies).where(eq(companies.id, companyId)).for('share');
+  if (!companyRow?.autonomousRelease) return false;
+  const [deptRow] = await tx.select({ repoBranch: departments.repoBranch }).from(departments).where(eq(departments.id, departmentId));
+  return Boolean(deptRow && (deptRow.repoBranch ?? 'main') === 'main');
+}
+
 async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
-  const [companyRow] = await tx.select({ autonomousRelease: companies.autonomousRelease }).from(companies).where(eq(companies.id, task.companyId)).for('share');
-  const [deptRow] = await tx.select({ repoBranch: departments.repoBranch }).from(departments).where(eq(departments.id, department.id));
-  if (!companyRow?.autonomousRelease || !deptRow || (deptRow.repoBranch ?? 'main') !== 'main') return null;
+  if (!(await enabledMainInTransaction(tx, task.companyId, department.id))) return null;
   const verdict = await verifiedIndependentVerdict(tx, task, department.id, commit);
   if (!verdict) return null;
   const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false, verdict.allowedRunBranches);
@@ -478,7 +512,7 @@ async function insertJournalRow(
 ): Promise<{ id: string; baseCommitSha: string } | null> {
   const fresh = await reverifyInTransaction(tx, task, commit, department);
   if (!fresh) return null;
-  const baseCommitSha = await verifiedFastForward(ctx, repo, commit);
+  const baseCommitSha = await verifiedMainLine(ctx, repo, fresh.verdict.baseCommitSha, commit);
   if (!baseCommitSha) return null;
   const [requester] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
   if (!requester) return null;
@@ -528,22 +562,26 @@ async function findRecordedAutoApproval(db: QueryDb, task: Task, commit: string)
 }
 
 async function loadAcceptanceTarget(ctx: Reader, task: Task, commit: string) {
-  if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
+  const found = await enabledMainRepo(ctx, task);
+  if (!found) return null;
   const recorded = await findRecordedAutoApproval(ctx.db, task, commit);
-  if (!recorded) return null;
-  const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
-  return found && isMainRepository(found.department, found.repo) ? { recorded, department: found.department, repo: found.repo } : null;
+  return recorded ? { recorded, department: found.department, repo: found.repo } : null;
+}
+
+async function verifiedRecordedLine(ctx: Reader, repo: Repo, candidateBaseSha: string, recordedMainSha: string, commit: string): Promise<boolean> {
+  const [baseOnMain, ffFromRecorded] = await Promise.all([
+    verifiedAncestorSha(ctx, repo, candidateBaseSha, recordedMainSha),
+    verifiedAncestorSha(ctx, repo, recordedMainSha, commit),
+  ]);
+  return baseOnMain && ffFromRecorded;
 }
 
 /* Verifies pre-push autonomous release journal row + live run, verdict and recorded base ancestry for main acceptance. */
 export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
   const target = await loadAcceptanceTarget(ctx, task, commit);
   if (!target) return null;
-  const [verdict, ancestor] = await Promise.all([
-    verifiedIndependentVerdict(ctx.db, task, target.department.id, commit),
-    verifiedAncestorSha(ctx, target.repo, target.recorded.baseCommitSha, commit),
-  ]);
-  if (!verdict || !ancestor) return null;
+  const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
+  if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
   const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, verdict.allowedRunBranches);
   return run ? { entryId: target.recorded.id, baseCommitSha: target.recorded.baseCommitSha, department: target.department } : null;
 }
