@@ -1,11 +1,12 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { runInNewContext } from 'node:vm';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -786,58 +787,142 @@ describe('service preparation lock ownership', () => {
   });
 });
 
-async function pgliteProbe(body: string): Promise<Record<string, boolean | number>> {
-  const script = `
-    import assert from 'node:assert/strict';
-    import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
-    import {join} from 'node:path';
-    import {PGlite} from '@electric-sql/pglite';
-    import {preparePgliteTemplate,readPgliteTemplate} from './apps/server/test/prepare-environment.ts';
-    import setup from './apps/server/test/global-setup.ts';
-    process.stderr.write('probe-start\\n');
-    const path=process.argv[1];
-    const provided=[]; const project={provide:(_,value)=>provided.push(value)};
-    process.env.HH_PGLITE_TEMPLATE=path;
-    ${body}
-  `;
-  const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, join(root, 'pglite')], {
-    cwd: fileURLToPath(new URL('../../..', import.meta.url)),
-  });
-  return JSON.parse(result.stdout) as Record<string, boolean | number>;
+interface PgliteTemplateBoundary {
+  root?: string;
+  pgliteVersion?: string;
+  dump?: () => Promise<Buffer> | Buffer;
 }
+
+interface PrepareEnvironmentModule {
+  preparePgliteTemplate: (output: string, options?: PgliteTemplateBoundary) => Promise<void>;
+  readPgliteTemplate: (path: string, options?: Omit<PgliteTemplateBoundary, 'dump'>) => Buffer | null;
+}
+
+interface GlobalSetupModule {
+  default: (
+    project: { provide: (key: 'migratedDataDir', value: string) => void },
+    options?: PgliteTemplateBoundary & { templatePath?: string },
+  ) => Promise<() => void>;
+}
+
+const RECORDED_PGLITE_DUMP = Buffer.from('hornhoof-recorded-pglite-migrated-dump-v1\n', 'utf8');
+const STANDALONE_PGLITE_DUMP = Buffer.from('hornhoof-standalone-pglite-migrated-dump-v1\n', 'utf8');
+
+function createPgliteInputFixture(dir: string): string {
+  const files: Record<string, string> = {
+    'apps/server/drizzle/0000_initial.sql': 'select 1;\n',
+    'apps/server/drizzle/meta/_journal.json': '{"entries":[{"tag":"0000_initial"}]}\n',
+    'apps/server/src/db/schema.ts': 'export const schemaVersion = 1;\n',
+    'apps/server/src/db/client.ts': 'export const clientVersion = 1;\n',
+    'apps/server/src/db/agent-sql.ts': 'export const agentSqlVersion = 1;\n',
+    'apps/server/test/prepare-environment.ts': 'export const prepareVersion = 1;\n',
+    'apps/server/test/global-setup.ts': 'export const setupVersion = 1;\n',
+    'apps/server/package.json': '{"name":"@hornhoof/server"}\n',
+    'package-lock.json': '{"lockfileVersion":3}\n',
+    'packages/protocol/dist/index.js': 'export const protocolVersion = 1;\n',
+  };
+  for (const [path, content] of Object.entries(files)) {
+    const target = join(dir, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  return dir;
+}
+
+async function loadPgliteEnvironment(): Promise<PrepareEnvironmentModule & { setup: GlobalSetupModule['default'] }> {
+  const [prepareEnv, globalSetup] = await Promise.all([
+    vi.importActual<PrepareEnvironmentModule>(fileURLToPath(new URL('../../server/test/prepare-environment.ts', import.meta.url))),
+    vi.importActual<GlobalSetupModule>(fileURLToPath(new URL('../../server/test/global-setup.ts', import.meta.url))),
+  ]);
+  return { ...prepareEnv, setup: globalSetup.default };
+}
+
 describe('prepared PGlite compatibility', () => {
-  it('copies a validated migrated dump and rejects stale metadata or changed bytes', async () => {
-    const measured = await pgliteProbe(`
-      process.stderr.write('prepare-start\\n');
-      await preparePgliteTemplate(path);
-      process.stderr.write('prepare-done\\n');
-      const bytes=readPgliteTemplate(path); assert(Buffer.isBuffer(bytes));
-      process.stderr.write('setup-start\\n');
-      const cleanup=await setup(project);
-      process.stderr.write('setup-done\\n');
-      try {assert(readFileSync(provided[0]).equals(bytes)); assert(!provided[0].startsWith(path));} finally {cleanup();}
-      const file=join(path,'READY.json'); const metadata=JSON.parse(readFileSync(file,'utf8'));
-      writeFileSync(file,JSON.stringify({...metadata,pgliteVersion:'0.0.0'})); assert.equal(readPgliteTemplate(path),null);
-      writeFileSync(file,JSON.stringify({...metadata,inputDigest:'0'.repeat(64)})); assert.equal(readPgliteTemplate(path),null);
-      writeFileSync(file,JSON.stringify(metadata)); writeFileSync(join(path,'migrated.tar'),'corrupt'); assert.equal(readPgliteTemplate(path),null);
-      process.stdout.write(JSON.stringify({validCopy:true,staleRejected:true,bytes:bytes.length}));
-    `);
-    expect(measured).toMatchObject({ validCopy: true, staleRejected: true });
-    expect(measured.bytes).toBeGreaterThan(0);
+  let previousTemplate: string | undefined;
+
+  beforeEach(() => { previousTemplate = process.env.HH_PGLITE_TEMPLATE; });
+  afterEach(() => {
+    if (previousTemplate === undefined) delete process.env.HH_PGLITE_TEMPLATE;
+    else process.env.HH_PGLITE_TEMPLATE = previousTemplate;
   });
+
+  it('copies a validated migrated dump and rejects stale metadata or changed bytes', async () => {
+    const { preparePgliteTemplate, readPgliteTemplate, setup } = await loadPgliteEnvironment();
+    const fixture = createPgliteInputFixture(join(root, 'pglite-inputs'));
+    const templateDir = join(root, 'pglite');
+    const dumpSpy = vi.fn(() => RECORDED_PGLITE_DUMP);
+    const fallbackSpy = vi.fn(() => STANDALONE_PGLITE_DUMP);
+    await preparePgliteTemplate(templateDir, { root: fixture, dump: dumpSpy });
+    expect(dumpSpy).toHaveBeenCalledTimes(1);
+    const bytes = readPgliteTemplate(templateDir, { root: fixture });
+    expect(bytes).toEqual(RECORDED_PGLITE_DUMP);
+
+    const provided: string[] = [];
+    process.env.HH_PGLITE_TEMPLATE = templateDir;
+    const cleanup = await setup({ provide: (_, value) => { provided.push(value); } }, { root: fixture, dump: fallbackSpy });
+    try {
+      expect(fallbackSpy).not.toHaveBeenCalled();
+      expect(provided).toHaveLength(1);
+      expect(readFileSync(provided[0]!)).toEqual(RECORDED_PGLITE_DUMP);
+      expect(provided[0]!.startsWith(templateDir)).toBe(false);
+    } finally {
+      cleanup();
+    }
+    expect(existsSync(dirname(provided[0]!))).toBe(false);
+
+    const readyFile = join(templateDir, 'READY.json');
+    const metadata = JSON.parse(readFileSync(readyFile, 'utf8')) as {
+      format: string; pgliteVersion: string; inputDigest: string; dumpDigest: string; inputs: Record<string, string>;
+    };
+    writeFileSync(readyFile, JSON.stringify({ ...metadata, format: 'hornhoof-pglite-v0' }));
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+    writeFileSync(readyFile, JSON.stringify({ ...metadata, pgliteVersion: '0.0.0' }));
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+    writeFileSync(readyFile, JSON.stringify({ ...metadata, inputDigest: '0'.repeat(64) }));
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+    writeFileSync(readyFile, JSON.stringify({ ...metadata, inputs: { ...metadata.inputs, 'package-lock.json': '0'.repeat(64) } }));
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+    writeFileSync(readyFile, JSON.stringify(metadata));
+    const migrationFile = join(fixture, 'apps/server/drizzle/0000_initial.sql');
+    const migrationOriginal = readFileSync(migrationFile);
+    writeFileSync(migrationFile, 'select 2;\n');
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+    writeFileSync(migrationFile, migrationOriginal);
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toEqual(RECORDED_PGLITE_DUMP);
+    writeFileSync(join(templateDir, 'migrated.tar'), 'corrupt');
+    expect(readPgliteTemplate(templateDir, { root: fixture })).toBeNull();
+  });
+
   it('falls back to standalone migrations when the optional artifact is corrupt', async () => {
-    const measured = await pgliteProbe(`
-      mkdirSync(path); writeFileSync(join(path,'READY.json'),'{}'); writeFileSync(join(path,'migrated.tar'),'corrupt');
-      process.stderr.write('setup-start\\n');
-      const cleanup=await setup(project);
-      process.stderr.write('setup-done\\n');
-      try {
-        const client=new PGlite({loadDataDir:new Blob([readFileSync(provided[0])])});
-        try {assert(Number((await client.query('SELECT count(*) AS n FROM drizzle.__drizzle_migrations')).rows[0].n)>0);} finally {await client.close();}
-      } finally {cleanup();}
-      process.stdout.write(JSON.stringify({fallback:true}));
-    `);
-    expect(measured.fallback).toBe(true);
+    const { setup } = await loadPgliteEnvironment();
+    const fixture = createPgliteInputFixture(join(root, 'pglite-inputs'));
+    const templateDir = join(root, 'pglite-corrupt');
+    mkdirSync(templateDir, { recursive: true });
+    writeFileSync(join(templateDir, 'READY.json'), '{}');
+    writeFileSync(join(templateDir, 'migrated.tar'), 'corrupt');
+    process.env.HH_PGLITE_TEMPLATE = templateDir;
+
+    const provided: string[] = [];
+    const fallbackSpy = vi.fn(async () => STANDALONE_PGLITE_DUMP);
+    const cleanup = await setup({ provide: (_, value) => { provided.push(value); } }, { root: fixture, dump: fallbackSpy });
+    try {
+      expect(fallbackSpy).toHaveBeenCalledTimes(1);
+      expect(provided).toHaveLength(1);
+      expect(readFileSync(provided[0]!)).toEqual(STANDALONE_PGLITE_DUMP);
+      expect(provided[0]!.startsWith(templateDir)).toBe(false);
+    } finally {
+      cleanup();
+    }
+    expect(existsSync(dirname(provided[0]!))).toBe(false);
+
+    const failedProvided: string[] = [];
+    await expect(
+      setup(
+        { provide: (_, value) => { failedProvided.push(value); } },
+        { root: fixture, dump: () => { throw new Error('standalone migration failed'); } },
+      ),
+    ).rejects.toThrow('standalone migration failed');
+    expect(failedProvided).toEqual([]);
   });
 });
 
@@ -887,60 +972,58 @@ describe('manifest argv selection', () => {
   });
 });
 
-async function generatedProtocolProbe(body: string): Promise<void> {
-  const { cpSync, symlinkSync } = await import('node:fs');
-  const { dirname } = await import('node:path');
-  const checkout = fileURLToPath(new URL('../../..', import.meta.url));
-  const fixture = join(root, 'generated-protocol');
-  for (const path of [
-    'package.json', 'package-lock.json', 'tsconfig.base.json', 'apps/server/package.json', 'apps/server/drizzle',
-    'apps/server/src/db', 'apps/server/test/prepare-environment.ts', 'apps/server/test/global-setup.ts',
-    'packages/protocol/package.json', 'packages/protocol/dist',
-  ]) {
-    mkdirSync(dirname(join(fixture, path)), { recursive: true });
-    cpSync(join(checkout, path), join(fixture, path), { recursive: true });
-  }
-  symlinkSync(join(checkout, 'node_modules'), join(fixture, 'node_modules'), 'dir');
-  mkdirSync(join(fixture, 'apps/server/node_modules/@hornhoof'), { recursive: true });
-  symlinkSync(join(fixture, 'packages/protocol'), join(fixture, 'apps/server/node_modules/@hornhoof/protocol'), 'dir');
-  const script = `
-    import assert from 'node:assert/strict';
-    import {createHash} from 'node:crypto';
-    import {mkdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
-    import {join} from 'node:path';
-    import {preparePgliteTemplate,readPgliteTemplate} from './apps/server/test/prepare-environment.ts';
-    const output=join(process.cwd(),'template'), dist=join(process.cwd(),'packages/protocol/dist'), file=join(dist,'index.js');
-    const original=readFileSync(file);
-    await preparePgliteTemplate(output);
-    assert(Buffer.isBuffer(readPgliteTemplate(output)));
-    ${body}
-  `;
-  await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: fixture });
-}
-
 describe('generated protocol inputs in prepared PGlite templates', () => {
   it('hashes actual generated bytes and accepts the same bytes after a rebuild', async () => {
-    await generatedProtocolProbe(`
-      const metadata=JSON.parse(readFileSync(join(output,'READY.json'),'utf8'));
-      assert.equal(metadata.inputs['packages/protocol/dist/index.js'],createHash('sha256').update(original).digest('hex'));
-      writeFileSync(file,Buffer.concat([original,Buffer.from('\\n// changed generated bytes\\n')]));
-      assert(readPgliteTemplate(output)===null,'Changed generated protocol bytes must invalidate the template');
-      rmSync(file); writeFileSync(file,original);
-      assert(Buffer.isBuffer(readPgliteTemplate(output)),'The same generated bytes after rebuilding must keep the template valid');
-      mkdirSync(join(dist,'nested')); writeFileSync(join(dist,'nested','extra.js'),'export const extra = 1;\\n');
-      assert(readPgliteTemplate(output)===null,'New nested generated bytes must invalidate the template');
-      rmSync(join(dist,'nested'),{recursive:true});
-      assert(Buffer.isBuffer(readPgliteTemplate(output)));
-    `);
+    const { preparePgliteTemplate, readPgliteTemplate } = await loadPgliteEnvironment();
+    const fixture = createPgliteInputFixture(join(root, 'generated-protocol'));
+    const output = join(fixture, 'template');
+    const dist = join(fixture, 'packages/protocol/dist');
+    const file = join(dist, 'index.js');
+    const original = readFileSync(file);
+
+    await preparePgliteTemplate(output, { root: fixture, dump: () => RECORDED_PGLITE_DUMP });
+    expect(readPgliteTemplate(output, { root: fixture })).toEqual(RECORDED_PGLITE_DUMP);
+
+    const metadata = JSON.parse(readFileSync(join(output, 'READY.json'), 'utf8')) as { inputs: Record<string, string> };
+    expect(metadata.inputs['packages/protocol/dist/index.js']).toBe(createHash('sha256').update(original).digest('hex'));
+
+    writeFileSync(file, Buffer.concat([original, Buffer.from('\n// changed generated bytes\n')]));
+    expect(readPgliteTemplate(output, { root: fixture })).toBeNull();
+
+    rmSync(file);
+    writeFileSync(file, original);
+    expect(readPgliteTemplate(output, { root: fixture })).toEqual(RECORDED_PGLITE_DUMP);
+
+    mkdirSync(join(dist, 'nested'));
+    writeFileSync(join(dist, 'nested', 'extra.js'), 'export const extra = 1;\n');
+    expect(readPgliteTemplate(output, { root: fixture })).toBeNull();
+
+    rmSync(join(dist, 'nested'), { recursive: true });
+    expect(readPgliteTemplate(output, { root: fixture })).toEqual(RECORDED_PGLITE_DUMP);
   });
+
   it('fails preparation explicitly for absent or empty generated output', async () => {
-    await generatedProtocolProbe(`
-      rmSync(dist,{recursive:true});
-      await assert.rejects(preparePgliteTemplate(join(process.cwd(),'absent')),/Missing required generated protocol artifact: packages\\/protocol\\/dist/);
-      mkdirSync(dist);
-      await assert.rejects(preparePgliteTemplate(join(process.cwd(),'empty')),/Missing required generated protocol artifact: packages\\/protocol\\/dist/);
-      assert(readPgliteTemplate(output)===null,'Missing generated bytes must reject the optional template');
-    `);
+    const { preparePgliteTemplate, readPgliteTemplate } = await loadPgliteEnvironment();
+    const fixture = createPgliteInputFixture(join(root, 'generated-protocol-missing'));
+    const output = join(fixture, 'template');
+    const dist = join(fixture, 'packages/protocol/dist');
+    const dumpSpy = vi.fn(() => RECORDED_PGLITE_DUMP);
+
+    await preparePgliteTemplate(output, { root: fixture, dump: dumpSpy });
+    expect(readPgliteTemplate(output, { root: fixture })).toEqual(RECORDED_PGLITE_DUMP);
+    expect(dumpSpy).toHaveBeenCalledTimes(1);
+
+    rmSync(dist, { recursive: true });
+    await expect(preparePgliteTemplate(join(fixture, 'absent'), { root: fixture, dump: dumpSpy }))
+      .rejects.toThrow(/Missing required generated protocol artifact: packages\/protocol\/dist/);
+    expect(readPgliteTemplate(output, { root: fixture })).toBeNull();
+    expect(dumpSpy).toHaveBeenCalledTimes(1);
+
+    mkdirSync(join(dist, 'empty-subdir'), { recursive: true });
+    await expect(preparePgliteTemplate(join(fixture, 'empty'), { root: fixture, dump: dumpSpy }))
+      .rejects.toThrow(/Missing required generated protocol artifact: packages\/protocol\/dist/);
+    expect(readPgliteTemplate(output, { root: fixture })).toBeNull();
+    expect(dumpSpy).toHaveBeenCalledTimes(1);
   });
 });
 
