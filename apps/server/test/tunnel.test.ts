@@ -1,8 +1,9 @@
+import { ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
+import { holdThroughOneEmptyRead, TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
 import { until } from './helpers.js';
 
 /* A stand-in for the tunnel client: it writes the token it was started with, its process id and whether it can see the
@@ -90,6 +91,53 @@ describe('the tunnel keeper', () => {
     await until(() => !alive(started()[0]![1]!));
     await readsFrom(3);
     expect(started()).toHaveLength(1);
+  });
+
+  it('tells a running client to stop at the first null read, and says why first', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    let wanted = true;
+    let started = 0;
+    const lines: string[] = [];
+    const keeper = new TunnelKeeper({
+      read: async () => (wanted ? settingsWith('first') : null),
+      everyMs: 20,
+      restartMs: 30,
+      clientFor: () => (started++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      why: () => 'Stopping the public link while this keeper holds no lease or waits after a lease ended.',
+      log: line => lines.push(line),
+    });
+    onTestFinished(async () => {
+      await keeper.stop();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+    keeper.start();
+    await until(() => started === 1);
+
+    wanted = false;
+    await vi.advanceTimersByTimeAsync(20);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+    await until(() => lines.includes('No public link: the tunnel waits.'));
+    const whyAt = lines.indexOf('Stopping the public link while this keeper holds no lease or waits after a lease ended.');
+    expect(whyAt).toBeGreaterThanOrEqual(0);
+    expect(whyAt).toBeLessThan(lines.indexOf('No public link: the tunnel waits.'));
+    await keeper.stop();
+  });
+
+  it('holds a peer reader through one empty read, and lets a second empty read stop it', async () => {
+    const queue: Answer[] = [null, settingsWith('first'), null, undefined, settingsWith('first'), null, null, null];
+    let index = 0;
+    const read = holdThroughOneEmptyRead(async () => (index < queue.length ? queue[index++] : null));
+    expect(await read()).toBeNull();
+    expect(await read()).toEqual(settingsWith('first'));
+    expect(await read()).toBeUndefined();
+    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual(settingsWith('first'));
+    expect(await read()).toBeUndefined();
+    expect(await read()).toBeNull();
+    expect(await read()).toBeNull();
   });
 
   it('keeps the client running while read answers undefined', async () => {

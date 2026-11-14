@@ -26,6 +26,8 @@ type Options<T> = {
   clientFor: (settings: T) => Client;
   /* What it says when a client starts and when there is nothing to run; the public link's own words when not given. */
   says?: { carrying: (settings: T) => string; waiting: string };
+  /* Why the settings came back empty, said once before a running client is stopped. */
+  why?: () => string | null;
   log: (line: string) => void;
 };
 
@@ -34,6 +36,34 @@ const LINK_WORDS = { carrying: (settings: unknown) => `Carrying ${(settings as T
 const LONGEST_PAUSE_MS = 60_000;
 /* A client that ran this long counts as having worked, so the next pause starts short again. */
 const WORKED_MS = 60_000;
+
+/* Wraps a reader whose tunnel registers no shared public name, such as a machine's own peer tunnel, so one empty read
+   answers undefined and keeps the running frpc alive. Stopping and starting frpc again can cost up to 40 s at the relay
+   and drops every open peer stream, while a one-second hiccup on the path through hornhoof.org, in the leader's mode,
+   or in a stale view can leave one read empty before the next read finds the same link standing. A second empty read in
+   a row answers null and stops the tunnel; TunnelKeeper itself stops at the first null so the public link under
+   linkWanted and a disconnected visitor release at once. */
+export function holdThroughOneEmptyRead<T>(read: () => Promise<T | null | undefined>): () => Promise<T | null | undefined> {
+  let running = false;
+  let sawEmpty = false;
+  return async () => {
+    const next = await read();
+    if (next === undefined) return undefined;
+    if (next !== null) {
+      running = true;
+      sawEmpty = false;
+      return next;
+    }
+    if (!running) return null;
+    if (!sawEmpty) {
+      sawEmpty = true;
+      return undefined;
+    }
+    running = false;
+    sawEmpty = false;
+    return null;
+  };
+}
 
 /* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
    when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
@@ -71,9 +101,15 @@ export class TunnelKeeper<T = TunnelSettings> {
     if (settings !== undefined && this.timer) this.follow(settings);
   }
 
+  private sayWhyStopped(): void {
+    const why = this.opts.why?.();
+    if (why) this.opts.log(why);
+  }
+
   private follow(settings: T | null): void {
     const text = settings && JSON.stringify(settings);
     if (text === this.text) return;
+    if (!settings) this.sayWhyStopped();
     this.text = text;
     this.pause = this.opts.restartMs;
     void this.end().then(() => {
