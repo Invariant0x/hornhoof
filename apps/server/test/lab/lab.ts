@@ -67,10 +67,12 @@ async function makeNetwork(name: string, label: string): Promise<void> {
   }
 }
 
+const shellQuote = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+
 /* A command in the keeper's container of a machine, named by the folder its compose runs from: docker exec alone, since
    compose takes a second to start and a keeper waits two for hornhoof.org's answer. */
 const inKeeper = (at: { machine: LabMachine; folder: string }, cmd: string): Promise<Ran> =>
-  at.machine.exec(`docker exec ${at.folder.split('/').pop()!}-keeper-1 sh -c '${cmd.replaceAll("'", `'\\''`)}'`);
+  at.machine.exec(`docker exec ${at.folder.split('/').pop()!}-keeper-1 sh -c ${shellQuote(cmd)}`);
 
 /* Script run inside a keeper container to bridge its peer doors and visitor loopback ports through the host PeerRelay. */
 export function bridgeScript(host: string, relayPort: number, offers: Record<string, number>, visits: Array<{ port: number; service: string }>): string {
@@ -150,9 +152,11 @@ export function keeperTcpProbeScript(host: string, port: number, timeoutMs = 300
   ].join(' ');
 }
 
-export function keeperTcpProbeCommand(_folder: string, host: string, port: number, timeoutMs = 3000): string {
-  const script = keeperTcpProbeScript(host, port, timeoutMs).replaceAll("'", `'\\''`);
-  return `node -e '${script}'`;
+/* Runs the TCP probe inside the keeper service container (built from root Dockerfile node:22.23.4-alpine, which
+   provides node and shares PeerSessions's network namespace) rather than on the outer docker:28.5.2-dind LabMachine
+   (machine.Dockerfile: bash, curl, jq, coreutils, iptables, no node). */
+export function keeperTcpProbeCommand(folder: string, host: string, port: number, timeoutMs = 3000): string {
+  return `cd ${shellQuote(folder)} && docker compose exec -T keeper node -e ${shellQuote(keeperTcpProbeScript(host, port, timeoutMs))}`;
 }
 
 export function probeKeeperTcp(
@@ -333,7 +337,9 @@ export class Lab {
     let directBlocked = false;
     const blockDirect = async (blocked: boolean): Promise<void> => {
       const cmd = directPeerBlockScript(blocked);
-      await Promise.all(places.map(at => at.machine.exec(cmd)));
+      const results = await Promise.all(places.map(at => at.machine.exec(cmd)));
+      const failed = results.find(ran => ran.code !== 0);
+      if (blocked && failed) throw new Error(`directPeerBlockScript failed (${failed.code}):\n${failed.out}`);
       directBlocked = blocked;
     };
     if (opts.blockDirect) await blockDirect(true);
