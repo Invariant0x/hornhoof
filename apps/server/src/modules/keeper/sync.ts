@@ -2,7 +2,7 @@ import type { Route, SyncFailure, SyncPost, SyncRecord, SyncResult } from '../li
 import { moveTarget } from '../copies/move.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf } from './machine-keys.js';
-import { lsnAtLeast, nextSyncStep, PACE_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SLOW_WAIT_MS, type CopySample, type Flag, type SyncAction, type SyncMemory, type SyncSample } from './sync-step.js';
+import { dropReason, lsnAtLeast, nextSyncStep, PACE_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SLOW_FOR_MS, SLOW_WAIT_MS, type CopySample, type DropReason, type Flag, type SyncAction, type SyncMemory, type SyncSample } from './sync-step.js';
 
 /* How often the relay is asked who holds the company's route, while a copy exists or something of one is left. */
 const ROUTE_EVERY_MS = 5_000;
@@ -129,6 +129,7 @@ export class SyncController {
   private holding = false;
   private heldNow = false;
   private postLine = '';
+  private dropped: { name: string; reason: DropReason } | null = null;
   private last: { listed: number; copies: CopyView[]; named: string | null } = { listed: 0, copies: [], named: null };
 
   constructor(private readonly opts: SyncControllerOptions) {}
@@ -224,10 +225,34 @@ export class SyncController {
     const sample = await this.sample();
     const step = nextSyncStep(sample, this.memory);
     this.memory = step.memory;
+    this.noteDrop(sample, step.action);
     await this.act(step.action);
     if (sample.listed > 0 && this.opts.leads() && sample.now - this.pulsedAt >= PULSE_EVERY_MS) {
       this.pulsedAt = sample.now;
       await this.opts.catalog.pulse();
+    }
+  }
+
+  /* Resets pace tracking when a silent or slow named copy is dropped so PACE_FOR_MS is required again, and logs the
+     drop reason once without addresses or keys. */
+  private noteDrop(sample: SyncSample, action: SyncAction): void {
+    const named = sample.setting === null ? undefined : sample.others.find(copy => copy.name === sample.setting);
+    const reason = named ? dropReason(named, sample) : null;
+    if (named && reason) {
+      this.paceSince.delete(named.name);
+      if (this.dropped?.name !== named.name || this.dropped.reason !== reason) {
+        const label = /^[a-z0-9_]{1,63}$/.test(named.name) ? named.name : 'the named copy';
+        const detail =
+          reason === 'slow'
+            ? `commits waited over ${SLOW_WAIT_MS} ms for ${SLOW_FOR_MS} ms with under 1 MiB sent`
+            : `no replication reply for over ${SILENT_REPLY_MS} ms`;
+        this.opts.log(`Stopping synchronous wait on ${label}: ${detail}.`);
+        this.dropped = { name: named.name, reason };
+      }
+    }
+    if (reason === null || action.do === 'clear') {
+      if (this.dropped) this.paceSince.delete(this.dropped.name);
+      this.dropped = null;
     }
   }
 
@@ -242,10 +267,7 @@ export class SyncController {
     const link = await this.opts.link();
     if (!link) return this.noLink(link);
     const route = await this.opts.relay.route(link.name, link.key);
-    if (!route.known) {
-      this.route = null;
-      return `hornhoof.org did not answer who holds the route (${route.why})`;
-    }
+    if (!route.known) return `hornhoof.org did not answer who holds the route (${route.why})`;
     this.stored = route.sync;
     this.route = route.state === 'held' && route.client === link.client ? { client: link.client, generation: route.generation } : null;
     if (!this.route) return "this keeper's own link does not hold the company's route now";

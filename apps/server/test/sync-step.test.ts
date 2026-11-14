@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SyncRecord } from '../src/modules/link/relay.js';
-import { lsnAtLeast, nextSyncStep, PACE_FOR_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SLOW_BYTES, SLOW_FOR_MS, STOP_RENEW_MS, type CopySample, type SyncMemory, type SyncSample } from '../src/modules/keeper/sync-step.js';
+import { dropReason, lsnAtLeast, nextSyncStep, PACE_FOR_MS, SAMPLE_EVERY_MS, SILENT_REPLY_MS, SLOW_BYTES, SLOW_FOR_MS, STOP_RENEW_MS, type CopySample, type SyncMemory, type SyncSample } from '../src/modules/keeper/sync-step.js';
 
 const GENERATION = 5;
 const ROUTE = { client: 'acme-ab12cd34-link', generation: GENERATION };
@@ -75,6 +75,9 @@ describe('the next step of the sync controller', () => {
     expect(quiet({}, { slowForMs: SLOW_FOR_MS, namedBytes5s: 2_000_000 })).toEqual(NONE);
     expect(quiet({}, { slowForMs: SLOW_FOR_MS - 1, namedBytes5s: 0 })).toEqual(NONE);
     expect(SLOW_BYTES).toBe(1_048_576);
+    expect(dropReason(copy({ replyAgeMs: SILENT_REPLY_MS + 1 }), sample())).toBe('silent');
+    expect(dropReason(C, sample({ slowForMs: SLOW_FOR_MS, namedBytes5s: 900_000 }))).toBe('slow');
+    expect(dropReason(C, sample({ slowForMs: SLOW_FOR_MS, namedBytes5s: 2_000_000 }))).toBeNull();
     /* Once the relay knows, the setting goes. */
     expect(said({ others: [copy({ replyAgeMs: null })], setting: C.name, record: OFF })).toEqual({ action: CLEAR, flag: 'relay_off', renew: true });
   });

@@ -719,7 +719,9 @@ describe('the peer link in the keeper', () => {
     const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
     const { catalog } = syncCatalog(copy);
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
