@@ -149,6 +149,24 @@ export const en = {
     keyHint: "A GitHub token that may create repositories for this owner and push to them: on a fine-grained token, Administration and Contents set to Read and write for all its repositories; on a classic one, repo. With each repository it creates, it goes to the machines of that department's agents.",
     keyKeep: 'Leave it empty to keep the saved key.',
   },
+  googleSheets: {
+    title: 'Google Sheets',
+    about: 'With a Google key saved here, employees of any department can create populated Google Sheets and send a ready link.',
+    none: 'Google Sheets is not connected yet. Until a key is saved here, employees attach a ready .xlsx file to the task and chat instead.',
+    saved: (account: string, last4: string, shareEmail: string | null) =>
+      `Spreadsheets are created with ${account} (key ending in ${last4})${shareEmail ? `, and shared with ${shareEmail}` : ''}.`,
+    connect: 'Connect Google Sheets',
+    change: 'Change settings',
+    remove: 'Disconnect',
+    removeAsk: 'Disconnect Google Sheets? Employees will stop creating new Google Sheets links and will attach .xlsx files instead.',
+    yesRemove: 'Disconnect',
+    keep: 'Keep',
+    keyLabel: 'Google key JSON',
+    keyHint: 'Paste a Google service account JSON (with Google Sheets API and Google Drive API enabled) or OAuth JSON with refresh_token.',
+    keyKeep: 'Leave it empty to keep the saved key.',
+    shareLabel: 'Share new spreadsheets with',
+    shareHint: 'The Google account that gets editor access to each new spreadsheet. A service account key needs it, as it opens its spreadsheets to no one else; with an OAuth key it is optional.',
+  },
   invite: {
     heading: 'Invite link',
     opening: 'Opening your invite',
@@ -405,6 +423,7 @@ export const en = {
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
     unknown: (at: string | null) => at ? `Unknown, last data from ${at}` : 'Unknown, no limit data received yet',
+    offlineLimit: (at: string | null) => at ? `Machine offline, last data from ${at}` : 'Machine offline, no limit data yet',
     noPlanLimits: 'Pay as you go, no plan limits',
     share: 'Tasks may use',
     shareLabel: (name: string) => `Share of ${name} for tasks`,
@@ -525,6 +544,7 @@ export const en = {
     notes: {
       limit: (at: string, duration: string) => `Until ${at}, in ${duration}. Its agents wait until then.`,
       limitUnknown: 'Its agents wait until the limit resets.',
+      offline: (host: string) => host ? `On ${host}. Its agents wait until the machine is back online.` : 'Its agents wait until a machine is back online.',
       login: (host: string, owner: string) => `On ${host}. Only ${owner} can sign in.`,
       loginOffline: (host: string) => `It needs a sign-in on ${host}, and the machine is offline.`,
       setup: (host: string, owner: string, program: string) => `On ${host}, ${program} asks its owner to accept its terms. Only ${owner} can do it, by running the install command on that machine again.`,
@@ -845,6 +865,16 @@ export const en = {
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
+    branches: {
+      title: 'Branches not in main yet',
+      hint: 'Accepted and handed-in tasks of the department whose work is on a branch main does not have yet. Whoever goes on with it starts from the branch.',
+      none: 'Every accepted branch of the department is in main.',
+      loading: 'Reading the branches of the repository…',
+      state: {
+        done: { notIn: 'Accepted, not in main yet', unknown: 'Accepted, not known whether it is in main' },
+        review: { notIn: 'Handed in, not in main yet', unknown: 'Handed in, not known whether it is in main' },
+      },
+    },
     /* Whether a department works in turns of its own, which count its tasks on the map, or all the time. */
     workMode: {
       title: 'How it works',
@@ -1133,6 +1163,10 @@ export const en = {
     noOutput: 'No output.',
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
+    offlineSince: (host: string, at: string | null) => (at ? `Machine ${host} is offline since ${at}.` : `Machine ${host} is offline.`),
+    moveTo: (plan: string) => `Move to ${plan}`,
+    movesLabel: 'Move to a plan of this department that is online',
+    noPlanOnline: 'No other plan of this department is online now.',
     model: 'Model',
     default: 'Default',
     subUnit: 'Sub-unit',
@@ -1677,6 +1711,8 @@ export const en = {
     repo_host_refused: 'GitHub did not create the repository. Check that the key is still valid and may create repositories for this owner, and that the name is free.',
     repo_name_invalid: 'Name the repository with Latin letters, digits, dots, hyphens and underscores, 100 at most.',
     repo_exists: 'This product already has a repository. Create the new one on the department, where it comes as a new product.',
+    google_sheets_invalid: 'Paste valid Google service account or OAuth JSON credentials, and enter a valid share email address or leave it empty.',
+    google_sheets_share_needed: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',
     link_reserved: 'This name is kept for Hornhoof itself. Pick another one.',

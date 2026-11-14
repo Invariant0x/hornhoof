@@ -15,7 +15,7 @@ import { agentChanges, agents, companies, departments, personAccess, proposals, 
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
-import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
+import { delegationOf, lockedFor, standingPrincipal, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
@@ -31,6 +31,7 @@ import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
+import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
@@ -225,7 +226,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   /* A card is the CEO's decision, with or without the card: the CEO's or the delegate's from their screen, or the
-     orchestrator's for the one its turn answers. A change inside a department is its owner's too. */
+     orchestrator's or a head's for the last person who asked it, in that turn or an earlier one. A change inside a
+     department is its owner's too. */
   async function cardDecision(me: Person, subject: DecisionSubject): Promise<Delegation | undefined> {
     const on = delegationOf(me);
     if (subject.source === 'proposal' && subject.departments) for (const id of subject.departments) await requireDepartmentChanger(db, me, id);
@@ -246,7 +248,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = BuildBody.parse(req.body);
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, subject, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on, standingPrincipal);
       let brief = body.brief;
       let agentId: string | null = null;
       if (body.proposalId) {
@@ -454,6 +456,15 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
+  /* Which accepted and handed-in task branches of the department are not in the main line yet, for those who run it. */
+  app.get('/api/departments/:id/branches', async req => {
+    const me = await requirePerson(req, db);
+    const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    await requireDepartmentChanger(db, me, dept.id);
+    return departmentBranches(ctx, dept.id);
+  });
+
   /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
      subscription that serves the department and runs the role's tier, with the model that tier asks for there. Every staff card
      picks from its roles, products and subscriptions. */
@@ -490,7 +501,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
-      await stillDecides(tx, me.companyId, me.id, subject, on);
+      await stillDecides(tx, me.companyId, me.id, subject, on, standingPrincipal);
       let agentId: string | null = null;
       if (body.proposalId) {
         const [taken] = await tx

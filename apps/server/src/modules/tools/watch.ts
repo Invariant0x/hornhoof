@@ -3,6 +3,8 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or,
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
+import { offlineMachine } from '../nodes/offline.js';
+import { worksIn } from '../departments/inside.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
@@ -15,18 +17,101 @@ import { programRestartStatus, restartProgram } from '../tasks/program-restarts.
 import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
+import { agentSeesTask } from '../tasks/views.js';
 import { OPERATIONS_ROLES } from '../program-operator/access.js';
 import { registerOperatorTools, registerProgramAccessTools } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 
+type Reader = Parameters<typeof agentSeesTask>[0];
+type TaskSight = Parameters<typeof agentSeesTask>[1];
+type Failure = { kind: string; text: string } | null;
+/* What of a task decides whether a reader may open it, read beside its work. */
+const SIGHT = { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId };
+
+/* Who reads failures, to know whose work it may open. */
+const readerOf = async (ctx: Ctx, agentId: string): Promise<Reader | undefined> =>
+  (await ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId)))[0];
+
+/* Whether a reader may open a task as task shows it. */
+const opensTask = (reader: Reader | undefined, task: TaskSight): boolean => reader !== undefined && agentSeesTask(reader, task);
+
+/* Whether a reader may open the work a turn's words come from: its task, or for a turn on no task its agent's department. */
+function opensTurn(reader: Reader | undefined, task: TaskSight | null, agent: { id: string | null; departmentId: string | null }): boolean {
+  if (task) return opensTask(reader, task);
+  return reader !== undefined && (reader.kind === 'orchestrator' || reader.id === agent.id || (reader.departmentId !== null && reader.departmentId === agent.departmentId));
+}
+
+/* Words as a reader gets them: as they are where it may open their work, else with no credential and no private path, cleaned
+   before any cut so that no part of either is left at its edge. */
+const shown = (text: string, open: boolean): string => (open ? text : cleanDiagnostic(text));
+
+/* Every word of a line as a reader who may not open its work gets it, down into what a node reported, its long words
+   already cleaned before their cut. */
+function cleanedAll<T>(value: T): T {
+  if (typeof value === 'string') return cleanDiagnostic(value) as T;
+  if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype)
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, cleanedAll(inner)])) as T;
+  return value;
+}
+const shownAll = <T>(value: T, open: boolean): T => (open ? value : cleanedAll(value));
+
+/* Why a turn failed as Hornhoof recorded it, beside the end of its output, which a program that never wrote leaves empty. */
+function failureReason(failure: Failure, result: string | null, open: boolean): string | null {
+  const reason = failure?.text ? `${failure.kind}: ${shown(failure.text, open)}` : shown(result?.trim() ?? '', open);
+  return reason ? reason.slice(0, TAIL) : null;
+}
+
+type FailedRow = { agentId: string | null; departmentId: string | null; tail: string; failure: Failure; result: string | null; sight: TaskSight | null };
+
+/* A failed turn as a reader gets it: its department by name, the end of its output and why it failed. */
+function failedLine<T extends FailedRow>(row: T, reader: Reader | undefined, names: Map<string, string>) {
+  /* What decides the reader's view stays out of what it reads. */
+  const { agentId, departmentId, tail, failure, result, sight, ...line } = row;
+  const open = opensTurn(reader, sight, { id: agentId, departmentId });
+  return shownAll({ ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason: failureReason(failure, result, open) }, open);
+}
+
+type SeenRow = { agentId: string; departmentId: string | null; sight: TaskSight | null; agent: string; text: string; at: Date; task: number | null };
+
+/* Tool calls and results as a reader gets them, cleaned before anything is read out of them or cut, so that what was
+   missing, the line that said so and what was installed come from cleaned words. */
+const seenBy = (rows: SeenRow[], reader: Reader | undefined) =>
+  rows.map(({ agentId, departmentId, sight, ...row }) => ({ ...row, text: shown(row.text, opensTurn(reader, sight, { id: agentId, departmentId })) }));
+
+/* How the turn a holder stopped from ended, the end of its output, cleaned before its cut. */
+const turnEnd = (last: { result: string | null; tail: string } | undefined, open: boolean): string | null =>
+  last ? shown(last.result?.trim() || last.tail, open).slice(-TAIL) : null;
+
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 type Agent = typeof agents.$inferSelect;
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
+
+/* Why an employee cannot take a message now. A machine that is off stops none of the work it pushed: someone else goes on
+   from its branch, or it moves to a plan of the department that is online. */
+async function cannotRun(ctx: Pick<Ctx, 'db' | 'hub'>, me: Agent, target: Agent, reason: string | null): Promise<string> {
+  const offline = reason === 'machine_offline' ? await offlineMachine(ctx, target.subscriptionId) : null;
+  if (!offline) return `${target.name} cannot run now. Tell your head, who tells the CEO.`;
+  /* Which machine it is stays inside the department, as on the cards. */
+  const machine = (await worksIn(ctx.db, me, target.departmentId)) ? `${offline.hostname}, the machine of its plan, is offline` : 'the machine of its plan is offline';
+  return `${target.name} cannot run now: ${machine}. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move ${target.name} to a plan of the department that is online.`;
+}
+
 export const TURN_NUDGES = 10;
 const TAIL = 400;
+/* The end of what a holder said when it stopped: a long report ends with its concerns and its next step. */
+const WHY_TAIL = 500;
+/* Queued turns Hornhoof ended unsent on purpose, as their task went to another holder or waits for the tasks before it: no
+   program ran, so there is nothing to find. */
+const ENDED_UNSENT = ['handed_on', 'waiting'];
+/* The start of what a holder said when it stopped, and its end when it says more than the start holds, as the reader gets it. */
+function heldWords(said: { text: string } | undefined, open: boolean) {
+  const text = said ? shown(said.text, open) : null;
+  return { why: text === null ? null : text.slice(0, TAIL), whyTail: text !== null && text.length > TAIL ? text.slice(-WHY_TAIL) : null };
+}
 const FAILED_MAX = 50;
 /* Tool calls and results read for where agents stumbled, the newest first. */
 const STUMBLES_MAX = 1000;
@@ -124,7 +209,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
-          "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it.",
+          "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it. " +
+          'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
       },
       async () => {
         const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
@@ -132,6 +218,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         if (!ids.length) return json([]);
         const names = await deptNames();
         const held = await watchedTasks(db, job.companyId, ids);
+        const reader = await readerOf(ctx, job.agentId);
         const out = [];
         /* Each agent by its own indexes, so a round costs the same however long the company has run. */
         for (const a of staff) {
@@ -150,7 +237,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .where(and(eq(jobs.agentId, a.id), inArray(jobs.status, ['done', 'failed']), isNotNull(jobs.finishedAt)))
             .orderBy(desc(jobs.finishedAt))
             .limit(1);
-          out.push({
+          const agent = {
             id: a.id,
             name: a.name,
             kind: a.kind,
@@ -171,11 +258,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             obsolete: state.obsolete,
             retry: state.retry,
             restart: await programRestartStatus(ctx, job.companyId, a.id),
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field
-            tasks: held.filter(t => t.holder === a.id).map(({ holder: _, ...t }) => t),
             lastActivityAt: active?.at ?? null,
             lastTurn: last ? { status: last.status, at: last.at, error: last.error } : null,
-          });
+          };
+          /* An agent's own words are its department's to read, the words of each task it holds that task's readers'. */
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field
+          const holds = held.filter(t => t.holder === a.id).map(({ holder: _, sight, ...t }) => shownAll(t, opensTask(reader, sight)));
+          out.push({ ...shownAll(agent, opensTurn(reader, null, { id: a.id, departmentId: a.departmentId })), tasks: holds });
         }
         return json(out);
       },
@@ -187,8 +276,9 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'failures',
       {
         description:
-          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now, ' +
-          'with what their holder said when it stopped and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the reason Hornhoof recorded, the end of its output and the task, and the tasks blocked now, ' +
+          'with the start of what their holder said when it stopped, its end in whyTail when it is longer, and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'The words of work you may not open, as task shows it, come with no credential and no private path in them. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
@@ -196,22 +286,23 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       },
       async ({ hours }) => {
         const names = await deptNames();
+        const reader = await readerOf(ctx, job.agentId);
         const failed = await db
-          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, task: tasks.number, interruption: jobs.interruption })
+          .select({ agent: agents.name, agentId: jobs.agentId, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption, sight: SIGHT })
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE)), gte(jobs.finishedAt, hoursAgo(hours))))
+          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, [...STOPPED_ON_PURPOSE, ...ENDED_UNSENT])), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
-          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt })
+          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt, sight: SIGHT })
           .from(tasks)
           .leftJoin(agents, eq(agents.id, tasks.assigneeAgentId))
           .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked')))
           .orderBy(tasks.updatedAt);
         const blocked = [];
-        for (const { id, holderId, ...task } of stuck) {
+        for (const { id, holderId, sight, ...task } of stuck) {
           /* What its holder said when it stopped, and how its last turn on it ended: enough to group causes without the task itself. */
           const [said] = await db
             .select({ text: taskEvents.text })
@@ -229,23 +320,25 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             : [];
           /* A turn that went out inside another one ended as that one did. */
           const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
-          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, lastTurn: lastTurn ?? null });
+          const open = opensTask(reader, sight);
+          blocked.push(shownAll({ ...task, ...heldWords(said, open), lastTurn: lastTurn ?? null }, open));
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>
           db
-            .select({ agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}`, at: agentEvents.createdAt, task: tasks.number })
+            .select({ agentId: agents.id, departmentId: agents.departmentId, agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}`, at: agentEvents.createdAt, task: tasks.number, sight: SIGHT })
             .from(agentEvents)
             .innerJoin(agents, eq(agents.id, agentEvents.agentId))
             .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
             .leftJoin(tasks, eq(tasks.id, jobs.taskId))
             .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
             .orderBy(desc(agentEvents.seq))
-            .limit(STUMBLES_MAX);
+            .limit(STUMBLES_MAX)
+            .then(rows => seenBy(rows, reader));
         const missing = tally<Missing>((await seen('tool_result', 'summary', MISSING_HINT)).flatMap(r => missingIn(r.text).map(m => ({ ...r, key: `${m.kind} ${m.what}`, value: m, example: lineOf(r.text, m.what) }))));
         const installed = tally<string>((await seen('tool', 'input', INSTALL_HINT)).flatMap(r => installsIn(r.text).map(command => ({ ...r, key: command, value: command }))));
         const stopped = await db
-          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt })
+          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt, sight: SIGHT })
           .from(requests)
           .innerJoin(agents, eq(agents.id, requests.agentId))
           .innerJoin(tasks, eq(tasks.id, requests.taskId))
@@ -253,7 +346,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .orderBy(desc(requests.createdAt))
           .limit(STOPS_MAX);
         const stops = [];
-        for (const { agentId, taskId, at, ...stop } of stopped) {
+        for (const { agentId, taskId, at, sight, ...stop } of stopped) {
           /* The turn it asked from, or the last one it ended without moving the task. */
           const [last] = await db
             .select({ result: jobs.result, tail: jobs.tail })
@@ -261,10 +354,11 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), inArray(jobs.status, ['done', 'failed']), sql`coalesce(${jobs.startedAt}, ${jobs.createdAt}) <= ${at}`))
             .orderBy(desc(sql`coalesce(${jobs.startedAt}, ${jobs.createdAt})`))
             .limit(1);
-          stops.push({ ...stop, lastTurn: last ? (last.result?.trim() || last.tail).slice(-TAIL) : null });
+          const open = opensTask(reader, sight);
+          stops.push(shownAll({ ...stop, lastTurn: turnEnd(last, open) }, open));
         }
         return json({
-          failed: failed.map(({ departmentId, tail, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL) })),
+          failed: failed.map(row => failedLine(row, reader, names)),
           blocked,
           missing: missing.map(({ value, ...m }) => ({ ...value, ...m })),
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip unused tally example field
@@ -374,7 +468,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           : say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
       if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
       const state = await agentState(ctx, target.id);
-      if (!state.ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
+      if (!state.ready) return say(await cannotRun(ctx, me, target, state.reason), true);
       if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {

@@ -10,4 +10,6 @@ Work comes to you as tasks: Hornhoof wakes you with a task's number and why. Rea
 
 What your department and your product keep for their agents, their way of working and the repositories with branch, rules and commit author, you read with "briefing": when you start on their work, and again when you need it. Your messages do not repeat it. A task works in its product's repository, else the department's own; each is cloned in your folder beside the others, in the folder "briefing" names.
 
+Earlier work of your department may wait in its repository outside main: "task" lists in departmentBranches the branches of its accepted and handed-in tasks not in main yet, and work that goes on from one starts from that branch. A machine that is off stops no work kept in the repository: while a plan of your department is online, go on, and never tell a person the work stands because a machine is off.
+
 When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.

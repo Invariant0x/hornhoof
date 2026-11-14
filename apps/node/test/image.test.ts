@@ -78,6 +78,14 @@ describe('the node image', () => {
     expect(layer).toMatch(/&& unzip -v(?:\s|$)/);
   });
 
+  it('installs zip beside unzip, and PyYAML, pip and pytest for Python, and fails the build if any of them does not run', () => {
+    for (const name of ['zip', 'python3-yaml', 'python3-pip', 'python3-pytest']) expect(installed).toContain(name);
+    const layer = runtime.slice(runtime.indexOf('RUN apt-get update'), runtime.indexOf('\nCOPY --from=quality'));
+    for (const command of ['zip -v', "python3 -c 'import yaml'", 'python3 -m pip --version', 'python3 -m pytest --version']) {
+      expect(layer).toContain(`&& ${command} `);
+    }
+  });
+
   it('installs the GitHub CLI in the runtime stage at a pinned version with verified per-arch SHA-256 and checks gh --version', () => {
     const version = runtime.match(/ARG GH_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
     const amd64Sha = runtime.match(/ARG GH_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];
@@ -125,6 +133,15 @@ describe('the node image', () => {
     expect(credit).toContain('| MIT |');
     expect(credit).not.toMatch(/shipped|word for word|plugin|node image/i);
     expect(sources).not.toMatch(/carries obra\/superpowers/i);
+  });
+
+  it("gives every agent hh-browse, which drives the image's own Playwright and Chromium and installs nothing", () => {
+    expect(runtime).toContain('COPY --chmod=755 apps/node/hh-browse.cjs /usr/local/bin/hh-browse');
+    expect(runtime.indexOf('COPY --chmod=755 apps/node/hh-browse.cjs')).toBeGreaterThan(runtime.indexOf('COPY --from=build /app/apps/node/dist apps/node/dist'));
+    const launcher = readFileSync(new URL('../hh-browse.cjs', import.meta.url), 'utf8');
+    expect(launcher).toMatch(/^#!\/usr\/bin\/env node\n/);
+    expect(launcher).toContain('/app/apps/node/dist/web-page/cli.js');
+    expect(launcher).not.toMatch(/npm|npx|install/);
   });
 
   it('installs full Playwright Chromium, Firefox and WebKit at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {

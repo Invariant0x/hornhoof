@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from './api';
 import { errorText, useT } from './i18n';
+import { forgetOrg } from './org';
+import { forgetRequestDrafts } from './ui/Requests';
 import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
@@ -27,22 +29,40 @@ export function App() {
   );
 }
 
+/* Whoever comes on this tab next sees nothing of the company the one before saw, however they came: the company leaves
+   every screen, with the answers still on their way for it, and so do the answers the one before typed and did not
+   send, before the next screen draws. */
+function useScreen() {
+  const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  const person = useRef<string | null>(null);
+  const show = useCallback((next: Screen) => {
+    const id = next.kind === 'shell' ? next.me.person.id : null;
+    if (id !== person.current) {
+      forgetOrg();
+      forgetRequestDrafts();
+    }
+    person.current = id;
+    setScreen(next);
+  }, []);
+  return [screen, show] as const;
+}
+
 function Screens() {
   const t = useT();
-  const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  const [screen, show] = useScreen();
 
   const decide = useCallback(async (welcome = false) => {
     const route = parseRoute(window.location.pathname);
-    if (route.kind === 'invite') return setScreen({ kind: 'invite', token: route.token });
+    if (route.kind === 'invite') return show({ kind: 'invite', token: route.token });
     try {
       const { needed, linkDomain } = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
-      if (needed) return setScreen({ kind: 'setup', linkDomain });
-      setScreen({ kind: 'shell', me: await api.get<Me>('/api/me'), welcome });
+      if (needed) return show({ kind: 'setup', linkDomain });
+      show({ kind: 'shell', me: await api.get<Me>('/api/me'), welcome });
     } catch (err) {
-      if (err instanceof ApiFailure && err.status === 401) return setScreen({ kind: 'login' });
-      setScreen({ kind: 'error', failure: err });
+      if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
+      show({ kind: 'error', failure: err });
     }
-  }, []);
+  }, [show]);
 
   useEffect(() => {
     void decide();
@@ -66,7 +86,8 @@ function Screens() {
     case 'login':
       return <Login onDone={() => void decide()} />;
     case 'shell':
-      return <Shell me={screen.me} welcome={screen.welcome} onSignOut={() => void decide()} />;
+      /* Each person gets screens of their own: nothing the one before drew stays on them. */
+      return <Shell key={screen.me.person.id} me={screen.me} welcome={screen.welcome} onSignOut={() => void decide()} />;
     case 'error':
       return (
         <Card>

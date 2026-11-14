@@ -161,7 +161,14 @@ describe('Claude Code in a terminal', () => {
       /* Claude Code alone renews its token while it runs; one that ran out would only be refused. */
       signIn('claude-access-2', Date.now() - 60_000);
       expect(await claudePlanLimits(home, base)).toBeNull();
-      expect(asked).toEqual(['/api/oauth/usage Bearer claude-access-1 oauth-2025-04-20']);
+      /* A plan signed in from Hornhoof keeps its one-year token in claude-oauth-token instead of .credentials.json. */
+      const longToken = 'sk-ant-oat01-' + 'd'.repeat(40);
+      writeFileSync(join(home, 'claude-oauth-token'), longToken + '\n', { mode: 0o600 });
+      expect(await claudePlanLimits(home, base)).toMatchObject({ status: 'allowed', complete: true });
+      expect(asked).toEqual([
+        '/api/oauth/usage Bearer claude-access-1 oauth-2025-04-20',
+        `/api/oauth/usage Bearer ${longToken} oauth-2025-04-20`,
+      ]);
     } finally {
       server.close();
     }

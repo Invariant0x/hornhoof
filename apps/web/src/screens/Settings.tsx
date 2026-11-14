@@ -6,6 +6,7 @@ import { errorText, useT } from '../i18n';
 import type { Me } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { CompanyGoogleSheets } from '../ui/GoogleSheets';
 import { CompanyRepoHost } from '../ui/RepoHost';
 import { useDialogClose } from '../ui/use-dialog-close';
 
@@ -120,6 +121,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
         <CompanyRepoHost />
+        <CompanyGoogleSheets />
       </div>
     </div>
   );

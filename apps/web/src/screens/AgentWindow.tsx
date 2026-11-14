@@ -193,6 +193,17 @@ function computerLine(t: Messages, language: Language, e: EventView): string {
   }
 }
 
+/* What an agent said, and the files it attached: a file sent on its own comes without words. */
+function AgentWords({ data }: { data: unknown }) {
+  const text = field(data, 'text');
+  return (
+    <>
+      {text ? <Markdown text={text} /> : null}
+      <SentPictures data={data} />
+    </>
+  );
+}
+
 function TodoLine({ todo }: { todo: Todo }) {
   return (
     <div className="t-l t-plan">
@@ -631,7 +642,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       case 'text':
         return (
           <ChatEntry side="agent" who={agentName} at={e.at}>
-            <Markdown text={field(e.data, 'text')} />
+            <AgentWords data={e.data} />
           </ChatEntry>
         );
       case 'applied':

@@ -36,9 +36,38 @@ describe('templates', () => {
     for (const role of roles.filter(r => /we test our program/.test(r.body))) expect(role.body, role.id).toMatch(/on virtual time only\.$/);
   });
 
+  it('keeps a shared machine, its shared browsers and a stale preparation from costing a check', () => {
+    const policy = body('dev-testing-policy');
+    expect(policy).toMatch(/Stop only processes you started, by their process id[\s\S]*`pkill`[\s\S]*other employees' checks/);
+    expect(policy).toMatch(/shared browser folder[\s\S]*may be read-only: never install into it[\s\S]*run its test runner directly/);
+    expect(policy).toMatch(/check out another commit or make a worktree[\s\S]*stale preparation, not a failed check/);
+  });
+
+  it('turns a missing command into a step within the access an employee has, and a failed write into a read before it is repeated', () => {
+    const flow = body('hh-task-flow');
+    expect(flow).toMatch(/`sudo: command not found`, is no reason to install it or to get around the limit[\s\S]*own user[\s\S]*goes to your head/);
+    expect(flow).toMatch(/A write that Hornhoof answered with 502, 503 or 504 may have gone through: read whether it did before you repeat it/);
+  });
+
+  it('waits again after a comment or a message ended the wait before what it waits for came', () => {
+    expect(body('hh-task-flow')).toMatch(/A comment or a message on the task ends your wait too[\s\S]*call "wait_for" again/);
+  });
+
+  it('connects a repository only once its branch holds a commit', () => {
+    expect(body('orch-resources')).toMatch(/only once its branch exists with at least one commit[\s\S]*git ls-remote --heads[\s\S]*stops every turn of that department/);
+  });
+
+  it("lets the program operator clear a menu without a cursor and a program's own offers, keeping the session", () => {
+    const operator = body('ops-program-operator');
+    expect(operator).toMatch(/no cursor takes no Enter yet: press an arrow key, look again[\s\S]*then press Enter alone/);
+    expect(operator).toMatch(/offer of the program itself[\s\S]*never Escape[\s\S]*compact and go on in the same session/);
+    expect(operator).toMatch(/no_hold answer on an open case lifts and closes nothing[\s\S]*tell_orchestrator/);
+    expect(body('ops-failure-review')).toMatch(/reasons Hornhoof recorded, the end of each blocked reason/);
+  });
+
   it('makes each ability self-contained instead of relying on another selected skill', () => {
     const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch'].includes(ref)), skill.id).toEqual([]);
+    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch', 'hh-browse', 'hh-xlsx'].includes(ref)), skill.id).toEqual([]);
   });
 
   it('keeps small work proportionate without waiving gates or permissions', () => {
@@ -302,7 +331,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(54);
-    expect(skills).toHaveLength(180);
+    expect(skills).toHaveLength(182);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -371,12 +400,12 @@ describe('templates', () => {
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
-    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
+    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
     expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
@@ -1722,5 +1751,34 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(steady.parts.map(part => part.kind)).toEqual(['base', 'assignment', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
     expect(steady.parts[0]!.text).toBe(ORCHESTRATOR_INSTRUCTIONS);
     for (const id of ORCHESTRATOR_SKILLS) expect(steady.parts.filter(part => part.id === id)).toHaveLength(1);
+  });
+
+  it('includes hh-tables in CORE_SKILLS and ORCHESTRATOR_SKILLS, forbids refusing spreadsheet delivery, and keeps DEV-HEAD within limits', () => {
+    expect(CORE_SKILLS).toContain('hh-tables');
+    const skill = templates.skills.get('hh-tables');
+    expect(skill).toBeDefined();
+    expect(skill!.title.en.length).toBeGreaterThan(3);
+    expect(skill!.title.ru.length).toBeGreaterThan(3);
+    expect(skill!.description.en.length).toBeGreaterThan(10);
+    expect(skill!.description.ru.length).toBeGreaterThan(10);
+    expect(skill!.body).toContain('hh-xlsx');
+    expect(skill!.body).toContain('hh-attach');
+    expect(skill!.body).toContain('send_telegram_file');
+    expect(skill!.body).toContain('create_google_sheet');
+    expect(skill!.body).toMatch(/error/i);
+    expect(skill!.body).toMatch(/no such capability|cannot generate files/i);
+    expect(skill!.body).not.toMatch(/ArSpatially|Ivan|David/i);
+    expect(skill!.body).not.toContain('\u2014');
+    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u0451');
+    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u2014');
+
+    for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
+      const role = templates.roles.get(roleId)!;
+      const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
+      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
+      expect(rendered.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+      expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    }
+    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
   });
 });

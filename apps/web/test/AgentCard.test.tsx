@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import type { AgentCardView } from '../src/types';
+import type { AgentCardView, SubView } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
-import { CARD, mockApi, TEAM_KEY } from './api-mock';
+import { CARD, mockApi, SUBS, TEAM_KEY } from './api-mock';
 
 function open(routes: Record<string, unknown> = {}) {
   const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
@@ -30,6 +30,15 @@ const assignmentCard = (assignment = '', skill = 'Write the test first.') => {
 };
 
 describe('AgentCard', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('says the orchestrator made a change, and what it was', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [{ field: 'switch', personName: null, byOrchestrator: true, at: '2026-10-30T09:00:00.000Z' }] }] });
     expect(await screen.findByText(/^Switched on or off: Orchestrator, /)).toBeInTheDocument();
@@ -64,11 +73,6 @@ describe('AgentCard', () => {
 
   it('shows the latest failed turn under the state in English and Russian, with tooltip and collapsed details clipped to 300 characters', async () => {
     /* The card's clock stands on one day, so 14:02 is today whenever the test runs. */
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
     const at = new Date(2026, 10, 3, 14, 2).getTime();
     const rawText = `529 Overloaded: ${'x'.repeat(340)}`;
     const clipped = `${rawText.slice(0, 299)}…`;
@@ -106,12 +110,12 @@ describe('AgentCard', () => {
   });
 
   it('shows the stale reason and says when the program gave no output in English and Russian', async () => {
-    const at = new Date().setHours(14, 2, 0, 0);
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
     const text = 'Stale queued wake. Program state: not started. Last sign of life: no data.';
     for (const [lang, noOutput] of [['en', 'No output.'], ['ru', 'Вывода не было.']] as const) {
       localStorage.setItem('hh-lang', lang);
       open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'unknown', text, at, tail: 'No output.' } }] });
-      const summary = await screen.findByText(/Last turn failed|Последний ход не удался/);
+      const summary = await screen.findByText(/Last turn failed at 14:02|Последний ход не удался в 14:02/);
       const details = summary.closest('details');
       expect(details?.querySelector('pre')).toHaveTextContent(text);
       expect(details).toHaveTextContent(noOutput);
@@ -121,7 +125,7 @@ describe('AgentCard', () => {
   });
 
   it('shows an obsolete wake calmly in English and Russian without a failure', async () => {
-    const at = new Date().setHours(14, 2, 0, 0);
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
     for (const [lang, expected] of [
       ['en', 'Wake-up became obsolete: the task moved on'],
       ['ru', 'Побудка устарела: задача ушла дальше'],
@@ -137,12 +141,6 @@ describe('AgentCard', () => {
   });
 
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
-
     const todayAt = new Date(2026, 10, 3, 14, 2).getTime();
     const twoDaysAgoAt = new Date(2026, 10, 1, 14, 2).getTime();
 
@@ -412,9 +410,8 @@ describe('AgentCard', () => {
     ['ru', 'Лимиты', 'Неизвестно, последние данные от 21:44'],
   ])('shows stale Antigravity limits as unknown in the agent card in %s', async (language, heading, words) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
-    onTestFinished(() => { vi.useRealTimers(); localStorage.removeItem('hh-lang'); });
+    onTestFinished(() => { localStorage.removeItem('hh-lang'); });
     const antigravity = {
       ...TEAM_KEY,
       kind: 'personal' as const,
@@ -705,5 +702,58 @@ describe('AgentCard assignment', () => {
     expect(await screen.findByRole('textbox', { name: 'Assignment' })).toHaveValue('Maintain billing.');
     expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+});
+
+describe('an employee whose machine is offline', () => {
+  const DEV_PLACE = { kind: 'department' as const, id: 'd2', name: 'Development' };
+  const HOME: SubView = { ...SUBS[0]!, id: 's-home', owner: { id: 'p5', name: 'Luiza' }, online: false, place: DEV_PLACE, machines: [{ id: 'm5', hostname: 'Marselle', status: 'ready', online: false }] };
+  const SPARE: SubView = { ...SUBS[0]!, id: 's-spare', owner: { id: 'p6', name: 'Max' }, online: true, place: DEV_PLACE };
+  const ASLEEP: SubView = { ...SPARE, id: 's-asleep', owner: { id: 'p7', name: 'Nora' }, online: false };
+  const NOT_SIGNED_IN: SubView = { ...SPARE, id: 's-login', owner: { id: 'p8', name: 'Pavel' }, status: 'needs_login' };
+  const WHOLE_COMPANY: SubView = { ...SPARE, id: 's-ceo', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Acme' } };
+  const SINCE = '2026-11-13T18:07:00.000Z';
+  const offlineCard = (runsOn: SubView[] = [HOME, SPARE, ASLEEP, NOT_SIGNED_IN, WHOLE_COMPANY], over: Partial<AgentCardView> = {}): AgentCardView => ({
+    ...CARD, subscription: HOME, offline: { hostname: 'Marselle', since: SINCE }, runsOn: runsOn.map(subscription => ({ subscription, models: [] })), ...over,
+  });
+  const at = (locale: string) => new Date(SINCE).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' });
+
+  it('says which machine is offline and since when, in English and Russian', async () => {
+    for (const [lang, line] of [['en', `Machine Marselle is offline since ${at('en-GB')}.`], ['ru', `Машина Marselle не в сети с ${at('ru-RU')}.`]] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, offlineCard()] });
+      expect(await screen.findByText(line)).toBeInTheDocument();
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+    open({ 'GET /api/agents/b1': [200, { ...offlineCard(), offline: { hostname: 'Marselle', since: null } }] });
+    expect(await screen.findByText('Machine Marselle is offline.')).toBeInTheDocument();
+  });
+
+  it('moves it in one click to a plan of its own department that is online and signed in, and offers no other plan', async () => {
+    const { calls } = open({ 'GET /api/agents/b1': [200, offlineCard()], 'PATCH /api/agents/b1': [200, { ...CARD, subscription: SPARE, offline: null }] });
+    const moves = await screen.findAllByRole('button', { name: /^Move to / });
+    expect(moves.map(b => b.textContent)).toEqual(['Move to Claude, Max']);
+    await userEvent.click(moves[0]!);
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([{ subscription: 's-spare' }]));
+    await vi.waitFor(() => expect(screen.queryByText(/^Machine Marselle is offline/)).not.toBeInTheDocument());
+  });
+
+  it('says so when no other plan of its department is online, and offers no move to someone who only sees the card', async () => {
+    open({ 'GET /api/agents/b1': [200, offlineCard([HOME, ASLEEP, WHOLE_COMPANY])] });
+    expect(await screen.findByText('No other plan of this department is online now.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
+    cleanup();
+    open({ 'GET /api/agents/b1': [200, offlineCard(undefined, { canEdit: false })] });
+    expect(await screen.findByText(/^Machine Marselle is offline since/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
+    expect(screen.queryByText('No other plan of this department is online now.')).not.toBeInTheDocument();
+  });
+
+  it('says nothing of a machine while it is online', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...offlineCard(), offline: null }] });
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByText(/is offline/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
   });
 });

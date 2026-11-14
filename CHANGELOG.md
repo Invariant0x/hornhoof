@@ -5,6 +5,85 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.23.6] - 2026-11-14
+
+Agents give people tables as real files and read pages that scripts build, a department's unfinished branches and
+offline machines no longer stop its work, and nodes that hang or stop are brought back.
+
+### Before you update
+
+- Migration 0106 adds an empty table `google_sheets` for a company's Google key. Nothing is moved, and 0.23.5 runs on
+  the database with it, so going back stays safe.
+- The node image now carries `hh-browse`, `hh-xlsx`, zip, PyYAML, pip and pytest, so it is larger.
+
+### Added
+
+- Any agent hands a person a table as an `.xlsx` or `.csv` file in the task card or the chat, sends it to a person's
+  Telegram, or makes a Google Sheet once a person who may change the whole company saved a Google key in Company
+  settings. Without a key the agent says what to connect and attaches the `.xlsx`. A file goes only to an active person
+  of the same company who may see it.
+- Agents of every department read pages that scripts build with `hh-browse`, in the node's own browser, and only public
+  addresses. A sign-in or a robot check is noted for a person, never got past.
+- The task view lists a department's branches of accepted and handed-in tasks that are not in main, so work goes on from
+  them.
+- The agent and task cards name an employee's machine that is offline, and the employee moves to an online plan of its
+  department in one click.
+- A file dropped into an agent's window is attached to the chat instead of opening in a tab.
+
+### Changed
+
+- Shared skills and tool descriptions say what to do about a missing command, a write answered with 502, 503 or 504, a
+  message that ends a wait, and full compact windows. The company view says which employees have text of their own over
+  their role's.
+- `failures` and `agents` show another department's blocked and failed work without its credentials or private paths.
+- The orchestrator and heads hire, build and run their department in any turn of theirs for the last person who wrote
+  to them, with that person's rights as they are now, so an answer that comes in a later turn no longer makes them ask
+  the person to write again. The orchestrator installs a Hornhoof version the CEO or the delegate asked for in a later
+  turn too. A person's own decisions, such as people, access, keys, plans, budgets and approval policy, still need the
+  turn that answers that person.
+
+### Fixed
+
+- The map of a company of about 120 agents stays on screen while the server is slow, and a tab another person comes to
+  no longer shows the company or the unsent answers of the one before.
+- A node that is silent or stuck is updated without waiting forever, a stopped node is started again, and the updater
+  ends the processes it left behind.
+- Claude plans show their full limits again.
+- The terminal keeps the reader's place when a program leaves its alternate screen.
+- Operations hears of a plan hold once, and a department whose task is paused with a reason is no longer called quiet.
+
+### Russian
+
+Агенты отдают людям таблицы настоящими файлами и читают страницы, которые строят скрипты; незавершенные ветки отдела и
+выключенные машины больше не останавливают его работу, а зависшие и остановленные узлы поднимаются снова.
+
+- Перед обновлением: миграция 0106 добавляет пустую таблицу `google_sheets` для ключа Google компании. Ничего не
+  переносится, 0.23.5 работает с этой базой, так что откат безопасен. Образ узла теперь содержит `hh-browse`, `hh-xlsx`,
+  zip, PyYAML, pip и pytest и поэтому больше.
+- Любой агент отдает человеку таблицу файлом `.xlsx` или `.csv` в карточке задачи или в чате, отправляет ее в Telegram
+  человека или создает Google-таблицу, когда человек с правом на всю компанию сохранил ключ Google в настройках компании.
+  Без ключа агент говорит, что подключить, и прикладывает `.xlsx`. Файл получает только активный человек той же
+  компании, которому его можно видеть.
+- Агенты всех отделов читают страницы, которые строят скрипты, через `hh-browse` в браузере узла и только по публичным
+  адресам. Вход или проверку на робота агент отмечает для человека и не обходит.
+- Задача показывает ветки принятых и сданных задач отдела, которых нет в main, и работа продолжается от них.
+- Карточки агента и задачи называют выключенную машину сотрудника, а перевод на работающую подписку отдела делается
+  одним нажатием.
+- Файл, брошенный в окно агента, прикладывается к чату, а не открывается во вкладке.
+- Общие навыки и описания инструментов говорят, что делать при отсутствующей команде, записи с ответом 502, 503 или
+  504, сообщении, которое завершает ожидание. Вид компании показывает, у каких сотрудников свой текст поверх роли.
+- `failures` и `agents` показывают заблокированную и упавшую работу другого отдела без ключей и личных путей.
+- Оркестратор и главы нанимают, строят и ведут свой отдел в любом своем ходе для последнего человека, который им
+  написал, с его нынешними правами, так что ответ, пришедший в следующем ходе, больше не заставляет просить человека
+  написать снова. Оркестратор ставит версию Hornhoof, о которой просил CEO или его делегат, и в следующем ходе. Решения
+  самого человека (люди, доступы, ключи, подписки, бюджеты, правила одобрения) по-прежнему требуют хода, который
+  отвечает этому человеку.
+- Карта компании примерно из 120 агентов держится на экране при медленном сервере, а вкладка, на которую пришел другой
+  человек, больше не показывает компанию и неотправленные ответы предыдущего.
+- Зависший или молчащий узел обновляется без бесконечного ожидания, остановленный запускается снова, а обновлятор
+  завершает оставленные им процессы. Подписки Claude снова показывают полные лимиты. Терминал сохраняет место чтения,
+  когда программа выходит из альтернативного экрана.
+
 ## [0.23.5] - 2026-11-13
 
 Each department runs turns of its own, so the work of one department no longer waits for another's or piles up in one

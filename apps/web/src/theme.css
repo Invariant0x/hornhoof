@@ -155,6 +155,8 @@ select:disabled { opacity: .55; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
 /* A switch with its line and a hint under it, like opening Hornhoof on the internet. */
+.dv-branches li { display: grid; gap: 2px; min-width: 0; }
+.dv-branches b, .dv-branches code { overflow-wrap: anywhere; }
 .card label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
 .card label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
 .card label.check span, .dv-list label.check span { display: grid; gap: 2px; }
@@ -1145,9 +1147,11 @@ body:has(.dview) .version-mark { display: none; }
 .new-task textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
 .new-task textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 /* A repository at the side: its address, branch and token ending, changed in place. */
-.repo, .repo-form { display: grid; gap: 6px; justify-items: start; }
+.repo, .repo-form { display: grid; gap: 6px; justify-items: start; min-width: 0; }
 .repo-form { gap: 10px; justify-items: stretch; }
-.repo p { margin: 0; font-size: 13px; }
+.repo p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.repo-form textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
+.repo-form textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .repo-url { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .repo-command { overflow-wrap: anywhere; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
@@ -1189,6 +1193,9 @@ body:has(.dview) .version-mark { display: none; }
 .ac-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .ac-state .ast { flex: 0 1 auto; max-width: 100%; box-sizing: border-box; white-space: normal; }
 .ac-failure { max-width: 100%; font-size: 12.5px; color: var(--pink-ink); }
+.offline-plan { display: grid; gap: 8px; min-width: 0; }
+.offline-moves { display: flex; flex-wrap: wrap; gap: 8px; }
+.offline-moves .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
 .ac-obsolete { max-width: 100%; font-size: 12.5px; color: var(--muted); }
 .ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
 .ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }

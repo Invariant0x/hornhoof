@@ -359,6 +359,79 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).queryByRole('button', { name: /Run a test/ })).not.toBeInTheDocument();
   });
 
+  it.each([
+    [
+      'en',
+      'Not on this plan',
+      'Machine offline',
+      'On Marselle. Its agents wait until the machine is back online.',
+      'Machine offline, last data from 05:22 PM',
+      'Machine offline, no limit data yet',
+    ],
+    [
+      'ru',
+      'Нет у этого тарифа',
+      'Машина не в сети',
+      'На Marselle. Ее агенты ждут, пока машина снова подключится.',
+      'Машина не в сети, последние данные от 17:22',
+      'Машина не в сети, данных о лимитах еще не было',
+    ],
+  ] as const)('says in %s when a machine is offline instead of Unknown, and Not on this plan for a complete single-window Claude plan', async (language, notOnPlan, offlineState, offlineLine, offlineWithData, offlineNoData) => {
+    localStorage.setItem('hh-lang', language);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-13T21:06:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const ivanClaude: SubView = {
+      ...SUBS[0]!,
+      id: 's-ivan',
+      machines: [{ id: 'm-ivan', hostname: '0xs-MacBook-Pro.local', status: 'ready', online: true }],
+      limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-16T21:00:00.000Z' }], complete: true },
+      limitsUpdatedAt: '2026-11-13T21:02:00.000Z',
+    };
+    const luizaClaude: SubView = {
+      ...SUBS[0]!,
+      id: 's-luiza',
+      owner: { id: 'p-luiza', name: 'Luiza' },
+      online: false,
+      machines: [{ id: 'm-luiza', hostname: 'Marselle', status: 'ready', online: false }],
+      limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.45, resetsAt: '2026-11-16T21:00:00.000Z' }], complete: true },
+      limitsUpdatedAt: '2026-11-13T17:22:00.000Z',
+    };
+    const maxCodex: SubView = {
+      ...SUBS[0]!,
+      id: 's-max',
+      provider: 'codex',
+      label: 'Codex',
+      owner: { id: 'p-max', name: 'Max' },
+      online: false,
+      machines: [{ id: 'm-max', hostname: 'DESKTOP-AB84Q08', status: 'ready', online: false }],
+      limits: null,
+      limitsUpdatedAt: null,
+    };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ivanClaude, luizaClaude, maxCodex] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    const rows = await screen.findAllByRole('row');
+    const luizaRow = rows.find(r => r.textContent?.includes('Luiza'))!;
+    expect(within(luizaRow).getByText(offlineState)).toBeInTheDocument();
+    expect(within(luizaRow).getAllByText(offlineWithData)).toHaveLength(2);
+    expect(luizaRow.textContent).not.toMatch(/Unknown,|Неизвестно,/);
+    const maxRow = rows.find(r => r.textContent?.includes('Max'))!;
+    expect(within(maxRow).getAllByText(offlineNoData)).toHaveLength(2);
+    const ivanRow = rows.find(r => r.textContent?.includes('Ivan'))!;
+    expect(within(ivanRow).getByText(notOnPlan)).toBeInTheDocument();
+
+    openCards();
+    const luizaCard = screen.getByRole('article', { name: 'Claude, Luiza' });
+    expect(luizaCard.querySelector('.stline')).toHaveTextContent(`${offlineState}${offlineLine}`);
+    expect(meterRows(luizaCard).map(m => m.textContent)).toEqual([
+      `${language === 'en' ? '5 hours' : '5 часов'}${offlineWithData}`,
+      `${language === 'en' ? '7 days' : '7 дней'}${offlineWithData}`,
+    ]);
+    const ivanCard = screen.getByRole('article', { name: 'Claude, Ivan' });
+    expect(meterRows(ivanCard)[0]).toHaveTextContent(notOnPlan);
+    expect(meterRows(ivanCard)[1]).toHaveTextContent('96%');
+  });
+
   it('refreshes on its own, so a node that signs in turns Ready without a reload', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     onTestFinished(() => {

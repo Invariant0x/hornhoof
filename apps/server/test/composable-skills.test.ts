@@ -7,10 +7,10 @@ import { loadTemplates } from '../src/modules/templates/load.js';
 const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
 
 describe('standalone employee abilities', () => {
-  it("keeps work that calls Hornhoof's tools inside the answer, never with a helper left running after it", () => {
+  it("keeps work that calls Hornhoof's tools inside the answer, never with a helper left running after it, and never asks to write again", () => {
     const body = templates.skills.get('hh-hornhoof')!.body;
     expect(body).toMatch(/Hornhoof's tools work only until your answer ends; a helper still running then, such as a background agent, loses them\./);
-    expect(body).toMatch(/Finish work that calls them in this answer, yourself or with helpers you wait for; never stop halfway and ask the person to write again so you can go on\./);
+    expect(body).toMatch(/Finish work that calls them in this answer, yourself or with helpers you wait for\. A request does not end with your answer: what is yours to do you finish in a later turn of yours\. Never ask a person to write again so a tool works\./);
   });
 
   it('defines any numbered local policy label within the ability that uses it', () => {

@@ -1,7 +1,42 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 type ServerOptions = { cwd: string; publicUrl: string; invalidBoot: string };
+
+function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.killed) return Promise.resolve();
+  return new Promise<void>(done => {
+    child.once('exit', () => done());
+    child.stdin.end();
+  });
+}
+
+function readBootLine<Boot>(child: ChildProcessWithoutNullStreams, invalidBoot: string, readStderr: () => string): Promise<Boot> {
+  const lines = createInterface({ input: child.stdout });
+  return new Promise<Boot>((resolveBoot, rejectBoot) => {
+    const onError = (err: Error) => finish(() => rejectBoot(err));
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+      finish(() => rejectBoot(new Error(`Real server exited early (${code ?? signal}):\n${readStderr()}`)));
+    const finish = (fn: () => void) => {
+      child.off('error', onError);
+      child.off('exit', onExit);
+      lines.close();
+      child.stdout.resume();
+      fn();
+    };
+    lines.once('line', line => {
+      try {
+        const parsed = JSON.parse(line) as Boot;
+        finish(() => resolveBoot(parsed));
+      } catch (err) {
+        finish(() => rejectBoot(new Error(`${invalidBoot}: ${line} (${String(err)})\n${readStderr()}`)));
+        child.kill();
+      }
+    });
+    child.once('error', onError);
+    child.once('exit', onExit);
+  });
+}
 
 export async function startServer<Boot>(script: string, { cwd, publicUrl, invalidBoot }: ServerOptions): Promise<Boot & { stop: () => Promise<void> }> {
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
@@ -13,26 +48,6 @@ export async function startServer<Boot>(script: string, { cwd, publicUrl, invali
   child.stderr.on('data', chunk => {
     stderr += String(chunk);
   });
-  const lines = createInterface({ input: child.stdout });
-  const boot = await new Promise<Boot>((resolveBoot, rejectBoot) => {
-    lines.once('line', line => {
-      try {
-        resolveBoot(JSON.parse(line) as Boot);
-      } catch (err) {
-        rejectBoot(new Error(`${invalidBoot}: ${line} (${String(err)})\n${stderr}`));
-      }
-    });
-    child.once('exit', code => {
-      rejectBoot(new Error(`Real server exited early (${code}):\n${stderr}`));
-    });
-  });
-  return {
-    ...boot,
-    stop: () =>
-      new Promise<void>(done => {
-        if (child.exitCode !== null) return done();
-        child.once('exit', () => done());
-        child.stdin.end();
-      }),
-  };
+  const boot = await readBootLine<Boot>(child, invalidBoot, () => stderr);
+  return { ...boot, stop: () => stopChild(child) };
 }

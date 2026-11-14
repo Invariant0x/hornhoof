@@ -51,7 +51,7 @@ import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
 import { harnessRoutes } from './modules/testruns/harness.js';
-import { readCommit, type CommitReader } from './modules/testruns/refs.js';
+import { readBranches, readCommit, type BranchReader, type CommitReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
@@ -66,13 +66,15 @@ import { fromOwnPages } from './auth/origin.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
+import { readCompare, readMerged, readTree, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
+import { googleSheetsRoutes } from './modules/google/routes.js';
+import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; createRepository?: RepositoryCreator; templates?: Templates };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -84,6 +86,8 @@ export type Ctx = Deps & {
   markCommit: CommitMarker;
   /* Creates a repository on a git host with a key the company saved. */
   createRepository: RepositoryCreator;
+  /* Creates a spreadsheet on Google Sheets with a key the company saved. */
+  createSpreadsheet: SpreadsheetCreator;
   log: FastifyBaseLogger;
   hub: NodeHub;
   bus: EventBus;
@@ -112,7 +116,21 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, createRepository: createOnGitHub(), ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = {
+    startedAt: new Date(),
+    readCommit,
+    markCommit,
+    readCompare,
+    readTree,
+    readBranches,
+    readMerged,
+    createRepository: createOnGitHub(),
+    createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
+    ...deps,
+    log: app.log,
+    bus: new EventBus(),
+    terminals: new TerminalRelay(),
+  } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
@@ -209,6 +227,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   linkRoutes(app, ctx);
   outboundRoutes(app, ctx);
   telegramRoutes(app, ctx);
+  googleSheetsRoutes(app, ctx);
   assistantRoutes(app, ctx);
   assistantMcpRoutes(app, ctx);
   return app;

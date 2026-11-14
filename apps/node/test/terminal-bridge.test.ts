@@ -25,9 +25,75 @@ async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen, server };
 }
 
+/* Hornhoof behind its proxy in a short outage: it answers with these statuses first, then as usual. */
+async function outage(statuses: number[]): Promise<{ url: string; seen: string[]; server: Server }> {
+  const seen: string[] = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', c => (body += c));
+    req.on('end', () => {
+      seen.push(`${req.method} ${req.url} ${body}`);
+      const status = statuses.shift() ?? 200;
+      res.writeHead(status, { 'content-type': 'application/json', 'x-file-name': 'run.log' });
+      res.end(status === 200 ? JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }) : 'Bad Gateway');
+    });
+  });
+  await listenIn(server);
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen, server };
+}
+
+/* A tool call, or a batch of them. */
+const toolCall = (...names: string[]) => {
+  const calls = names.map((name, i) => ({ jsonrpc: '2.0', id: i + 1, method: 'tools/call', params: { name, arguments: {} } }));
+  return JSON.stringify(calls.length === 1 ? calls[0] : calls);
+};
+
 describe("the node's bridge to Hornhoof's tools", () => {
   const closers: (() => void)[] = [];
   afterEach(() => { vi.useRealTimers(); closers.splice(0).forEach(c => c()); });
+
+  /* The bridge's pauses between tries, taken on no clock: each one is only written down. */
+  async function bridgeTo(statuses: number[]) {
+    const up = await outage(statuses);
+    const pauses: number[] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { pause: async ms => { pauses.push(ms); } });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const a = bridge.agent('agent-1');
+    const post = (body: string) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    return { up, pauses, a, post };
+  }
+
+  it('asks Hornhoof again after growing pauses when a short outage answers a call that only reads, or a file asked for', async () => {
+    const read = await bridgeTo([502, 503]);
+    const answer = await read.post(toolCall('test_run'));
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    expect(read.up.seen).toHaveLength(3);
+    expect(read.pauses).toEqual([1_000, 2_000]);
+
+    const file = await bridgeTo([504]);
+    const got = await fetch(`${file.a.attachUrl}/file?task=12&file=run.log`);
+    expect(got.status).toBe(200);
+    expect(got.headers.get('x-file-name')).toBe('run.log');
+    expect(file.up.seen).toEqual(['GET /api/attachments/file?task=12&file=run.log ', 'GET /api/attachments/file?task=12&file=run.log ']);
+    expect(file.pauses).toEqual([1_000]);
+  });
+
+  it('gives an outage that lasts back after a few tries, and never asks again for a call that may have changed something', async () => {
+    const lasting = await bridgeTo([502, 502, 502, 502, 502]);
+    expect((await lasting.post(toolCall('task'))).status).toBe(502);
+    expect(lasting.up.seen).toHaveLength(4);
+    expect(lasting.pauses).toEqual([1_000, 2_000, 4_000]);
+
+    for (const body of [toolCall('report'), toolCall('task', 'submit'), '{"jsonrpc":"2.0","id":1,"method":"initialize"}']) {
+      const write = await bridgeTo([502]);
+      expect((await write.post(body)).status).toBe(502);
+      expect(write.up.seen).toHaveLength(1);
+      expect(write.pauses).toEqual([]);
+    }
+  });
 
   it("hands each tool call on with the token of the agent's running turn", async () => {
     const up = await upstream();

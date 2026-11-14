@@ -43,19 +43,31 @@ export class TelegramError extends Error {
 
 type Answer = { ok?: boolean; result?: unknown; error_code?: number; description?: string; parameters?: { retry_after?: number } };
 
-export async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {
+async function postTelegram<T>(base: string, token: string, method: string, init: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${base}/bot${token}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params), signal });
+    res = await fetch(`${base}/bot${token}/${method}`, init);
   } catch {
     throw new TelegramError(null, 'Telegram could not be reached.');
   }
   const answer = (await res.json().catch(() => null)) as Answer | null;
-  if (!answer?.ok) {
-    const words = (answer?.description ?? `Telegram answered ${res.status}.`).replaceAll(token, '[token]');
-    throw new TelegramError(answer?.error_code ?? res.status, words, answer?.parameters?.retry_after ?? null);
-  }
+  if (!answer?.ok) throw refusal(res.status, answer, token);
   return answer.result as T;
+}
+
+/* What Telegram refused, in its own words without the bot's token. */
+function refusal(status: number, answer: Answer | null, token: string): TelegramError {
+  const words = (answer?.description ?? `Telegram answered ${status}.`).replaceAll(token, '[token]');
+  return new TelegramError(answer?.error_code ?? status, words, answer?.parameters?.retry_after ?? null);
+}
+
+export async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {
+  return postTelegram<T>(base, token, method, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+    signal,
+  });
 }
 
 /* How long getUpdates waits for news before it answers with none, in seconds: Telegram's own long polling. */
@@ -72,6 +84,27 @@ export const getUpdates = (base: string, token: string, offset: number, signal: 
 /* Plain text, with no formatting, so no character in an answer can break it. */
 export const sendText = (base: string, token: string, chatId: number, text: string, signal?: AbortSignal) =>
   callTelegram<unknown>(base, token, 'sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, signal);
+
+export const TELEGRAM_SEND_FILE_BYTES = 50 * 1024 * 1024;
+export const TELEGRAM_CAPTION_MAX = 1024;
+
+export async function sendDocument(
+  base: string,
+  token: string,
+  chatId: number,
+  doc: { bytes: Buffer; name: string; mediaType?: string },
+  caption?: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (!doc.bytes.length || doc.bytes.length > TELEGRAM_SEND_FILE_BYTES) {
+    throw new TelegramError(400, 'Bad Request: file must be non-empty and up to 50 MB.');
+  }
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('document', new Blob([new Uint8Array(doc.bytes)], { type: doc.mediaType ?? 'application/octet-stream' }), doc.name || 'file');
+  if (caption?.trim()) form.append('caption', splitForTelegram(caption.trim(), TELEGRAM_CAPTION_MAX)[0]!);
+  return postTelegram<unknown>(base, token, 'sendDocument', { method: 'POST', body: form, signal });
+}
 
 /* The most one Telegram message holds. */
 export const TELEGRAM_TEXT_MAX = 4096;

@@ -99,9 +99,10 @@ ARG SHELLCHECK_AMD64_SHA256=b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b4
 ARG SHELLCHECK_ARM64_SHA256=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
+# zip packs what unzip unpacks; python3-yaml, python3-pip and python3-pytest give Python scripts YAML, pip and the usual test runner.
 # tini runs first in the container and ends the processes left without a parent, which the node never waits for.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux tini procps util-linux unzip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux tini procps util-linux unzip zip binutils patch iproute2 time python3 python3-venv python-is-python3 python3-pil python3-yaml python3-pip python3-pytest $(cat /opt/browser-packages) \
   && install -d /usr/share/keyrings \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
   && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -117,6 +118,10 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && flock --version \
   && unzip -v \
+  && zip -v \
+  && python3 -c 'import yaml' \
+  && python3 -m pip --version \
+  && python3 -m pytest --version \
   && /usr/bin/time --version \
   && strings --version \
   && patch --version \
@@ -160,6 +165,10 @@ COPY --chmod=755 apps/node/git-askpass /app/git-askpass
 # node gives each turn its address and token.
 COPY --chmod=755 apps/node/hh-attach.cjs /usr/local/bin/hh-attach
 COPY --chmod=755 apps/node/hh-fetch.cjs /usr/local/bin/hh-fetch
+# Agents of every department read pages that scripts build with hh-browse, in the image's own Playwright and Chromium,
+# through a proxy of each call that opens only public addresses.
+COPY --chmod=755 apps/node/hh-browse.cjs /usr/local/bin/hh-browse
+COPY --chmod=755 apps/node/hh-xlsx.cjs /usr/local/bin/hh-xlsx
 # Agents run in tmux sessions; their hooks and status line tell the node how a turn goes through hh-hook.
 COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 COPY apps/node/hh-hook-send.cjs /usr/local/bin/hh-hook-send.cjs

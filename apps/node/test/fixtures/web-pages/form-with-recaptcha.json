@@ -1,0 +1,22 @@
+{
+  "title": "Contact the studio",
+  "text": "Contact the studio\n\nThe studio designs small gardens for city flats. Since 2009 it has planted more than four hundred balconies, roofs and courtyards in six cities, always with plants that need little water and little time.\n\nEach project starts with a visit: we measure the light, the wind and the weight the balcony can carry, then draw a plan with three choices of plants and pots. A plan costs nothing when you order the planting from us.\n\nPlanting takes one day for a balcony and up to a week for a courtyard. We come back after a month to see how the plants settled and replace any that did not take, at no cost.\n\nFor care through the year we offer a visit each season. The visit covers pruning, feeding and a check of the watering. Prices are on the price page.\n\nWrite to us with the form below or call during working hours. We answer every message within two working days.\n\nYour message Send",
+  "textLength": 898,
+  "links": [
+    {
+      "text": "the price page",
+      "url": "https://shop.example/prices"
+    }
+  ],
+  "linkCount": 1,
+  "frames": [],
+  "scripts": [
+    "https://www.google.com/recaptcha/api.js?render=6Lc_invisible"
+  ],
+  "markers": [
+    ".g-recaptcha",
+    "[data-sitekey]"
+  ],
+  "passwordFields": 0,
+  "height": 800
+}

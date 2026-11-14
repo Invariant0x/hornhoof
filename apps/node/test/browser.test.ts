@@ -36,7 +36,7 @@ function makeTemp(prefix = 'hh-browser-'): string {
 
 function startupToolsOnPath(missing?: string): string {
   const bin = makeTemp('hh-startup-tools-');
-  for (const name of ['unzip', 'gh', 'shellcheck', 'time', 'strings', 'patch', 'ss', 'objdump']) {
+  for (const name of ['unzip', 'zip', 'gh', 'shellcheck', 'time', 'strings', 'patch', 'ss', 'objdump']) {
     if (name === missing) continue;
     writeFileSync(join(bin, name), '#!/bin/sh\nprintf "%s\\n" "$*" > "$0.args"\necho "fixture version 1"\n', { mode: 0o755 });
   }
@@ -106,7 +106,7 @@ describe('startup tool readiness', () => {
     const bin = startupToolsOnPath();
     expect(await startupBrowserCheck(makeTemp(), null, undefined, browsersReady)).toBeNull();
     for (const [name, args] of [
-      ['unzip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
+      ['unzip', '-v'], ['zip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
       ['strings', '--version'], ['patch', '--version'], ['ss', '--version'], ['objdump', '--version'],
     ]) {
       const recorded = join(bin, `${name}.args`);
@@ -123,6 +123,15 @@ describe('startup tool readiness', () => {
       : realRunProgram({ ...options, bin: options.bin === '/usr/bin/time' ? join(bin, 'time') : options.bin }));
     expect(await startupBrowserCheck(makeTemp(), user)).toBe('ss --version timed out.');
     expect(checked.mock.calls.find(([options]) => options.bin === 'ss')?.[0]).toMatchObject({ user, timeoutMs: 30_000 });
+  });
+
+  it('names a missing zip, which packs what unzip unpacks, before preparing any browsers', async () => {
+    startupToolsOnPath('zip');
+    const dir = makeTemp();
+    const error = await startupBrowserCheck(dir, null, undefined, browsersReady);
+    expect(error).toContain('zip -v');
+    expect(error).toContain('ENOENT');
+    expect(existsSync(browsersDir(dir))).toBe(false);
   });
 
   it('refuses work when unzip is absent, before preparing any browsers', async () => {

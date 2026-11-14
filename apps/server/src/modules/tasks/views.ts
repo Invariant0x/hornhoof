@@ -14,9 +14,10 @@ import { type Task } from './engine.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
+import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 
 /* Task log text and its automatic files have the same agent readership. */
-export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
+export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
   return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
     ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id));
 }
@@ -87,6 +88,8 @@ export type TaskDetail = TaskLine & {
   files: FileView[];
   /* The newest test runs, each with the commit it pinned and whether it still proves its branch. */
   testEvidence: RunEvidence[];
+  /* The machine the plan of whoever holds the task was heard from last while none of its machines is online. */
+  assigneeOffline: OfflineMachine | null;
 };
 
 type Names = {
@@ -212,7 +215,7 @@ async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<type
 
 /* One task as people and agents read it: the body, its required route, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
-export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
+export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'> & Partial<Pick<Ctx, 'hub'>>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
   const { db } = ctx;
   const subs = (await db.select().from(tasks).where(eq(tasks.parentId, task.id)).orderBy(asc(tasks.number))).filter(sees);
   const [above] = task.parentId ? await db.select().from(tasks).where(eq(tasks.id, task.parentId)) : [];
@@ -262,7 +265,15 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     })),
     files: await fileViews(db, n, files),
     testEvidence: await taskEvidence(ctx, task),
+    assigneeOffline: await holderOffline(ctx, task.assigneeAgentId),
   };
+}
+
+/* Without the hub, as in a reader that knows no machine, nothing is said of one. */
+async function holderOffline(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'hub'>>, agentId: string | null): Promise<OfflineMachine | null> {
+  if (!ctx.hub || !agentId) return null;
+  const [holder] = await ctx.db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.id, agentId));
+  return offlineMachine({ db: ctx.db, hub: ctx.hub }, holder?.subscriptionId ?? null);
 }
 
 /* The task a reference names in the company: its number (12 or "#12") or its id. */

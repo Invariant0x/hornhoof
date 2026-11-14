@@ -128,7 +128,7 @@ app.post('/__e2e/scenario', async req => {
   /* A failing verdict keeps the work with Review, which repairs it itself, so the one who holds it asks. */
   const choiceReq = (await ask(app.ctx, fx.reviewer.id, mainTask.id, {
     kind: 'choice',
-    topic: body.withPickTask ? 'release' : 'task',
+    topic: body.withPickTask ? 'people' : 'task',
     text: body.lang === 'ru'
       ? 'Какой вариант отображения длинного отчета и файлов задачи удобнее?'
       : 'Which layout for reading long reports and task files works better?',
@@ -328,7 +328,16 @@ test.describe.configure({ mode: 'serial' });
 let srv: RealServerBoot;
 
 test.beforeAll(async () => {
+  /* Server startup waits for the readiness line rather than the clock; 0 disables Playwright's 30 s hook timeout. */
+  test.setTimeout(0);
   srv = await startRealServer(`http://localhost:${process.env.HORNHOOF_BROWSER_PORT ?? '4179'}`);
+});
+
+/* The page still asks the server while a test ends, and what it asked then has no test left to answer. It leaves the app
+   first, so it asks nothing more. */
+test.afterEach(async ({ page }) => {
+  await page.goto('about:blank');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
 test.afterAll(async () => {

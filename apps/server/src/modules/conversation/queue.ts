@@ -42,8 +42,10 @@ import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operato
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
-   keep the whole window, since they hold the department's and the company's picture. */
+   keep the whole window, since they hold the department's and the company's picture. Their window is named outright too:
+   left to its own choice, Claude Code stops a session with a question whether to compact earlier, which nobody answers. */
 export const WORKER_COMPACT_WINDOW = 500_000;
+export const FULL_COMPACT_WINDOW = 1_000_000;
 
 /* Any turn may run as long as its work takes. This only ends one that hangs, a program frozen or waiting for input
    nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
@@ -925,10 +927,16 @@ function heldNotice(agent: { name: string }, held: HeldPlanTurn): string {
   return `Hornhoof: ${agent.name}'s turn ${held.job.id} has waited for ${why} since ${held.since}. It waits until ${held.until}. Check the plan and give the work to another employee if one can take it.`;
 }
 
+/* A provider gives the same reset with other milliseconds each time it is asked: the hold is the same one to the minute. */
+const holdMinute = (until: string) => {
+  const at = Date.parse(until);
+  return Number.isNaN(at) ? until : new Date(Math.round(at / 60_000) * 60_000).toISOString();
+};
+
 async function tellOperationsOfHold(ctx: Ctx, agent: PlanAgent & { name: string }, sub: Plan): Promise<void> {
   const held = await planHeld(ctx, agent, sub);
   if (!held || Date.now() - Date.parse(held.since) <= HELD_NOTICE_MS) return;
-  await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${held.until}`);
+  await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${holdMinute(held.until)}`);
 }
 
 /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
@@ -1027,7 +1035,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       sessionId,
       model,
       effort,
-      compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
+      compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : FULL_COMPACT_WINDOW,
       timeoutMs: job.timeoutMs,
       instructions: instructions.text,
       toolToken: token,

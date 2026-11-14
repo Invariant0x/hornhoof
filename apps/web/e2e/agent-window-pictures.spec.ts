@@ -122,6 +122,9 @@ const file = (page: Page, name: string, type: string, text: string): Promise<JSH
 const paste = (where: Locator, clipboardData: JSHandle<DataTransfer>) =>
   where.evaluate((el, data) => el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })), clipboardData);
 
+const drag = (where: Locator, kind: 'dragenter' | 'dragover' | 'drop', dataTransfer: JSHandle<DataTransfer>) =>
+  where.evaluate((el, [type, data]) => el.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true })), [kind, dataTransfer] as const);
+
 const lineOf = (window: Locator, agent: Agent, t: typeof en | typeof ru) => window.getByRole('textbox', { name: agent === 'orchestrator' ? t.window.placeholder : t.window.writeTo('Bruno'), exact: true });
 
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
@@ -136,12 +139,12 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await expect(window.locator('.xterm-screen')).toBeVisible();
       const shotOne = await picture(page, 'screen.png');
 
-      await terminal.dispatchEvent('dragenter', { dataTransfer: shotOne });
+      await expect(drag(terminal, 'dragenter', shotOne)).resolves.toBe(false);
       const where = window.getByText(t.window.dropPictures);
       await expect(where).toBeVisible();
       await shot(page, info, 'dragging', settings);
-      await terminal.dispatchEvent('dragover', { dataTransfer: shotOne });
-      await terminal.dispatchEvent('drop', { dataTransfer: shotOne });
+      await expect(drag(terminal, 'dragover', shotOne)).resolves.toBe(false);
+      await expect(drag(terminal, 'drop', shotOne)).resolves.toBe(false);
       await expect(where).toHaveCount(0);
 
       await expect.poll(() => server.keys).toEqual(['screen.png: hh-fetch message pic1']);
@@ -225,6 +228,35 @@ test.describe('a picture for an agent', () => {
     await shot(page, info, 'owner-direct-picture', settings);
     await page.keyboard.type('hi');
     await expect.poll(() => server.keys.join('')).toBe('screen.png: hh-fetch message pic1hi');
+    await checkPage(page, errors);
+  });
+
+  test('dropped in the chat of the orchestrator after another agent window closes, it attaches instead of opening in the browser', async ({ page }) => {
+    const errors = watchErrors(page);
+    const server = await serve(page, 'owner', settings);
+    const window = await open(page, 'orchestrator', 'en');
+    await window.getByRole('button', { name: en.window.showChat, exact: true }).click();
+    const log = window.getByRole('log', { name: en.window.chat.conversation, exact: true });
+    await expect(log).toBeVisible();
+
+    await page.getByRole('button', { name: /^Development/ }).click();
+    await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
+    const bruno = page.getByRole('complementary', { name: /^Bruno,/ });
+    await expect(bruno.getByRole('log')).toBeVisible();
+    await bruno.getByRole('button', { name: en.window.close, exact: true }).click();
+    await page.getByRole('button', { name: en.window.restoreAgent(en.window.title), exact: true }).click();
+    await expect(log).toBeVisible();
+
+    const shotOne = await picture(page, 'screen.png');
+    await expect(drag(log, 'dragenter', shotOne)).resolves.toBe(false);
+    await expect(window.getByText(en.window.dropPictures)).toBeVisible();
+    await expect(drag(log, 'dragover', shotOne)).resolves.toBe(false);
+    await expect(drag(log, 'drop', shotOne)).resolves.toBe(false);
+    await expect(window.getByText(en.window.dropPictures)).toHaveCount(0);
+    await expect(window.getByRole('img', { name: 'screen.png', exact: true })).toBeVisible();
+
+    await window.getByRole('button', { name: en.window.chat.send, exact: true }).click();
+    await expect.poll(() => server.messages).toEqual([{ agent: 'orchestrator', text: '', pictures: ['pic1'] }]);
     await checkPage(page, errors);
   });
 

@@ -491,7 +491,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.status).toBe('open');
   });
 
-  it('only reads in a turn that answers anyone but the CEO and the CEO delegate', async () => {
+  it('only reads while the last person who wrote to it is neither the CEO nor the CEO delegate', async () => {
     const { app, db, ceo, ceoId, orchestrator, bruno } = await company();
     const zed = await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const [zedRow] = await db.select().from(people).where(eq(people.name, 'Zed'));
@@ -502,7 +502,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     await wrote(zedRow!.id);
     const refused = await rename('Bruno Z');
     expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain('In this turn the tool only reads: it answers neither the CEO nor the CEO delegate.');
+    expect(text(refused)).toContain('The tool only reads now: the last person who wrote to you is neither the CEO nor the CEO delegate.');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people ORDER BY name' })))[0].rows).toEqual([{ name: 'Ivan' }, { name: 'Zed' }]);
     await wrote(null);
     expect((await rename('Bruno N')).isError).toBe(true);
@@ -646,7 +646,8 @@ describe('the orchestrator reads and changes the database itself', () => {
 describe('what only the CEO may ask for', () => {
   const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
   const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
-  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask one of them first.";
+  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
+  const ONLY_CEO_ASKED = 'Only the CEO or the CEO delegate can ask for this, and the last person who wrote to you is neither. Nothing was changed. Ask the CEO.';
 
   /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
   async function quiet() {
@@ -702,7 +703,7 @@ describe('what only the CEO may ask for', () => {
       ['machine_command', {}],
       ['add_plan_to_machine', { machine: '00000000-0000-4000-8000-0000000000aa', subscription: '00000000-0000-4000-8000-0000000000bb' }],
     ] as const) {
-      expect(text(await call(client, name, args)), name).toBe(name === 'set_repository' || name === 'add_repository' ? ONLY_DEPARTMENT_OWNER : ONLY_CEO);
+      expect(text(await call(client, name, args)), name).toBe(name === 'set_repository' || name === 'add_repository' ? ONLY_DEPARTMENT_OWNER : name === 'update_hornhoof' ? ONLY_CEO_ASKED : ONLY_CEO);
     }
     expect(await statusOf(db, lena.id)).toBe('active');
     expect((await call(client, 'change_employee', { employee: (await db.select().from(agents).where(eq(agents.name, 'Bruno')))[0]!.id, on: false })).isError).toBeFalsy();

@@ -11,6 +11,12 @@ works() {
 if [ "${1:-}" = context ] && [ "${2:-}" = show ]; then echo "${STUB_CONTEXT:-desktop-linux}"; exit 0; fi
 if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
+stopped() {
+  case " ${STUB_STOPPED:-} " in
+    *" $1 "*) [ ! -f "$STUB_STATE/started-$1" ] ;;
+    *) return 1 ;;
+  esac
+}
 # STUB_NODE_RUNNING is the image the server's built-in node runs now; STUB_IMAGE_IDS words are "ref=id" for tags that
 # point at the same image.
 id_of() {
@@ -24,7 +30,11 @@ case "$1" in
     case "${STUB_PULL:-ok}:$2" in fail:* | node:*hornhoof-node*) echo "pull access denied" >&2; exit 1 ;; esac
     echo "4f4fb700ef54: Pulling fs layer" ;;
   create) echo cid-app ;;
-  cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
+  cp)
+    case "$2" in
+      *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+      *:/data/removed) case " ${STUB_REMOVED:-} " in *" ${2%%:*} "*) exit 0 ;; *) exit 1 ;; esac ;;
+    esac ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
@@ -39,7 +49,7 @@ case "$1" in
     case "${3:-}" in *HostPort*) for s in ${STUB_SERVERS:-}; do IFS=: read -r p _ port <<< "$s"; [ "${!#}" = "app-$p" ] && echo "$port "; done; exit 0 ;; esac
     # STUB_NODE_ENV: the settings a node was started with, one per line.
     case "${3:-}" in *.Config.Env*) printf '%b' "${STUB_NODE_ENV:-}"; exit 0 ;; esac
-    if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
+    if [ "${3:-}" = '{{.State.Running}}' ]; then if stopped "${!#}"; then echo false; else echo true; fi; exit 0; fi
     # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
     if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
     [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
@@ -66,8 +76,16 @@ case "$1" in
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
-    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+    WORD=-d; if has "$@"; then
+      [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }
+      prev=''; for a in "$@"; do [ "$prev" = --name ] && touch "$STUB_STATE/started-$a"; prev=$a; done
+      echo "0123456789ab"
+    fi ;;
   exec)
+    for n in ${STUB_STOPPED:-}; do
+      WORD=$n
+      if has "$@" && stopped "$n"; then echo "Error response from daemon: Container $n is not running" >&2; exit 1; fi
+    done
     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.
     WORD=/data/node.json; if has "$@"; then

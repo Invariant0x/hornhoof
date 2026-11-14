@@ -1,3 +1,5 @@
+import { earlierWork } from '../departments/branches.js';
+import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
@@ -13,12 +15,12 @@ import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, r
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
-import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
+import { agentSeesTask as sees, taskByRef, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, giveOutsideTurns, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
-import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
-import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
+import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
+import { ONLY_CEO_ASKED, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
@@ -281,10 +283,11 @@ class TaskTools {
     return settled && [orchestratorId, settled.headId].includes(this.job.agentId) ? `${text} ${settled.note}` : text;
   }
 
-  /* Only the CEO or delegate answered in this turn can make work urgent, or the owner of the department it is in. */
+  /* Only the CEO or delegate can make work urgent, or the owner of the department it is in: the last person who asked, in
+     this turn or an earlier one. */
   private async urgentBy(departmentId: string | null): Promise<void> {
-    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
-    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
+    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO_ASKED);
+    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
   }
 
   private async urgentFromCeo(items: { department: string; urgent?: boolean | undefined }[]): Promise<void> {
@@ -352,7 +355,7 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref).then(
-          async ({ agent, task }) => say(fitted({ ...await taskDetail(this.ctx, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id) })),
+          async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );
@@ -382,7 +385,7 @@ class TaskTools {
         description:
           "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
           'which opens it again and wakes its executor with your words, once in a piece of work: blocked again after that, it opens with the answer written into it by update_task. ' +
-          'A comment from a person or another agent also ends an external wait and wakes its holder. ' +
+          'A comment from a person or another agent also ends an external wait and wakes its holder. A note that should leave the wait standing goes to its holder with message_employee naming no task. ' +
           'The current head or orchestrator resolves its internal stuck request with a comment. To hand work on, use the task\'s own moves.',
         inputSchema: { task: Ref, text: Text.trim().min(1) },
       },
@@ -420,6 +423,7 @@ class TaskTools {
       {
         description:
           'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
@@ -579,7 +583,7 @@ class TaskTools {
       'set_urgent',
       {
         description:
-          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, as the last person who wrote to you, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>

@@ -165,6 +165,21 @@ The files live in the database, so every copy of the database carries them.
 
 A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
 
+## How does an agent read a page that scripts build?
+
+An agent of any department runs this on its machine:
+
+```sh
+hh-browse --screenshot page.png https://example.org/
+```
+
+The machine's own browser opens the page and waits until the page has loaded and drawn what its scripts build. The agent gets the page's visible text, its links and, if asked, a picture to put on a task with `hh-attach`.
+
+- It opens only public http and https addresses. It refuses the machine itself, private networks and cloud metadata addresses, also when a redirect, a page's script or a name's address points there.
+- Each call has a time limit of 30 seconds and may load 20 MB, and both can be changed within limits. `hh-browse --help` lists them.
+- The browser signs in nowhere and gets past no robot check. A page that asks for either answers `login_required` or `robot_check`. The agent notes the address for a person and goes on with the other addresses.
+- When the call ends or fails, its browser processes and temporary files go with it. The picture stays.
+
 ## Who can give a department a task?
 
 Anyone whose access lists a department can give it a task, from inside the department, with "New task". It goes to the department's head, and joins the running turn if one runs.

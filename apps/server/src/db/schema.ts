@@ -306,6 +306,30 @@ export const repoHosts = pgTable(
   ],
 );
 
+/* The company's Google Sheets credentials, encrypted at rest, so agents of any department can create populated spreadsheets
+   and share their links when Google is connected. */
+export const GOOGLE_CREDENTIAL_KINDS = ['service_account', 'oauth'] as const;
+export type GoogleCredentialKind = (typeof GOOGLE_CREDENTIAL_KINDS)[number];
+
+export const googleSheets = pgTable(
+  'google_sheets',
+  {
+    id: id(),
+    companyId: companyId(),
+    kind: text('kind', { enum: GOOGLE_CREDENTIAL_KINDS }).notNull(),
+    account: text('account').notNull(),
+    shareEmail: text('share_email'),
+    credentialsEnc: text('credentials_enc').notNull(),
+    keyLast4: text('key_last4').notNull(),
+    updatedBy: uuid('updated_by').references(() => people.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [
+    uniqueIndex('google_sheets_company').on(t.companyId),
+    check('google_sheets_kind', sql`${t.kind} IN ('service_account', 'oauth')`),
+  ],
+);
+
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
 export const approvalPolicies = pgTable(

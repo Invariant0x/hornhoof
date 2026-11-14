@@ -502,7 +502,16 @@ wait_for_node() {
   return 1
 }
 
-node_status() { "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null || echo offline; }
+node_status() {
+  "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null && return 0
+  if "${DOCKER[@]}" cp "$1:/data/removed" - > /dev/null 2>&1; then echo removed; else echo offline; fi
+}
+
+remove_node() {
+  say "Removing $1, which was removed in Hornhoof."
+  "${DOCKER[@]}" rm -f "$1" > /dev/null 2>&1 || true
+  "${DOCKER[@]}" volume rm "$1" > /dev/null 2>&1 || true
+}
 
 # This server's nodes on this machine as "name:id" words. A node from before nodes carried their server is this
 # server's when its own settings name this server. One whose settings cannot be read may work for another company on
@@ -657,9 +666,7 @@ node_mode() {
     name=${entry%%:*}
     named_free "${entry#*:}" || continue
     if [ "$(node_status "$name")" = removed ]; then
-      say "Removing $name, which was removed in Hornhoof."
-      "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
-      "${DOCKER[@]}" volume rm "$name" > /dev/null 2>&1 || true
+      remove_node "$name"
       removed="$removed $name"
     fi
   done
@@ -1047,6 +1054,10 @@ sweep_nodes() {
       named_free "$id" || continue
       case "$seen" in *" $name "*) continue ;; esac
       seen="$seen$name "
+      if [ "$(node_status "$name")" = removed ]; then
+        remove_node "$name"
+        continue
+      fi
       if [ -z "$pulled" ]; then
         pull_image
         pulled=1

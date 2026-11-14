@@ -1,0 +1,17 @@
+{
+  "title": "Sign in - Partner portal",
+  "text": "Sign in to continue\nEmail  Password  Sign in\nForgot your password?",
+  "textLength": 66,
+  "links": [
+    {
+      "text": "Forgot your password?",
+      "url": "https://shop.example/forgot"
+    }
+  ],
+  "linkCount": 1,
+  "frames": [],
+  "scripts": [],
+  "markers": [],
+  "passwordFields": 1,
+  "height": 800
+}

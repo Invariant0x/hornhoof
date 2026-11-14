@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -10,7 +10,7 @@ import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { answeredWords, clickWords, wordsForTurn } from './turn-words.js';
+import { answeredWords, byPerson, clickWords, incomingWords, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
@@ -18,7 +18,8 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
    answers that person: the last person who wrote into the turn, or pressed Enter in its terminal, says who it is. Notices
    Hornhoof writes and messages from agents never change whom a turn answers, and a turn without a person's words answers
    nobody unless a person started it with none. Words on their way into the turn, or that went in without being kept, leave
-   the turn without anyone's right. */
+   the turn without anyone's right. Their own work of running the company or a department goes on in any turn of theirs,
+   for the last person who asked them: see standingPrincipal. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
@@ -51,6 +52,32 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
   return turn && answered(turn);
 }
 
+/* How a check finds the person a call goes for: decisionPrincipal, or standingPrincipal for running the company. */
+export type FindPrincipal = (db: Reader, jobId: string) => Promise<Principal | null>;
+
+/* The person whose words the orchestrator or a head carries out in any running turn of its own, when it runs the company or
+   its department: whom the turn answers, or, when no person's words came into it, the last person who wrote or typed to
+   it in an earlier turn. A turn that ended before a check came back takes nobody's word away. Words of agents and notices
+   of Hornhoof still never stand for a person, and the routes still allow only what that person may do now. */
+export async function standingPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
+  const turn = await turnWords(db, jobId);
+  if (!turn) return null;
+  if (turn.said.some(byPerson) || (turn.said.length === 0 && turn.job.createdBy)) return answered(turn);
+  return earlierPrincipal(db, turn.job.agentId!);
+}
+
+/* The last person who wrote or typed to the agent; null when nobody did, or an Enter cleared it. */
+async function earlierPrincipal(db: Reader, agentId: string): Promise<Principal | null> {
+  const words = await db
+    .select({ seq: agentEvents.seq, personId: agentEvents.personId, kind: agentEvents.kind, data: agentEvents.data })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'typed']), incomingWords, or(isNotNull(agentEvents.personId), eq(agentEvents.kind, 'typed'))))
+    .orderBy(desc(agentEvents.seq))
+    .limit(20);
+  const last = words.find(byPerson);
+  return last?.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
+}
+
 const answered = ({ job, said }: Words): Principal | null => answeredWords(job.createdBy, said);
 
 const clickOf = ({ job, said }: Words): string | null => clickWords(job, said);
@@ -64,9 +91,9 @@ export const contextMissing = () =>
   );
 const contextChanged = () => new ApiError(409, 'conflict', 'Someone else wrote into this turn meanwhile. Read it and decide again.', 'decision_context_changed');
 
-/* The turn still answers the same person through the same message, at the moment the decision is kept. */
-export async function checkDelegation(db: Reader, d: Delegation): Promise<void> {
-  const now = await decisionPrincipal(db, d.jobId);
+/* The turn still goes for the same person through the same message, at the moment the decision is kept. */
+export async function checkDelegation(db: Reader, d: Delegation, find: FindPrincipal = decisionPrincipal): Promise<void> {
+  const now = await find(db, d.jobId);
   if (!now) throw contextMissing();
   if (now.personId !== d.personId || now.sourceSeq !== d.sourceSeq) throw contextChanged();
 }
@@ -90,15 +117,15 @@ export async function actingCeo(db: Reader, personId: string): Promise<string | 
 }
 
 /* The CEO or the CEO delegate the turn answers now, or null. */
-export async function ceoPrincipal(db: Reader, jobId: string): Promise<string | null> {
-  const principal = await decisionPrincipal(db, jobId);
+export async function ceoPrincipal(db: Reader, jobId: string, find: FindPrincipal = decisionPrincipal): Promise<string | null> {
+  const principal = await find(db, jobId);
   return principal ? actingCeo(db, principal.personId) : null;
 }
 
 /* The person the turn answers now, if they run this department as the CEO does: the CEO, the CEO delegate or the owner the
    CEO named for it. Null for anyone else. */
-export async function departmentPrincipal(db: Reader, jobId: string, departmentId: string): Promise<string | null> {
-  const principal = await decisionPrincipal(db, jobId);
+export async function departmentPrincipal(db: Reader, jobId: string, departmentId: string, find: FindPrincipal = decisionPrincipal): Promise<string | null> {
+  const principal = await find(db, jobId);
   if (!principal) return null;
   const [p] = await db.select().from(people).where(eq(people.id, principal.personId));
   return p && (await runsDepartment(db, p, departmentId)) ? p.id : null;
@@ -128,7 +155,7 @@ export async function cardPrincipal(db: Reader, companyId: string, requestId: st
 }
 
 /* Whether the turn answers the CEO or the CEO delegate, now. */
-export const answersCeoOrDelegate = async (db: Reader, jobId: string): Promise<boolean> => (await ceoPrincipal(db, jobId)) !== null;
+export const answersCeoOrDelegate = async (db: Reader, jobId: string, find: FindPrincipal = decisionPrincipal): Promise<boolean> => (await ceoPrincipal(db, jobId, find)) !== null;
 
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
    never goes by a principal that new words changed already. Separate from the agent's queue line; nothing inside takes it
@@ -229,9 +256,9 @@ export function delegationOf(me: { id: string; via?: string; decision?: { jobId:
 /* The decision is kept under the input lock of the orchestrator or head that takes it, and at once from a person's screen. */
 export const lockedFor = <T>(ctx: Pick<Ctx, 'db'>, on: Delegation | undefined, fn: () => Promise<T>): Promise<T> => (on ? withInputLock(ctx, on.agentId, fn) : fn());
 
-/* At the moment a decision is kept: the turn still answers the same person, who still may take it. */
-export async function stillDecides(db: Reader, companyId: string, personId: string, subject: DecisionSubject, on: Delegation | undefined): Promise<void> {
-  if (on) await checkDelegation(db, on);
+/* At the moment a decision is kept: the turn still goes for the same person, who still may take it. */
+export async function stillDecides(db: Reader, companyId: string, personId: string, subject: DecisionSubject, on: Delegation | undefined, find: FindPrincipal = decisionPrincipal): Promise<void> {
+  if (on) await checkDelegation(db, on, find);
   await requireDecider(db, companyId, on?.personId ?? personId, subject);
 }
 

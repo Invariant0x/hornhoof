@@ -76,6 +76,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/map/layout': { blocks: {} },
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },
+  '/api/google-sheets': { google: null },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
@@ -98,6 +99,8 @@ export async function serveApi(page: Page) {
     /* A department works in turns unless a test says otherwise, and the person may change it. */
     const workMode = /^\/api\/departments\/([^/]+)\/work-mode$/.exec(path);
     if (workMode) return route.fulfill(json({ departmentId: workMode[1], workMode: 'turns', canChangeWorkMode: true }));
+    /* A department has no task branch outside main unless a test says otherwise. */
+    if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));

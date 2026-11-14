@@ -18,6 +18,8 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
+import { registerTelegramTools } from '../telegram/tools.js';
+import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
@@ -53,10 +55,12 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
     'company',
-    { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
+    { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  registerTelegramTools(server, ctx, job);
+  registerGoogleSheetsTools(server, ctx, job);
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {

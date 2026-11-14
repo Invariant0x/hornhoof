@@ -8,6 +8,7 @@ import { cutLine } from '../restarts';
 import { placeName, useTask } from '../tasks';
 import type { Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
+import { OfflineMachine } from './OfflineMachine';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
@@ -105,6 +106,7 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
       <p className="muted">{meta}</p>
       <WorkLabels task={task} />
       <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
+      {task.assigneeOffline && <OfflineMachine offline={task.assigneeOffline} />}
       <ExternalTaskWait wait={task.externalWait} />
       {task.paused && <p className="muted">{t.tasks.pausedLine(task.paused.reason)}</p>}
       {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}

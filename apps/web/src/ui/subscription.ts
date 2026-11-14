@@ -43,7 +43,10 @@ export function clock(language: Language, iso: string | null): string | null {
   return new Intl.DateTimeFormat(language, parts).format(at);
 }
 
-export const unknownLimitData = (t: Messages, language: Language, s: Pick<SubView, 'limitsUpdatedAt'>) => t.subs.unknown(clock(language, s.limitsUpdatedAt ?? null));
+export function unknownLimitData(t: Messages, language: Language, s: Pick<SubView, 'limitsUpdatedAt' | 'online' | 'status'>): string {
+  const at = clock(language, s.limitsUpdatedAt ?? null);
+  return s.online === false && s.status !== 'waiting_machine' ? t.subs.offlineLimit(at) : t.subs.unknown(at);
+}
 
 /* What keeps a plan from working on one of its machines, if anything. */
 export function waitsThere(t: Messages, on: { online: boolean; status: PlanStatus }): string | null {

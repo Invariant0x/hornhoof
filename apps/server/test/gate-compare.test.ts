@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readCompare } from '../src/modules/testruns/compare.js';
+import { readCompare, readMerged, readTree } from '../src/modules/testruns/compare.js';
 
 const sha = 'a'.repeat(40);
 const fixture = (files: { filename: string; previous_filename?: string; patch?: string; additions: number; deletions: number }[] = [{ filename: 'src/view.ts', patch: '+const title = "Saved";', additions: 1, deletions: 0 }]) => ({ base_commit: { sha: 'b'.repeat(40) }, commits: [{ sha }], total_commits: 1, status: 'ahead', files });
@@ -66,5 +66,38 @@ describe('trusted repository comparison', () => {
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: false, reason: 'compare-unavailable' });
     vi.stubGlobal('fetch', (_url: string, options: RequestInit) => new Promise((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(new Error('timeout')))));
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' }, 5)).toEqual({ complete: false, reason: 'compare-unavailable' });
+  });
+});
+
+/* GitHub's answer, read no further than 32 MiB: past that it is too large, whatever follows. The body is made as it is pulled
+   and counts what was pulled; an endless answer would otherwise fill the server's memory. */
+const CAP = 32 * 1024 * 1024;
+function endless(head: string): { response: Response; pulled: () => number } {
+  const space = new Uint8Array(1024 * 1024).fill(0x20);
+  let pulled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode(head)); },
+    pull(controller) {
+      if (pulled > CAP * 2) { controller.enqueue(new TextEncoder().encode('}')); controller.close(); return; }
+      pulled += space.length;
+      controller.enqueue(space);
+    },
+  });
+  return { response: new Response(body), pulled: () => pulled };
+}
+
+describe('a GitHub answer past its size', () => {
+  it('stops reading at 32 MiB: the comparison and the tree are too large, and whether a branch is in main is unknown', async () => {
+    const cases = [
+      { head: '{"status":"behind","ahead_by":0,"behind_by":3', read: () => readMerged(repo, { base: 'main', head: sha }), want: null },
+      { head: JSON.stringify(fixture()).slice(0, -1), read: () => readCompare(repo, { base: 'main', head: 'turn-8' }), want: { complete: false, reason: 'compare-too-large' } },
+      { head: '{"truncated":false,"tree":[]', read: () => readTree(repo, sha), want: { complete: false, reason: 'tree-too-large' } },
+    ];
+    for (const { head, read, want } of cases) {
+      const answer = endless(head);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(answer.response));
+      expect(await read()).toEqual(want);
+      expect(answer.pulled()).toBeLessThanOrEqual(CAP + 4 * 1024 * 1024);
+    }
   });
 });

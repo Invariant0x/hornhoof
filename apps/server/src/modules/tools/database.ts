@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { HIDDEN, SECRET, type SqlMode } from '../../db/agent-sql.js';
-import { answersCeoOrDelegate, withInputLock } from '../conversation/decision-context.js';
+import { answersCeoOrDelegate, standingPrincipal, withInputLock } from '../conversation/decision-context.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
@@ -14,8 +14,8 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 const SECRETS = Object.values(SECRET).flat().join(', ');
 const CLOSED = 'Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.';
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
-/* The orchestrator's in a turn that answers nobody who takes the CEO's decisions. */
-export const READS_IN_THIS_TURN = 'In this turn the tool only reads: it answers neither the CEO nor the CEO delegate. A change waits for a turn of theirs.';
+/* The orchestrator's while the last person who wrote to it takes none of the CEO's decisions. */
+export const READS_IN_THIS_TURN = 'The tool only reads now: the last person who wrote to you is neither the CEO nor the CEO delegate. A change goes once one of them asks for it.';
 const DECISIONS = 'Requests, cards and the logs of tasks and conversations change only through the other tools: a request closes only with answer_request.';
 const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
@@ -88,15 +88,16 @@ const DESCRIPTIONS: Record<SqlMode, string> = {
 
 /* What the tool says of itself, and why a read-only call refused a write, in each mode. */
 const DESCRIBED: Record<SqlMode, string> = {
-  write: `${DESCRIPTIONS.write} In a turn that answers neither the CEO nor the CEO delegate it only reads.`,
+  write: `${DESCRIPTIONS.write} When the last person who wrote to you is neither the CEO nor the CEO delegate, it only reads.`,
   read: DESCRIPTIONS.read,
 };
 const WHY_READ_ONLY: Record<SqlMode, string> = { write: READS_IN_THIS_TURN, read: READ_ONLY };
 
-/* The mode a call runs in: the orchestrator's changes rows only in a turn that answers the CEO or the delegate. */
+/* The mode a call runs in: the orchestrator's changes rows only for the CEO or the delegate, the last person who wrote to
+   it, in this turn or an earlier one. */
 async function modeNow(ctx: Ctx, job: ToolJob, mode: SqlMode): Promise<SqlMode> {
   if (mode === 'read') return 'read';
-  return (await answersCeoOrDelegate(ctx.db, job.id)) ? 'write' : 'read';
+  return (await answersCeoOrDelegate(ctx.db, job.id, standingPrincipal)) ? 'write' : 'read';
 }
 
 async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: ToolJob, sql: string, mode: SqlMode) {
@@ -112,9 +113,9 @@ async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: Too
 }
 
 /* SQL on Hornhoof's own database, for what the other tools do not reach: the orchestrator's changes rows, the head of
-   Operations' only reads. The orchestrator's only reads too in a turn that answers neither the CEO nor the delegate, as
-   the turn answers when the call runs, under the input lock words for the turn take. The map is told to look again after
-   a change. */
+   Operations' only reads. The orchestrator's only reads too when the last person who wrote to it is neither the CEO nor
+   the delegate, as found when the call runs, under the input lock words for the turn take. The map is told to look again
+   after a change. */
 export function registerDatabaseTool(server: McpServer, ctx: Ctx, job: ToolJob, mode: SqlMode): void {
   server.registerTool('database', { description: DESCRIBED[mode], inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
     const agentSql = ctx.agentSql;

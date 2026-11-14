@@ -209,14 +209,27 @@ describe("Kimi Code's session log", () => {
 });
 
 describe("Claude Code's status line", () => {
-  it('gives the five-hour and seven-day windows', () => {
+  it('gives the complete set of windows the plan reports, including a plan with only seven days', () => {
     expect(claudeStatusLimits({ rate_limits: { five_hour: { used_percentage: 11, resets_at: 1793379000 }, seven_day: { used_percentage: 86, resets_at: 1793516400 } } })).toEqual({
       status: 'allowed',
       windows: [
         { name: 'five_hour', utilization: 0.11, resetsAt: new Date(1793379000000).toISOString() },
         { name: 'seven_day', utilization: 0.86, resetsAt: new Date(1793516400000).toISOString() },
       ],
+      complete: true,
     });
+    expect(claudeStatusLimits({ rate_limits: { seven_day: { used_percentage: 96, resets_at: 1793516400 } } })).toEqual({
+      status: 'allowed',
+      windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: new Date(1793516400000).toISOString() }],
+      complete: true,
+    });
+    expect(claudeStatusLimits({ rate_limits: { seven_day: { used_percentage: 100, resets_at: 1793516400 } } })).toEqual({
+      status: 'rejected',
+      windows: [{ name: 'seven_day', utilization: 1, resetsAt: new Date(1793516400000).toISOString() }],
+      complete: true,
+    });
+    expect(claudeStatusLimits({ rate_limits: {} })).toBeNull();
+    expect(claudeStatusLimits({ rate_limits: { seven_day: { used_percentage: null } } })).toBeNull();
     expect(claudeStatusLimits({ model: {} })).toBeNull();
   });
 
