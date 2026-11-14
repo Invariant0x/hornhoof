@@ -44,11 +44,14 @@ export async function appFixture<T>(app: FastifyInstance, key: string, make: () 
 }
 
 /* A company with its orchestrator and nothing else, for a test about something other than Operations, and the CEO's
-   session token. First-run setup runs once in a file; a test about what people really get calls /api/setup itself. */
+   session token. First-run setup runs once in a file; a test about what people really get calls /api/setup itself. Its
+   mail goes each as a turn of its own, as a test about something other than the inbox expects; inbox.test.ts takes the
+   inbox every company starts with. */
 export async function setUpCompany(app: FastifyInstance): Promise<string> {
   return appFixture(app, 'setUpCompany', async () => {
     const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
     await withoutOperations(app.ctx.db);
+    await app.ctx.db.update(schema.companies).set({ inboxMode: 'direct' });
     return token;
   });
 }

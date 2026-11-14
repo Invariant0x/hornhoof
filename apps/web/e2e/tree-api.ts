@@ -18,7 +18,7 @@ export async function serveTree(page: Page, live: { during: boolean }) {
     };
     const employee = org.departments[0]!.employees.find(e => path.startsWith(`/api/agents/${e.id}/`) || path === `/api/agents/${e.id}`);
     if (employee) {
-      if (path.endsWith('/events?after=0')) return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: employee.state === 'working', runningJobId: null, queued: 0, terminal: false } } });
+      if (path.endsWith('/events?last=300')) return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: employee.state === 'working', runningJobId: null, queued: 0, terminal: false } } });
       if (path === `/api/agents/${employee.id}`) return route.fulfill({ json: agentCard(employee) });
       if (path.endsWith('/messages')) return route.fulfill({ json: { queued: true } });
     }

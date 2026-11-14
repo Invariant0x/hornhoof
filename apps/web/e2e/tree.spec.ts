@@ -187,7 +187,7 @@ for (const lang of ['en', 'ru'] as const) {
       const event = (seq: number, kind: string, data: unknown) => ({ seq, kind, data, at: '2026-11-03T10:00:00Z', jobId: 'j1', person: null });
       const state = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
       const routes: Record<string, unknown> = {
-        '/api/agents/orchestrator/events?after=0': { events: [event(1, 'text', { text: 'Starting checkout.' }),
+        '/api/agents/orchestrator/events?last=300': { events: [event(1, 'text', { text: 'Starting checkout.' }),
           event(2, 'program', { program: { state: 'thinking', since: Date.parse('2026-11-03T10:00:00Z'), tool: null }, alarm: null }),
           event(3, 'text', { text: 'Checkout is ready.' })], state },
         '/api/agents/orchestrator/events?after=3': { events: [], state },

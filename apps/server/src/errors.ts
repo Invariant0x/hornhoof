@@ -67,6 +67,7 @@ export type ErrorReason =
   | 'tool_token_invalid'
   | 'orchestrator_not_ready'
   | 'agent_unknown'
+  | 'letter_unknown'
   | 'agent_not_ready'
   | 'not_your_department'
   | 'agent_hidden'

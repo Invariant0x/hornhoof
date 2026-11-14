@@ -71,6 +71,7 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
   timerOrder: null,
   timerAt: null,
   timerForWork: false,
+  inboxMode: null,
   removedAt: null,
   createdAt: new Date(),
   ...over,

@@ -34,7 +34,7 @@ const uploaded = (id: string, name = 'screen.png') => [201, { id, name }] as [nu
 function open(routes: Record<string, unknown> = {}, state: object = READY, events: EventView[] = [], window = <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={vi.fn()} />) {
   const calls = mockApi({
     [`GET ${AGENT}`]: [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
-    [`GET ${AGENT}/events?after=0`]: [200, { events, state }],
+    [`GET ${AGENT}/events?last=300`]: [200, { events, state }],
     [`POST ${AGENT}/start`]: [200, { started: false }],
     [`POST ${AGENT}/messages`]: [202, { jobId: 'j2' }],
     ...(routes as Record<string, [number, unknown]>),
@@ -223,7 +223,7 @@ describe('a picture dragged into the window', () => {
     open(
       {
         'GET /api/agents/b1': [200, CARD],
-        'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }],
+        'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }],
         [`POST ${AGENT}/pictures?name=screen.png`]: uploaded('pic1'),
       },
       READY,
@@ -541,7 +541,7 @@ describe('what the window turns away', () => {
 
   it('takes nothing at all from someone the server does not let in', async () => {
     const refused = [403, { error: { code: 'forbidden', message: 'No.', reason: 'not_your_department' } }] as [number, unknown];
-    const { uploads } = open({ [`GET ${AGENT}/events?after=0`]: refused, [`GET ${AGENT}`]: refused, [`POST ${AGENT}/start`]: refused });
+    const { uploads } = open({ [`GET ${AGENT}/events?last=300`]: refused, [`GET ${AGENT}`]: refused, [`POST ${AGENT}/start`]: refused });
     await screen.findByRole('alert');
     fireEvent.dragEnter(windowBox(), dragged());
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();

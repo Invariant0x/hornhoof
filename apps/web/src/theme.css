@@ -793,6 +793,10 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-bar button:hover { color: var(--ink); }
 .acard > .t-bar button:focus-visible, .orch > .t-bar button:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
 .t-bar button.btn { width: auto; height: 26px; padding: 0 10px; display: inline-flex; }
+/* A panel that counts what waits in it shows the number beside its icon; on a phone, on its corner. */
+.t-bar button.counts { position: relative; width: auto; min-width: 34px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.t-bar button.counts svg { flex: none; }
+.t-bar .panel-count { margin: 0; font-weight: 600; line-height: 1; white-space: nowrap; pointer-events: none; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .t-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
 .t-log > * { animation: tin .45s ease-out; }
@@ -942,11 +946,74 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   .t-access-more { width: 24px; }
   .t-access-count { padding: 0 2px; }
 }
+/* Earlier lines of a conversation come above the oldest one kept. */
+.chat-earlier { justify-content: center; }
 .notebook { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
-.notebook .entries { display: grid; list-style: none; min-width: 0; margin: 0; padding: 0; }
-.notebook .entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-block: 16px; border-block-end: 1px solid var(--line); }
-.notebook .entry:first-child { padding-block-start: 0; }
-.notebook .entry:last-child { padding-block-end: 0; border-block-end: 0; }
+.notebook .entries, .inbox .entries { display: grid; list-style: none; min-width: 0; margin: 0; padding: 0; }
+.notebook .entry, .inbox .entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-block: 16px; border-block-end: 1px solid var(--line); }
+.notebook .entry:first-child, .inbox .entry:first-child { padding-block-start: 0; }
+.notebook .entry:last-child, .inbox .entry:last-child { padding-block-end: 0; border-block-end: 0; }
+/* The inbox, a panel of the window: how letters come, then the letters, newest first. */
+.inbox .ac-body { font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+.inbox .ac-body :where(p, h4, li, span, button, time) { overflow-wrap: anywhere; }
+.inbox .ac-body :where(p, h4) { margin: 0; }
+/* How letters come: a list of three, each on its own line, and what holds now in words. */
+.inbox-mode { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.inbox-mode-label { padding: 0; margin-block-end: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.inbox-choices { display: grid; }
+.inbox-choices label { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 8px 12px; margin-block-start: -1px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-weight: 500; cursor: pointer; }
+.inbox-choices label:first-child { margin-block-start: 0; }
+.inbox-choices label.on { z-index: 1; border-color: var(--cyan-ink); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
+.inbox-choices input { position: absolute; margin: 0; opacity: 0; pointer-events: none; }
+.inbox-choices label:has(input:focus-visible), .inbox-mode[data-keys] .inbox-choices label:has(input:focus) { z-index: 2; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.inbox-dot { flex: none; inline-size: 16px; block-size: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line2); }
+.inbox-choices label.on .inbox-dot { box-shadow: inset 0 0 0 1.5px var(--cyan-ink), inset 0 0 0 4px var(--glow), inset 0 0 0 8px var(--cyan-ink); }
+.inbox-now { font-weight: 600; color: var(--ink); }
+.inbox-what { font-size: 12px; color: var(--muted); }
+.inbox-mode > [aria-live] { display: grid; gap: 6px; }
+/* The head of the list: its name and how many are unread, and marking them all at its end. */
+.inbox-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-block-start: 14px; border-block-start: 1px solid var(--line); }
+.inbox-sum-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.inbox-sum h4 { font-family: var(--f-display); font-size: 15px; font-weight: 600; line-height: 1.15; color: var(--ink); }
+.inbox-sum h4:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.inbox-sum p { font-size: 13px; color: var(--muted); }
+.inbox-sum .entry-actions { inline-size: auto; flex: 1 1 auto; }
+/* A letter: an unread one has a stripe at the start of its line, its sender's name in bold and says so in words. */
+.inbox .entry { position: relative; }
+.inbox .entry.unread { padding-inline-start: 12px; }
+.inbox .entry.unread::before { content: ""; position: absolute; inset-inline-start: 0; inset-block: 0 16px; width: 3px; background: var(--cyan-ink); }
+.inbox .entry.unread:first-child::before { inset-block-start: 0; }
+.inbox .entry.unread:last-child::before { inset-block-end: 0; }
+.inbox-from { display: flex; flex-wrap: wrap; column-gap: 8px; color: var(--ink); }
+.inbox-from b { font-weight: 500; }
+.inbox .entry.unread .inbox-from b { font-weight: 600; }
+.inbox-from span { color: var(--muted); }
+/* A word with a hyphen keeps whole while the line can hold it. */
+.inbox .nb { display: inline-block; max-inline-size: 100%; overflow-wrap: anywhere; }
+.inbox-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--muted); }
+.inbox-kind { display: inline-flex; align-items: center; padding: 0 6px; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); font-weight: 500; }
+.inbox-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.inbox-state i { width: 8px; height: 8px; flex: none; background: currentColor; }
+.inbox-state.new { color: var(--cyan-ink); }
+.inbox-state.old { color: var(--muted); font-weight: 400; }
+.inbox-state.old i { background: none; box-shadow: inset 0 0 0 1.5px currentColor; }
+.inbox .t-link { justify-self: start; text-align: start; }
+.inbox .t-link b, .inbox-task b { font-weight: 600; }
+.inbox-task { color: var(--ink); }
+/* A letter keeps its own lines; a long word or path wraps inside the panel. */
+.inbox-text { white-space: pre-line; color: var(--ink); }
+.inbox-fold { font-size: 12px; color: var(--muted); }
+.inbox-mark-err { display: grid; padding: 6px 10px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); font-size: 13px; }
+/* While the letters are read, and when none came or none could be read. */
+.inbox-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); }
+.inbox-skel { display: grid; gap: 8px; }
+.inbox-skel i { display: block; height: 12px; background: var(--idle); }
+.inbox-skel i:nth-child(1) { inline-size: 60%; }
+.inbox-skel i:nth-child(2) { inline-size: 90%; }
+.inbox-skel i:nth-child(3) { inline-size: 75%; }
+.inbox-empty { display: grid; gap: 4px; color: var(--muted); }
+.inbox-empty b { color: var(--ink); font-weight: 500; }
+.inbox-alert { display: grid; gap: 8px; }
 .entry-main { min-width: 0; display: grid; gap: 4px; }
 .entry-main > * { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .entry-meta { font-size: 12px; color: var(--muted); }
@@ -2120,9 +2187,16 @@ th.k-prio .sorth { white-space: nowrap; }
   .bar-word svg { display: block; }
   .bar-word span { display: none; }
   /* The switch between the chat and the terminal says its word too, unless a panel covers the window: the way back then takes
-     the word's room, and the switch keeps its icon and its name, as the buttons beside it do. */
-  .orch:not(.with-panels) > .t-bar button.bar-word.both { width: auto; padding: 0 8px; gap: 6px; }
-  .orch:not(.with-panels) .bar-word.both span { display: inline; }
+     the word's room, and the switch keeps its icon and its name, as the buttons beside it do. A window with an inbox has one
+     icon more, which takes the word's room the same way. */
+  .orch:not(.with-panels):not(:has(> .t-bar [data-panel="inbox"])) > .t-bar button.bar-word.both { width: auto; padding: 0 8px; gap: 6px; }
+  .orch:not(.with-panels):not(:has(> .t-bar [data-panel="inbox"])) .bar-word.both span { display: inline; }
+  /* The count sits on the icon's end corner, ringed in the bar's colour, and leaves the button its size. */
+  .orch > .t-bar button.counts { min-width: 28px; padding: 0; }
+  .orch > .t-bar .panel-count { position: absolute; inset-block-start: -3px; inset-inline-end: -6px; min-width: 16px; height: 16px; padding: 0 3px; font-size: 10px; box-shadow: 0 0 0 2px var(--surface); }
+  /* The task's button says Task and keeps no room for its other word; with no task its name still says so. */
+  .orch > .t-bar .agent-task-toggle > span { display: none; }
+  .orch > .t-bar .agent-task-toggle::after { content: attr(data-short); height: auto; overflow: visible; visibility: visible; }
   /* A panel takes the whole window here: what lies under it is out of reach for the keyboard too. */
   .orch.with-panels .agent-conversation { display: none; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }

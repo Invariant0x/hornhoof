@@ -295,7 +295,7 @@ const LOG: EventView[] = [{ seq: 1, kind: 'text', data: { kind: 'text', text: 'H
 
 function open(terminal = true, more: Partial<OrchestratorState> = {}, extra: Parameters<typeof mockApi>[0] = {}) {
   const calls = mockApi({
-    [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: { ...READY, ...more, terminal } }],
+    [`GET ${EVENTS}?last=300`]: [200, { events: LOG, state: { ...READY, ...more, terminal } }],
     [`GET ${EVENTS}?after=1`]: [200, { events: [], state: { ...READY, ...more, terminal } }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     'POST /api/agents/orchestrator/stop': [202],
@@ -593,7 +593,7 @@ describe("an agent's live terminal in its window", () => {
   it('keeps the refused turn in the log of what happened', async () => {
     const refused: EventView = { seq: 2, kind: 'turn_refused', data: { reason: 'unknown_words' }, jobId: null, person: null, at: '2026-10-30T10:00:01Z' };
     mockApi({
-      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, refused], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?last=300`]: [200, { events: [...LOG, refused], state: { ...READY, terminal: false } }],
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
@@ -608,7 +608,7 @@ describe("an agent's live terminal in its window", () => {
   ] as const)('keeps words left in the input in the log of what happened, and says %s', async (_, person, says) => {
     const left: EventView = { seq: 2, kind: 'input_left', data: { text: 'a <b>draft</b>\nof two lines', ref: 'r1' }, jobId: null, person, at: '2026-10-30T10:00:01Z' };
     mockApi({
-      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, left], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?last=300`]: [200, { events: [...LOG, left], state: { ...READY, terminal: false } }],
       [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });

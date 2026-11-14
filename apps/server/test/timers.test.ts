@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agentEvents, agents, departments, jobs, requests, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, requests, tasks } from '../src/db/schema.js';
 import { leadSweeps, minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from './builtin.js';
@@ -19,11 +19,13 @@ async function keepTaskWake(db: FastifyInstance['ctx']['db'], task: typeof tasks
 
 const NODE_KEY = 'k'.repeat(40);
 
-/* Operations with Wanda on the company key, which the built-in node runs. */
-async function company() {
+/* Operations with Wanda on the company key, which the built-in node runs. Its mail goes each as a turn of its own, as a test
+   of timers expects; inbox: it takes its mail by the inbox every company starts with. */
+async function company({ inbox = false } = {}) {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
   const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+  if (!inbox) await db.update(companies).set({ inboxMode: 'direct' });
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
   /* Timer tests need a ready modern sender; conversation tests cover the legacy instruction limit. */
@@ -429,6 +431,36 @@ describe('timers', () => {
     await minuteRound(app.ctx, at(30), () => () => {});
     expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(2);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+  });
+
+  it('says the reason of an alarm first, so the head of Operations reads it in its inbox turn, where each letter is cut short', async () => {
+    const { app, db, wandaId, orchestrator } = await company({ inbox: true });
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: orchestrator.subscriptionId })
+      .returning();
+    const [task] = await db
+      .insert(tasks)
+      .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
+      .returning();
+    await db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
+    const startedAt = new Date();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    const [turn] = await db
+      .insert(jobs)
+      .values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'Build POST /checkout.', timeoutMs: 900_000, status: 'running', startedAt })
+      .returning();
+    await keepTaskWake(db, task!, bruno!.id, turn!.id);
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.program', jobId: turn!.id, state: 'thinking', since: at(10).getTime(), screenAt: at(10).getTime() }, at(10));
+
+    await minuteRound(app.ctx, at(20), () => () => {});
+    const [wandaTurn] = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurn).toMatchObject({ inboxWake: true });
+    expect(wandaTurn!.prompt).toContain('Each is cut at 300 characters.');
+    expect(wandaTurn!.prompt).toContain('node_silent (node has not reported for 10 minutes)');
+    expect(wandaTurn!.prompt).toContain('Bruno (Backend engineer)');
   });
 
   it("sends the 30-minute alarm to the head of Operations when the task watchdog's own turn is silent, or when the watchdog is busy, off, or removed, without closing the watchdog's turn", async () => {

@@ -104,7 +104,7 @@ const ROUTES: Record<string, unknown> = {
     program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 },
     runsOn: [], changes: [], interrupted: [], canEdit: true, canRemove: true, timer: null,
   } satisfies AgentCardView,
-  '/api/agents/orchestrator/events?after=0': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
+  '/api/agents/orchestrator/events?last=300': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
 };
 
 /* Every /api call of the page gets the answer above, a task its detail, and anything else a 404 as the server gives it. */

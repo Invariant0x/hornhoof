@@ -152,10 +152,11 @@ for (const who of PEOPLE) {
       await back.click();
       await expect(panel('card')).toHaveCount(0);
       await expect(back).toHaveCount(0);
-      await expect(word(words.log)).toBeVisible();
+      /* The window keeps an inbox, whose icon takes the word's room on a phone. */
+      await expect(word(words.log)).toBeHidden();
       await inOneRow(resting);
 
-      /* In the chat the switch says Terminal, a longer word, and the way back leads to the conversation. */
+      /* In the chat the switch is named Terminal, and the way back leads to the conversation. */
       const backToChat = bar.getByRole('button', { name: words.backToChat, exact: true });
       await toggleTo(words.log).click();
       await expect(window.getByRole('log')).toBeVisible();
@@ -168,7 +169,7 @@ for (const who of PEOPLE) {
       await page.screenshot({ path: test.info().outputPath(`bar-with-panel-in-chat-${who}-${s.lang}-${s.theme}.png`) });
       await backToChat.click();
       await expect(panel('card')).toHaveCount(0);
-      await expect(word(words.terminal)).toBeVisible();
+      await expect(word(words.terminal)).toBeHidden();
       await inOneRow(chatting);
       await toggleTo(words.terminal).click();
       await expect(window.locator('.xterm-screen')).toBeVisible();

@@ -11,7 +11,7 @@ import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
-import { listEvents } from '../events/store.js';
+import { lastEvents, listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
@@ -21,7 +21,8 @@ import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
 
-const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
+/* after: what came since seq, a page at a time; last: only the newest so many, before seq when given. */
+const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), last: z.coerce.number().int().min(1).max(500).optional(), before: z.coerce.number().int().min(1).optional() });
 const MessageBody = z
   .object({ text: Text.trim().default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
   .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
@@ -107,10 +108,11 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
-    const { after } = EventsQuery.parse(req.query);
+    const { after, last, before } = EventsQuery.parse(req.query);
     const viewer = await viewerOf(db, me);
     const state = await agentState(ctx, agent.id);
-    return { events: (await listEvents(db, agent.id, after)).map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
+    const found = last === undefined ? await listEvents(db, agent.id, after) : await lastEvents(db, agent.id, last, before);
+    return { events: found.map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {

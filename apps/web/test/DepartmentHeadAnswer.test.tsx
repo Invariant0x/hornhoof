@@ -192,7 +192,7 @@ describe('department owner answering head on a large company', () => {
     const calls = mockApi({
       'GET /api/org': [200, org],
       [`GET /api/agents/${headId}`]: () => agentReply,
-      [`GET /api/agents/${headId}/events?after=0`]: EVENTS_REPLY,
+      [`GET /api/agents/${headId}/events?last=300`]: EVENTS_REPLY,
       [`GET /api/agents/${headId}/events?after=1`]: [200, { events: [], state: STATE }],
       'GET /api/departments/dept-1/notes': [200, { notes: [] }],
     });
@@ -276,7 +276,7 @@ describe('department owner answering head on a large company', () => {
         'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }],
         'GET /api/tasks/t9': () => (cutOff ? [200] : [200, { task: taskDetail }]),
         'GET /api/agents/b0': () => (cutOff ? [200] : [200, headCard]),
-        'GET /api/agents/b0/events?after=0': EVENTS_REPLY,
+        'GET /api/agents/b0/events?last=300': EVENTS_REPLY,
         'GET /api/agents/b0/events?after=1': () => (cutOff ? [200] : [200, { events: [], state: STATE }]),
         'GET /api/departments/d2/notes': () => (cutOff ? [200] : [200, { notes: [] }]),
       });

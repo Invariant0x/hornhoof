@@ -28,8 +28,12 @@ type Viewer = keyof AclCompany['tokens'];
 type Call = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; payload?: object };
 
 /* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything;
-   ownerToo: or for the owner of the agent's department; company: it is the company's work, which everyone of it reads. */
-type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; company?: boolean; closedStatus?: 403 | 404 };
+   ownerToo: or for the owner of the agent's department; rules: it asks for who changes the agent's rules, the CEO, the CEO
+   delegate or the named owner of its department, and no one else of the whole company; company: it is the company's work,
+   which everyone of it reads. */
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; rules?: boolean; company?: boolean; closedStatus?: 403 | 404 };
+/* Who changes the rules of the agents that are open to them: Olga is the named owner of Development. */
+const RULE_MAKERS: readonly Viewer[] = ['ceo', 'lisa', 'olga'];
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -70,6 +74,10 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/agents/:id/start', of: anAgent('POST', '/start', {}) },
   { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
   { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
+  /* The inbox opens with the employee; its letters are marked and its mode changed by who changes the employee's rules. */
+  { route: 'GET /api/agents/:id/inbox', of: anAgent('GET', '/inbox') },
+  { route: 'POST /api/agents/:id/inbox/read', of: anAgent('POST', '/inbox/read', { all: true }), rules: true },
+  { route: 'PUT /api/agents/:id/inbox-mode', of: anAgent('PUT', '/inbox-mode', { mode: 'direct' }), rules: true },
   /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
   { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true, ownerToo: true },
   { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
@@ -149,6 +157,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
+  'PUT /api/departments/:id/inbox-mode': "inbox.test.ts: the department's owner, the CEO or the CEO delegate, 403 for another one, 404 for a product",
+  'PUT /api/company/inbox-mode': 'inbox.test.ts: the CEO or the CEO delegate alone, 403 for everyone else',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts, department-owner-rights.test.ts: the CEO or the department owner, 403 for everyone else who sees the task',
   'GET /api/task-departments': "backlog.test.ts: every department of the company, which everyone sees",
@@ -259,14 +269,14 @@ describe('every real route', () => {
 });
 
 describe('one thing of one agent', () => {
-  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, company, closedStatus = 403 }) => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly, ownerToo, rules, company, closedStatus = 403 }) => {
     const c = await aclCompany();
     const got: string[] = [];
     /* Those that are closed first: what opens may change or remove what it is given. */
     for (const { name, viewer, agent, closed } of [...CASES].sort((a, b) => Number(b.closed) - Number(a.closed))) {
       const res = await call(c, await of(c, agent), viewer);
       got.push(`${name}: ${res.statusCode}`);
-      const scoped = companyOnly && (viewer === 'ann' || (viewer === 'olga' && !ownerToo));
+      const scoped = rules ? !RULE_MAKERS.includes(viewer) : companyOnly && (viewer === 'ann' || (viewer === 'olga' && !ownerToo));
       if (company) expect(res.statusCode, `${route}, ${name}`).toBe(200);
       else if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
       else expect([403, closedStatus], `${route}, ${name}`).not.toContain(res.statusCode);

@@ -295,11 +295,12 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
   const restartLine = restart.allowed ? 'restart_program is allowed now, for a wait the screen shows dead.' : `restart_program is not allowed now: ${restart.reason}`;
   const action = `Read program_screen for employee ${s.agent.id} and do at its screen what it needs to go on. ${restartLine} When nothing you may do helps, tell your head what the screen shows.`;
+  const reason = program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason);
+  /* The reason and who come first: an inbox turn shows each letter cut at 300 characters. */
   return (
-    `Hornhoof: ${who} triggered a turn alarm in turn ${s.job.id} (${where}). ` +
+    `Hornhoof: turn alarm, reason ${reason}: ${who}, in turn ${s.job.id} (${where}). ` +
     `Program state: ${programLabel(program)}, since ${stateSince}. Last change: ${when(iso)} (${iso}). ` +
-    `Last sign: ${sign}. Program retry: ${retry}. ` +
-    `Reason: ${program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason)}. ${action}`
+    `Last sign: ${sign}. Program retry: ${retry}. ${action}`
   );
 }
 

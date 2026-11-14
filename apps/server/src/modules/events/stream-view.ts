@@ -20,7 +20,7 @@ export function heardInFull(viewer: AgentViewer, m: StreamMessage): StreamMessag
   if (!viewer.apart.size) return m;
   const apart = (end: Endpoint) => end.kind === 'agent' && viewer.apart.has(end.id);
   if (m.type === 'agent_event') return viewer.apart.has(m.agentId) ? null : { ...m, event: maskEvent(viewer, m.event) };
-  if (m.type === 'context') return viewer.apart.has(m.agentId) ? null : m;
+  if (m.type === 'context' || m.type === 'inbox') return viewer.apart.has(m.agentId) ? null : m;
   if (m.type === 'pulse') return apart(m.from) || apart(m.to) ? null : m;
   return m;
 }
@@ -37,6 +37,7 @@ const passes = (m: StreamMessage) => m;
 const FILTERS: Filters = {
   agent_event: (m, { viewer }) => (seesAgentId(viewer, m.agentId) ? { ...m, event: maskEvent(viewer, m.event) } : null),
   context: (m, { viewer }) => (knowsAgentId(viewer, m.agentId) ? m : null),
+  inbox: (m, { viewer }) => (seesAgentId(viewer, m.agentId) ? m : null),
   pulse: (m, { viewer }) => (apartEnd(viewer, m.from) || apartEnd(viewer, m.to) ? null : m),
   working: async (_m, { db, companyId }) => ({ type: 'working', working: await workingSeen(db, companyId) }),
   task: async (m, { db, viewer }) => {

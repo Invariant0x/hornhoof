@@ -862,6 +862,13 @@
       "when": 1794696089625,
       "tag": "0123_feedback_sent",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1794696777541,
+      "tag": "0124_inbox",
+      "breakpoints": true
     }
   ]
 }

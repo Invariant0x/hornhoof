@@ -16,6 +16,7 @@ import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { ComputerStrip } from '../ui/ComputerStrip';
 import { Markdown } from '../ui/Markdown';
+import { Inbox, useInboxCount } from '../ui/Inbox';
 import { Notebook } from '../ui/Notebook';
 import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
@@ -27,6 +28,10 @@ import { everyVisible, useRenderGuard } from '../guard';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
+/* The window keeps the newest lines only, so a long day open leaves the page light; a person reads further back a page at a
+   time, and what they asked for stays too. */
+const KEEP = 300;
+const EARLIER = 200;
 /* Machines come and go without a message on the stream, so the window asks again now and then. */
 const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
@@ -36,6 +41,7 @@ const TERMINAL_ICON = 'M5 7l5 5-5 5M12 17h7';
 const CHAT_ICON = 'M4 5h16v11H10l-5 4v-4H4z';
 const SEND_ICON = 'M5 12h13M13 6l6 6-6 6';
 const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
+const INBOX_ICON = 'M4 13l3-8h10l3 8v6H4zM4 13h5l1 2h4l1-2h5';
 const STOP_ICON = 'M7 7h10v10H7z';
 
 type Applied = {
@@ -316,6 +322,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The chat shows once its whole history is in: drawn a page at a time from the oldest, it would open on old lines and run
      down to the newest. */
   const [historyIn, setHistoryIn] = useState(false);
+  /* Whether the server may have lines older than the oldest kept here, and how many the window keeps now. */
+  const [older, setOlder] = useState(false);
+  const [readingOlder, setReadingOlder] = useState(false);
+  const keep = useRef(KEEP);
   const [text, setText] = useState('');
   /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
   const [manual, setManual] = useState<boolean | null>(null);
@@ -342,6 +352,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const liveId = orchestrator ? org.orchestrator?.id : agentId;
   /* The department whose notebook a head keeps. */
   const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
+  const keepsInbox = card !== null && card.kind !== 'assistant';
+  const [unreadLetters, heardUnread] = useInboxCount(agentId, liveId, keepsInbox ? card.inboxUnread : undefined);
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
@@ -383,12 +395,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       err => mounted.current && setFailure(err),
     );
 
-  /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. */
+  /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
+     window with no line yet takes the newest ones only. */
   const catchUp = useCallback(async () => {
     try {
       for (;;) {
         const n = ++catchUps.current;
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?after=${last.current}`);
+        const fresh = last.current === 0;
+        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
         if (!readyEvents(mounted.current, res)) return;
         merge(res.events);
         if (n > stateFrom.current) {
@@ -396,7 +410,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           setState(res.state);
         }
         if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
-        if (res.events.length < PAGE) {
+        if (fresh && res.events.length === KEEP) setOlder(true);
+        if (fresh || res.events.length < PAGE) {
           setHistoryIn(true);
           break;
         }
@@ -410,6 +425,33 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
     await loadCommands();
   }, [loadCommands, merge, path]);
+
+  /* Past what it keeps, the oldest lines go; the server still has them for the person who asks. */
+  useEffect(() => {
+    if (events.length <= keep.current) return;
+    setEvents(list => list.slice(-keep.current));
+    setOlder(true);
+  }, [events]);
+
+  /* Where the person reads, as far from the end as before the older lines came above it. */
+  const fromEnd = useRef<number | null>(null);
+  const earlier = async (log: HTMLElement | null) => {
+    const first = events[0];
+    if (!first) return;
+    setReadingOlder(true);
+    try {
+      const res = await api.get<{ events: EventView[] }>(`${path}/events?last=${EARLIER}&before=${first.seq}`);
+      if (!mounted.current) return;
+      fromEnd.current = log ? log.scrollHeight - log.scrollTop : null;
+      keep.current += res.events.length;
+      merge(res.events);
+      setOlder(res.events.length === EARLIER);
+    } catch (err) {
+      if (mounted.current) setFailure(err);
+    } finally {
+      if (mounted.current) setReadingOlder(false);
+    }
+  };
 
   const soon = useCallback(() => {
     if (catchUpTimer.current) return;
@@ -587,6 +629,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
   const { log, onScroll } = useChatScroll(chat && !place?.minimized, `${events.length} ${state?.busy} ${commands.length} ${hasCards}`);
+  useLayoutEffect(() => {
+    const el = log.current;
+    if (fromEnd.current === null || !el) return;
+    el.scrollTop = el.scrollHeight - fromEnd.current;
+    fromEnd.current = null;
+  }, [events, log]);
 
   const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
   const authorOf = (e: LogEvent): string => {
@@ -677,8 +725,17 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
   }
 
-  /* The orchestrator's notebook is the company's, a head's its department's. */
+  /* The orchestrator's notebook is the company's, a head's its department's. Every employee but a person's assistant, which
+     answers its owner alone, keeps an inbox. */
+  const inbox: WindowPanel = {
+    id: 'inbox',
+    label: t.agentInbox.panel,
+    icon: INBOX_ICON,
+    count: { n: unreadLetters, label: t.agentInbox.button(unreadLetters) },
+    render: close => <Inbox agentId={agentId} liveId={liveId} hasDepartment={Boolean(card?.department)} onClose={close} onUnread={heardUnread} />,
+  };
   const sidePanels: WindowPanel[] = [
+    ...(keepsInbox ? [inbox] : []),
     ...(orchestrator || headOf ? [framedPanel('notebook', t.window.notebook, NOTEBOOK_ICON, <Notebook departmentId={orchestrator ? null : headOf} />)] : []),
     { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
   ];
@@ -710,6 +767,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       {chat && (
         <div className="t-log chat" ref={log} role="log" aria-label={t.window.chat.conversation} onScroll={onScroll}>
+          {older && (
+            <div className="entry-actions chat-earlier">
+              <button className="btn small ghost" type="button" disabled={readingOlder} onClick={() => void earlier(log.current)}>
+                {t.window.chat.earlier}
+              </button>
+            </div>
+          )}
           {ready && !shown.length && <p className="chat-empty">{t.window.chat.empty}</p>}
           {chatItems(shown).map(item =>
             item.kind === 'steps' ? (

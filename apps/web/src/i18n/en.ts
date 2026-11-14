@@ -1,7 +1,7 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { BuiltinSkinId } from '../skins/registry';
 import type { SkinErrorCode } from '../skins/validate';
-import type { EmployeeStatus, FailureKind } from '../types';
+import type { EmployeeStatus, FailureKind, LetterKind } from '../types';
 import { plural } from './plural';
 
 const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
@@ -902,6 +902,46 @@ export const en = {
     changeNote: (n: number) => `Change note #${n}`,
     removeNote: (n: number) => `Remove note #${n}`,
   },
+  agentInbox: {
+    panel: 'Inbox',
+    button: (n: number) => (n ? `Inbox: ${n} unread` : 'Inbox: all read'),
+    modeLabel: 'How this employee gets letters',
+    modes: { rule: 'Department rule', companyRule: 'Company rule', inbox: 'Through Inbox', direct: 'Direct' },
+    nowMode: { inbox: 'through Inbox', direct: 'direct' },
+    byRule: { department: 'by department rule', company: 'by company rule' },
+    now: (mode: string, byRule: string | null) => (byRule ? `Now: ${mode}, ${byRule}` : `Now: ${mode}`),
+    modeWhat: {
+      inbox: 'New letters wait here. Hornhoof wakes the free employee once for all unread letters.',
+      direct: "Each letter goes straight to the employee's window as its own turn.",
+    },
+    readOnly: 'The CEO or the head of the department can change it.',
+    saving: 'Saving…',
+    modeFailed: 'Could not change the mode. The old one stays.',
+    title: 'Letters',
+    sumUnread: (n: number, all: number) => `${n} of ${all} unread`,
+    sumAll: (all: number) => `All read. ${all} in total`,
+    unread: 'Unread',
+    read: 'Read',
+    kinds: { message: 'Message', report: 'Report', comment: 'Comment', assignment: 'Task assigned', notification: 'Notice' } satisfies Record<LetterKind, string>,
+    system: 'System message',
+    open: 'Open letter',
+    fold: 'Fold letter',
+    openOf: (name: string) => `Open the letter from ${name}`,
+    foldOf: (name: string) => `Fold the letter from ${name}`,
+    more: (n: number) => `${n} more ${n === 1 ? 'line' : 'lines'}`,
+    markAll: 'Mark all as read',
+    markOne: 'Mark as read',
+    markOneOf: (name: string) => `Mark the letter from ${name} as read`,
+    markFailed: 'Could not mark the letter. Try again.',
+    markAllFailed: 'Could not mark the letters. Try again.',
+    loading: 'Loading letters…',
+    emptyHead: 'No letters yet.',
+    emptyText: 'Letters to this employee from people, other employees and the orchestrator come here.',
+    errorHead: 'Could not load the letters.',
+    errorText: 'Check the connection to the server and try again.',
+    retry: 'Retry',
+    showMore: 'Show more',
+  },
   window: {
     task: 'Task',
     noTask: 'No task',
@@ -962,6 +1002,7 @@ export const en = {
     /* The window's chat: the conversation with the agent as anyone reads it. */
     chat: {
       conversation: 'Conversation',
+      earlier: 'Show earlier',
       you: 'You',
       viaTelegram: (name: string) => `${name}, via Telegram`,
       viaAssistant: (name: string, assistant: string) => `${name}, through the assistant ${assistant}`,
@@ -1980,6 +2021,7 @@ export const en = {
     staff_invalid: 'This roster does not fit the department as it is now. Ask the orchestrator to correct the card.',
     department_unknown: 'This department no longer exists. Reload the page.',
     agent_unknown: 'This employee no longer exists. Reload the page.',
+    letter_unknown: 'Some of these letters are no longer in this employee\'s inbox. Reload the page.',
     agent_not_ready: 'This employee cannot answer right now.',
     not_your_department: 'This employee works in a department you do not have access to.',
     agent_hidden: 'You can open only employees on your own plan in your departments, and every employee of a department you own.',
