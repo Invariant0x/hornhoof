@@ -1,12 +1,12 @@
 import { turnCounts } from './turn-progress.js';
-import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
-import { runsDepartment } from '../../auth/departments.js';
+import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
@@ -56,9 +56,9 @@ const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: T
 
 const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positive(), ownerBinding: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) });
 const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
-/* department: one of the person's own, or none for the work given to the orchestrator itself, which only people with the
-   whole company read. */
-const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]), status: z.enum(['open', 'closed', 'all']).default('open') });
+/* department: any of the company's, or none for the work given to the orchestrator itself, which only people with the
+   whole company read; left out, every task the person reads. */
+const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]).optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
@@ -254,22 +254,25 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The task as this person reads it. */
   const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId) });
 
-  /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. */
+  /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one
+     of the person's own, whose work and list for later turns they change. */
   app.get('/api/task-departments', async req => {
     const me = await requirePerson(req, db);
     const all = await db.select().from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
-    return { whole: (await accessOf(db, me)).whole, departments: all.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
+    const mine = new Set((await departmentsHad(db, me)).map(d => d.id));
+    return { whole: (await accessOf(db, me)).whole, departments: all.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id) })) };
   });
 
-  /* One department's tasks, as this person sees them: any department's. The work given to the orchestrator itself is his,
-     whom only people with the whole company open. */
+  /* One department's tasks, or every department's, as this person sees them: any department's. The work given to the
+     orchestrator itself is his, whom only people with the whole company open. */
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
-    if (q.department === 'none' && !(await accessOf(db, me)).whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
-    if (q.department !== 'none' && !(await departmentOf(db, me.companyId, q.department))) throw refuse(404, 'department_unknown', 'This department does not exist.');
+    const whole = (await accessOf(db, me)).whole;
+    if (q.department === 'none' && !whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
+    if (q.department && q.department !== 'none' && !(await departmentOf(db, me.companyId, q.department))) throw refuse(404, 'department_unknown', 'This department does not exist.');
     const viewer = await viewerOf(db, me);
-    const place = q.department === 'none' ? isNull(tasks.departmentId) : eq(tasks.departmentId, q.department);
+    const place = q.department === undefined ? (whole ? undefined : isNotNull(tasks.departmentId)) : q.department === 'none' ? isNull(tasks.departmentId) : eq(tasks.departmentId, q.department);
     const page = (state: SQL) =>
       db
         .select()
@@ -301,7 +304,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!assignee) throw refuse(409, 'no_head', 'This company has no orchestrator.');
     } else {
       const [dept] = await db.select().from(departments).where(and(eq(departments.id, body.department), eq(departments.companyId, me.companyId)));
-      if (!dept || dept.parentId || !canReach(await accessOf(db, me), { departmentId: dept.id })) throw refuse(404, 'department_unknown', 'This department does not exist.');
+      if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
+      if (!canReach(await accessOf(db, me), { departmentId: dept.id })) throw refuse(403, 'not_your_department', "Only the CEO, the CEO delegate and the people of this department give it work. Ask one of them, or the orchestrator.");
       if (body.product) {
         const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
         if (!product) throw refuse(404, 'department_unknown', 'This product does not exist.');

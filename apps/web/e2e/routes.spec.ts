@@ -4,7 +4,7 @@ import { ru } from '../src/i18n/ru';
 import { openCompany } from './agent-windows-api';
 import { SETTINGS } from './computer-strip-api';
 import { serveRoutes } from './routes-api';
-import { openTaskRow, TASKS } from './api';
+import { openTaskCard, TASKS } from './api';
 
 test.use({ reducedMotion: 'reduce' });
 
@@ -45,7 +45,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/machines\/m1$/);
     await expect(page.getByRole('article', { name: 'build-box', exact: true })).toBeVisible();
     await tab(t.shell.tabs.tasks).click();
-    await openTaskRow(page, 1);
+    await openTaskCard(page, 1);
     await expect(page).toHaveURL(/\/tasks\/t1$/);
     await expect(page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true })).toBeVisible();
     await page.getByRole('complementary', { name: '#1 Checkout step 1', exact: true }).getByRole('button', { name: t.window.close, exact: true }).click();

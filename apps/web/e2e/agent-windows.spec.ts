@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { box, openTaskRow } from './api';
+import { box, openTaskCard } from './api';
 import { expectStripsApart, openCompany, overlaps, pastePicture } from './agent-windows-api';
 import { SETTINGS } from './computer-strip-api';
 
@@ -215,7 +215,7 @@ test('a task opened from a screen takes the window aside and leaves its strip', 
   const orchestrator = words.orchestrator;
   await openOrchestrator();
   await tab(words.tasks).click();
-  await openTaskRow(page, 2);
+  await openTaskCard(page, 2);
   const task = page.getByRole('complementary', { name: '#2 Checkout step 2', exact: true });
   await expect(task).toBeVisible();
   await expect(windowOf(orchestrator)).toBeHidden();

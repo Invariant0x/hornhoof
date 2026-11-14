@@ -142,6 +142,10 @@ test('keeps every card and control inside the board in every skin, at a desk and
     await capture(page, info, `${skin}-${width}`);
   }
   await open(page, 'en', 1440);
+  /* The bar of a goal keeps its own width whatever width each engine gives the words beside it: 360 px less the gap
+     and the 8em of words, so the engines differ by at most 1 px (style book, section 9). */
+  const bar = (await card(page, goalOf('Take card payments').number).getByRole('progressbar').boundingBox())!;
+  expect(Math.abs(bar.width - 250)).toBeLessThanOrEqual(0.5);
   await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
   const payments = card(page, goalOf('Take card payments').number);
   const frame = (await board(page, t).boundingBox())!;

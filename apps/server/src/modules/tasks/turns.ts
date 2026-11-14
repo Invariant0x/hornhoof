@@ -154,8 +154,8 @@ const listsChanged = (ctx: Pick<Ctx, 'bus'>, companyId: string, items: BacklogIt
   for (const departmentId of new Set(items.map(i => i.departmentId))) backlogChanged(ctx, companyId, departmentId);
 };
 
-/* Planned tasks wait in their turn without anyone holding them. */
-async function insertPlanned(tx: Tx, companyId: string, planner: Planner, turnId: string, items: Placed[], improvement?: string): Promise<Task[]> {
+/* Planned tasks wait in their turn without anyone holding them; work outside turns has none and starts at once. */
+async function insertPlanned(tx: Tx, companyId: string, planner: Planner, turnId: string | null, items: Placed[], improvement?: string): Promise<Task[]> {
   const { agentId, personId } = planner;
   let n = await lastTaskNumber(tx, companyId);
   const rows: Task[] = [];
@@ -360,6 +360,38 @@ export async function addTasks(ctx: Ctx, by: By, number: number, items: PlanItem
   }
   for (const t of done.planned) published(ctx, t);
   return { turn: done.turn, text: `Added ${numbers(done.planned)} to ${turnName(done.turn)}; they start with it.`, wakes: [] };
+}
+
+/* The work outside turns of each piece's department: a head's only of its own, which it may leave out, and the
+   orchestrator's of the department it names. */
+function outsideTurns(scope: Scope, items: PlanItem[]): PlanItem[] {
+  if (scope && items.some(i => i.department && i.department !== scope)) throw notYourTurns();
+  return scope ? items.map(i => ({ ...i, department: scope })) : items;
+}
+
+/* Work given outside every turn: urgent or standalone tasks that are no goal of a turn. Each goes to its department's head
+   at once, whatever turn the department runs or waits for, and no turn holds it or waits for it. */
+export async function giveOutsideTurns(ctx: Ctx, by: By, items: PlanItem[], improvement?: string, backlog: string[] = [], scope: Scope = null): Promise<{ text: string; wakes: Wake[] }> {
+  const { companyId, agentId } = by;
+  const listed = await readBacklog(ctx.db, companyId, backlog);
+  const placed = await place(ctx, by, companyId, outsideTurns(scope, [...items, ...fromBacklog(listed, i => i.createdByPersonId)]));
+  const done = await ctx.db.transaction(async tx => {
+    await lockCompany(tx, companyId);
+    const taken = await takeBacklog(tx, companyId, backlog);
+    const planned = await insertPlanned(tx, companyId, { agentId }, null, placed, improvement);
+    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by));
+    const started: Started[] = [];
+    for (const task of planned) {
+      const s = await start(tx, task);
+      if (s) started.push(s);
+    }
+    return { started, taken };
+  });
+  ctx.bus.publish(companyId, { type: 'org' });
+  listsChanged(ctx, companyId, done.taken);
+  if (improvement) improvementsChanged(ctx, companyId);
+  await announce(ctx, done.started);
+  return { text: `Given outside turns: ${whoGot(done.started)}.`, wakes: wakesFor(done.started) };
 }
 
 /* The department's next turn takes what a person puts into it from the department's list: its first planned one, or else

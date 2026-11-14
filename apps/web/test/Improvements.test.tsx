@@ -54,7 +54,7 @@ function shell(routes: Record<string, unknown> = {}, me: Me = ME, onSignOut: () 
     'GET /api/org': [200, DEV_ORG],
     'GET /api/requests': [200, decisions([])],
     'GET /api/improvements': [200, { improvements: IMPROVEMENTS }],
-    'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }],
+    'GET /api/tasks?status=all': [200, { tasks: TASKS }],
     'GET /api/turns': [200, { turns: [] }],
     ...(routes as Record<string, [number, unknown]>),
   });

@@ -90,7 +90,7 @@ test('a person of part of the company sees every employee and the whole work in 
   await expect(page.locator('.tv-in')).toContainText('Timur');
   await expect(page.locator('.tv-in')).toContainText('Checkout step 63');
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
-  await expect(page.locator('.tasks')).toContainText(`#${OWN_TASK.number} ${OWN_TASK.title}`);
+  await expect(page.locator('.tasks').getByRole('article', { name: `#${OWN_TASK.number} ${OWN_TASK.title}`, exact: true })).toBeVisible();
   await expect(page.locator('.tasks')).not.toContainText('Hidden task of another agent');
 });
 

@@ -14,7 +14,7 @@ import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
-import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
+import { addTasks, editTurn, giveOutsideTurns, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
 import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
@@ -549,15 +549,23 @@ class TaskTools {
       'add_tasks',
       {
         description:
-          (this.boss ? 'Adds tasks of its own department to a turn that is not over. ' : 'Adds tasks to a turn of your own department that is not over. ') +
-          "Only work for that turn's own goal: a new goal goes into a new turn with plan_turn, so a turn closes once its goal is done instead of growing. Follow the shared admission rule in hh-lead-tasks. " +
-          "In the running turn they go to the department's head at once, in a planned turn they wait for it to start.",
-        inputSchema: { turn: Turn, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
+          (this.boss ? 'Adds tasks of its own department to a turn that is not over, ' : 'Adds tasks to a turn of your own department that is not over, ') +
+          "or with no turn named, gives them outside every turn. In a turn: only work for that turn's own goal: a new goal goes into a new turn with plan_turn, so a turn closes once its goal is done instead of growing. Follow the shared admission rule in hh-lead-tasks. " +
+          "In the running turn they go to the department's head at once, in a planned turn they wait for it to start. " +
+          'Without a turn: urgent or standalone work that is no goal of a turn goes to its department\'s head at once, waits for no turn and keeps no turn open; ' +
+          (this.boss ? 'each task names its department. ' : 'it is work of your own department. ') +
+          'Work outside turns goes through no echelons: a member of a turnkey team does it end to end.',
+        inputSchema: { turn: Turn.optional().describe('The turn number, like 2; left out, the work goes outside turns.'), tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
         this.run(async () => {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
+          if (input.turn === undefined) {
+            await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
+            const given = await giveOutsideTurns(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.tasks, input.improvement, input.backlog, scope);
+            return { text: given.text, moved: { wakes: given.wakes } };
+          }
           const [turn] = await this.db.select({ departmentId: turnsTable.departmentId }).from(turnsTable).where(and(eq(turnsTable.companyId, this.job.companyId), eq(turnsTable.number, input.turn)));
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? turn?.departmentId ?? '' })));
           const moved = await addTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.turn, input.tasks, input.words, input.improvement, input.backlog, scope);

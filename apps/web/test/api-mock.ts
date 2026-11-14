@@ -15,7 +15,7 @@ function taskDepartments(routes: Record<string, Route>): Route {
     const org = routes['GET /api/org'];
     const reply = typeof org === 'function' ? await org(undefined) : org;
     const departments = (reply?.[1] as Partial<Org> | undefined)?.departments ?? [];
-    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) }];
+    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true })) }];
   };
 }
 

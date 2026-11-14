@@ -111,7 +111,7 @@ const ORG_FIXTURE: Org = {
   ],
 };
 /* The departments whose tasks the CEO reads, as the server gives them for the Tasks screen. */
-const TASK_DEPARTMENTS: TaskDepartments = { whole: true, departments: ORG_FIXTURE.departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
+const TASK_DEPARTMENTS: TaskDepartments = { whole: true, departments: ORG_FIXTURE.departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true })) };
 
 function collectStrings(value: unknown, out: string[] = []): string[] {
   if (typeof value === 'string') out.push(value);
@@ -582,8 +582,8 @@ test('separates legacy option.image preview from explicit choice and send-withou
     });
 
     await page.goto('/tasks');
-    const legacyCard = page.getByRole('article', { name: new RegExp(`^#${srv.legacyTaskNumber} `) });
-    const freeCard = page.getByRole('article', { name: new RegExp(`^#${srv.freeTaskNumber} `) });
+    const legacyCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${srv.legacyTaskNumber} `) });
+    const freeCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${srv.freeTaskNumber} `) });
     await expect(legacyCard).toBeVisible();
     await expect(freeCard).toBeVisible();
 

@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
 import type { ExternalWait, TaskDetail } from '../src/types';
-import { openTaskRow, serveApi, TASKS } from './api';
+import { openTaskCard, serveApi, TASKS } from './api';
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark']) for (const width of [1440, 375]) {
   test(`named task wait ${language} ${theme} ${width}`, async ({ page }, info) => {
@@ -27,7 +27,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     });
     await page.goto('/');
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
-    await openTaskRow(page, 1);
+    await openTaskCard(page, 1);
     const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
     const text = language === 'en' ? `waits for ${employee}: Acceptance on a-host, until 16:30` : `ждет: Acceptance on a-host; сотрудник: ${employee}, до 16:30`;
     await expect(panel.getByText(text, { exact: true })).toBeVisible();

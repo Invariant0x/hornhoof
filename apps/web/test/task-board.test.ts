@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byDepartment, byRelease, goals, humanStatus, inDepartment, split, type Goal } from '../src/task-board';
+import { byDepartment, byRelease, goals, humanStatus, inDepartment, inProgress, split, type Goal } from '../src/task-board';
 import type { TaskLine, TurnView } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -126,13 +126,20 @@ describe('the department filter and the sections of the tracker', () => {
     expect(inDepartment(work, 'none').map(t => t.id)).toEqual(['c']);
   });
 
-  it("groups goals by department in the order given, and the orchestrator's own work last", () => {
-    const sections = byDepartment(work, ['d3', 'd2']);
+  it("groups the goals in progress by every department in the order given, and the orchestrator's own work last", () => {
+    const sections = byDepartment(work, ['d3', 'd2', 'd9']);
     expect(sections.map(s => [s.id, s.split.open.map(g => g.task.id), s.split.closed.map(g => g.task.id)])).toEqual([
       ['d3', ['b'], []],
-      ['d2', ['a', 'f'], ['e', 'd']],
+      ['d2', ['a'], ['e', 'd']],
+      ['d9', [], []],
       ['none', ['c'], []],
     ]);
+  });
+
+  it('leaves the work that waits for its turn out of what is in progress', () => {
+    const { open, closed } = inProgress(work);
+    expect(open.map(g => g.task.id)).toEqual(['c', 'b', 'a']);
+    expect(closed.map(g => g.task.id)).toEqual(['e', 'd']);
   });
 
   it('shows what is getting ready for release, what is planned, the work outside releases and what came out, by turn', () => {

@@ -1,8 +1,6 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
-import { en } from '../src/i18n/en';
-import { ru } from '../src/i18n/ru';
 import type { AgentCardView, Briefing, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -70,8 +68,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/nodes/commands': { commands: [] },
   '/api/computer': { available: false, until: null, asked: null },
   '/api/turns': { turns: [TURN] },
-  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
-  '/api/tasks?status=all&department=d2': { tasks: TASKS },
+  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true }] },
+  '/api/tasks?status=all': { tasks: TASKS },
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
@@ -112,12 +110,8 @@ export async function box(locator: Locator) {
   return b;
 }
 
-const OPEN_TASK = new RegExp(`^(${en.tasks.table.open}|${ru.tasks.table.open})$`);
-
-/* A task opens from the table of the Tasks screen: its row unfolds, and the button in what it shows opens the panel. */
-export async function openTaskRow(page: Page, number: number) {
-  const row = page.getByRole('row', { name: new RegExp(`^#${number} `) });
-  const card = row.getByRole('button');
-  if ((await card.getAttribute('aria-expanded')) !== 'true') await card.click();
-  await row.locator('xpath=following-sibling::tr[1]').getByRole('button', { name: OPEN_TASK }).click();
+/* A task opens from the Tasks board, not from a request above it that names the same number: the title of its card
+   opens the panel. */
+export async function openTaskCard(page: Page, number: number) {
+  await page.locator('.board').getByRole('article', { name: new RegExp(`^#${number} `) }).first().locator('.goal-title button').click();
 }

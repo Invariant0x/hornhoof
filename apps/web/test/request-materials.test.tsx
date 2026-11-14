@@ -754,8 +754,8 @@ describe('separate question materials preview and explicit answering (#512)', ()
       calls.push({ method, path, body });
       if (method === 'GET' && path === '/api/org') return new Response(JSON.stringify(DEV_ORG), { status: 200, headers: { 'content-type': 'application/json' } });
       if (method === 'GET' && path === '/api/turns') return new Response(JSON.stringify({ turns: [TURN] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (method === 'GET' && path === '/api/task-departments') return new Response(JSON.stringify({ whole: true, departments: [{ id: 'd2', name: null, templateKey: 'development' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (method === 'GET' && path === '/api/tasks?status=all&department=d2') return new Response(JSON.stringify({ tasks: TASKS }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === '/api/task-departments') return new Response(JSON.stringify({ whole: true, departments: [{ id: 'd2', name: null, templateKey: 'development', mine: true }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === '/api/tasks?status=all') return new Response(JSON.stringify({ tasks: TASKS }), { status: 200, headers: { 'content-type': 'application/json' } });
       if (method === 'GET' && path === '/api/departments/d2/roster') return new Response(JSON.stringify(ROSTER), { status: 200, headers: { 'content-type': 'application/json' } });
       if (method === 'GET' && path === `/api/proposals/${structId}/materials`) {
         return new Response(JSON.stringify({

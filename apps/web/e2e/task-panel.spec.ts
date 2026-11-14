@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, openTaskRow as openTask, serveApi, TASKS } from './api';
+import { box, detail, openTaskCard as openTask, serveApi, TASKS } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its width and place, the panel runs to the bottom of the
    window, scrolls by itself and leaves the page scrolled where it was. */
@@ -44,20 +44,21 @@ async function openPage(page: Page, heading: string, ...buttons: (string | RegEx
 async function openTasks(page: Page) {
   await openPage(page, 'Tasks', /^Tasks/);
   await expect(page.getByText('Nothing waits for you.')).toBeVisible();
-  await expect(page.getByRole('radio', { name: 'Development' })).toBeChecked();
-  await expect(row(page, 1)).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'In progress' })).toBeChecked();
+  await expect(card(page, 1)).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 const openImprovements = (page: Page) => openPage(page, 'Improvements', 'Account', 'Improvements');
 
-const row = (page: Page, n: number) => page.getByRole('row', { name: `#${n} Checkout step ${n}`, exact: true });
+const card = (page: Page, n: number) => page.getByRole('article', { name: `#${n} Checkout step ${n}`, exact: true });
 const panelOf = (page: Page, n: number) => page.getByRole('complementary', { name: `#${n} Checkout step ${n}` });
 
 /* What scrolls on a page is its main part under the header, not the document. */
 const pageScroll = (page: Page) => page.getByRole('main').evaluate(el => el.scrollTop);
-async function scrollPage(page: Page, top: number) {
-  await page.getByRole('main').evaluate((el, y) => el.scrollTo(0, y), top);
-  await expect.poll(() => pageScroll(page)).toBe(top);
+/* Scrolls the page down until the card of task n is in sight, so opening it moves nothing. */
+async function scrollTo(page: Page, n: number) {
+  await card(page, n).scrollIntoViewIfNeeded();
+  await expect.poll(() => pageScroll(page)).toBeGreaterThan(0);
 }
 
 /* Each panel that opens over a page: the page, what on it must keep its width and place, and how the panel opens. */
@@ -65,7 +66,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: 'a task from the list',
     go: openTasks,
-    content: page => row(page, 1),
+    content: page => card(page, 1),
     open: async page => {
       await openTask(page, 1);
       await expect(panelOf(page, 1).getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
@@ -75,7 +76,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
   {
     name: "the orchestrator's window",
     go: openTasks,
-    content: page => row(page, 1),
+    content: page => card(page, 1),
     open: async page => {
       await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
       const panel = page.getByRole('complementary', { name: 'Orchestrator' });
@@ -122,10 +123,10 @@ test.describe('scrolling', () => {
 
   test('opening and closing the panel keeps the list scrolled where it was', async ({ page }) => {
     await openTasks(page);
-    await scrollPage(page, 900);
+    const n = 12;
+    await scrollTo(page, n);
     const scrolled = await pageScroll(page);
     expect(scrolled).toBeGreaterThan(0);
-    const n = 12;
     await openTask(page, n);
     await expect(panelOf(page, n)).toBeVisible();
     expect(await pageScroll(page)).toBe(scrolled);
@@ -137,7 +138,7 @@ test.describe('scrolling', () => {
 
   test('Esc closes the panel and leaves the list where it was', async ({ page }) => {
     await openTasks(page);
-    await scrollPage(page, 900);
+    await scrollTo(page, 12);
     const scrolled = await pageScroll(page);
     await openTask(page, 12);
     await expect(panelOf(page, 12)).toBeVisible();
@@ -148,7 +149,7 @@ test.describe('scrolling', () => {
 
   test('the panel scrolls by itself and the page under it stays put', async ({ page }) => {
     await openTasks(page);
-    await scrollPage(page, 300);
+    await scrollTo(page, 5);
     const scrolled = await pageScroll(page);
     await openTask(page, 5);
     const panel = panelOf(page, 5);

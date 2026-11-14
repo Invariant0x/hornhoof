@@ -410,6 +410,8 @@ export type TaskLine = {
   /* What kind of work it is and what a mistake in it would cost, when someone said so. An older server sends neither. */
   workKind?: WorkKind | null;
   riskClass?: RiskClass | null;
+  /* Said by the CEO or the owner of its department, never read from its words; the work under it is as urgent. */
+  urgent?: boolean;
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
@@ -571,8 +573,9 @@ export type TurnView = {
   tasks: { total: number; done: number };
 };
 
-/* The departments whose tasks a person reads, and whether they have the whole company. */
-export type TaskDepartments = { whole: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null }[] };
+/* The departments whose tasks a person reads, and whether they have the whole company. mine: a department of the person's
+   own, whose work and list for later turns they change. */
+export type TaskDepartments = { whole: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null; mine: boolean }[] };
 
 /* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
 export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };

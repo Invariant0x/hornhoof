@@ -8,7 +8,7 @@ import { CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLA
 import { fakeStream } from './fake-stream';
 import { taskRoute } from './task-route';
 
-const ALL = '/api/tasks?status=all&department=d2';
+const ALL = '/api/tasks?status=all';
 const PLANNED = { ...TASKS[1]!, id: 't14', number: 14, title: 'Refund button', brief: '', status: 'planned' as const, assignee: null, turn: 4 };
 const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief: '', status: 'open' as const, parentId: 't12' };
 const CHECKING_CART = { ...TASKS[1]!, status: 'review' as const, assignee: TASKS[0]!.assignee, echelons: taskRoute('review', TASKS[0]!.assignee!.id) };
@@ -56,11 +56,13 @@ describe('the tracker', () => {
     expect(screen.queryByRole('button', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
   });
 
-  it('says what to do when there is no turn yet', async () => {
+  it('says what to do when nothing is in progress and there is no turn yet', async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
     await openTasks(user);
-    expect(await screen.findByText(/No turns in this department yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing is in progress here/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
+    expect(screen.getByText(/No turns and no tasks yet/)).toBeInTheDocument();
   });
 
   it('answers a question and takes it off the list', async () => {
@@ -169,9 +171,8 @@ describe('the tracker', () => {
     await openTasks(user);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita'));
-    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('In review');
-    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Review');
+    await waitFor(() => expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita'));
+    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('In review');
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -193,19 +194,19 @@ describe('the tracker', () => {
     stream.send({ type: 'task', id: 't11' });
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita'));
+    await waitFor(() => expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita'));
     await act(async () => {
       late();
       /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita');
-    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Review');
+    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita');
+    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('In review');
   });
 });
 
-/* The rows of tasks in a table, without its heads. */
-const taskRows = (table: HTMLElement) => within(table).getAllByRole('row').filter(row => row.classList.contains('rm'));
+/* The cards of what a search found, without the related tasks folded in them. */
+const taskRows = (found: HTMLElement) => within(found).getAllByRole('article').filter(card => !card.classList.contains('sub'));
 
 describe('task search', () => {
   const archived = { ...PLANNED, id: 'abcdef14-1234-4567-8901-123456789abc', status: 'done', turn: 2 };
@@ -216,13 +217,13 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [mention, { ...PLANNED, id: 't114', number: 114 }, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('table', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Search results' });
     const matches = taskRows(results);
     expect(matches).toHaveLength(2);
-    expect(matches[0]).toHaveTextContent('#14 Refund button');
+    expect(matches[0]).toHaveAccessibleName('#14 Refund button');
     expect(matches[0]).toBeVisible();
-    expect(matches[1]).toHaveTextContent('#13 Notes for #14');
-    expect(within(results).queryByRole('row', { name: /#114/ })).not.toBeInTheDocument();
+    expect(matches[1]).toHaveAccessibleName('#13 Notes for #14');
+    expect(within(results).queryByRole('article', { name: /#114/ })).not.toBeInTheDocument();
   });
 
   it.each(['abcdef14-1234-4567-8901-123456789abc', 'ABCDEF14'])('finds a task by its id or prefix: %s', async query => {
@@ -230,9 +231,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('table', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Search results' });
     expect(taskRows(results)).toHaveLength(1);
-    expect(within(results).getByRole('row', { name: /#14 Refund button/ })).toBeVisible();
+    expect(within(results).getByRole('article', { name: /#14 Refund button/ })).toBeVisible();
   });
 
   it('does not use id prefixes shorter than eight characters', async () => {
@@ -252,9 +253,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, russian] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('table', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Search results' });
     expect(taskRows(results)).toHaveLength(1);
-    expect(within(results).getByRole('row', { name: new RegExp(title) })).toBeVisible();
+    expect(within(results).getByRole('article', { name: new RegExp(title) })).toBeVisible();
   });
 
   it('shows no matches without changing the decisions waiting for the person', async () => {
@@ -263,7 +264,7 @@ describe('task search', () => {
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'Checkout missing');
     expect(screen.getByRole('status')).toHaveTextContent('No tasks found');
-    expect(screen.queryByRole('row', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Stripe or Adyen?');
   });
 
@@ -303,7 +304,7 @@ describe('the decisions of one person', () => {
     expect(waiting).toHaveTextContent('Nothing waits for a decision from Maria.');
     await user.click(screen.getByRole('button', { name: 'Map' }));
     await user.click(screen.getByRole('button', { name: /^Tasks/ }));
-    expect(await screen.findAllByRole('article')).toHaveLength(2);
+    expect(await within(await screen.findByRole('region', { name: 'Waiting for you' })).findAllByRole('article')).toHaveLength(2);
     expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
   });
 
@@ -400,13 +401,18 @@ describe('decisions read failure', () => {
 });
 
 describe('how a turn runs', () => {
-  it("lists in a department's table its own turns and those its tasks are in, not another department's", async () => {
+  it("lists every department's turns by turn and release, and only the picked department's when one is picked", async () => {
     const user = userEvent.setup();
     const launch = { ...TURN, id: 'u5', number: 5, title: 'Spring launch', goal: 'Tell people.', departmentId: 'd3', messages: [] };
     const offers = { ...PLANNED_TURN, id: 'u6', number: 6, title: 'Spring offers', goal: 'Special prices.', departmentId: 'd3' };
     shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN, launch, offers] }] });
     await openTasks(user);
+    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
     expect(await screen.findByText('Refunds')).toBeInTheDocument();
+    expect(screen.getByText('Spring launch')).toBeInTheDocument();
+    expect(screen.getByText('Spring offers')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Department' }), 'Development');
+    expect(screen.getByText('Refunds')).toBeInTheDocument();
     expect(screen.queryByText('Spring launch')).not.toBeInTheDocument();
     expect(screen.queryByText('Spring offers')).not.toBeInTheDocument();
   });
@@ -415,10 +421,11 @@ describe('how a turn runs', () => {
     const user = userEvent.setup();
     const calls = shell({ 'PATCH /api/turns/4': [200, { turn: { ...PLANNED_TURN, mode: 'turnkey' } }] });
     await openTasks(user);
+    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
     const modes = await screen.findAllByRole('combobox', { name: 'How the turn runs' });
     expect(modes).toHaveLength(1);
     expect(modes[0]).toHaveValue('echelons');
-    expect(screen.getAllByText('How the turn runs: in stages').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('How the turn runs: in stages')).toHaveLength(1);
     await user.selectOptions(modes[0]!, 'turnkey');
     await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/turns/4', body: { mode: 'turnkey' } }));
   });
@@ -426,18 +433,20 @@ describe('how a turn runs', () => {
   it('shows a person who may not change it how each turn runs, without a way to change it', async () => {
     const user = userEvent.setup();
     shell({
-      'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }],
+      'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development', mine: true }] }],
       'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN].map(turn => ({ ...turn, canChangeMode: false })) }],
     });
     await openTasks(user);
-    expect(await screen.findAllByText('How the turn runs: in stages')).not.toHaveLength(0);
+    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
+    expect(await screen.findAllByText('How the turn runs: in stages')).toHaveLength(2);
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
   });
 
   it('lets the owner of the department, who sees only part of the company, change how its planned turn runs', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }] });
+    shell({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development', mine: true }] }] });
     await openTasks(user);
+    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
     expect(await screen.findAllByRole('combobox', { name: 'How the turn runs' })).toHaveLength(1);
   });
 
@@ -453,6 +462,8 @@ describe('how a turn runs', () => {
         'POST /api/departments/d2/backlog/schedule': [200, { turn: { number: 5 }, tasks: [{ id: 't20', number: 20 }] }],
       });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await user.click(screen.getByRole('radio', { name: lang === 'en' ? 'By turn and release' : 'По ходам и выпускам' }));
+      await user.selectOptions(screen.getByRole('combobox', { name: lang === 'en' ? 'Department' : 'Отдел' }), lang === 'en' ? 'Development' : 'Разработка');
       await user.click(await screen.findByRole('checkbox', { name: choose }));
       await user.selectOptions(screen.getByRole('combobox', { name: mode }), turnkey);
       await user.click(screen.getByRole('button', { name: put }));

@@ -1284,6 +1284,40 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .ttree li { display: grid; gap: 6px; }
 .ttree.sub { padding-left: 18px; border-left: 1px solid var(--line2); margin-left: 10px; }
 .tstate.planned { border-style: dashed; }
+/* The tracker's board: three views, a department and a search, then goals as cards with their related tasks folded in. */
+.board { display: grid; gap: 16px; min-width: 0; }
+.board-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; align-items: end; min-width: 0; }
+.board-section { display: grid; gap: 10px; min-width: 0; }
+.board-section > h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.board-section > h2 > .goal-fold { font-size: inherit; color: var(--ink); }
+.goals { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.goal { display: grid; gap: 6px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); }
+.goal.on { border-color: var(--cyan); border-inline-start: 3px solid var(--cyan); }
+.goal.sub { gap: 4px; padding: 8px 12px; background: var(--surface2); }
+.goal-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.goal-title { margin: 0; min-width: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.goal.sub .goal-title { font-size: 14px; }
+.goal-title > .linkish { color: var(--ink); text-align: start; overflow-wrap: anywhere; }
+.goal-title > .linkish:hover { color: var(--cyan-ink); }
+.goal-title > .linkish:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.goal-no { font-size: 12px; color: var(--muted); }
+.goal-brief { margin: 0; min-width: 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.goal-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.goal-meta > * { min-width: 0; overflow-wrap: anywhere; }
+.goal-meta > .badge { white-space: normal; }
+.goal-meta > .badge.urgent { color: var(--amber-ink); }
+.goal-meta > .goal-progress { flex: 1 1 200px; max-width: 280px; }
+.goal-progress { display: grid; grid-template-columns: minmax(0, 1fr) 8em; align-items: center; gap: 10px; max-width: 360px; font-size: 12.5px; }
+.goal-progress small { font-size: inherit; color: var(--muted); overflow-wrap: anywhere; }
+.goal-fold { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin: 0; padding: 4px 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; font-size: 13px; font-weight: 600; text-align: start; cursor: pointer; }
+.goal-fold > span { min-width: 0; overflow-wrap: anywhere; }
+.goal-fold .chev { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
+.goal-fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
+[dir="rtl"] .goal-fold .chev { transform: scaleX(-1); }
+[dir="rtl"] .goal-fold[aria-expanded="true"] .chev { transform: scaleX(-1) rotate(90deg); }
+.goal-fold:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.goal-subs { display: grid; gap: 6px; margin: 0; padding: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line2); list-style: none; min-width: 0; }
+.goal-closed { display: grid; gap: 8px; min-width: 0; }
 .waiting { display: grid; gap: 10px; }
 .machine-away { display: grid; gap: 4px; padding: 8px 12px; border-left: 2px solid var(--amber); }
 .machine-away h3 { font-size: 14px; }

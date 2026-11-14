@@ -1,6 +1,6 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
-import { openTaskRow, serveApi, TASKS } from './api';
+import { openTaskCard, serveApi, TASKS } from './api';
 
 for (const language of ['en', 'ru']) {
   for (const theme of ['light', 'dark']) {
@@ -29,7 +29,7 @@ for (const language of ['en', 'ru']) {
         await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task } }));
         await page.goto('/');
         await page.getByRole('button', { name: /^(Tasks|Задачи)/ }).click();
-        await openTaskRow(page, 1);
+        await openTaskCard(page, 1);
         const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
         const log = panel.getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
         await expect(log.getByRole('listitem')).toHaveCount(4);

@@ -112,8 +112,9 @@ for (const lang of ['en', 'ru'] as const) {
         await looksRight(page);
         await shot('one');
 
-        /* The Tasks screen keeps the whole turn's progress as it was. */
+        /* The Tasks screen keeps the whole turn's progress as it was, by turn and release. */
         await page.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
+        await page.getByRole('radio', { name: t.tasks.board.views.releases, exact: true }).check({ force: true });
         await expect(page.getByRole('progressbar', { name: label(3, 17) })).toHaveAttribute('aria-valuenow', '18');
         await page.getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
         await expect(dev).toHaveAttribute('aria-valuenow', '18');

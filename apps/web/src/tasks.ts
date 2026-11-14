@@ -47,10 +47,10 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, refres
   return { data, failure, load };
 }
 
-/* department: one of the person's own, or none for the work given to the orchestrator itself. */
-export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string };
+/* department: any of the company's, or none for the work given to the orchestrator itself; left out, all the person reads. */
+export type TaskFilter = { status: 'open' | 'closed' | 'all'; department?: string };
 
-export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}&department=${f.department}`;
+export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
 
 const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enabled ? tasksPath(filter) : null;
 
