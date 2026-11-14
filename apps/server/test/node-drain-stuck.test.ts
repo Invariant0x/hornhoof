@@ -220,13 +220,14 @@ describe('node drain updates silent or stuck nodes without interrupting live wor
   describe('waits for a turn that is still live by its own signs, and only while it is', () => {
     /* A node that answers, with one turn it took four hours ago: past a full drain-and-retry cycle, so the turn's own signs
        decide. */
-    async function liveStand(turn: { startedAgoMs?: number; task?: (s: Awaited<ReturnType<typeof stuckStand>>) => Promise<string> } = {}) {
+    async function liveStand(turn: { startedAgoMs?: number; restartedAgoMs?: number; task?: (s: Awaited<ReturnType<typeof stuckStand>>) => Promise<string> } = {}) {
       const s = await stuckStand();
       const sock = await connectNode(s.url, s.nodeKey);
       onTestFinished(() => sock.close());
       const startedAt = new Date(Date.now() - (turn.startedAgoMs ?? 4 * 60 * MINUTE_MS));
+      const restartedAt = turn.restartedAgoMs === undefined ? null : new Date(Date.now() - turn.restartedAgoMs);
       const taskId = turn.task ? await turn.task(s) : undefined;
-      const [job] = await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: s.worker.id, nodeId: s.nodeId, taskId, kind: 'conversation', prompt: 'Long turn', status: 'running', createdAt: startedAt, startedAt, timeoutMs: TURN_TIMEOUT_MS }).returning();
+      const [job] = await s.db.insert(jobs).values({ companyId: s.company.id, subscriptionId: s.sub.id, agentId: s.worker.id, nodeId: s.nodeId, taskId, kind: 'conversation', prompt: 'Long turn', status: 'running', createdAt: startedAt, startedAt, restartedAt, timeoutMs: TURN_TIMEOUT_MS }).returning();
       sock.send({ type: 'hello', version: '0.23.3', loggedIn: true, running: [job!.id] });
       await until(() => s.app.ctx.hub.isReady({ kind: 'node', nodeId: s.nodeId }));
       const identity = { kind: 'node' as const, nodeId: s.nodeId };
@@ -282,6 +283,18 @@ describe('node drain updates silent or stuck nodes without interrupting live wor
       const at = Date.now();
       const old = s.startedAt.getTime();
       await handleNodeMessage(s.app.ctx, s.identity, { type: 'job.program', jobId: s.job.id, state: 'asking', since: old, screenAt: old, signAt: old }, new Date(at));
+      expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+      vi.setSystemTime(at + 11 * MINUTE_MS);
+      await s.answers();
+      expect((await s.askNode()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    });
+
+    it('while a restarted turn asks a question within the turn timeout measured from its restart', async () => {
+      const s = await liveStand({ startedAgoMs: 4 * 60 * MINUTE_MS, restartedAgoMs: TURN_TIMEOUT_MS - 10 * MINUTE_MS });
+      const at = Date.now();
+      const restarted = s.job.restartedAt!.getTime();
+      await handleNodeMessage(s.app.ctx, s.identity, { type: 'job.program', jobId: s.job.id, state: 'asking', since: restarted, screenAt: restarted, signAt: restarted }, new Date(at));
       expect((await s.askNode()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
 
       vi.setSystemTime(at + 11 * MINUTE_MS);

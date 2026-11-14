@@ -24,6 +24,7 @@ const UPDATER_SELF = `${UPDATER_REPO}@sha256:${'7'.repeat(64)}`;
 const PLAN_STOPPED_OLD = 'aaaaaaaa-1111-4111-8111-111111111111';
 const PLAN_STOPPED_NEW = 'bbbbbbbb-2222-4222-8222-222222222222';
 const PLAN_RUNNING_NEW = 'cccccccc-3333-4333-8333-333333333333';
+const PLAN_REMOVED = 'eeeeeeee-5555-4555-8555-555555555555';
 
 async function remotePass(env: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-stopped-remote-'));
@@ -83,5 +84,36 @@ describe('updater brings stopped nodes back up on the required image', () => {
     const post = res.calls.find(c => c.startsWith('curl') && c.includes('/api/nodes/update') && c.includes('-X POST'));
     expect(post ?? '').toContain(JSON.stringify({ scope: 'server', nodes: ['builtin', PLAN_STOPPED_NEW] }));
     expect(res.calls).toContain(`installer told only builtin ${PLAN_STOPPED_NEW}`);
+  });
+
+  it('removes a stopped remote node whose volume marks its plan removed instead of starting it again', async () => {
+    const removedName = 'hornhoof-claude-removed';
+    const nodes = [
+      `${removedName}=${PLAN_REMOVED}=${OLD_BUILD}`,
+      `hornhoof-codex-new=${PLAN_STOPPED_NEW}=${NEW_BUILD}`,
+      `hornhoof-kimi-live=${PLAN_RUNNING_NEW}=${NEW_BUILD}`,
+    ].join(' ');
+    const res = await remotePass({
+      STUB_PLAN_NODES: nodes,
+      STUB_STOPPED_NODES: `${removedName} hornhoof-codex-new`,
+      STUB_REMOVED_NODES: removedName,
+    });
+    expect(res.code).toBe(0);
+    expect(res.calls).toContain(`docker rm -f ${removedName}`);
+    expect(res.calls).toContain(`docker volume rm ${removedName}`);
+    expect(res.calls.filter(c => c.startsWith('started '))).toEqual([
+      `started plan=${PLAN_STOPPED_NEW} image=${NEW_BUILD} server=${REMOTE_SERVER}`,
+    ]);
+    expect(res.out).toContain(`Removing ${removedName}, which was removed in Hornhoof.`);
+
+    const onlyRemoved = await remotePass({
+      STUB_PLAN_NODES: `${removedName}=${PLAN_REMOVED}=${NEW_BUILD}`,
+      STUB_STOPPED_NODES: removedName,
+      STUB_REMOVED_NODES: removedName,
+    });
+    expect(onlyRemoved.code).toBe(0);
+    expect(onlyRemoved.calls).toContain(`docker rm -f ${removedName}`);
+    expect(onlyRemoved.calls).toContain(`docker volume rm ${removedName}`);
+    expect(onlyRemoved.calls.filter(c => c.startsWith('started '))).toEqual([]);
   });
 });

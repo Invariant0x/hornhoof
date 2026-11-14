@@ -185,6 +185,24 @@ describe('install.sh', () => {
     expect(r.calls).toContain('docker volume rm hornhoof-kimi-00000000');
   });
 
+  it('removes a stopped node whose volume marks its plan removed instead of starting it again', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: [],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_NODES_ONLY: `id-of-${name}`,
+        STUB_CONTAINERS: `${name}=${SERVER}`,
+        STUB_STOPPED: name,
+        STUB_REMOVED: name,
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker rm -f ${name}`);
+    expect(r.calls).toContain(`docker volume rm ${name}`);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name ${name}`))).toBe(false);
+  });
+
   it('points nodes at host.docker.internal when the server is on localhost', () => {
     const r = install({ env: { HORNHOOF_SERVER: 'http://localhost:8080' } });
     expect(r.code).toBe(0);

@@ -745,6 +745,14 @@ describe('install.sh', () => {
       expect(r.code).toBe(0);
       expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
     });
+
+    it('removes a stopped plan node on the server computer whose volume marks its plan removed instead of starting it', () => {
+      const r = fromUpdater({ HORNHOOF_NODES_FREE: '1', STUB_STOPPED: personal, STUB_REMOVED: personal });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain(`docker rm -f ${personal}`);
+      expect(r.calls).toContain(`docker volume rm ${personal}`);
+      expect(r.calls.some(c => c.startsWith(`docker run -d --name ${personal}`))).toBe(false);
+    });
   });
 
   it('refuses a server name it cannot use as a folder', () => {

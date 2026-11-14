@@ -136,6 +136,8 @@ case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *)
 SCRIPT
             ;;
           *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+          *:/data/removed)
+            case " ${STUB_REMOVED_NODES:-} " in *" ${2%%:*} "*) exit 0 ;; *) exit 1 ;; esac ;;
         esac ;;
     esac ;;
 esac
