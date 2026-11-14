@@ -196,7 +196,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether its machine is short of free memory for its program to start (memoryWait: its turns wait and start by themselves once memory frees up, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
-          "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it.",
+          "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it. " +
+          'The words of work you may not open, as task shows it, come with no credential and no private path in them.',
       },
       async () => {
         const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
@@ -204,6 +205,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         if (!ids.length) return json([]);
         const names = await deptNames();
         const held = await watchedTasks(db, job.companyId, ids);
+        const reader = await readerOf(ctx, job.agentId);
         const out = [];
         /* Each agent by its own indexes, so a round costs the same however long the company has run. */
         for (const a of staff) {
@@ -222,7 +224,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .where(and(eq(jobs.agentId, a.id), inArray(jobs.status, ['done', 'failed']), isNotNull(jobs.finishedAt)))
             .orderBy(desc(jobs.finishedAt))
             .limit(1);
-          out.push({
+          const agent = {
             id: a.id,
             name: a.name,
             kind: a.kind,
@@ -243,11 +245,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             obsolete: state.obsolete,
             retry: state.retry,
             restart: await programRestartStatus(ctx, job.companyId, a.id),
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field
-            tasks: held.filter(t => t.holder === a.id).map(({ holder: _, ...t }) => t),
             lastActivityAt: active?.at ?? null,
             lastTurn: last ? { status: last.status, at: last.at, error: last.error } : null,
-          });
+          };
+          /* An agent's own words are its department's to read, the words of each task it holds that task's readers'. */
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field
+          const holds = held.filter(t => t.holder === a.id).map(({ holder: _, sight, ...t }) => shownAll(t, opensTask(reader, sight)));
+          out.push({ ...shownAll(agent, opensTurn(reader, null, { id: a.id, departmentId: a.departmentId })), tasks: holds });
         }
         return json(out);
       },
