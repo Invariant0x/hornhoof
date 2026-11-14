@@ -241,6 +241,17 @@ describe('calling a job off', () => {
   });
 });
 
+describe('which turns a node still runs', () => {
+  it('asks of up to 100 named turns and takes the answer of what was asked and what is held', () => {
+    expect(parseServerMessage(JSON.stringify({ type: 'jobs.check', jobIds: ['job-1', 'job-2'] }))).toEqual({ type: 'jobs.check', jobIds: ['job-1', 'job-2'] });
+    expect(parseServerMessage(JSON.stringify({ type: 'jobs.check', jobIds: [] }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: 'jobs.check', jobIds: Array.from({ length: 101 }, (_, i) => `job-${i}`) }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: 'jobs.check', jobIds: ['a/b'] }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'jobs.held', asked: ['job-1', 'job-2'], held: ['job-2'] }))).toEqual({ type: 'jobs.held', asked: ['job-1', 'job-2'], held: ['job-2'] });
+    expect(parseNodeMessage(JSON.stringify({ type: 'jobs.held', asked: ['job-1'] }))).toBeNull();
+  });
+});
+
 describe('job.run', () => {
   it('carries the effort the agent thinks at, only as a plain level name', () => {
     const run = { ...(SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>), effort: 'max' };
