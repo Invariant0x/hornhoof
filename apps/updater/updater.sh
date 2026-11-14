@@ -2444,14 +2444,52 @@ learn_host() {
 }
 
 write_addresses() {
-  local now out list
+  local now out ids nets='' list
   learn_host
   [ "$HOST_OS" = linux ] || return 0
   now=$(date +%s)
   [ "$now" -ge "$ADDRESSES_AT" ] || return 0
   ADDRESSES_AT=$((now + ADDRESSES_EVERY))
   out=$(docker run --rm --network host --entrypoint ip "$COMPUTER_IMAGE" -4 -o addr show scope global 2> /dev/null) || return 0
-  list=$(printf '%s\n' "$out" | awk '$2 !~ /^(docker|br-|veth|virbr)/ && $3 == "inet" { split($4, a, "/"); print a[1] }' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null) || return 0
+  if [ -n "$out" ]; then
+    ids=$(docker network ls -q 2> /dev/null || true)
+    if [ -n "$ids" ]; then
+      # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
+      nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+    fi
+  fi
+  list=$(
+    {
+      printf '%s\n' "$nets"
+      printf -- '---\n'
+      printf '%s\n' "$out"
+    } | awk '
+      $0 == "---" { addr_mode = 1; next }
+      !addr_mode && NF {
+        split($0, f, "|")
+        if (f[1] != "") skip_if["br-" substr(f[1], 1, 12)] = 1
+        if (f[4] != "") skip_if[f[4]] = 1
+        n = split(f[6], items, ";")
+        for (i = 1; i <= n; i++) {
+          if (items[i] == "") continue
+          split(items[i], sg, ",")
+          if (sg[2] != "") skip_ip[sg[2]] = 1
+          split(sg[1], cp, "/")
+          if (split(cp[1], oct, ".") == 4 && oct[4] == "0") {
+            skip_ip[oct[1] "." oct[2] "." oct[3] ".1"] = 1
+          }
+        }
+        next
+      }
+      addr_mode && $3 == "inet" {
+        iface = $2
+        sub(/:.*/, "", iface)
+        if (iface ~ /^(docker|br-|veth|virbr|cni|podman|flannel|calico|nerdctl)/ || skip_if[iface] || skip_if[$2]) next
+        split($4, a, "/")
+        if (a[1] != "" && !skip_ip[a[1]]) print a[1]
+      }
+    ' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null
+  ) || return 0
   jq -cn --argjson at "$now" --argjson addresses "$list" '{at: $at, addresses: $addresses}' > "$CONTROL/addresses.json.new" 2> /dev/null || return 0
   mv "$CONTROL/addresses.json.new" "$CONTROL/addresses.json"
 }

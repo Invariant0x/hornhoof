@@ -40,10 +40,22 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 ```
 
 - It goes into `~/hornhoof-acme`, as its own compose project.
-- It takes the first free web port from 8080 and peer port from 8180, and keeps them in `.env` as `HORNHOOF_PORT` and `HORNHOOF_PEER_PORT`. A list in the Docker volume `hornhoof-ports` keeps every company's ports on this computer, so no two companies get the same one, even while one is stopped.
+- It takes the first free web port from 8080 and peer port from 8180, and keeps them in `.env` as `HORNHOOF_PORT` and `HORNHOOF_PEER_PORT`.
+- It also picks two non-overlapping `/24` Docker subnets outside this computer's own addresses, routes and existing Docker networks, keeps them in `.env` as `HORNHOOF_SUBNET` and `HORNHOOF_INTERNAL_SUBNET`, and records them alongside the ports in the Docker volume `hornhoof-ports`. No two Hornhoof projects on this computer get overlapping ports or subnets, even while one is stopped.
 - Run the same command again to update that company.
 
-Machines can carry nodes for several companies too. Each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's nodes.
+Machines can carry nodes and cores for several companies too. Each joined core takes its own folder, Compose project, ports and Docker subnets, and each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's core and nodes.
+
+## What if machines on the same home network reach each other only through hornhoof.org?
+
+Check whether an older Docker network on one of the computers covers your home network range (for example `192.168.0.0/20` over `192.168.1.0/24`):
+
+```sh
+docker network ls
+docker network inspect <network>
+```
+
+If an older Hornhoof project holds that overlapping network, run the Hornhoof install command again on that computer: the installer picks free subnets outside the home network and recreates the project's network cleanly. If an unused network from another Docker project holds that range, remove it with `docker network rm <network>` after stopping what uses it.
 
 ## Run it from source with Docker
 

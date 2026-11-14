@@ -11,8 +11,8 @@ import { encryptSecret } from '../src/crypto/secrets.js';
 import { companies, machines, peerSecrets, people, publicLinks } from '../src/db/schema.js';
 import { REPLICA_FILE } from '../src/modules/keeper/become.js';
 import { COPY_STATE } from '../src/modules/keeper/copy.js';
-import { Hander } from '../src/modules/keeper/handing.js';
-import { termOf, writeTerm } from '../src/modules/keeper/promote.js';
+import { Hander, readHanding } from '../src/modules/keeper/handing.js';
+import { handoverOf, recordHandover, termOf, writeTerm } from '../src/modules/keeper/promote.js';
 import { SWITCH_MS, type TakeState } from '../src/modules/keeper/switch-step.js';
 import { Promoter, readTaking, Taker, type OwnSubscription } from '../src/modules/keeper/taking.js';
 import { linkClientId } from '../src/modules/link/client.js';
@@ -467,6 +467,15 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
       ];
       const dbA = await createTestSql();
       const dbB = await createTestSql();
+      /* Initial term 1 on Machine A; Machine B starts as a synced ready copy following Machine A. */
+      await dbA.sql.query(
+        'UPDATE net_local.state SET term_number = 1, term_machine = $1, machine = $1, term_split = false, handed_to = NULL, handed_lsn = NULL, handed_at = NULL',
+        [SHARED_HOST_A_ID],
+      );
+      await dbA.sql.query('UPDATE net_local.lease SET term_number = 1, term_machine = $1, term_split = false', [SHARED_HOST_A_ID]);
+      await dbB.sql.query(
+        "SET session_replication_role = replica; DELETE FROM net_local.lease; DELETE FROM net_local.state; SET session_replication_role = origin; SET hornhoof.fenced = 'off'",
+      );
 
       const [comp] = await dbA.db.insert(companies).values({ name: `Company ${label}` }).returning();
       const [owner] = await dbA.db
@@ -496,6 +505,13 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
         })
         .returning();
 
+      /* Replicate the leader's rows onto Machine B's copy database, as logical replication applies them on B. */
+      await dbB.sql.query('SET session_replication_role = replica');
+      await dbB.db.insert(companies).values(comp!);
+      await dbB.db.insert(people).values(owner!);
+      await dbB.db.insert(machines).values([rowA!, rowB!]);
+      await dbB.sql.query('SET session_replication_role = origin');
+
       const configA = { secret, controlDir: controlA, relayUrl: 'https://hornhoof.org', publicUrl: `http://localhost:8080`, machineId: SHARED_HOST_A_ID } as unknown as Config;
       const links = new PublicLinks({ db: dbA.db, config: configA, log: SILENT_LOG });
       attachSharedRelay(links);
@@ -512,11 +528,6 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
         { kind: 'data', secretEnc: encryptSecret(`${label}-data-secret`, secret) },
         { kind: 'visit', secretEnc: encryptSecret(JSON.stringify({ name: linkName, key: `${label}-visitor-key-0123456789` }), secret) },
       ]);
-
-      /* Initial term 1 on Machine A; Machine B starts as a synced ready copy following Machine A. */
-      await writeTerm(dbA.sql, { above: 0, machine: SHARED_HOST_A_ID });
-      await dbB.sql.query('SET session_replication_role = replica');
-      await dbB.sql.query('DELETE FROM net_local.lease; DELETE FROM net_local.state');
 
       const relayEntry = relayTaken.get(linkName)!;
       relayEntry.holder = linkClientId(linkName, SHARED_HOST_A_ID);
@@ -627,11 +638,21 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
         await dbA.db.execute(raw`DELETE FROM net.move`);
         await dbA.db.execute(raw`INSERT INTO net.move (machine_id, from_machine_id, asked_by, asked_at, state) VALUES (${rowB!.id}, ${rowA!.id}, ${owner!.id}, clock_timestamp(), 'preparing')`);
         const rows = (await dbA.db.execute(raw`SELECT request::text, state FROM net.move`) as unknown as { rows: { request: string; state: string }[] }).rows;
-        return rows[0]!.request;
+        const req = rows[0]!.request;
+        if (stateB.subEnabled) {
+          await dbB.sql.query('SET session_replication_role = replica');
+          await dbB.sql.query('DELETE FROM net.move');
+          await dbB.sql.query(
+            `INSERT INTO net.move (request, machine_id, from_machine_id, asked_by, asked_at, state) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, clock_timestamp(), 'switching')`,
+            [req, rowB!.id, rowA!.id, owner!.id],
+          );
+          await dbB.sql.query('SET session_replication_role = origin');
+        }
+        return req;
       }
 
-      async function switchLeaderFromAToB(): Promise<void> {
-        await requestMoveToB();
+      async function switchLeaderFromAToB(): Promise<string> {
+        const req = await requestMoveToB();
         /* Hander on A offers switch to Taker on B, fences A, sends go, and stops A's link tunnel. */
         for (let i = 0; i < 6 && stateB.takerExited === 0; i++) {
           now += 250;
@@ -662,9 +683,19 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
           appLeads: () => stateB.appLeads,
           exit: () => {},
           promote: async t => {
+            const slots = { [SHARED_HOST_A_ID]: slotOnBForA };
             await writeTerm(dbB.sql, { above: t.term.number, machine: SHARED_HOST_B_ID });
+            await recordHandover(dbB.sql, {
+              id: t.switch,
+              from: rowA!.id,
+              term: t.term,
+              applied: t.w ?? '0/4000000',
+              to: rowB!.id,
+              at: new Date(now),
+              slots,
+            });
             stateB.promoterLeads = true;
-            return { [SHARED_HOST_A_ID]: slotOnBForA };
+            return slots;
           },
           now: () => now,
           log: () => {},
@@ -684,14 +715,17 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
           now += 250;
           await handerA.look();
         }
+        return req;
       }
 
-      const moveState = async () =>
-        (await dbA.db.execute(raw`SELECT state, reason FROM net.move`) as unknown as { rows: { state: string; reason: string | null }[] }).rows[0] ?? null;
+      const copiedNamesOnB = async () => (await dbB.db.select({ name: companies.name }).from(companies)).map(r => r.name);
+      const pendingMovesOnB = async () => (await dbB.sql.query('SELECT 1 FROM net.move')).rows;
 
       return {
         label,
         comp: comp!,
+        rowAId: rowA!.id,
+        slotOnBForA,
         links,
         linkName,
         dirA,
@@ -705,7 +739,9 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
         peerLog,
         relayEntry,
         switchLeaderFromAToB,
-        moveState,
+        copiedNamesOnB,
+        pendingMovesOnB,
+        handoverOnB: (id: string) => handoverOf(dbB.sql, id),
         termOnA: () => termOf(dbA.sql),
         termOnB: () => termOf(dbB.sql),
       };
@@ -778,17 +814,26 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
     expect(visitToml2).toContain(`clientID = "${visitClientId(company2.linkName, SHARED_HOST_B_ID)}"`);
     expect(visitToml1).not.toContain(company2.linkName);
 
-    /* Both companies initially lead on Machine A (term 1) and replicate to Machine B. */
-    expect(await company1.termOnA()).toEqual({ number: 1, machine: SHARED_HOST_A_ID, split: false });
-    expect(await company2.termOnA()).toEqual({ number: 1, machine: SHARED_HOST_A_ID, split: false });
+    /* Both companies initially lead on Machine A (term 1) and replicate only their own company data to Machine B. */
+    expect(await company1.termOnA()).toMatchObject({ number: 1, machine: SHARED_HOST_A_ID, split: false });
+    expect(await company2.termOnA()).toMatchObject({ number: 1, machine: SHARED_HOST_A_ID, split: false });
     expect(await company1.termOnB()).toBeNull();
     expect(await company2.termOnB()).toBeNull();
+    expect(await company1.copiedNamesOnB()).toEqual(['Company alpha']);
+    expect(await company2.copiedNamesOnB()).toEqual(['Company beta']);
 
     /* 3. Switch Company 1's leader from Machine A to Machine B. Company 2 must stay completely untouched on Machine A! */
-    await company1.switchLeaderFromAToB();
+    const switch1Id = await company1.switchLeaderFromAToB();
 
-    expect(await company1.termOnB()).toEqual({ number: 2, machine: SHARED_HOST_B_ID, split: false });
-    expect(await company1.moveState()).toEqual({ state: 'done', reason: null });
+    expect(await company1.termOnB()).toMatchObject({ number: 2, machine: SHARED_HOST_B_ID, split: false });
+    expect(await company1.pendingMovesOnB()).toEqual([]);
+    expect(await company1.handoverOnB(switch1Id)).toEqual({
+      from: company1.rowAId,
+      term: { number: 1, machine: SHARED_HOST_A_ID, split: false },
+      slots: { [SHARED_HOST_A_ID]: company1.slotOnBForA },
+    });
+    expect(readHanding(company1.dirA)).toBeNull();
+    expect(company1.stateA.exited).toBe(1);
     expect(existsSync(join(company1.controlA, REPLICA_FILE))).toBe(true);
     expect(company1.relayEntry.holder).toBe(linkClientId(company1.linkName, SHARED_HOST_B_ID));
 
@@ -798,8 +843,9 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
     expect(company2.stateA.tunnelRunning).toBe(true);
     expect(company2.stateB.subEnabled).toBe(true);
     expect(company2.stateB.takerExited).toBe(0);
-    expect(await company2.termOnA()).toEqual({ number: 1, machine: SHARED_HOST_A_ID, split: false });
+    expect(await company2.termOnA()).toMatchObject({ number: 1, machine: SHARED_HOST_A_ID, split: false });
     expect(await company2.termOnB()).toBeNull();
+    expect(await company2.copiedNamesOnB()).toEqual(['Company beta']);
     expect(existsSync(join(company2.controlA, REPLICA_FILE))).toBe(false);
     expect(company2.relayEntry.holder).toBe(linkClientId(company2.linkName, SHARED_HOST_A_ID));
     expect(company2.peerLog).toEqual([]);
@@ -808,15 +854,23 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
     const c1PeerCallsBefore = [...company1.peerLog];
     const c1RelayGenBefore = company1.relayEntry.generation;
 
-    await company2.switchLeaderFromAToB();
+    const switch2Id = await company2.switchLeaderFromAToB();
 
-    expect(await company2.termOnB()).toEqual({ number: 2, machine: SHARED_HOST_B_ID, split: false });
-    expect(await company2.moveState()).toEqual({ state: 'done', reason: null });
+    expect(await company2.termOnB()).toMatchObject({ number: 2, machine: SHARED_HOST_B_ID, split: false });
+    expect(await company2.pendingMovesOnB()).toEqual([]);
+    expect(await company2.handoverOnB(switch2Id)).toEqual({
+      from: company2.rowAId,
+      term: { number: 1, machine: SHARED_HOST_A_ID, split: false },
+      slots: { [SHARED_HOST_A_ID]: company2.slotOnBForA },
+    });
+    expect(readHanding(company2.dirA)).toBeNull();
+    expect(company2.stateA.exited).toBe(1);
     expect(existsSync(join(company2.controlA, REPLICA_FILE))).toBe(true);
     expect(company2.relayEntry.holder).toBe(linkClientId(company2.linkName, SHARED_HOST_B_ID));
 
     /* Company 1 remains untouched on Machine B under term 2. */
-    expect(await company1.termOnB()).toEqual({ number: 2, machine: SHARED_HOST_B_ID, split: false });
+    expect(await company1.termOnB()).toMatchObject({ number: 2, machine: SHARED_HOST_B_ID, split: false });
+    expect(await company1.copiedNamesOnB()).toEqual(['Company alpha']);
     expect(company1.relayEntry.holder).toBe(linkClientId(company1.linkName, SHARED_HOST_B_ID));
     expect(company1.relayEntry.generation).toBe(c1RelayGenBefore);
     expect(company1.peerLog).toEqual(c1PeerCallsBefore);
