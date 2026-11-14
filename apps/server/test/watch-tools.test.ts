@@ -408,6 +408,102 @@ describe('tools a skill grants', () => {
     ]);
   });
 
+  /* Where agents stumbled and stopped on another department's task, its title and a node log of a restart, each with a
+     credential or a private path in it: what a failure collector may not open comes cleaned, and its own department reads it
+     as it is. */
+  async function stumbledOnTask(c: Awaited<ReturnType<typeof company>>) {
+    const { app, db, acme, sub, bruno, task } = c;
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    await db.update(tasks).set({ title: `Checkout API for ${GITHUB_TOKEN}` }).where(eq(tasks.id, task.id));
+    await blocked(app.ctx, bruno.id, task.id, 'Waits for the bank.');
+    const turn = { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1 };
+    /* The token of the second turn sits where the last 400 characters of its output as written begin 9 characters before
+       its end. */
+    const second = 'ghp_' + 'stopTurnSecondToken0'.repeat(3);
+    const output = `Asked about ${second} ` + 'y'.repeat(390);
+    const [asked, stuck] = await db.insert(jobs).values([
+      { ...turn, status: 'done' as const, result: `token=${GITHUB_TOKEN} path=${HOME}`, tail: '', startedAt: ago(30), finishedAt: ago(29) },
+      { ...turn, status: 'done' as const, result: '', tail: output, startedAt: ago(20), finishedAt: ago(19) },
+    ]).returning();
+    await db.insert(requests).values([
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, jobId: asked!.id, kind: 'question', text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, status: 'answered', answer: `No, keep /Users/fixture/keys to yourself.`, createdAt: ago(28) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, jobId: stuck!.id, kind: 'stuck', text: 'Needs help.', createdAt: ago(18) },
+    ]);
+    await db.insert(agentEvents).values([
+      { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool_result', data: { ok: false, summary: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}` }, createdAt: ago(27) },
+      { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool', data: { name: 'Bash', input: `pip install --user pyyaml --target ${HOME} --token ${GITHUB_TOKEN}` }, createdAt: ago(26) },
+      /* CUT of 120 falls inside the password of the index address, which a cut before cleaning would leave without its @. */
+      { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool', data: { name: 'Bash', input: `pip install --index-url https://bruno:${'p'.repeat(60)}@pypi.example.com/simple ` + 'x'.repeat(20) + ' pyyaml' }, createdAt: ago(25) },
+    ]);
+    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: `Stopping node token=${GITHUB_TOKEN} path=${HOME}` } };
+    await db.insert(jobs).values({ ...turn, status: 'failed', error: 'machine_restarted', tail: 'safe', interruption, finishedAt: ago(5) });
+    return { second, output, interruption };
+  }
+
+  type Stumbles = {
+    failed: { interruption: { diagnosis: { log: string } } }[];
+    blocked: { title: string }[];
+    stops: { text: string; answer: string | null; lastTurn: string | null }[];
+    missing: { what: string; example: string }[];
+    installed: { command: string }[];
+  };
+
+  it("keeps credentials and private paths of another department's task out of its stops, stumbles, title and node log", async () => {
+    const c = await company(['ops-failure-review']);
+    const { second, output } = await stumbledOnTask(c);
+    expect(output.slice(-400).startsWith(second.slice(-9))).toBe(true);
+    const client = await mcp(c.app, TOKEN);
+    expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
+    const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as Stumbles;
+    const words: [string, string][] = [
+      ['failed.interruption.diagnosis.log', out.failed[0]!.interruption.diagnosis.log], ['blocked.title', out.blocked[0]!.title],
+      ...out.stops.flatMap((s, i): [string, string][] => [[`stops.${i}.text`, s.text], [`stops.${i}.answer`, s.answer ?? ''], [`stops.${i}.lastTurn`, s.lastTurn ?? '']]),
+      ...out.missing.flatMap((m, i): [string, string][] => [[`missing.${i}.what`, m.what], [`missing.${i}.example`, m.example]]),
+      ...out.installed.map((m, i): [string, string] => [`installed.${i}.command`, m.command]),
+    ];
+    for (const [field, said] of words) {
+      for (const secret of [GITHUB_TOKEN, second.slice(-9), HOME, 'fixture805', '/Users/fixture', 'bruno:ppp']) expect.soft(said, field).not.toContain(secret);
+    }
+    expect(out.failed[0]!.interruption.diagnosis.log).toBe('Stopping node token=[hidden] path=[hidden]');
+    expect(out.blocked[0]!.title).toBe('Checkout API for [hidden]');
+    expect(out.stops).toEqual([
+      expect.objectContaining({ text: 'Needs help.', lastTurn: ' [hidden] ' + 'y'.repeat(390) }),
+      expect.objectContaining({ text: 'May I push with [hidden] from [hidden] now?', answer: 'No, keep [hidden] to yourself.', lastTurn: 'token=[hidden] path=[hidden]' }),
+    ]);
+    expect(out.missing).toEqual([expect.objectContaining({ what: 'ps', example: 'bash: line 1: ps: command not found; could not read [hidden] with [hidden]' })]);
+    expect(out.installed.map(i => i.command).sort()).toEqual([
+      'pip install --index-url https://[hidden]@pypi.example.com/simple ' + 'x'.repeat(20) + ' pyyaml',
+      'pip install --user pyyaml --target [hidden] --token [hidden]',
+    ]);
+  });
+
+  it('lets a failure collector of the same department read the stops, stumbles, title and node log of its own task as they are', async () => {
+    const c = await company(['ops-failure-review']);
+    const own = 'tool-token-watch-own-stumbles-0123456789';
+    await c.db.update(agents).set({ skills: ['ops-failure-review'] }).where(eq(agents.id, c.hana.id));
+    await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
+    const { interruption, output } = await stumbledOnTask(c);
+    const client = await mcp(c.app, own);
+    expect((await call(client, 'task', { task: c.task.number })).isError).toBeFalsy();
+    const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as Stumbles;
+    expect(out.failed[0]!.interruption).toEqual(interruption);
+    expect(out.blocked[0]!.title).toBe(`Checkout API for ${GITHUB_TOKEN}`);
+    expect(out.stops).toEqual([
+      expect.objectContaining({ text: 'Needs help.', lastTurn: output.slice(-400) }),
+      expect.objectContaining({ text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, answer: 'No, keep /Users/fixture/keys to yourself.', lastTurn: `token=${GITHUB_TOKEN} path=${HOME}` }),
+    ]);
+    expect(out.missing).toEqual([expect.objectContaining({ what: 'ps', example: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}` })]);
+    expect(out.installed.map(i => i.command)).toContain(`pip install --user pyyaml --target ${HOME} --token ${GITHUB_TOKEN}`.slice(0, 120));
+  });
+
+  it('leaves the orchestrator its sight of every task', async () => {
+    const { app, db, acme, sub, task } = await company(['ops-failure-review']);
+    const [orchestrator] = await db.select().from(agents).where(and(eq(agents.companyId, acme.id), eq(agents.kind, 'orchestrator')));
+    const own = 'tool-token-watch-orchestrator-0123456789';
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
+    expect((await call(await mcp(app, own), 'task', { task: task.number })).isError).toBeFalsy();
+  });
+
   it("tell a failure collector how the turn ended that a blocked task went out in along with another task", async () => {
     const { app, db, dev, acme, sub, hana } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
