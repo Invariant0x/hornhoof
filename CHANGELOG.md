@@ -36,6 +36,11 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
   message that ends a wait, and full compact windows. The company view says which employees have text of their own over
   their role's.
 - `failures` and `agents` show another department's blocked and failed work without its credentials or private paths.
+- The orchestrator and heads hire, build and run their department in any turn of theirs for the last person who wrote
+  to them, with that person's rights as they are now, so an answer that comes in a later turn no longer makes them ask
+  the person to write again. The orchestrator installs a Hornhoof version the CEO or the delegate asked for in a later
+  turn too. A person's own decisions, such as people, access, keys, plans, budgets and approval policy, still need the
+  turn that answers that person.
 
 ### Fixed
 
@@ -68,6 +73,11 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 - Общие навыки и описания инструментов говорят, что делать при отсутствующей команде, записи с ответом 502, 503 или
   504, сообщении, которое завершает ожидание. Вид компании показывает, у каких сотрудников свой текст поверх роли.
 - `failures` и `agents` показывают заблокированную и упавшую работу другого отдела без ключей и личных путей.
+- Оркестратор и главы нанимают, строят и ведут свой отдел в любом своем ходе для последнего человека, который им
+  написал, с его нынешними правами, так что ответ, пришедший в следующем ходе, больше не заставляет просить человека
+  написать снова. Оркестратор ставит версию Hornhoof, о которой просил CEO или его делегат, и в следующем ходе. Решения
+  самого человека (люди, доступы, ключи, подписки, бюджеты, правила одобрения) по-прежнему требуют хода, который
+  отвечает этому человеку.
 - Карта компании примерно из 120 агентов держится на экране при медленном сервере, а вкладка, на которую пришел другой
   человек, больше не показывает компанию и неотправленные ответы предыдущего.
 - Зависший или молчащий узел обновляется без бесконечного ожидания, остановленный запускается снова, а обновлятор
