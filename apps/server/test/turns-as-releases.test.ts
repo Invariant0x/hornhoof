@@ -1,0 +1,160 @@
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agents, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
+import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
+import { fixture } from './development-echelons-fixture.js';
+import { as, listen, mcp, SETUP, testApp } from './helpers.js';
+import { sessionFrom } from './helpers-basic.js';
+import { readyInTurn, serve } from './turn-release-fixture.js';
+
+const MERGED = 'd'.repeat(40);
+const PAST = 'e'.repeat(40);
+const START = '9'.repeat(40);
+
+const reportOf = async (f: Awaited<ReturnType<typeof readyInTurn>>, id = f.task.id) => (await f.detail(id)).log.findLast(event => event.kind === 'report')?.data;
+
+describe('a department always has one open turn, the release it gets ready', () => {
+  it('opens one for every top-level department: the one setup makes and one built later', async () => {
+    const { app, db } = await testApp();
+    const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(ceo) });
+    expect(built.statusCode).toBeLessThan(300);
+    const tops = await db.select().from(departments).where(isNull(departments.parentId));
+    expect(tops.map(top => top.templateKey).sort()).toEqual(['operations', 'support']);
+    for (const top of tops) expect(await db.select().from(turns).where(and(eq(turns.departmentId, top.id), eq(turns.status, 'open')))).toHaveLength(1);
+  });
+
+  it('offers no tools to plan, merge or switch the mode of turns', async () => {
+    const f = await fixture();
+    await listen(f.app);
+    const token = 'turn-tools-head-token-0123456789abcdef0123456';
+    await f.db.insert(jobs).values({ companyId: f.task.companyId, subscriptionId: f.head.subscriptionId!, agentId: f.head.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    const tools = (await (await mcp(f.app, token)).listTools()).tools;
+    const names = tools.map(tool => tool.name);
+    expect(names).not.toContain('plan_turn');
+    expect(names).not.toContain('merge_turn');
+    expect(names).toContain('release_turn');
+    const edit = tools.find(tool => tool.name === 'edit_turn');
+    expect(Object.keys((edit?.inputSchema.properties ?? {}) as object)).not.toContain('mode');
+    const add = tools.find(tool => tool.name === 'add_tasks');
+    expect(Object.keys((add?.inputSchema.properties ?? {}) as object)).not.toContain('turn');
+  });
+});
+
+describe('the team of its holder, not a turn, decides the route of a task', () => {
+  it('sends the work of a department with a repository through the echelons with no turn', async () => {
+    const f = await fixture({ turn: null });
+    expect((await loadTask(f.db, f.task.id)).turnId).toBeNull();
+    const route = (await f.detail()).echelons;
+    expect(route.resultKind).toBe('code');
+    expect(route.stages.map(step => step.stage)).toContain('review');
+  });
+
+  it('keeps the work of a member of a turnkey team turnkey', async () => {
+    const f = await fixture({ turn: null });
+    const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+    await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, f.author.id));
+    const { task } = await f.create({ reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+    expect((await f.detail(task.id)).echelons).toMatchObject({ resultKind: 'turnkey', stages: [] });
+    expect(task.turnId).toBeNull();
+  });
+});
+
+describe('a result joins the open turn of its department as its head accepts it', () => {
+  it('gives the task the open turn and keeps the fast-forward commit as its integration', async () => {
+    const f = await readyInTurn();
+    const moved = await f.accept();
+    expect(moved.task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect(await reportOf(f)).toMatchObject({ acceptedCandidate: { integration: { branch: f.branch, commit: f.finalCommit } } });
+  });
+
+  it('takes the candidate when the turn branch has already gone past it', async () => {
+    const f = await readyInTurn();
+    f.repo.heads[f.branch] = PAST;
+    f.repo.holds[PAST] = [f.finalCommit, ...f.repo.holds[f.finalCommit]!];
+    const moved = await f.accept();
+    expect(moved.task).toMatchObject({ status: 'done', turnId: f.turn.id });
+  });
+
+  it('refuses a merge on the turn branch: the turn takes a candidate only by fast-forward', async () => {
+    const f = await readyInTurn();
+    f.repo.heads[f.branch] = MERGED;
+    f.repo.holds[MERGED] = [f.finalCommit, ...f.repo.holds[f.finalCommit]!];
+    await expect(f.accept({ integrationCommit: MERGED })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('fast-forward') as unknown });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
+  });
+
+  it('refuses the first result of a turn whose branch does not hold the commit the turn started from', async () => {
+    const f = await readyInTurn();
+    await f.db.execute(sql`update turns set start_commit = ${START} where id = ${f.turn.id}`);
+    await expect(f.accept()).rejects.toMatchObject({ status: 409, message: expect.stringContaining(START) as unknown });
+    f.repo.holds[f.finalCommit]!.push(START);
+    expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+  });
+
+  it('refuses when the turn closed between reading its branch and accepting, and says that the same commit needs no new check', async () => {
+    const f = await readyInTurn();
+    const read = f.ctx.readCommit;
+    f.ctx.readCommit = async (repo, want) => {
+      const at = await read(repo, want);
+      if ('branch' in want && want.branch === f.branch) {
+        await f.db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, f.turn.id));
+        await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: f.turn.number + 1, goal: 'Next release', status: 'open', openedAt: new Date() });
+      }
+      return at;
+    };
+    const refused = f.accept().then(() => null, (err: { status: number; message: string }) => err);
+    expect(await refused).toMatchObject({ status: 409, message: expect.stringContaining(`turn-${f.turn.number + 1}`) as unknown });
+    expect((await refused)!.message).toMatch(/same commit/);
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
+  });
+
+  it('sends the result of a product with a repository of its own to main, with a person approving it, and into no turn', async () => {
+    const f = await readyInTurn();
+    const [product] = await f.db.insert(departments).values({ companyId: f.task.companyId, parentId: f.task.departmentId!, roleCode: 'DEV', repoUrl: 'https://github.com/acme/app.git' }).returning();
+    await f.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, f.task.id));
+    f.repo.heads.main = f.finalCommit;
+    await expect(f.accept()).rejects.toMatchObject({ status: 403 });
+    const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve this exact main integration.', commit: f.finalCommit });
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
+    expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: null });
+  });
+});
+
+/* A member of a turnkey team in a department with a repository, its task-N branch and the department's open turn. */
+async function turnkeyInTurn() {
+  const f = await fixture();
+  const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+  const player = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+  await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, player.id));
+  const { task } = await f.create({ assigneeAgentId: player.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  const [turn] = await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open')));
+  const own = 'c'.repeat(40);
+  const repo = { heads: { main: 'a'.repeat(40), [`turn-${turn!.number}`]: PAST, [`task-${task.number}`]: own } as Record<string, string>, tags: {}, holds: { [PAST]: [own, 'a'.repeat(40)], [own]: ['a'.repeat(40)] } as Record<string, string[]>, between: {}, cut: new Set<string>() };
+  serve(f.ctx, repo);
+  const done = () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
+  const lastReport = async () => (await f.detail(task.id)).log.findLast(event => event.kind === 'report')?.data;
+  return { ...f, player, task, turn: turn!, own, repo, done, lastReport };
+}
+
+describe('turnkey work of a department with a repository', () => {
+  it('joins the open turn when the turn branch holds its own branch, with its integration commit', async () => {
+    const f = await turnkeyInTurn();
+    expect((await f.done()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect(await f.lastReport()).toMatchObject({ integration: { branch: `turn-${f.turn.number}`, commit: f.own } });
+  });
+
+  it('is refused while the turn branch does not hold its own branch', async () => {
+    const f = await turnkeyInTurn();
+    f.repo.holds[PAST] = ['a'.repeat(40)];
+    await expect(f.done()).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`turn-${f.turn.number}`) as unknown });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: expect.not.stringMatching(/done/) as unknown, turnId: null });
+  });
+
+  it('closes outside every release when it has no branch of its own', async () => {
+    const f = await turnkeyInTurn();
+    delete f.repo.heads[`task-${f.task.number}`];
+    expect((await f.done()).task).toMatchObject({ status: 'done', turnId: null });
+  });
+});

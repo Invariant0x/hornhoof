@@ -144,7 +144,7 @@ async function localRepository(fixture: PostgresFixture, held: boolean) {
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/fixture.git`, token, ready: arrived.promise, release, requests: () => requests };
 }
 
-async function appContext(fixture: PostgresFixture, label: string, secret: string, env: NodeJS.ProcessEnv): Promise<{ ctx: Ctx; pool: pg.Pool }> {
+export async function appContext(fixture: PostgresFixture, label: string, secret: string, env: NodeJS.ProcessEnv): Promise<{ ctx: Ctx; pool: pg.Pool }> {
   const folder = await mkdtemp(join(tmpdir(), 'hh-pg-app-'));
   fixture.cleanup(() => rm(folder, { recursive: true, force: true }));
   const config = loadConfig({ HORNHOOF_SECRET: secret, UPDATE_CHECK_MS: '0', HORNHOOF_CONTROL_DIR: folder, WEB_DIST: join(folder, 'web'), ...env });
