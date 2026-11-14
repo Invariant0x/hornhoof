@@ -182,3 +182,10 @@ export async function backupsOf(q: Query): Promise<Row[]> {
   if (!(await has(q, 'backups'))) return [];
   return (await q<{ row: Row }>('SELECT to_jsonb(b) AS row FROM net.backups b ORDER BY b.made_at, b.id')).map(found => found.row);
 }
+
+/* Which of these public tables hold at least one row. */
+export async function nonEmptyTables(q: Query, names: string[]): Promise<Set<string>> {
+  if (names.length === 0) return new Set();
+  const sql = names.map((_name, index) => `SELECT $${index + 1}::text AS name WHERE EXISTS (SELECT 1 FROM public.${quote(names[index]!)})`).join(' UNION ALL ');
+  return new Set((await q<{ name: string }>(sql, names)).map(row => row.name));
+}

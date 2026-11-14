@@ -3,10 +3,11 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import type { Db } from '../src/db/client.js';
-import { companies, departments, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { companies, departments, jobs, people, subscriptions, taskEvents, tasks, agents, attachments } from '../src/db/schema.js';
+import { runMerge } from '../src/modules/merge/apply.js';
 import { factsOf, type Query } from '../src/modules/merge/facts.js';
 import {
-  backupsOf, consumedIds, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, netTables, openConflicts, restoresOf, rowsByKeys, rowsOf,
+  backupsOf, consumedIds, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, netTables, nonEmptyTables, openConflicts, restoresOf, rowsByKeys, rowsOf,
 } from '../src/modules/merge/read.js';
 import { KEPT_NAME, keptSource, sourceUrl } from '../src/modules/merge/source.js';
 import { ownDatabases, TEST_SECRET } from './helpers.js';
@@ -163,5 +164,50 @@ describe('reading both sides of a merge', () => {
     const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, DATABASE_URL: 'postgres://u:p@127.0.0.1:9/hornhoof' });
     for (const name of ['hornhoof', 'hornhoof_restore']) await expect(keptSource(config, name, 'a database')).rejects.toThrow('The merge source is not the kept database.');
     await expect(keptSource(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }), 'hornhoof_before_t1', 'a database')).rejects.toThrow('no database address');
+  });
+
+  it('finds non-empty tables and re-reads outside the transaction when the leader shifts before locking', async () => {
+    const sides = await twoSides();
+    const c = await company(sides.leader.db);
+    const { db, client } = sides.leader;
+    const q = queryOf(sides.leader);
+    expect(await nonEmptyTables(q, [])).toEqual(new Set());
+    expect(await nonEmptyTables(q, ['tasks', 'teams'])).toEqual(new Set(['tasks']));
+
+    const [plan] = await db.insert(subscriptions).values({ companyId: c.acme.id, provider: 'claude', kind: 'personal', label: 'Plan', ownerPersonId: c.owner.id, status: 'ready' }).returning();
+    const [ana] = await db.insert(agents).values({ companyId: c.acme.id, subscriptionId: plan!.id, model: '', kind: 'worker', name: 'Ana', departmentId: c.sales.id }).returning();
+    const [picture] = await db.insert(attachments).values({ companyId: c.acme.id, agentId: ana!.id, mediaType: 'image/png', bytes: Buffer.from('diagram'), size: 7 }).returning();
+    const fork = await sides.fork();
+    await fork.db.update(tasks).set({ title: 'From fork' }).where(eq(tasks.id, c.one.id));
+
+    const made = (await db.execute(sql`INSERT INTO net.merges (source, label) VALUES ('machine:shift', 'the fork') RETURNING id`)) as unknown as { rows: { id: string }[] };
+    const raw = await fork.source();
+    let codeReads = 0;
+    let readsInTx = 0;
+    const source = {
+      ...raw,
+      query: async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
+        if (client.isInTransaction()) readsInTx += 1;
+        const rows = await raw.query<T>(text, params);
+        if (text.includes('FROM public.jobs j') && text.includes('JOIN public.tasks t')) {
+          codeReads += 1;
+          if (codeReads === 1) {
+            await db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, at) VALUES (${randomUUID()}, ${randomUUID()}, now(), now())`);
+          } else if (codeReads === 2) {
+            await db.delete(attachments).where(eq(attachments.id, picture!.id));
+          }
+        }
+        return rows;
+      },
+    };
+    try {
+      const result = await runMerge(db, { id: made.rows[0]!.id, label: 'the fork', kept: false, companyId: c.acme.id }, source, { log: () => undefined });
+      expect(result.path).toBe('compare');
+      expect([codeReads, readsInTx]).toEqual([3, 0]);
+      const [restored] = await db.select().from(attachments).where(eq(attachments.id, picture!.id));
+      expect(Buffer.from(restored!.bytes).toString()).toBe('diagram');
+    } finally {
+      await raw.close();
+    }
   });
 });
