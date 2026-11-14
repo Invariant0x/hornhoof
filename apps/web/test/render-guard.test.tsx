@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { everyVisible, guardedResizeObserver, isLight, leaveLight, rateMeter, useRenderGuard, watchFrames } from '../src/guard';
 import { listen, useStream } from '../src/live';
+import { LanguageProvider } from '../src/i18n';
 import { GuardBoundary, LightNotice } from '../src/ui/GuardBoundary';
+import { decl, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
 /* Everything here runs on the test's clock: no check waits for real time to pass. */
@@ -57,8 +59,7 @@ describe('a block that redraws without end', () => {
         <p>The rest of the page</p>
       </>,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('This part stopped');
-    expect(screen.getByRole('alert')).toHaveTextContent('It was redrawing without end');
+    expect(screen.getByRole('alert')).toHaveTextContent('This block was stopped: it was slowing the screen down.');
     expect(screen.getByText('The rest of the page')).toBeInTheDocument();
     expect(isLight()).toBe(true);
     expect(document.documentElement.dataset.light).toBe('on');
@@ -95,7 +96,7 @@ describe('a block that redraws without end', () => {
         <Broken />
       </GuardBoundary>,
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong in it');
+    expect(screen.getByRole('alert')).toHaveTextContent('This block was stopped: something went wrong in it.');
     expect(isLight()).toBe(false);
   });
 });
@@ -109,7 +110,7 @@ describe('the light mode', () => {
     act(() => {
       for (let i = 0; i < 40; i++) HandObserver.last!.size(i % 2 ? 300 : 320);
     });
-    expect(screen.getByRole('status')).toHaveTextContent('Light mode');
+    expect(screen.getByRole('status')).toHaveTextContent('Effects are off to keep the screen responsive.');
     fireEvent.click(screen.getByRole('button', { name: 'Turn effects back on' }));
     expect(isLight()).toBe(false);
     expect(document.documentElement.dataset.light).toBeUndefined();
@@ -287,3 +288,58 @@ describe('the frame budget', () => {
     expect(remove.mock.calls.filter(c => c[0] === 'visibilitychange').map(c => c[1])).toEqual(expect.arrayContaining(watched));
   });
 });
+
+/* The two plates of the guard as Design set them (#888): one line and one button each, on the theme's tokens. */
+describe('the plates of the guard', () => {
+  it('say in Russian that the block stopped and that the effects are off, each with its role and its button', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    loop.on = true;
+    render(
+      <LanguageProvider>
+        <GuardBoundary block="spinning">
+          <Spinning />
+        </GuardBoundary>
+        <LightNotice />
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Этот блок остановлен: он мешал работе экрана\.Перезапустить блок$/);
+    expect(screen.getByRole('status')).toHaveTextContent(/^Эффекты выключены, чтобы экран не тормозил\.Вернуть эффекты$/);
+    loop.on = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Перезапустить блок' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть эффекты' }));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('say in Russian that a block which failed some other way stopped', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    function Broken(): never {
+      throw new Error('no');
+    }
+    render(
+      <LanguageProvider>
+        <GuardBoundary block="broken">
+          <Broken />
+        </GuardBoundary>
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Этот блок остановлен: в нем произошла ошибка\.Перезапустить блок$/);
+  });
+
+  it('stand on the second surface in the strong line colour, the stopped one with a pink stripe at its start, with buttons of 44 px', () => {
+    for (const plate of ['.guard-stop', '.light-note']) {
+      expect(decl(plate, 'background'), plate).toBe('var(--surface2)');
+      expect(decl(plate, 'border'), plate).toBe('1px solid var(--line2)');
+      expect(decl(`${plate} .btn`, 'min-block-size'), plate).toBe('44px');
+    }
+    expect(decl('.guard-stop', 'border-inline-start')).toBe('3px solid var(--pink-ink)');
+    /* Logical sides only, so a right-to-left page mirrors them. */
+    const physical = /^(left|right|top|bottom|margin-(left|right|top|bottom)|padding-(left|right|top|bottom)|border-(left|right))$/;
+    for (const selector of ['.guard-stop', '.guard-stop.float', '.light-note', '.guard-stop .btn', '.light-note .btn', '.guard-stop p', '.light-note p']) {
+      for (const rule of rulesFor(selector)) expect(Object.keys(rule.decls).filter(name => physical.test(name)), selector).toEqual([]);
+    }
+  });
+});
+

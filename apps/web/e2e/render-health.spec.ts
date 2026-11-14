@@ -23,13 +23,13 @@ const HEAD_EVENTS: EventView[] = [{ seq: 1, kind: 'text', data: { text: 'Working
 const HEAD_STATE = { ready: true, reason: null, busy: true, runningJobId: 'j1', queued: 0, terminal: true, canType: true, turnRefused: null };
 
 /* The company of 120 agents, its head's window with a live terminal, and every request it makes counted by path. */
-async function bigCompanyServer(page: Page): Promise<Map<string, number>> {
+async function bigCompanyServer(page: Page, terminal = true): Promise<Map<string, number>> {
   const asked = new Map<string, number>();
   page.on('request', r => {
     const path = new URL(r.url()).pathname;
     if (path.startsWith('/api/')) asked.set(path, (asked.get(path) ?? 0) + 1);
   });
-  await chooseTerminal(page);
+  if (terminal) await chooseTerminal(page);
   await serveApi(page);
   await page.route('**/api/org', route => route.fulfill({ json: COMPANY }));
   await page.route('**/api/link', route => route.fulfill({ json: { domain: 'hornhoof.app', link: null } }));
@@ -230,4 +230,41 @@ test.describe('a 120-agent company in the browser', () => {
       await page.screenshot({ path: info.outputPath(`${skin}-department.png`) });
     });
   }
+
+  /* Design (#888): the plate of a stopped block and the plate of the light mode, in Russian on Cyberpunk at 1440 px. On the
+     paused clock 400 keys typed into the head's chat are 400 drawings of its window at one moment, past the guard's bar of
+     300 in two seconds: the window stops behind its boundary and the page goes light. */
+  test('shows the plates of a stopped block and of the light mode with their roles, words and 44 px buttons', async ({ page }, info) => {
+    await onTestClock(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'ru');
+      localStorage.setItem('hh-theme', 'cyberpunk');
+    });
+    await bigCompanyServer(page, false);
+    await page.goto('/');
+    await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
+    await page.locator('.map .dept').first().click();
+    await page.locator('button.shead').click();
+    const input = page.locator(`#input-${HEAD.id}`);
+    await expect(input).toBeEnabled();
+    await input.focus();
+    await page.keyboard.type('x'.repeat(400));
+    const stopped = page.getByRole('alert').filter({ hasText: 'Этот блок остановлен' });
+    const light = page.getByRole('status').filter({ hasText: 'Эффекты выключены' });
+    await expect(stopped).toHaveText('Этот блок остановлен: он мешал работе экрана.Перезапустить блок');
+    await expect(light).toHaveText('Эффекты выключены, чтобы экран не тормозил.Вернуть эффекты');
+    const restart = stopped.getByRole('button', { name: 'Перезапустить блок' });
+    const effects = light.getByRole('button', { name: 'Вернуть эффекты' });
+    for (const button of [restart, effects]) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: info.outputPath('cyberpunk-ru-stopped-block.png') });
+    await restart.click();
+    await expect(stopped).toHaveCount(0);
+    await expect(page.locator('aside.orch')).toBeVisible();
+    await expect(light).toBeVisible();
+    await page.screenshot({ path: info.outputPath('cyberpunk-ru-light-mode.png') });
+    await effects.click();
+    await expect(light).toHaveCount(0);
+    await expect(page.locator('html')).not.toHaveAttribute('data-light');
+  });
 });
+
