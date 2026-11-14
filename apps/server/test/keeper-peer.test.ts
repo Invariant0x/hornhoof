@@ -712,6 +712,62 @@ describe('the peer link in the keeper', () => {
     expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
   });
 
+  it('keeps mode and the word to the app on lead through four-second relay hiccups every six minutes', async () => {
+    const { vi } = await import('vitest');
+    const c = await company(true);
+    const target = await listening(c.app);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    const { catalog } = syncCatalog(copy);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
+    onTestFinished(() => vi.useRealTimers());
+    const startMono = performance.now();
+    const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
+    let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
+    let unknownReads = 0;
+    const relayClient: NonNullable<KeeperOptions['sync']>['relay'] = {
+      route: async () => {
+        const elapsed = performance.now() - startMono;
+        if ((elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000)) {
+          unknownReads += 1;
+          return { known: false, why: 'unreachable' };
+        }
+        return { known: true, state: 'held', client: ownClient, since: 1, generation: 1, relayStarted: 100, evictionBound: 30, sync: syncRecord };
+      },
+      setSync: async (_name, _key, post) => {
+        syncRecord = { state: post.state, copy: post.copy, epoch: post.epoch, generation: post.generation, at: Math.floor(Date.now() / 1000) };
+        return { stored: true, sync: syncRecord };
+      },
+    };
+    const { keeper, controlDir } = await keeperBeside(c, target, folder(), {
+      lease: fakeLease({ othersHoldData: true }),
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+      throughput: { start: ignore, stop: ignore, best: () => ({}) },
+      everyMs: 3000,
+      linkEveryMs: 3000,
+      peerEveryMs: 3000,
+      beatEveryMs: 60_000,
+      guardEveryMs: 60_000,
+      copies: { everyMs: 60_000 },
+      sync: { catalog, relay: relayClient, everyMs: 1000, routeEveryMs: 1000, linkPauseMs: 30_000 },
+    });
+    while (!(keeper.mode() === 'lead' && readKeeperState(controlDir)?.mode === 'lead')) {
+      await vi.advanceTimersByTimeAsync(1000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    const modes: string[] = [];
+    for (const windowStartMs of [355_000, 715_000]) {
+      await vi.advanceTimersByTimeAsync(windowStartMs - (performance.now() - startMono));
+      for (let second = 0; second < 12; second++) {
+        await vi.advanceTimersByTimeAsync(1000);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        modes.push(`${Math.round((performance.now() - startMono) / 1000)}s:${keeper.mode()}/${readKeeperState(controlDir)?.mode}`);
+      }
+    }
+    expect(unknownReads).toBeGreaterThanOrEqual(8);
+    expect(modes.filter(entry => entry.includes('read'))).toEqual([]);
+  });
+
   it('keeps the list of revoked certificates where only the keeper reads it', async () => {
     const c = await company();
     const { keeper, dir } = await keeperBeside(c, await listening(c.app));

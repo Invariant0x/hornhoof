@@ -1,5 +1,5 @@
 import { createServer, type RequestListener } from 'node:http';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { Relay, type SyncPost } from '../src/modules/link/relay.js';
 import { fakeRelay } from './fake-relay.js';
@@ -38,9 +38,7 @@ describe('reading a route', () => {
     fake.routeAnswer = 'badstate';
     expect(await relay.route('acme', key)).toEqual({ known: false, why: 'malformed' });
     fake.routeAnswer = 'hang';
-    const started = Date.now();
-    expect(await relay.route('acme', key, 200)).toEqual({ known: false, why: 'slow' });
-    expect(Date.now() - started).toBeLessThan(400);
+    expect(await afterTimeout(200, () => relay.route('acme', key, 200))).toEqual({ known: false, why: 'slow' });
     expect(await new Relay('http://127.0.0.1:1').route('acme', key)).toEqual({ known: false, why: 'unreachable' });
   });
 
@@ -66,10 +64,9 @@ describe('posting the sync record', () => {
   });
 
   it('fails closed inside its time budget when the relay is slow', async () => {
-    const relay = new Relay(await oneAnswer({ sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1, at: 100 } }, 1000));
-    const started = Date.now();
-    expect(await relay.setSync('acme', 'k'.repeat(20), post(), 100)).toEqual({ stored: false, why: 'slow' });
-    expect(Date.now() - started).toBeLessThan(250);
+    const slow = await slowAnswer({ sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1, at: 100 } }, 1000);
+    const relay = new Relay(slow.url);
+    expect(await afterTimeout(100, () => relay.setSync('acme', 'k'.repeat(20), post(), 100), slow.arrived)).toEqual({ stored: false, why: 'slow' });
   });
 
   it('distinguishes a refused status from an unreachable relay', async () => {
@@ -99,13 +96,13 @@ describe('reading a sync answer that is not what was posted', () => {
   });
 
   it('reads a 409 that names nothing known, or has no body, as refused with its status', async () => {
-    expect(await new Relay(await oneAnswer({ error: 'something_else' }, 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
+    expect(await new Relay(await oneAnswer({ error: 'something_else' }, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
       stored: false,
       why: 'refused',
       status: 409,
       error: 'something_else',
     });
-    expect(await new Relay(await oneAnswer('not json', 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
+    expect(await new Relay(await oneAnswer('not json', 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
       stored: false,
       why: 'refused',
       status: 409,
@@ -117,8 +114,10 @@ describe('reading a sync answer that is not what was posted', () => {
 describe('an answer whose body breaks', () => {
   it('reads a body that stalls as slow and one that is cut off as unreachable', async () => {
     const key = 'k'.repeat(20);
-    expect(await new Relay(await brokenBody('stall')).route('acme', key, 200)).toEqual({ known: false, why: 'slow' });
-    expect(await new Relay(await brokenBody('cut')).route('acme', key)).toEqual({ known: false, why: 'unreachable' });
+    const stall = await brokenBody('stall');
+    expect(await afterTimeout(200, () => new Relay(stall.url).route('acme', key, 200), stall.arrived)).toEqual({ known: false, why: 'slow' });
+    const cut = await brokenBody('cut');
+    expect(await new Relay(cut.url).route('acme', key)).toEqual({ known: false, why: 'unreachable' });
   });
 });
 
@@ -167,7 +166,8 @@ describe('health', () => {
 
   it('reads a malformed or slow health answer as down', async () => {
     expect(await new Relay(await oneAnswer({ ok: true, frps: true, relayStarted: 'now' })).health()).toEqual({ up: false, relayStarted: null, passthrough: false });
-    expect(await new Relay(await oneAnswer({ ok: true, frps: true, relayStarted: 5 }, 300)).health(100)).toEqual({ up: false, relayStarted: null, passthrough: false });
+    const slow = await slowAnswer({ ok: true, frps: true, relayStarted: 5 }, 300);
+    expect(await afterTimeout(100, () => new Relay(slow.url).health(100), slow.arrived)).toEqual({ up: false, relayStarted: null, passthrough: false });
   });
 });
 
@@ -218,7 +218,7 @@ describe('key calls that fail', () => {
   const reasonOf = async (call: Promise<unknown>) => ((await failure(call)) as ApiError).reason;
 
   it('tells a busy relay from an unreachable one', async () => {
-    const busy = new Relay(await oneAnswer({}, 0, 429));
+    const busy = new Relay(await oneAnswer({}, 429));
     for (const call of [() => busy.changeKey('acme', key), () => busy.visitorKey('acme', key)]) {
       const error = (await failure(call())) as ApiError;
       expect([error.status, error.code]).toEqual([429, 'too_many']);
@@ -227,7 +227,7 @@ describe('key calls that fail', () => {
 
   it('keeps a refused key and an unknown name as relay_unreachable, as bind does', async () => {
     for (const status of [401, 404, 500]) {
-      const relay = new Relay(await oneAnswer({ error: 'no' }, 0, status));
+      const relay = new Relay(await oneAnswer({ error: 'no' }, status));
       expect(await reasonOf(relay.changeKey('acme', key)), String(status)).toBe('relay_unreachable');
       expect(await reasonOf(relay.visitorKey('acme', key)), String(status)).toBe('relay_unreachable');
     }
@@ -261,14 +261,40 @@ describe('the key stays out of results and errors', () => {
     results.push(await failure(relay.visitorKey('acme', key)), await failure(relay.changeKey('acme', key)));
     fake.down = false;
     fake.routeAnswer = 'hang';
-    results.push(await relay.route('acme', key, 100));
+    results.push(await afterTimeout(100, () => relay.route('acme', key, 100)));
     const closed = new Relay('http://127.0.0.1:1');
     results.push(await closed.route('acme', key), await closed.setSync('acme', key, post()), await failure(closed.changeKey('acme', key)));
-    results.push(await new Relay(await oneAnswer({ error: key }, 0, 503)).setSync('acme', key, post()));
+    results.push(await new Relay(await oneAnswer({ error: key }, 503)).setSync('acme', key, post()));
     results.push(await relay.changeKey('acme', key));
     expect(results.every(result => !shown(result).includes(key))).toBe(true);
   });
 });
+
+/* Runs one relay call on controlled timers, checking that it stays pending at budgetMs - 1 and aborts at budgetMs. */
+async function afterTimeout<T>(budgetMs: number, startCall: () => Promise<T>, arrived?: Promise<void>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), ms);
+    timer.unref?.();
+    return abort.signal;
+  });
+  try {
+    const pending = startCall();
+    let settled = false;
+    void pending.finally(() => {
+      settled = true;
+    });
+    if (arrived) await arrived;
+    await vi.advanceTimersByTimeAsync(budgetMs - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    return await pending;
+  } finally {
+    timeoutSpy.mockRestore();
+    vi.useRealTimers();
+  }
+}
 
 /* A local server that answers every request with the handler, and is shut down with the test. */
 async function stubServer(handler: RequestListener): Promise<string> {
@@ -282,20 +308,40 @@ async function stubServer(handler: RequestListener): Promise<string> {
   return `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
 }
 
-/* A relay that gives one fixed answer to every call, after a pause. */
-function oneAnswer(body: object | string, pauseMs = 0, status = 200): Promise<string> {
-  const timers = new Set<NodeJS.Timeout>();
-  onTestFinished(() => timers.forEach(clearTimeout));
+/* A relay that gives one fixed answer to every call at once. */
+function oneAnswer(body: object | string, status = 200): Promise<string> {
   return stubServer((_req, res) => {
-    timers.add(setTimeout(() => res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body)), pauseMs));
+    res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body));
   });
 }
 
-/* A relay that sends a 200 and then stalls in the middle of its body, or cuts the connection there. */
-function brokenBody(mode: 'stall' | 'cut'): Promise<string> {
-  return stubServer((req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.write('{"state":');
-    if (mode === 'cut') setTimeout(() => req.socket.destroy(), 20);
+/* A relay that schedules its answer on the test's controlled clock after pauseMs, signalling once the request arrives. */
+async function slowAnswer(body: object | string, pauseMs: number, status = 200): Promise<{ url: string; arrived: Promise<void> }> {
+  let markArrived!: () => void;
+  const arrived = new Promise<void>(resolve => {
+    markArrived = resolve;
   });
+  const timers = new Set<NodeJS.Timeout>();
+  onTestFinished(() => timers.forEach(clearTimeout));
+  const url = await stubServer((_req, res) => {
+    timers.add(setTimeout(() => res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body)), pauseMs));
+    markArrived();
+  });
+  return { url, arrived };
+}
+
+/* A relay that sends a 200 and then stalls in the middle of its body, or cuts the connection once that fragment flushes. */
+async function brokenBody(mode: 'stall' | 'cut'): Promise<{ url: string; arrived: Promise<void> }> {
+  let markArrived!: () => void;
+  const arrived = new Promise<void>(resolve => {
+    markArrived = resolve;
+  });
+  const url = await stubServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.write('{"state":', () => {
+      if (mode === 'cut') req.socket.destroy();
+      markArrived();
+    });
+  });
+  return { url, arrived };
 }
