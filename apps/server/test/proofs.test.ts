@@ -210,6 +210,65 @@ describe('the proofs a leader keeps its lease by', () => {
     expect(it.missing()).toBe('link probe timed out; no sync copy named');
     await vi.advanceTimersByTimeAsync(500);
   });
+
+  it('ignores an answer to a probe sent before a new take so it proves nothing for the new lease', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const it = new LeaseProofs({
+      probe: nonce => new Promise(resolve => setTimeout(() => resolve({ machine: A, nonce }), 1500)),
+      beats: { answer: () => null, all: () => new Map() },
+      self: A, term: () => TERM, b: () => null,
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+    });
+    const old = it.tick();
+    await vi.advanceTimersByTimeAsync(500);
+    it.clear();
+    await vi.advanceTimersByTimeAsync(1500);
+    await old;
+    expect(it.proof()).toBeNull();
+  });
+
+  it('ignores another machine answer to a probe sent before a new take so it does not end the new lease', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const it = new LeaseProofs({
+      probe: nonce => new Promise(resolve => setTimeout(() => resolve({ machine: B, nonce }), 1500)),
+      beats: { answer: () => null, all: () => new Map() },
+      self: A, term: () => TERM, b: () => null,
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+    });
+    const old = it.tick();
+    await vi.advanceTimersByTimeAsync(500);
+    it.clear();
+    await vi.advanceTimersByTimeAsync(1500);
+    await old;
+    expect(it.ended()).toBeNull();
+  });
+
+  it('keeps linkMiss idle when an older probe times out after a newer probe already answered', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    let call = 0;
+    const it = new LeaseProofs({
+      probe: nonce =>
+        new Promise(resolve => {
+          const idx = call++;
+          if (idx === 0) return;
+          setTimeout(() => resolve({ machine: A, nonce }), 500);
+        }),
+      beats: { answer: () => null, all: () => new Map() },
+      self: A, term: () => TERM, b: () => null,
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+    });
+    const dropped = it.tick();
+    await vi.advanceTimersByTimeAsync(1000);
+    const newer = it.tick();
+    await vi.advanceTimersByTimeAsync(500);
+    await newer;
+    await vi.advanceTimersByTimeAsync(3500);
+    await dropped;
+    expect(it.missing()).toBe('no new answer from link probe; no sync copy named');
+  });
 });
 
 describe('whether a lease takes a proof', () => {
@@ -258,7 +317,11 @@ describe('whether a lease takes a proof', () => {
   });
 });
 
-async function slowLinkStand(opts: { probeMs: number; linkEveryMs?: number; renew?: () => boolean }) {
+async function slowLinkStand(opts: {
+  probeMs: number | (() => number);
+  linkEveryMs?: number;
+  renew?: () => boolean | Promise<boolean>;
+}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-proofs-keeper-'));
   const controlDir = mkdtempSync(join(tmpdir(), 'hh-proofs-ctrl-'));
   const app = http.createServer((_req, res) => res.writeHead(404).end());
@@ -266,9 +329,9 @@ async function slowLinkStand(opts: { probeMs: number; linkEveryMs?: number; rene
   const appPort = (app.address() as AddressInfo).port;
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
   vi.setSystemTime(new Date('2026-11-14T01:14:00.000Z'));
-  const state = { needed: false, link: 'self' as 'self' | 'silent' };
+  const state = { needed: false, link: 'self' as 'self' | 'silent' | 'blackhole' };
   const lines: string[] = [];
-  const lease = fakeLease({ renew: async () => (opts.renew ? opts.renew() : true) });
+  const lease = fakeLease({ renew: async () => (opts.renew ? await opts.renew() : true) });
   const keeper = new Keeper({
     config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: controlDir, HORNHOOF_MACHINE_ID: A, ACME_DIRECTORY: 'off' }),
     db: null,
@@ -288,7 +351,12 @@ async function slowLinkStand(opts: { probeMs: number; linkEveryMs?: number; rene
     throughput: { start: () => undefined, stop: () => undefined, best: () => ({}) },
     proofs: {
       needed: async () => state.needed,
-      probe: nonce => new Promise(resolve => setTimeout(() => resolve(state.link === 'silent' ? null : { machine: A, nonce }), opts.probeMs)),
+      probe: nonce =>
+        new Promise(resolve => {
+          if (state.link === 'blackhole') return;
+          const waitMs = typeof opts.probeMs === 'function' ? opts.probeMs() : opts.probeMs;
+          setTimeout(() => resolve(state.link === 'silent' ? null : { machine: A, nonce }), waitMs);
+        }),
       ownTerm: async () => null,
       poll: async () => ({
         sent: { wall: Date.now(), mono: performance.now() },
@@ -360,5 +428,58 @@ describe('keeping the lease when the first copy finishes on a slow link', () => 
     await vi.advanceTimersByTimeAsync(9000);
     expect(keeper.mode()).toBe('read');
     expect(lease.calls.some(call => call.method === 'fence')).toBe(true);
+  });
+
+  it('keeps leading without false missing-proof lines when the first copy finishes near lease end and the link probe takes 3 s', async () => {
+    let canRenew = true;
+    const { keeper, lease, lines, state } = await slowLinkStand({ probeMs: 3000, linkEveryMs: 500, renew: () => canRenew });
+    canRenew = false;
+    await vi.advanceTimersByTimeAsync(8000);
+    expect([keeper.mode(), keeper.term()?.number]).toEqual(['lead', 1]);
+
+    canRenew = true;
+    state.needed = true;
+    for (let step = 0; step < 40; step++) {
+      await vi.advanceTimersByTimeAsync(500);
+      expect([step, keeper.mode(), keeper.term()?.number, keeper.linkWanted()]).toEqual([step, 'lead', 1, true]);
+    }
+    expect(lease.calls.filter(call => call.method === 'fence')).toEqual([]);
+    expect(lines.filter(line => line.includes('missing proof'))).toEqual([]);
+  });
+
+  it('writes no missing-proof line over 30 s on a healthy 3 s +-300 ms link with 50 ms renewals, and writes one when the link goes silent', async () => {
+    let n = 0;
+    const { keeper, lease, lines, state } = await slowLinkStand({
+      probeMs: () => 3000 + ((n++ % 3) - 1) * 300,
+      renew: () => new Promise(resolve => setTimeout(() => resolve(true), 50)),
+    });
+    await vi.advanceTimersByTimeAsync(2500);
+    state.needed = true;
+
+    for (let step = 0; step < 60; step++) {
+      await vi.advanceTimersByTimeAsync(500);
+      expect([step, keeper.mode(), keeper.term()?.number]).toEqual([step, 'lead', 1]);
+    }
+    expect(lease.calls.filter(call => call.method === 'fence')).toEqual([]);
+    expect(lines.filter(line => line.includes('missing proof'))).toEqual([]);
+
+    /* Real silence on the link surfaces the missing-proof warning before the lease fences. */
+    state.link = 'blackhole';
+    await vi.advanceTimersByTimeAsync(7500);
+    expect(lines.filter(line => line.includes('missing proof'))).toEqual([
+      'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
+    ]);
+
+    /* Once a fast probe recovers the standing lease, a later outage logs anew. */
+    state.link = 'self';
+    n = 1;
+    await vi.advanceTimersByTimeAsync(4500);
+    expect(keeper.mode()).toBe('lead');
+    state.link = 'blackhole';
+    await vi.advanceTimersByTimeAsync(7500);
+    expect(lines.filter(line => line.includes('missing proof'))).toEqual([
+      'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
+      'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
+    ]);
   });
 });
