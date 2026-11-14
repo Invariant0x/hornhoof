@@ -114,7 +114,7 @@ async function releaseFixture() {
     const sha = opts.commit ?? CANDIDATE;
     const runTask = opts.candidate ? task : f.task;
     const runner = opts.candidate ? tester : author;
-    const branch = opts.branch ?? `task-${runTask.number}`;
+    const branch = opts.branch ?? `task-${task.number}`;
     const chosenProfile = opts.profile ?? 'full';
     const prevBranchCommit = branchCommit;
     branchCommit = sha;
@@ -695,7 +695,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(filteredJournal.statusCode).toBe(200);
     expect(filteredJournal.json().entries).toEqual([]);
 
-    /* Orchestrator acting on a turn — EVEN when answering the CEO — is an agent and MUST be refused. */
+    /* Orchestrator acting on a turn, EVEN when answering the CEO, is an agent and MUST be refused. */
     const orchDirect = await c.app.inject({
       method: 'PUT',
       url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
