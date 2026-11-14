@@ -1,9 +1,9 @@
 import type { Db } from '../../db/client.js';
 import { withNamedKeys } from './apply.js';
-import { factsOf, type Query, type TableFacts } from './facts.js';
+import { factsOf, type Facts, type Query, type TableFacts } from './facts.js';
 import { queryOf } from './leader.js';
 import { differing } from './plan.js';
-import { backupsOf, parkedOf, horizonOf, journalIds, journalRows, keyText, netTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
+import { backupsOf, parkedOf, horizonOf, journalIds, journalRows, keyText, netTables, nonEmptyTables, openConflicts, restoresOf, rowsByKeys, rowsOf, type Row } from './read.js';
 import { ruleOf } from './rules.js';
 import type { MergeSource } from './source.js';
 
@@ -12,6 +12,19 @@ const NAMED = 20;
 const BATCH = 1000;
 
 type Missing = { table: string; key: Record<string, unknown> };
+
+const isCheckedTable = (name: string, byJournal: boolean): boolean => {
+  const rule = ruleOf(name);
+  return rule.kind !== 'skip' && (byJournal || rule.afterRestore !== 'skip');
+};
+
+const hasFiles = (t: TableFacts): boolean => t.columns.some(column => column.type === 'bytea');
+
+async function checkedTables(src: Query, facts: Facts, byJournal: boolean): Promise<string[]> {
+  const candidates = facts.order.filter(name => isCheckedTable(name, byJournal));
+  const nonEmpty = await nonEmptyTables(src, candidates.filter(name => !hasFiles(facts.tables.get(name)!)));
+  return candidates.filter(name => hasFiles(facts.tables.get(name)!) || nonEmpty.has(name));
+}
 
 /* What the leader's records say of rows of one table: the keys a conflict of any merge names, those a merge left to a
    skipped transaction or found under another key here, and the columns a merge wrote otherwise than the source has
@@ -65,9 +78,8 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
   };
 
   const facts = await factsOf(q);
-  for (const name of facts.order) {
+  for (const name of await checkedTables(src, facts, byJournal)) {
     const rule = ruleOf(name);
-    if (rule.kind === 'skip' || (!byJournal && rule.afterRestore === 'skip')) continue;
     const t = facts.tables.get(name) as TableFacts;
     const by = rule.kind === 'log' && rule.match && !(t.key.length === 1 && t.key[0] === rule.match) ? rule.match : undefined;
     const keyOf = (x: Row): Record<string, unknown> => Object.fromEntries(t.key.map(column => [column, x[column]]));

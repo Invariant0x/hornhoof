@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, jobs, machines, people, subscriptions } from '../src/db/schema.js';
 import { copyOrder } from '../src/modules/copies/slots.js';
+import { LeaseHolder } from '../src/modules/keeper/lease-holder.js';
+import { leaseStore } from '../src/modules/keeper/lease-store.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import * as apply from '../src/modules/merge/apply.js';
 import { fastWay } from '../src/modules/merge/check.js';
@@ -41,13 +44,20 @@ async function stand() {
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'copy-machine', hostname: 'ivan-mac', role: 'data', networkId: NETWORK_ID, copyOld: 1, copyName: 'copy_99bb2233aabbccdd_2', copyState: 'ready' }).returning();
-  const state: { old: Side | null; queries: string[] } = { old: null, queries: [] };
+  const state: { old: Side | null; queries: string[]; around?: <T>(text: string, run: () => Promise<T>) => Promise<T> } = { old: null, queries: [] };
   /* The copy's old database as the role that only reads sees it, with every statement it was asked kept. */
   const peers = {
     open: async (port: number, label: string): Promise<MergeSource> => {
       expect(port).toBe(PORT);
       const source = await pgliteSource(state.old!.client, label);
-      return { ...source, query: (text, params) => (state.queries.push(text), source.query(text, params)) };
+      return {
+        ...source,
+        query: <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
+          state.queries.push(text);
+          const run = () => source.query<T>(text, params);
+          return state.around ? state.around(text, run) : run();
+        },
+      };
     },
   };
   const merger = new Merger(app.ctx, { list: async () => [], open: async () => Promise.reject(new Error('no kept database here')), drop: async () => undefined }, { peers });
@@ -327,5 +337,98 @@ describe("the old database of a copy on another machine", () => {
     await never.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, never.machine.id));
     await never.look();
     expect(await never.merges()).toEqual([]);
+  });
+
+  it('merges a led database whose source answers each read after 2 s while renewing the lease and letting writes through', async () => {
+    const s = await stand();
+    await s.db.update(machines).set({ copyOld: 2, copyOldLed: 2 }).where(eq(machines.id, s.machine.id));
+    let onlyThere!: { id: string };
+    const old = await s.copied(async side => {
+      [onlyThere] = await side.db.insert(departments).values({ companyId: s.acme.id, name: 'From old leader', roleCode: 'OLD' }).returning();
+    });
+    await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster) VALUES (2, 'copy', 'copy', 'cluster-of-the-copy')`);
+    await s.db.insert(departments).values({ companyId: s.acme.id, name: 'Already on leader', roleCode: 'HERE' });
+
+    const startWall = Date.parse('2026-11-14T01:31:00.000Z');
+    let wall = startWall;
+    let mono = 0;
+    vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.setSystemTime(wall);
+
+    const store = leaseStore({ query: <R = Record<string, unknown>>(text: string, params?: unknown[]) => s.opened.client.query<R>(text, params) }, { machineId: 'leader-a' });
+    const holder = new LeaseHolder({ lease: store, updaterBusy: () => false, now: () => ({ wall, mono }), log: () => undefined });
+    await holder.tick();
+    const firstUntil = holder.standing()!.until;
+    expect(firstUntil).toBe(startWall + 10_000);
+
+    const outside = AsyncResource.bind(<T>(work: () => Promise<T>) => work());
+    const txSpy = vi.spyOn(s.db, 'transaction');
+
+    let reads = 0;
+    let readsInTx = 0;
+    let renewals = 0;
+    let wroteWithoutWaiting = false;
+    let companyWrite: Promise<{ id: string }> | null = null;
+    s.state.around = async (_text, run) => {
+      reads += 1;
+      if (s.opened.client.isInTransaction()) readsInTx += 1;
+      if (reads === 1) {
+        let settled = false;
+        companyWrite = outside(() =>
+          s.db.insert(departments).values({ companyId: s.acme.id, name: 'Written during merge', roleCode: 'LIVE' }).returning(),
+        ).then(rows => {
+          settled = true;
+          return rows[0]!;
+        });
+        for (let turn = 0; turn < 30 && !settled; turn += 1) await new Promise<void>(resolve => setImmediate(resolve));
+        wroteWithoutWaiting = settled;
+      }
+      for (let second = 0; second < 2; second += 1) {
+        wall += 1_000;
+        mono += 1_000;
+        vi.setSystemTime(wall);
+        if (!s.opened.client.isInTransaction()) {
+          await outside(() => holder.tick());
+          renewals += 1;
+        }
+      }
+      return run();
+    };
+
+    s.door(true);
+    await s.look();
+    const written = await companyWrite!.catch(() => null);
+
+    expect(reads).toBeGreaterThan(5);
+    expect(wall - startWall).toBe(reads * 2_000);
+    const [merge] = await s.merges();
+    expect({
+      source: merge?.source,
+      status: merge?.status,
+      path: merge?.path,
+      error: merge?.error,
+      readsInTx,
+      wroteWithoutWaiting,
+      renewals,
+      leaseValid: holder.standing() !== null && holder.standing()!.until > firstUntil,
+      repeatableRead: txSpy.mock.calls.some(call => call[1]?.isolationLevel === 'repeatable read'),
+      broughtOldLeaderRow: (await s.db.select().from(departments).where(eq(departments.id, onlyThere.id))).length,
+      wroteConcurrentRow: written ? (await s.db.select().from(departments).where(eq(departments.id, written.id))).length : 0,
+    }).toEqual({
+      source: `machine:${s.machine.id}:led-2`,
+      status: 'merged',
+      path: 'journal',
+      error: null,
+      readsInTx: 0,
+      wroteWithoutWaiting: true,
+      renewals: reads * 2,
+      leaseValid: true,
+      repeatableRead: false,
+      broughtOldLeaderRow: 1,
+      wroteConcurrentRow: 1,
+    });
   });
 });

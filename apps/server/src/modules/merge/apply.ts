@@ -6,11 +6,16 @@ import {
   compareOutcome, cutoffOf, differing, divergence, heldAs, historiesOf, journalOutcome, listedIn, pathOf, skippedXacts, theirsOf, type KeyHistory, type Outcome, type Path, type Theirs,
 } from './plan.js';
 import {
-  backupsOf, consumedIds, handoversOf, parkedNodes, parkedOf, type ParkedNode, FILE_HASH, horizonOf, journalIds, journalRows, keyText, lastChange, listedSources, openConflicts, restoresOf, rowsByKeys, rowsOf, type JournalRow, type Row,
+  consumedIds, parkedNodes, parkedOf, type ParkedNode, FILE_HASH, horizonOf, journalIds, journalRows, keyText, listedSources, restoresOf, rowsByKeys, type JournalRow, type Row,
 } from './read.js';
 import { BOOKKEEPING, CLOSING, SOFT_REFS, TABLE_RULES, ruleOf, type TableRule } from './rules.js';
+import {
+  liveMergeReader, NeedMoreFromSource, noteMoreNeeded, prepareSource, type CodeLine, type MergeReader, type SourceRequest,
+} from './snapshot.js';
 import type { MergeSource } from './source.js';
 import { nameOf, valueWords } from './words.js';
+
+export type { CodeLine } from './snapshot.js';
 
 export type Counts = {
   added: number; changed: number; deleted: number; equal: number; skipped: number; conflicts: number; carried: number; matched: number; rewritten: number;
@@ -18,9 +23,6 @@ export type Counts = {
   passes: number;
   byTable: Record<string, { added: number; changed: number; deleted: number; conflicts: number }>;
 };
-/* A task with code: its number on the source, the branch by that number, and the machines the source's turns on it ran
-   on with their last time. */
-export type CodeLine = { task: string; number: number; branch: string; machines: { name: string; at: string }[] };
 /* heldMs: how long the app's writes waited, from the gate closing to its opening. */
 export type MergeResult = { path: Path; counts: Counts; tasks: string[]; code: CodeLine[]; from: Date | null; to: Date | null; heldMs: number };
 
@@ -444,15 +446,15 @@ class Merge {
 
   constructor(
     private readonly q: Query,
-    private readonly src: Query,
+    private readonly src: MergeReader,
     private readonly merge: { id: string; label: string; kept: boolean; companyId: string },
     private readonly onUnit?: (n: number) => void | Promise<void>,
   ) {}
 
   async run(): Promise<Omit<MergeResult, 'heldMs'>> {
     const { q, src, merge } = this;
-    /* Nothing of the app may end this transaction, and no session outside the gate may write what it reads: the locks
-       are taken before the first read takes the snapshot. */
+    /* Nothing of the app may end this transaction, and no session outside the gate may write what it reads: the table
+       locks are taken before the leader's rows are read, while every network read of a peer source was finished ahead. */
     await q("SET LOCAL lock_timeout = '10s'");
     await q('SET LOCAL statement_timeout = 0');
     await q('SET LOCAL transaction_timeout = 0');
@@ -463,11 +465,10 @@ class Merge {
     this.now = row.now;
     if (row.source.startsWith('kept:')) this.restoredAt = (await q<{ at: string | Date }>('SELECT at FROM net.restores WHERE kept = $1 ORDER BY at DESC LIMIT 1', [row.source.slice(5)]))[0]?.at ?? null;
     this.facts = await factsOf(q);
-    const shape = sameShape(this.facts, await factsOf(src));
+    const shape = sameShape(this.facts, await src.facts());
     if (shape) throw new MergeRefused(shape);
     for (const name of this.facts.tables.keys()) ruleOf(name);
-    const [theirs] = await src<{ id: string }>('SELECT id FROM public.companies LIMIT 1');
-    if (theirs?.id !== merge.companyId) throw new MergeRefused(ANOTHER_COMPANY);
+    if ((await src.companyId()) !== merge.companyId) throw new MergeRefused(ANOTHER_COMPANY);
 
     await this.plan();
     await this.write();
@@ -492,13 +493,13 @@ class Merge {
     let theirs = new Map<string, Map<string, Theirs>>();
     if (!merge.kept) {
       const leaderHorizon = await horizonOf(q);
-      this.cutoff = cutoffOf(await horizonOf(src), leaderHorizon);
-      const [theirIds, ownIds] = [await journalIds(src, this.cutoff), await journalIds(q, this.cutoff)];
+      this.cutoff = cutoffOf(await src.horizon(), leaderHorizon);
+      const [theirIds, ownIds] = [await src.journalIds(this.cutoff), await journalIds(q, this.cutoff)];
       const lacking = [...theirIds.keys()].filter(id => !ownIds.has(id));
       const parted = divergence(theirIds, ownIds, await consumedIds(q, lacking));
-      this.path = pathOf({ kept: false, leaderRestores: await restoresOf(q), sourceRestores: await restoresOf(src), shared: parted.shared });
+      this.path = pathOf({ kept: false, leaderRestores: await restoresOf(q), sourceRestores: await src.restores(), shared: parted.shared });
       if (this.path === 'journal') {
-        const a = await journalRows(src, parted.a);
+        const a = await src.journalRows(parted.a);
         const named = listedIn(a);
         const skipped = skippedXacts(a, await listedSources(q, named.sources, named.calls));
         this.proving = a.filter(found => !skipped.has(found.xact));
@@ -529,15 +530,13 @@ class Merge {
   private async byJournal(t: TableFacts, rule: TableRule, histories: Map<string, KeyHistory>, theirs?: Map<string, Theirs>): Promise<void> {
     if (histories.size === 0) return;
     const keys = [...histories.values()].map(history => (history.a[0] ?? history.old[0] ?? history.s[0])!.key);
-    const xs = await rowsByKeys(this.src, t, keys);
+    const allRows = [...histories.values()].flatMap(history => [...history.a, ...history.s, ...history.old]);
+    const xs = await this.src.rowsForJournal(t, keys, allRows);
     const here = await this.heres(t, rule, [...xs.values()]);
     const ys = rule.kind === 'log' ? null : await rowsByKeys(this.q, t, keys);
     const pairs = keys.map(key => ({ key, text: keyText(key), x: xs.get(keyText(key)) ?? null }));
     const both = pairs.map(pair => ({ ...pair, y: pair.x ? here(pair.x) : (ys?.get(pair.text) ?? null) }));
-    if (t.name === 'map_returns') {
-      await withNamedKeys(this.src, [...both.map(pair => pair.x), ...[...histories.values()].flatMap(history => [...history.a, ...history.s, ...history.old].map(found => found.old))]);
-      await withNamedKeys(this.q, both.map(pair => pair.y));
-    }
+    if (t.name === 'map_returns') await withNamedKeys(this.q, both.map(pair => pair.y));
     for (const { key, text, x, y } of both) {
       const mine = histories.get(text)!;
       const outcome = addsOnly(rule, journalOutcome(t, x, y, mine, rule.kind === 'log' ? undefined : theirs?.get(text)));
@@ -548,13 +547,10 @@ class Merge {
   }
 
   private async compare(t: TableFacts, rule: TableRule): Promise<void> {
-    for await (const page of rowsOf(this.src, t)) {
+    for await (const page of this.src.pagesOf(t)) {
       const here = await this.heres(t, rule, page);
       const ys = page.map(x => here(x));
-      if (t.name === 'map_returns') {
-        await withNamedKeys(this.src, page);
-        await withNamedKeys(this.q, ys);
-      }
+      if (t.name === 'map_returns') await withNamedKeys(this.q, ys);
       for (const [index, x] of page.entries()) {
         let outcome = addsOnly(rule, compareOutcome(t, x, ys[index]!));
         /* A difference this side made itself is nothing to settle: an earlier merge took this very row from another
@@ -634,10 +630,10 @@ class Merge {
     const deletes = this.units.filter(unit => unit.op === 'delete').sort((a, b) => order.get(b.table)! - order.get(a.table)!);
     const writer = new UnitWriter(q, this.facts, {
       now: this.now, label: this.merge.label, afterRestore: this.merge.kept || this.path === 'compare',
-      whole: async (t, key) => (await rowsByKeys(this.src, t, [key], undefined, true)).values().next().value ?? null,
+      whole: (t, key) => this.src.wholeOf(t, key),
     });
     /* What nodes said of jobs whose rows were away, on either side. */
-    const running = parkedNodes([...(await parkedOf(q)), ...(await parkedOf(this.src))]);
+    const running = parkedNodes([...(await parkedOf(q)), ...(await this.src.parked())]);
     await q(`SAVEPOINT ${UNITS}`);
     for (let pass = 0; ; pass += 1) {
       if (pass > 0) await q(`ROLLBACK TO SAVEPOINT ${UNITS}`);
@@ -683,7 +679,7 @@ class Merge {
   /* The conflicts an earlier merge left open in the source: each may hold the only copy of a value the company wrote. */
   private async carry(): Promise<Row[]> {
     const carried: Row[] = [];
-    for (const theirs of await openConflicts(this.src)) {
+    for (const theirs of await this.src.conflicts()) {
       const first = theirs.carried ?? theirs.id;
       const [held] = await this.q('SELECT 1 AS found FROM net.merge_conflicts WHERE id = $1::uuid OR carried = $1::uuid LIMIT 1', [first]);
       if (!held) carried.push({ ...theirs, carried: first });
@@ -695,13 +691,13 @@ class Merge {
      switch written down after it. A switch between machines this database does not hold stays where it was. What
      nodes told the source of jobs it had no row of comes too, applied or not as the source left it. */
   private async backups(): Promise<void> {
-    for (const parked of await parkedOf(this.src)) {
+    for (const parked of await this.src.parked()) {
       await this.q('INSERT INTO net.parked SELECT * FROM jsonb_populate_record(NULL::net.parked, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(parked)]);
     }
-    for (const backup of await backupsOf(this.src)) {
+    for (const backup of await this.src.backups()) {
       await this.q('INSERT INTO net.backups SELECT * FROM jsonb_populate_record(NULL::net.backups, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(backup)]);
     }
-    for (const handover of await handoversOf(this.src)) {
+    for (const handover of await this.src.handovers()) {
       await this.q(
         `INSERT INTO net.handovers SELECT h.* FROM jsonb_populate_record(NULL::net.handovers, $1::jsonb) h
           WHERE EXISTS (SELECT 1 FROM public.machines m WHERE m.id = h.from_machine_id) AND EXISTS (SELECT 1 FROM public.machines m WHERE m.id = h.to_machine_id)
@@ -731,7 +727,7 @@ class Merge {
     const x = unit.x;
     const files = x ? t.columns.filter(column => column.type === 'bytea' && typeof x[column.name] === 'string' && (x[column.name] as string).startsWith(FILE_HASH)).map(column => column.name) : [];
     if (!x || files.length === 0) return x;
-    const whole = (await rowsByKeys(this.src, t, [unit.key], undefined, true)).values().next().value;
+    const whole = await this.src.wholeOf(t, unit.key);
     return whole ? { ...x, ...Object.fromEntries(files.map(name => [name, whole[name]])) } : x;
   }
 
@@ -839,15 +835,8 @@ class Merge {
     );
     const lines: CodeLine[] = [];
     for (const { id } of here) {
-      const [there] = await this.src<{ number: number }>('SELECT number FROM public.tasks WHERE id = $1::uuid', [id]);
-      if (!there) continue;
-      const machines = await this.src<{ name: string; at: Date }>(
-        `SELECT COALESCE(NULLIF(m.hostname, ''), 'the server') AS name, max(COALESCE(j.finished_at, j.started_at)) AS at
-         FROM public.jobs j LEFT JOIN public.nodes n ON n.id = j.node_id LEFT JOIN public.machines m ON m.id = n.machine_id
-         WHERE j.task_id = $1::uuid GROUP BY 1 HAVING max(COALESCE(j.finished_at, j.started_at)) IS NOT NULL ORDER BY 1`,
-        [id],
-      );
-      if (machines.length > 0) lines.push({ task: id, number: there.number, branch: `task-${there.number}`, machines: machines.map(machine => ({ name: machine.name, at: new Date(machine.at).toISOString() })) });
+      const line = await this.src.codeFor(id);
+      if (line) lines.push(line);
     }
     return lines;
   }
@@ -857,23 +846,26 @@ class Merge {
   private async span(source: string): Promise<[Date | null, Date | null]> {
     if (this.path === 'journal') return [this.proving[0]?.at ?? null, this.proving.at(-1)?.at ?? null];
     const [restore] = source.startsWith('kept:') ? await this.q<{ at: string | Date }>('SELECT dumped_at AS at FROM net.restores WHERE kept = $1 ORDER BY at DESC LIMIT 1', [source.slice(5)]) : [];
-    return [restore ? new Date(restore.at) : null, await lastChange(this.src)];
+    return [restore ? new Date(restore.at) : null, await this.src.lastChange()];
   }
 }
 
-/* Brings into the leader's database what the source did and the leader lacks, in one transaction, while the app's writes
-   wait at their gate. It never writes the source, and it changes nothing when it fails. */
-export async function runMerge(
+const refuseMerge = (reason: string): never => {
+  throw new MergeRefused(reason);
+};
+
+async function runPreparedMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
-  source: MergeSource,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; log?: (line: string) => void } = {},
+  prepared: MergeReader,
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number },
 ): Promise<MergeResult> {
   let heldMs = 0;
   const done = await writeGate.exclusive(async () => {
     const began = Date.now();
     try {
-      return await db.transaction(tx => new Merge(queryOf(tx as unknown as Db), source.query, merge, opts.onUnit).run(), { isolationLevel: 'repeatable read' });
+      /* Read committed so the deferred fence trigger at commit sees live lease renewals (and any fence) committed while this merge ran. */
+      return await db.transaction(tx => new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit).run());
     } catch (err) {
       /* A session outside the gate held a table for longer than the merge waits: nothing was changed, and it is tried
          again later. */
@@ -883,7 +875,41 @@ export async function runMerge(
       heldMs = Date.now() - began;
     }
   }, opts.gateWaitMs ?? GATE_WAIT_MS);
-  /* No value of a row goes into a log line. */
-  (opts.log ?? console.info)(`The merge ${merge.id} held the app's writes ${heldMs} ms.`);
   return { ...done, heldMs };
+}
+
+async function runPeerMerge(
+  db: Db,
+  merge: { id: string; label: string; kept: boolean; companyId: string },
+  source: MergeSource,
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number },
+): Promise<MergeResult> {
+  const request: SourceRequest = { compare: false, files: new Map() };
+  for (let attempt = 0; ; attempt += 1) {
+    const prepared = await prepareSource(queryOf(db), source.query, merge, request, withNamedKeys, ANOTHER_COMPANY, refuseMerge);
+    try {
+      return await runPreparedMerge(db, merge, prepared, opts);
+    } catch (err) {
+      if (!(err instanceof NeedMoreFromSource) || attempt >= 3 || !noteMoreNeeded(request, prepared, err)) throw err;
+    }
+  }
+}
+
+/* Peer merges pre-read their remote source outside the write gate and outside any leader transaction; kept and uploaded
+   databases sit in the leader's own Postgres and stream 500-row pages inside the read-committed transaction without
+   holding equal rows in memory. Neither writes the source, and a failed merge changes nothing. */
+export async function runMerge(
+  db: Db,
+  merge: { id: string; label: string; kept: boolean; companyId: string },
+  source: MergeSource,
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; log?: (line: string) => void } = {},
+): Promise<MergeResult> {
+  const [target] = await queryOf(db)<{ status: string; source: string }>('SELECT status, source FROM net.merges WHERE id = $1::uuid', [merge.id]);
+  if (target?.status !== 'pending') throw new MergeRefused('The merge was applied already.');
+  const result = target.source.startsWith('machine:')
+    ? await runPeerMerge(db, merge, source, opts)
+    : await runPreparedMerge(db, merge, liveMergeReader(source.query, withNamedKeys), opts);
+  /* No value of a row goes into a log line. */
+  (opts.log ?? console.info)(`The merge ${merge.id} held the app's writes ${result.heldMs} ms.`);
+  return result;
 }
