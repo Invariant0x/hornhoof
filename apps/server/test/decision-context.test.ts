@@ -14,6 +14,7 @@ import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/mod
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
+import { ONLY_CEO_ASKED } from '../src/modules/tools/control.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 /* Whose input lock decisions asked for, in order: a decision the orchestrator takes waits there for words going in. */
@@ -543,6 +544,25 @@ describe('management after the turn that answered a person ended', () => {
     expect(outside.isError).toBe(true);
     expect(text(outside)).toContain('is not in your department');
     expect((await c.db.select().from(agents).where(eq(agents.id, olga!.id)))[0]!.name).toBe('Olga');
+  });
+
+  it('installs a Hornhoof version and calls an update off in its next turn, for the CEO who asked', async () => {
+    const c = await company();
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Update Hornhoof to the latest version once the agents are idle.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    /* It reaches the update route as the CEO, whose answer here is that this test runs no updater: no refusal for the turn. */
+    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe('The updater is not running. Run install.sh server again to update.');
+    expect((await call(client, 'cancel_update', {})).isError).toBeFalsy();
+  });
+
+  it('installs no version when the last person who asked is not the CEO or the delegate', async () => {
+    const c = await company();
+    await askedEarlier(c, c.orchestrator.id, c.ids.ivan, 'Look after the team.');
+    await askedEarlier(c, c.orchestrator.id, c.ids.zed, 'Update Hornhoof to the latest version.');
+    await notice(c, c.orchestrator.id, c.job.id);
+    const client = await mcp(c.app, TOKEN);
+    expect(text(await call(client, 'update_hornhoof', { version: 'latest', whenIdle: true }))).toBe(ONLY_CEO_ASKED);
   });
 
   it('gives an ordinary employee no management tool, whoever asked it before', async () => {
