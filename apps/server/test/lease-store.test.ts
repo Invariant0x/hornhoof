@@ -164,9 +164,10 @@ describe('the lease the keeper holds in the database', () => {
     onTestFinished(() => { vi.useRealTimers(); });
     const s = await store();
     await s.lease.take('normal', FAR);
-    const horizon = async () => (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM now() - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
+    const horizon = async (at: 'now()' | "(pg_stat_file('PG_VERSION')).modification" = 'now()') =>
+      (await s.run.query<{ ago: number }>(`SELECT extract(epoch FROM ${at} - below)::float8 AS ago FROM net.horizon`)).rows[0]!.ago;
     /* A database is given one as it is migrated: whatever was pruned before is older than that. */
-    expect(Math.abs((await horizon()) - 7 * 86_400)).toBeLessThan(3600);
+    expect(Math.abs((await horizon("(pg_stat_file('PG_VERSION')).modification")) - 7 * 86_400)).toBeLessThan(3600);
     await s.run.query(`UPDATE net.horizon SET below = '2000-01-01'`);
     await s.db.execute(sql`INSERT INTO net.merges (id, source, label, status) VALUES ('00000000-0000-4000-8000-00000000000a', 'kept:hornhoof_before_t1', 'a database', 'done')`);
     await s.db.execute(sql`INSERT INTO net.merge_consumed (journal, merge, at, how) VALUES
