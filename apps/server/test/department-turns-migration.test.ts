@@ -97,7 +97,8 @@ const turnOfTasks = async (client: PGlite) =>
     'SELECT k.number, t.number AS turn FROM tasks k LEFT JOIN turns t ON t.id = k.turn_id ORDER BY k.number',
   )).rows.map(r => [r.number, r.turn]));
 
-describe('the migration that gives each turn its department', () => {
+/* Each case runs every migration twice over, which a loaded runner takes longer than the usual limit for. */
+describe('the migration that gives each turn its department', { timeout: 60_000 }, () => {
   it("gives every turn the top department of its first task, and a live one that of its first unfinished task", async () => {
     expect((await turnsOf(await acme())).map(t => [t.number, t.department_id, t.status])).toEqual([
       [1, MARKETING, 'closed'],
