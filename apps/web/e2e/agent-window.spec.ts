@@ -1,4 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { PROGRAM_NAMES } from '../src/providers';
 import { box, chooseTerminal } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
@@ -29,6 +32,14 @@ async function openFromMap(page: Page, lang: Settings['lang']) {
   await page.goto('/');
   await page.getByRole('button', { name: /^Development/ }).click();
   await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
+}
+
+/* A program that sleeps shows no terminal: the terminal view says why, and the chat takes the words that wake it up. */
+async function expectAsleep(window: Locator, lang: Settings['lang']) {
+  const t = lang === 'en' ? en : ru;
+  await expect(window.getByRole('status', { name: t.window.showTerminal, exact: true })).toHaveText(t.window.noTerminal.asleep(PROGRAM_NAMES.codex));
+  await expect(window.locator('.xterm-screen')).toHaveCount(0);
+  return t;
 }
 
 async function checkSurface(page: Page, errors: string[]) {
@@ -163,6 +174,8 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
           await expect(window).toBeVisible();
           await expect(window).toHaveCount(1);
           if (!awake) {
+            const t = await expectAsleep(window, lang);
+            await window.getByRole('button', { name: t.window.showChat, exact: true }).click();
             await window.getByRole('textbox', { name: words.write }).fill('Please check the cart');
             await window.getByRole('textbox', { name: words.write }).press('Enter');
             await expect.poll(() => live.messages.at(-1)).toEqual({ text: 'Please check the cart' });
@@ -178,7 +191,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const { words, errors, window } = await prepare(page, info, settings, { awake: false, hasTask: false });
       await openFromMap(page, lang);
       await expect(window.getByRole('button', { name: words.noTask })).toBeDisabled();
-      await expect(window.locator('.xterm-screen, .t-log').first()).toBeVisible();
+      await expectAsleep(window, lang);
       await expect(window.getByText(words.why)).toHaveCount(0);
       await expect(page.getByRole('complementary', { name: '#1 Checkout step 1' })).toHaveCount(0);
       await checkSurface(page, errors);
