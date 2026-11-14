@@ -85,14 +85,16 @@ next_pool_subnet() {
   printf '192.168.240.0/20'
 }
 ensure_compose_network() {
-  local project=$1 suffix=$2 var=$3 internal=$4 name sub='' n id
+  local project=$1 suffix=$2 var=$3 internal=$4 name sub='' has_gw=1 n id
   name="${project}_${suffix}"
   grep -Fq "|$name|" "$PORTS/networks" 2> /dev/null && return 0
   if [ -f compose.yaml ] && grep -Fq "$var" compose.yaml; then
     sub=$(grep "^$var=" .env 2> /dev/null | tail -1 | cut -d= -f2-)
     [ -n "$sub" ] || sub=$(sed -n "s/.*${var}:-\\([^}]*\\)}.*/\\1/p" compose.yaml | head -1)
+    grep -Fq 'gateway:' compose.yaml || has_gw=0
   fi
   [ -n "$sub" ] || sub=$(next_pool_subnet)
+  [ "$has_gw" = 1 ] || sub="${sub},"
   n=$(($(cat "$PORTS/net-count" 2> /dev/null || echo 0) + 1))
   echo "$n" > "$PORTS/net-count"
   id=$(printf 'net%012d' "$n")
@@ -218,13 +220,31 @@ case "$1" in
       ls) awk -F'|' 'NF && $1 != "" { print $1 }' "$PORTS/networks" ;;
       inspect)
         shift 2
-        [ "${1:-}" = --format ] && shift 2
+        fmt=''
+        if [ "${1:-}" = --format ]; then fmt=${2:-}; shift 2; fi
         for want in "$@"; do
           while IFS='|' read -r id name proj sub internal bridge; do
             [ -n "$id" ] || continue
             [ "$id" = "$want" ] || [ "$name" = "$want" ] || continue
-            gw=''; [ -z "$sub" ] || gw=$(gateway_of "$sub")
-            printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "${sub:+${sub},${gw};}"
+            cidr=${sub%%,*}
+            if [ -z "$cidr" ]; then
+              cfg=''
+            elif [[ "$sub" == *, ]]; then
+              if [[ "$fmt" == *'.Gateway'* ]]; then
+                echo 'template parsing error: template: :1:201: executing "" at <.Gateway>: map has no entry for key "Gateway"' >&2
+                exit 1
+              elif [[ "$fmt" == *'{{with index . "Gateway"}}'* ]]; then
+                cfg="${cidr},;"
+              else
+                cfg="${cidr},<no value>;"
+              fi
+            elif [[ "$sub" == *,* ]]; then
+              cfg="${cidr},${sub#*,};"
+            else
+              gw=$(gateway_of "$cidr")
+              cfg="${cidr},${gw};"
+            fi
+            printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "$cfg"
           done < "$PORTS/networks"
         done ;;
     esac ;;

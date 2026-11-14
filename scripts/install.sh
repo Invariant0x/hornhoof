@@ -1607,7 +1607,7 @@ inspect_docker_networks() {
   ids=$("${DOCKER[@]}" network ls -q 2> /dev/null) || true
   [ -n "$ids" ] || return 0
   # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
-  lines=$("${DOCKER[@]}" network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+  lines=$("${DOCKER[@]}" network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}' $ids 2> /dev/null || true)
   while IFS='|' read -r id name proj bridge internal cfg; do
     [ -n "$id$name" ] || continue
     if [ -n "$project" ] && { [ "$proj" = "$project" ] || [ "$name" = "${project}_default" ] || [ "$name" = "${project}_internal" ]; }; then

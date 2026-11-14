@@ -361,13 +361,31 @@ case "$1 $2" in
             for item in ${STUB_DOCKER_NETWORKS:-}; do printf '%s\n' "${item%%|*}"; done ;;
           inspect)
             shift 2
-            [ "${1:-}" = --format ] && shift 2
+            fmt=''
+            if [ "${1:-}" = --format ]; then fmt=${2:-}; shift 2; fi
             for want in "$@"; do
               for item in ${STUB_DOCKER_NETWORKS:-}; do
                 IFS='|' read -r id name proj sub internal bridge <<< "$item"
                 [ "$id" = "$want" ] || [ "$name" = "$want" ] || continue
-                gw=''; [ -z "$sub" ] || gw=$(awk -F. '{ printf "%d.%d.%d.%d", $1, $2, $3, ($4 == 0 ? 1 : $4) }' <<< "${sub%%/*}")
-                printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "${sub:+${sub},${gw};}"
+                cidr=${sub%%,*}
+                if [ -z "$cidr" ]; then
+                  cfg=''
+                elif [[ "$sub" == *, ]]; then
+                  if [[ "$fmt" == *'.Gateway'* ]]; then
+                    echo 'template parsing error: template: :1:201: executing "" at <.Gateway>: map has no entry for key "Gateway"' >&2
+                    exit 1
+                  elif [[ "$fmt" == *'{{with index . "Gateway"}}'* ]]; then
+                    cfg="${cidr},;"
+                  else
+                    cfg="${cidr},<no value>;"
+                  fi
+                elif [[ "$sub" == *,* ]]; then
+                  cfg="${cidr},${sub#*,};"
+                else
+                  gw=$(awk -F. '{ printf "%d.%d.%d.%d", $1, $2, $3, ($4 == 0 ? 1 : $4) }' <<< "${cidr%%/*}")
+                  cfg="${cidr},${gw};"
+                fi
+                printf '%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$proj" "$bridge" "${internal:-false}" "$cfg"
               done
             done ;;
         esac ;;

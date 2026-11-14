@@ -977,7 +977,7 @@ warn_subnet_overlap() {
   [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
   [ -n "$project" ] || return 0
   # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
-  nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+  nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}' $ids 2> /dev/null || true)
   [ -n "$nets" ] || return 0
   hits=$(
     {
@@ -2578,7 +2578,7 @@ write_addresses() {
     ids=$(docker network ls -q 2> /dev/null || true)
     if [ -n "$ids" ]; then
       # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
-      nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Options}}{{index . "com.docker.network.bridge.name"}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{.Subnet}},{{.Gateway}};{{end}}' $ids 2> /dev/null || true)
+      nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}' $ids 2> /dev/null || true)
     fi
   fi
   list=$(

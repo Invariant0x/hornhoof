@@ -124,7 +124,7 @@ function makeComputer(ipAddr: string, ipRoute: string) {
         .filter(Boolean)
         .map(line => {
           const [id = '', name = '', project = '', subnet = '', internal = 'false'] = line.split('|');
-          return { id, name, project, subnet, internal: internal === 'true' };
+          return { id, name, project, subnet: subnet.replace(/,.*$/, ''), internal: internal === 'true' };
         });
     },
     runServer: (args: string[] = [], env: Record<string, string> = {}, tty = '\n') =>
@@ -472,15 +472,44 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(upd.status?.log).toContain("overlaps this computer's network");
     expect(upd.status?.log).toContain('install.sh server');
 
-    const sClean = stand('HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof\n');
+    const sClean = stand('HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_ADDRESSES=192.168.1.20\n');
     const cleanUpd = await runOnce(sClean, ask('u-clean'), {
       HORNHOOF_HOST_OS: 'linux',
-      STUB_IP: LAN_ADDR_B,
-      STUB_DOCKER_NETWORKS: 'oknet0000000001|hornhoof_default|hornhoof|10.200.0.0/24|false|',
+      STUB_IP: [
+        '2: eth0    inet 192.168.1.20/24 brd 192.168.1.255 scope global eth0\\       valid_lft forever preferred_lft forever',
+        '9: hhbr0    inet 10.200.0.1/24 brd 10.200.0.255 scope global hhbr0\\       valid_lft forever preferred_lft forever',
+      ].join('\n'),
+      /* Custom Compose subnet without an explicit Gateway entry in IPAM.Config, as Docker Engine stores it. */
+      STUB_DOCKER_NETWORKS: 'oknet0000000001|hornhoof_default|hornhoof|10.200.0.0/24,|false|hhbr0 okint0000000001|hornhoof_internal|hornhoof|10.200.1.0/24,|true|hhbr1',
     });
     expect(cleanUpd.code).toBe(0);
     expect(cleanUpd.status?.state).toBe('done');
     expect(cleanUpd.status?.log).not.toContain("overlaps this computer's network");
+    const savedAddrs = JSON.parse(readFileSync(join(sClean.control, 'addresses.json'), 'utf8')) as { addresses: string[] };
+    expect(savedAddrs.addresses).toEqual(['192.168.1.20']);
+
+    /* Inside the updater container on Linux, ip addr shows the updater container's own eth0 on the live Compose subnet
+       (10.200.2.2/24), while Docker Engine's IPAM.Config map has Subnet without Gateway. Must not emit a false overlap warning. */
+    const containerView = makeComputer(
+      '134: eth0    inet 10.200.2.2/24 brd 10.200.2.255 scope global eth0\\       valid_lft forever preferred_lft forever',
+      '10.200.2.0/24 dev eth0 proto kernel scope link src 10.200.2.2',
+    );
+    mkdirSync(containerView.folder('hornhoof-nr2'), { recursive: true });
+    writeFileSync(
+      join(containerView.folder('hornhoof-nr2'), '.env'),
+      'COMPOSE_PROJECT_NAME=hornhoof-nr2\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8081\nHORNHOOF_PEER_PORT=8181\nHORNHOOF_SUBNET=10.200.2.0/24\nHORNHOOF_INTERNAL_SUBNET=10.200.3.0/24\nHORNHOOF_ADDRESSES=192.168.15.8\n',
+    );
+    const cleanFromContainer = containerView.runServer([], {
+      STUB_OS: 'Linux',
+      STUB_DOCKER_NETWORKS:
+        '091192985c054ce1|hornhoof-nr2_default|hornhoof-nr2|10.200.2.0/24,|false| 2ba1f8a529740306|hornhoof-nr2_internal|hornhoof-nr2|10.200.3.0/24,|true|',
+      HORNHOOF_FROM_UPDATER: '1',
+      HORNHOOF_UPDATER_REV: '2',
+      HORNHOOF_SERVER_DIR: containerView.folder('hornhoof-nr2'),
+      STUB_HOSTNAME: 'updater-cid',
+    });
+    expect(cleanFromContainer.code).toBe(0);
+    expect(cleanFromContainer.out).not.toContain("overlaps this computer's network");
   }, 60_000);
 });
 
