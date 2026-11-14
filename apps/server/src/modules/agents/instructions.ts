@@ -54,7 +54,9 @@ function told(kept: string[], files: SkillFile[]): string {
    go out. */
 const whole = (texts: string[]) => texts.join('\n\n');
 
-const CANONICAL_SKILLS: ReadonlySet<string> = new Set(['hh-run-checks', 'hh-lead-tasks']);
+/* Skills whose text is the template's for everyone, with no text of an employee's own: how checks run, how heads lead,
+   and how Operations end a turn that stands with no person asked. */
+const CANONICAL_SKILLS: ReadonlySet<string> = new Set(['hh-run-checks', 'hh-lead-tasks', 'ops-program-operator']);
 
 const movedSinceHire = (hired: Record<string, string>, id: string, hash: string): boolean => hired[id] !== undefined && hired[id] !== hash;
 
@@ -63,8 +65,11 @@ function lockedSkillIds(role: Role | undefined, agent: AgentRow): readonly strin
   return head ? HEAD_SKILLS : MEMBER_SKILLS;
 }
 
+/* What the role locks on reaches everyone in it with every turn, those hired before it was in the role too. */
+const roleLockedIds = (role: Role | undefined): string[] => (role ? role.skills.filter(s => s.locked).map(s => s.id) : []);
+
 function effectiveSkillIds(t: Templates, role: Role | undefined, agent: AgentRow): string[] {
-  const required = [...CORE_SKILLS, ...lockedSkillIds(role, agent)].filter(id => t.skills.has(id));
+  const required = [...CORE_SKILLS, ...lockedSkillIds(role, agent), ...roleLockedIds(role)].filter(id => t.skills.has(id));
   return [...new Set([...required, ...agent.skills])];
 }
 

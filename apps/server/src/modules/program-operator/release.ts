@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OperatorError, OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programOperatorCases } from '../../db/schema.js';
@@ -36,9 +36,9 @@ function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
 
 const noHold = (row: Case): ReleaseResult => ({ result: 'no_hold', status: row.status, continuation: row.continuationJobId });
 
-/* A case of this company, on an agent still here and not the caller itself. */
+/* A case of this company, on an agent still here, not the caller itself and not a person's own assistant. */
 async function caseToRelease(ctx: Ctx, me: Agent, id: string): Promise<Case> {
-  const [held] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases).innerJoin(agents, eq(agents.id, programOperatorCases.agentId)).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.companyId, me.companyId), isNull(agents.removedAt)));
+  const [held] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases).innerJoin(agents, eq(agents.id, programOperatorCases.agentId)).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.companyId, me.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
   if (!held || held.row.agentId === me.id) throw operatorRefused();
   return held.row;
 }

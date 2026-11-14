@@ -16,20 +16,22 @@ import { until } from './helpers-basic.js';
 const MIN = 60_000;
 type Result = { content: { text: string }[]; isError?: boolean };
 type Handler = (args: { employee: string }) => Promise<Result>;
-async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'codex') {
+async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'codex', whose: 'agent' | 'head' | 'orchestrator' = 'agent') {
   const c = await failureCompany();
   const operator = await c.hire('Olga', 'worker', 'OPS-PROGRAM', c.ops.id);
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const target = { agent: c.agent, head: c.head, orchestrator: orchestrator! }[whose];
   await c.db.update(subscriptions).set({ provider, kind: 'personal' }).where(eq(subscriptions.id, c.sub.id));
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'mac-12345', hostname: 'Mac' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, version: '0.5.0', status: 'ready', keyHash: 'node-key-hash' }).returning();
-  await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, c.agent.id));
+  await c.db.update(agents).set({ nodeId: node!.id, subscriptionId: c.sub.id }).where(eq(agents.id, target.id));
   const task = await c.db.transaction(async tx => {
-    const [row] = await tx.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', small: true, status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    const [row] = await tx.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', small: true, status: 'working', assigneeAgentId: target.id, executorAgentId: target.id }).returning();
     await createRoute(tx, row!, {}, developmentStages());
     return row!;
   });
   const taskWake = taskWakeOf(task, { why: 'assigned' }, routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId));
-  const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', taskId: task.id, createdBy: null, message: { personId: null, text: 'Work', from: 'agent', by: c.head.id, name: c.head.name, taskWake } });
+  const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: target.id, prompt: 'Work', taskId: task.id, createdBy: null, message: { personId: null, text: 'Work', from: 'agent', by: c.head.id, name: c.head.name, taskWake } });
   await c.db.update(jobs).set({ sessionId: 'session' }).where(eq(jobs.id, id));
   const identity = nodeIdentity(node!.id);
   const report = (state: 'thinking' | 'retrying' | 'tool' | 'asking' | 'idle' | 'gone' = 'thinking', quiet = 80, tool?: string) => handleNodeMessage(c.ctx, identity, { type: 'job.program', jobId: id, state, since: Date.now() - quiet * MIN, screenAt: Date.now(), signAt: Date.now() - quiet * MIN, ...(tool ? { tool } : {}) });
@@ -45,11 +47,18 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
   };
   const answer = (ok: boolean, reason: string | null = null) => {
     c.sent.mockImplementation((to, msg) => {
-      if (msg.type === 'agent.restart') queueMicrotask(() => void handleNodeMessage(c.ctx, identity, { type: 'agent.restarted', jobId: id, agentKey: c.agent.id, ok, reason }));
+      if (msg.type === 'agent.restart') queueMicrotask(() => void handleNodeMessage(c.ctx, identity, { type: 'agent.restarted', jobId: id, agentKey: target.id, ok, reason }));
       return true;
     });
   };
-  return { ...c, operator, id, node: node!, identity, task, report, run, answer, registered };
+  /* Operations by their role alone, in a turn of their own, with no skill that grants the tool. */
+  const byRole = async (caller: typeof agents.$inferSelect): Promise<Result> => {
+    const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: caller.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Round.', timeoutMs: 1000, status: 'running', createdBy: null }).returning();
+    const tool = vi.fn();
+    registerWatchTools({ registerTool: tool } as unknown as McpServer, c.ctx, { id: turn!.id, companyId: c.companyId, agentId: caller.id, agentKind: caller.kind, roleKey: caller.roleKey }, new Set<Grant>());
+    return (tool.mock.calls.find(([name]) => name === 'restart_program')![2] as Handler)({ employee: target.id });
+  };
+  return { ...c, operator, target, id, node: node!, identity, task, report, run, answer, registered, byRole };
 }
 
 describe('restart_program', () => {
@@ -118,6 +127,19 @@ describe('restart_program', () => {
     expect((await c.run()).isError).toBeFalsy();
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart' && m.jobId === c.id)).toBe(true);
     expect((await c.jobOf(c.id)).status).toBe('running');
+  });
+
+  it.each(['head', 'orchestrator'] as const)('lets the head of Operations and the program operator restart the program of the %s by their role, and names who asked', async whose => {
+    for (const roleKey of ['OPS-HEAD', 'OPS-PROGRAM'] as const) {
+      const c = await stuck('codex', whose);
+      const caller = roleKey === 'OPS-HEAD' ? await c.hire('Oleg', 'head', 'OPS-HEAD', c.ops.id) : c.operator;
+      c.answer(true);
+      const result = await c.byRole(caller);
+      expect(result.isError, roleKey).toBeFalsy();
+      expect(c.sent.mock.calls.filter(([, msg]) => msg.type === 'agent.restart' && msg.jobId === c.id && msg.agentKey === c.target.id), roleKey).toHaveLength(1);
+      expect((await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.id))).map(e => (e.data as { text?: string }).text), roleKey).toContain(`${caller.name} requested a program restart of ${c.target.name} after 80 minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
+      expect((await c.jobOf(c.id)).restartedAt, roleKey).not.toBeNull();
+    }
   });
 
   it('asks the node to restart a fresh session and keeps its refusal in both logs', async () => {

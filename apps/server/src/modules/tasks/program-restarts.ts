@@ -50,8 +50,11 @@ export async function programRestartStatus(ctx: Ctx, companyId: string, agentId:
   return { allowed: !!check.ready, reason: check.reason ?? null };
 }
 
-export async function restartProgram(ctx: Ctx, companyId: string, agentId: string): Promise<{ ok: boolean; text: string }> {
-  const [target] = await ctx.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
+/* The watchdog asks as Operations; an employee of Operations by its name, with whose program. */
+const askedBy = (by: string | undefined, whose: string) => (by ? `${by} requested a program restart of ${whose}` : 'Operations requested a program restart');
+
+export async function restartProgram(ctx: Ctx, companyId: string, agentId: string, by?: string): Promise<{ ok: boolean; text: string }> {
+  const [target] = await ctx.db.select({ kind: agents.kind, name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
   if (target?.kind === 'assistant') return { ok: false, text: "This is a person's own assistant, not an employee of the company: only its owner restarts it." };
   const checked = await onAgent(ctx, agentId, async (): Promise<Check> => {
     const check = await taskRestart(ctx, companyId, agentId, Date.now());
@@ -65,7 +68,7 @@ export async function restartProgram(ctx: Ctx, companyId: string, agentId: strin
   }
   const { job, node, minutes } = checked.ready;
   const note = `Your program was restarted after ${minutes} minutes without a sign from the model. Go on from where you were.`;
-  await logTurnFact(ctx, job, `Operations requested a program restart after ${minutes} minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
+  await logTurnFact(ctx, job, `${askedBy(by, target!.name)} after ${minutes} minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
   const reply = await waitForRestart(ctx, node, job, note);
   const text = await recordRestartReply(ctx, job, reply);
   return { ok: reply.ok, text };

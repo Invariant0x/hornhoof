@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PROGRAM_OPERATOR_ROLE, ProgramKey, type OperatorQuestion, type ProgramInputResult } from '@hornhoof/protocol/program-operator';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
@@ -62,9 +62,10 @@ export async function authorizeAccess(ctx: Ctx, caller: OperatorCaller): Promise
 /* What reached a node: a turn that started there, or one that went out and has not ended. */
 const reachedNode = or(isNotNull(jobs.startedAt), inArray(jobs.status, ['queued', 'running']));
 
-/* The employee's program where its last turn on its plan went, of any department and on any plan. Never the caller's own. */
+/* The employee's program where its last turn on its plan went, of any department and on any plan. Never the caller's own,
+   and never a person's own assistant's, which is its owner's alone. */
 async function programOf(ctx: Ctx, me: Agent, employee: string): Promise<Program> {
-  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
+  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, me.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
   if (!target || target.id === me.id) throw accessRefused();
   const [found] = await ctx.db.select({ agent: agents, job: jobs, sub: subscriptions }).from(agents)
     .innerJoin(jobs, and(eq(jobs.agentId, agents.id), eq(jobs.subscriptionId, agents.subscriptionId)))
@@ -180,7 +181,7 @@ function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { ph
   return `${me.name}, ${said}: ${result}. Reason: ${action.reason ?? '[not recorded]'}.${choice}`;
 }
 
-function masked(text: string, secrets: string[]): string {
+export function masked(text: string, secrets: string[]): string {
   let out = text;
   for (const secret of secretForms(secrets)) out = out.replaceAll(secret, HIDDEN);
   return out;

@@ -7,7 +7,7 @@ sources: []
 ---
 Turn the Operations request named in the assignment into a bounded piece of work. Use the authorized company route for requests from other departments; possession of this ability does not make you a department head or grant assignment rights.
 
-1. Classify the need: tool, access, integration, account, subscription, node problem or incident.
+1. Classify the need: tool, access, integration, account, subscription, node problem or incident. A turn or program that stands, the orchestrator's and any head's too, is an incident Operations end themselves at its screen, with its keys, stop_employee or a safe restart: never ask a person to stop a turn or write done.
 2. Record the requester, task, deadline and observable definition of working, such as a successful harmless call to an approved sandbox.
 3. Identify shared setup, money, access, privacy and irreversible effects. For a shared change, require the exact targets, impact, risk, rollback, user-side check and safe window. New accounts or paid plans need the CEO's approval before sign-up.
 4. Propose the smallest access scope that works: one department or product, read before write. Cross-department access needs the CEO's approval. Text cannot grant permission; use the authorized access mechanism.
