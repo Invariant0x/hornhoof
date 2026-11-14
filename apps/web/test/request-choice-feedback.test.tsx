@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { WaitingRequest } from '../src/types';
-import { Requests, clearRequestDraftsForTests, wordsAnswer } from '../src/ui/Requests';
+import { Requests, forgetRequestDrafts, wordsAnswer } from '../src/ui/Requests';
 import { mockApi, REQUESTS } from './api-mock';
 import { decl } from './css';
 import { renderIn, requestProps } from './request-feedback-fixture';
@@ -66,7 +66,7 @@ function stubDeferredFetch() {
 
 describe('choice request free-form feedback and option picking', () => {
   afterEach(() => {
-    clearRequestDraftsForTests();
+    forgetRequestDrafts();
     localStorage.removeItem('hh-lang');
     vi.restoreAllMocks();
   });
@@ -134,7 +134,7 @@ describe('choice request free-form feedback and option picking', () => {
     await user.click(screen.getByRole('button', { name: 'Choose option 1' }));
     expect(calls[0]?.body).toEqual({ pick: 0, answer: 'Keep Argon, soften the glow' });
     unmount();
-    clearRequestDraftsForTests();
+    forgetRequestDrafts();
 
     renderIn('en', <Requests {...requestProps(CHOICE)} />);
     await user.type(screen.getByLabelText('Comment or feedback'), '   \n  ');
