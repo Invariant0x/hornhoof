@@ -7,16 +7,17 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.23.6] - 2026-11-14
 
-A company runs on several machines of its own with encrypted backups and a link of its own, agents give people tables
-as real files and read pages that scripts build, and a person sends a finding to Hornhoof's developers with one button.
+A company runs on several machines of its own with encrypted backups and a link of its own, employees' letters wait in
+an inbox, agents give people tables as real files and read pages that scripts build, and a person sends a finding to
+Hornhoof's developers with one button.
 
 ### Before you update
 
-- Migrations 0106 to 0123 come with this release. 0106 to 0119 add what keeps copies of the company's data on other
+- Migrations 0106 to 0124 come with this release. 0106 to 0119 add what keeps copies of the company's data on other
   machines, its backups and the lease of the machine that leads, and every write then goes through that lease. 0120
   adds an empty table `google_sheets` for a company's Google key, 0121 the autonomous release switch and its log, 0122
-  and 0123 the feedback inbox and what became of sent findings. Going back to 0.23.5 means the database goes back to
-  the copy made before the update, so changes made after the update are lost.
+  and 0123 the feedback inbox and what became of sent findings, 0124 employees' inboxes. Going back to 0.23.5 means the
+  database goes back to the copy made before the update, so changes made after the update are lost.
 - The app image now carries the packages for certificates and the network, and the node image `hh-browse`, `hh-xlsx`,
   zip, PyYAML, pip and pytest, so both are larger.
 - A server on a Mac that was updated with the Update button: run the install line once on that Mac. Until then other
@@ -27,6 +28,10 @@ as real files and read pages that scripts build, and a person sends a finding to
 
 ### Added
 
+- Letters from employees and Hornhoof wait in an employee's inbox, and a free employee takes all its unread letters in one
+  turn instead of a turn for each. The agent window shows the inbox with its unread count; the CEO or the head of the
+  department picks whether an employee, a department or the company gets letters through the inbox or each as its own
+  turn. A person's words never wait there. The agent window keeps the newest 300 lines.
 - A company keeps copies of its data on other machines of its own. One machine leads; Machines shows each machine's
   copy and its place in line, and "Move the server here" moves the server with the work kept. When the machine that
   leads stops answering, a copy that holds every change takes over; when a copy may lack changes, the CEO decides
@@ -94,20 +99,25 @@ as real files and read pages that scripts build, and a person sends a finding to
 
 ### Russian
 
-Компания работает на нескольких своих машинах, с зашифрованными резервными копиями и своей ссылкой; агенты отдают людям
-таблицы настоящими файлами и читают страницы, которые строят скрипты, а человек одной кнопкой отправляет находку
-разработчикам Hornhoof.
+Компания работает на нескольких своих машинах, с зашифрованными резервными копиями и своей ссылкой, письма сотрудникам
+ждут во входящих, агенты отдают людям таблицы настоящими файлами и читают страницы, которые строят скрипты, а человек
+одной кнопкой отправляет находку разработчикам Hornhoof.
 
-- Перед обновлением: в выпуске миграции с 0106 по 0123. Миграции 0106-0119 добавляют то, что держит копии данных
+- Перед обновлением: в выпуске миграции с 0106 по 0124. Миграции 0106-0119 добавляют то, что держит копии данных
   компании на других машинах, резервные копии и аренду ведущей машины, и дальше каждая запись идет через эту аренду.
   0120 добавляет пустую таблицу `google_sheets` для ключа Google компании, 0121 переключатель самостоятельного выпуска и
-  его журнал, 0122 и 0123 входящие отзывы и судьбу отправленных находок. Откат на 0.23.5 возвращает базу к копии,
-  сделанной перед обновлением, поэтому изменения после обновления пропадут. Образ сервера теперь содержит пакеты для
-  сертификатов и сети, а образ узла `hh-browse`, `hh-xlsx`, zip, PyYAML, pip и pytest, поэтому оба больше.
+  его журнал, 0122 и 0123 входящие отзывы и судьбу отправленных находок, 0124 входящие сотрудников. Откат на 0.23.5
+  возвращает базу к копии, сделанной перед обновлением, поэтому изменения после обновления пропадут. Образ сервера
+  теперь содержит пакеты для сертификатов и сети, а образ узла `hh-browse`, `hh-xlsx`, zip, PyYAML, pip и pytest,
+  поэтому оба больше.
 - Сервер на Mac, обновленный кнопкой «Обновить»: один раз выполните на этом Mac строку установки. До этого другие
   машины находят его только по ссылке hornhoof.org, после этого и в вашей собственной сети. Сервер на Linux делает это
   сам. Если после обновления ссылка hornhoof.org перестала открываться, впишите `ACME_DIRECTORY=off` в файл `.env` в
   папке `~/hornhoof` и выполните там `docker compose up -d app`: ссылка снова откроется в течение минуты.
+- Письма от сотрудников и Hornhoof ждут во входящих сотрудника, и свободный сотрудник берет все непрочитанные письма
+  одним ходом, а не ходом на каждое. Окно агента показывает входящие с числом непрочитанных; CEO или глава отдела
+  выбирает, получает ли сотрудник, отдел или компания письма через входящие или каждое отдельным ходом. Слова человека
+  туда никогда не попадают. Окно агента хранит последние 300 строк.
 - Компания держит копии своих данных на других своих машинах. Одна машина ведет; экран «Машины» показывает копию каждой
   машины и ее место в очереди, а «Перенести сервер сюда» переносит сервер с сохранением работы. Если ведущая машина
   перестала отвечать, ее место занимает копия, в которой есть все изменения; если в копии может не хватать изменений,
