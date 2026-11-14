@@ -71,9 +71,6 @@ export const CEO_ONLY = new Set([
   'update_hornhoof',
   'set_team_urgent_only',
 ]);
-/* What only the CEO asks for that still goes in a later turn of his, for the CEO or the delegate who asked him last:
-   installing a Hornhoof version, which the head of Development and he run end to end. Calling one off goes as the owner. */
-const CEO_STANDING = new Set(['update_hornhoof']);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 export const ONLY_DEPARTMENT_OWNER =
   "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
@@ -94,7 +91,11 @@ const PERMISSION = {
    question asked of that person, so only in the turn that answers them; a structure or a hire is the orchestrator's own
    work of running the company, which goes in any turn of his for the last person who asked him. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
-const FINDS: Record<string, typeof decisionPrincipal> = { answer_request: decisionPrincipal, build_structure: standingPrincipal, hire: standingPrincipal };
+/* What goes in any turn of the orchestrator, for the last person who asked him and with their right: a structure, a hire,
+   and installing a Hornhoof version for the CEO or the delegate, as the head of Development and he run releases end to
+   end. Calling an update off goes as the owner. Anything else only the CEO asks for goes only in the turn that answers them. */
+const STANDING = new Set(['build_structure', 'hire', 'update_hornhoof']);
+const findFor = (name: string): typeof decisionPrincipal => (STANDING.has(name) ? standingPrincipal : decisionPrincipal);
 const NOBODY_ASKED =
   "No person's words stand behind this: nobody wrote to you yet, or words for this turn are still on their way. Nothing was changed. " +
   'Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it.';
@@ -442,8 +443,8 @@ async function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string,
       return say(err instanceof Error ? err.message : 'The internal stuck answer did not go through.', true);
     }
   }
-  if (DECIDES.has(name)) return decide(ctx, app, job, made, FINDS[name]!);
-  return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made, CEO_STANDING.has(name) ? standingPrincipal : decisionPrincipal) : send(ctx, app, job, made);
+  if (DECIDES.has(name)) return decide(ctx, app, job, made, findFor(name));
+  return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made, findFor(name)) : send(ctx, app, job, made);
 }
 
 /* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */
